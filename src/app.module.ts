@@ -13,9 +13,13 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TaskScheduleModule } from './task-schedule/task-schedule.module';
 import { JobProcessorModule } from './job-processor/job-processor.module';
 import { NotificationModule } from './notification/notification.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     ScheduleModule.forRoot(),
     ProjectModule,
     ThreadModule,
