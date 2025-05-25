@@ -4,6 +4,11 @@ WORKDIR /app
 
 RUN yarn global add @nestjs/cli
 
+COPY package.json ./
+COPY . .
+
+RUN chown -R node:node /app
+
 # Switch to non-root user
 USER node
 

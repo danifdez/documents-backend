@@ -1,23 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
 import { Job } from 'src/job/job.interface';
-import * as path from 'path';
 import { ResourceService } from 'src/resource/resource.service';
-import { spawn } from 'child_process';
 import { JobService } from 'src/job/job.service';
+import { JobProcessorClientService } from '../job-processor-client.service';
 
 @Injectable()
 export class DetectLanguageProcessor implements JobProcessor {
   private readonly logger = new Logger(DetectLanguageProcessor.name);
   private readonly JOB_TYPE = 'detect-language';
-  private readonly extractorPath = path.join(
-    process.cwd(),
-    'utilities/detect_language.py',
-  );
 
   constructor(
     private readonly resourceService: ResourceService,
     private readonly jobService: JobService,
+    private readonly jobProcessorClientService: JobProcessorClientService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -35,14 +31,17 @@ export class DetectLanguageProcessor implements JobProcessor {
 
     const samples = this.extractTextSamples(resource.content);
 
-    Promise.all(samples.map((sample) => this.runPythonScript(sample)))
+    Promise.all(samples.map((sample) => this.detectLanguage(sample)))
       .then((results) => {
-        if (results[0] !== 'unknown' && results[0] === results[1]) {
+        if (
+          results[0].language !== 'unknown' &&
+          results[0].language === results[1].language
+        ) {
           this.resourceService.update(resourceId, {
-            language: results[0],
+            language: results[0].language,
           });
 
-          if (results[0] === 'en') {
+          if (results[0].language === 'en') {
             this.jobService.create('entity-extraction', {
               resourceId: resourceId,
               from: 'content',
@@ -50,15 +49,15 @@ export class DetectLanguageProcessor implements JobProcessor {
           } else {
             this.jobService.create('translate', {
               resourceId: resourceId,
-              sourceLanguage: results[0],
+              sourceLanguage: results[0].language,
               targetLanguage: 'en',
               saveTo: 'workingContent',
             });
           }
-          if (results[0] !== 'es') {
+          if (results[0].language !== 'es') {
             this.jobService.create('translate', {
               resourceId: resourceId,
-              sourceLanguage: results[0],
+              sourceLanguage: results[0].language,
               targetLanguage: 'es',
               saveTo: 'translatedContent',
             });
@@ -75,45 +74,8 @@ export class DetectLanguageProcessor implements JobProcessor {
    * @param sample Text sample to process
    * @returns Promise resolving to the result of the Python script
    */
-  private runPythonScript(sample: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const pythonProcess = spawn('python', [this.extractorPath, sample]);
-      let dataString = '';
-      let errorString = '';
-      pythonProcess.stdout.on('data', (data) => {
-        dataString += data.toString();
-      });
-      pythonProcess.stderr.on('data', (data) => {
-        errorString += data.toString();
-        this.logger.error(`Extraction error: ${data.toString()}`);
-      });
-      pythonProcess.on('close', (code) => {
-        if (code !== 0) {
-          if (errorString) {
-            this.logger.error(`Error details: ${errorString}`);
-          }
-          reject(new Error(`Python script exited with code ${code}`));
-          return;
-        }
-        try {
-          const trimmedResult = dataString.trim();
-          if (trimmedResult) {
-            resolve(trimmedResult);
-          } else {
-            resolve('unknown'); // Default when no language is detected
-          }
-        } catch (parseError) {
-          this.logger.error(
-            `Failed to parse extraction result: ${parseError.message}`,
-          );
-          reject(new Error(`Failed to parse extraction result: ${parseError.message}`));
-        }
-      });
-      pythonProcess.on('error', (error) => {
-        this.logger.error(`Failed to start Python process: ${error.message}`);
-        reject(new Error(`Failed to start Python process: ${error.message}`));
-      });
-    });
+  private detectLanguage(sample: string): Promise<any> {
+    return this.jobProcessorClientService.post('language', { text: sample });
   }
 
   private extractTextSamples(html: string): string[] {

@@ -1,24 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
 import { Job } from 'src/job/job.interface';
-import * as path from 'path';
 import { ResourceService } from 'src/resource/resource.service';
-import { spawn } from 'child_process';
 import * as cheerio from 'cheerio';
 import { JobService } from 'src/job/job.service';
+import { JobProcessorClientService } from '../job-processor-client.service';
 
 @Injectable()
 export class TranslateProcessor implements JobProcessor {
   private readonly logger = new Logger(TranslateProcessor.name);
   private readonly JOB_TYPE = 'translate';
-  private readonly extractorPath = path.join(
-    process.cwd(),
-    'utilities/translate.py',
-  );
 
   constructor(
     private readonly resourceService: ResourceService,
     private readonly jobService: JobService,
+    private readonly jobProcessorClientService: JobProcessorClientService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -55,12 +51,12 @@ export class TranslateProcessor implements JobProcessor {
       const textsToTranslate = chunk.map(item => item.text);
 
       try {
-        const translatedTexts = await this.runPythonScript(
+        const translatedTexts = await this.translate(
           sourceLanguage,
           targetLanguage,
           textsToTranslate,
         );
-        const translatedTextArray = translatedTexts;
+        const translatedTextArray = translatedTexts.translated_texts || [];
 
         chunk.forEach((item, index) => {
           if (translatedTextArray[index]) {
@@ -110,56 +106,20 @@ export class TranslateProcessor implements JobProcessor {
 
   /**
    * Run the Python script to detect language
+   * @param sourceLanguage Source language code
+   * @param targetLanguage Target language code
    * @param sample Text sample to process
-   * @returns Promise resolving to the result of the Python script
+   * @returns Promise resolving to the translated text array
    */
-  private runPythonScript(
+  private translate(
     sourceLanguage: string,
     targetLanguage: string,
     sample: string[],
   ): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const processedSample = sample.map((text) => '"' + text + '"');
-      const pythonProcess = spawn('python', [
-        this.extractorPath,
-        sourceLanguage,
-        targetLanguage,
-        ...processedSample,
-      ]);
-      let dataString = [];
-      let errorString = '';
-      pythonProcess.stdout.on('data', (data) => {
-        dataString = dataString.concat(JSON.parse(data.toString()));
-        console.log(`Result:`, JSON.parse(data.toString()));
-      });
-      pythonProcess.stderr.on('data', (data) => {
-        errorString += data.toString();
-      });
-      pythonProcess.on('close', (code) => {
-        if (code !== 0) {
-          if (errorString) {
-            this.logger.error(`Error details: ${errorString}`);
-          }
-          reject(new Error(`Python script exited with code ${code}`));
-          return;
-        }
-        try {
-          resolve(dataString);
-        } catch (parseError) {
-          this.logger.error(
-            `Failed to parse extraction result: ${parseError.message}`,
-          );
-          reject(
-            new Error(
-              `Failed to parse extraction result: ${parseError.message}`,
-            ),
-          );
-        }
-      });
-      pythonProcess.on('error', (error) => {
-        this.logger.error(`Failed to start Python process: ${error.message}`);
-        reject(new Error(`Failed to start Python process: ${error.message}`));
-      });
+    return this.jobProcessorClientService.post('translate', {
+      source: sourceLanguage,
+      target: targetLanguage,
+      texts: sample,
     });
   }
 

@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { ExtractionService } from 'src/extraction/extraction.service';
 import { FileStorageService } from 'src/file-storage/file-storage.service';
 import { Job } from 'src/job/job.interface';
 import { ResourceService } from 'src/resource/resource.service';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobService } from 'src/job/job.service';
+import { JobProcessorClientService } from '../job-processor-client.service';
 
 @Injectable()
 export class DocumentExtractionProcessor implements JobProcessor {
@@ -13,11 +13,11 @@ export class DocumentExtractionProcessor implements JobProcessor {
   private readonly JOB_TYPE = 'document-extraction';
 
   constructor(
-    private readonly extractionService: ExtractionService,
     private readonly fileService: FileStorageService,
     private readonly resourceService: ResourceService,
     private readonly notificationGateway: NotificationGateway,
     private readonly jobService: JobService,
+    private readonly jobProcessorClientService: JobProcessorClientService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -34,7 +34,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
 
     const fullPath = this.fileService.getFullPath(hash, extension);
 
-    const extractedContent = await this.extractionService.extractDocument(fullPath);
+    const extractedContent = await this.extractDocument(fullPath);
 
     if (extractedContent.error) {
       throw new Error(`Extraction failed: ${extractedContent.error}`);
@@ -60,5 +60,9 @@ export class DocumentExtractionProcessor implements JobProcessor {
     });
 
     return { success: true, resourceId: resource._id };
+  }
+
+  private async extractDocument(filePath: string): Promise<any> {
+    return await this.jobProcessorClientService.post('extraction', { file: filePath });
   }
 }

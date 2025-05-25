@@ -7,7 +7,6 @@ import { DocModule } from './doc/doc.module';
 import { ResourceModule } from './resource/resource.module';
 import { ResourceTypeModule } from './resource-type/resource-type.module';
 import { FileStorageModule } from './file-storage/file-storage.module';
-import { ExtractionModule } from './extraction/extraction.module';
 import { JobModule } from './job/job.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TaskScheduleModule } from './task-schedule/task-schedule.module';
@@ -27,7 +26,6 @@ import { ConfigModule } from '@nestjs/config';
     ResourceModule,
     ResourceTypeModule,
     FileStorageModule,
-    ExtractionModule,
     JobModule,
     JobProcessorModule,
     TaskScheduleModule,

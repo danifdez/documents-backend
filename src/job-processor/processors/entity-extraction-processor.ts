@@ -3,19 +3,17 @@ import { JobProcessor } from '../job-processor.interface';
 import { Job } from 'src/job/job.interface';
 import { ResourceService } from 'src/resource/resource.service';
 import * as cheerio from 'cheerio';
-import { spawn } from 'child_process';
-import * as path from 'path';
+import { JobProcessorClientService } from '../job-processor-client.service';
 
 @Injectable()
 export class EntityExtractionProcessor implements JobProcessor {
   private readonly logger = new Logger(EntityExtractionProcessor.name);
   private readonly JOB_TYPE = 'entity-extraction';
-  private readonly extractorPath = path.join(
-    process.cwd(),
-    'utilities/entities.py',
-  );
 
-  constructor(private readonly resourceService: ResourceService) { }
+  constructor(
+    private readonly resourceService: ResourceService,
+    private readonly jobProcessorClientService: JobProcessorClientService,
+  ) { }
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;
@@ -48,8 +46,8 @@ export class EntityExtractionProcessor implements JobProcessor {
       const chunk = extractedTexts.slice(i, i + 32);
       const textsToTranslate = chunk.map((item) => item.text);
       try {
-        const translatedTexts = await this.runPythonScript(textsToTranslate);
-        translatedTexts.forEach((translatedText) => {
+        const translatedTexts = await this.extract(textsToTranslate);
+        translatedTexts.entities.forEach((translatedText) => {
           if (
             translatedText &&
             typeof translatedText === 'object' &&
@@ -150,53 +148,7 @@ export class EntityExtractionProcessor implements JobProcessor {
    * @param texts Array of text samples to process
    * @returns Promise resolving to the result of the Python script
    */
-  private async runPythonScript(texts: string[]): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const processedSample = texts.map(
-        (text) => '"' + text.replace(/"/g, '\\"') + '"',
-      );
-      const pythonProcess = spawn('python', [
-        this.extractorPath,
-        ...processedSample,
-      ]);
-      let dataString = [];
-      let errorString = '';
-      pythonProcess.stdout.on('data', (data) => {
-        dataString = dataString.concat(JSON.parse(data.toString()));
-      });
-
-      pythonProcess.stderr.on('data', (data) => {
-        errorString += data.toString();
-      });
-
-      pythonProcess.on('close', (code) => {
-        if (code !== 0) {
-          if (errorString) {
-            this.logger.error(`Error details: ${errorString}`);
-          }
-          reject(new Error(`Python script exited with code ${code}`));
-          return;
-        }
-        try {
-          resolve(dataString);
-        } catch (parseError) {
-          this.logger.error(
-            `Failed to parse extraction result: ${parseError.message}`,
-          );
-          reject(
-            new Error(
-              `Failed to parse extraction result: ${parseError.message}`,
-            ),
-          );
-        }
-      });
-
-      pythonProcess.on('error', (error) => {
-        this.logger.error(`Failed to start Python process: ${error.message}`);
-        reject(new Error(`Failed to start Python process: ${error.message}`));
-      });
-    });
-
-    return texts;
+  private async extract(texts: string[]): Promise<any> {
+    return this.jobProcessorClientService.post('entities', { texts });
   }
 }
