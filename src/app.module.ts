@@ -13,6 +13,7 @@ import { TaskScheduleModule } from './task-schedule/task-schedule.module';
 import { JobProcessorModule } from './job-processor/job-processor.module';
 import { NotificationModule } from './notification/notification.module';
 import { ConfigModule } from '@nestjs/config';
+import { CommentModule } from './comment/comment.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ConfigModule } from '@nestjs/config';
     JobProcessorModule,
     TaskScheduleModule,
     NotificationModule,
+    CommentModule,
   ],
   controllers: [AppController],
   providers: [AppService],
