@@ -10,6 +10,8 @@ import { TranslateProcessor } from './processors/translate-processor';
 import { EntityExtractionProcessor } from './processors/entity-extraction-processor';
 import { HttpModule } from '@nestjs/axios';
 import { JobProcessorClientService } from './job-processor-client.service';
+import { IngestContentProcessor } from './processors/ingest-content-processor';
+import { RagModule } from 'src/rag/rag.module';
 
 @Module({
   imports: [
@@ -18,6 +20,7 @@ import { JobProcessorClientService } from './job-processor-client.service';
     NotificationModule,
     JobModule,
     HttpModule,
+    RagModule,
   ],
   providers: [
     JobProcessorFactory,
@@ -26,6 +29,7 @@ import { JobProcessorClientService } from './job-processor-client.service';
     TranslateProcessor,
     EntityExtractionProcessor,
     JobProcessorClientService,
+    IngestContentProcessor,
   ],
   exports: [JobProcessorFactory, JobProcessorClientService],
 })

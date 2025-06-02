@@ -90,6 +90,11 @@ export class TranslateProcessor implements JobProcessor {
           resourceId: resourceId,
           from: saveTo,
         });
+        this.jobService.create('ingest-content', {
+          resourceId: resourceId,
+          projectId: resource.project,
+          content: bodyContent,
+        });
       }
 
       return {

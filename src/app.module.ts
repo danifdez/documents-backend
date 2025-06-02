@@ -15,6 +15,7 @@ import { NotificationModule } from './notification/notification.module';
 import { ConfigModule } from '@nestjs/config';
 import { CommentModule } from './comment/comment.module';
 import { MarkModule } from './mark/mark.module';
+import { RagModule } from './rag/rag.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { MarkModule } from './mark/mark.module';
     NotificationModule,
     CommentModule,
     MarkModule,
+    RagModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -46,6 +46,11 @@ export class DetectLanguageProcessor implements JobProcessor {
               resourceId: resourceId,
               from: 'content',
             });
+            this.jobService.create('ingest-content', {
+              resourceId: resourceId,
+              projectId: resource.project,
+              content: resource.content,
+            });
           } else {
             this.jobService.create('translate', {
               resourceId: resourceId,
