@@ -23,6 +23,39 @@ export class DocService {
     return this.docModel.find({ thread: new ObjectId(threadId) }).exec();
   }
 
+  async findByProject(projectId: string): Promise<Doc[]> {
+    return this.docModel
+      .aggregate([
+        {
+          $lookup: {
+            from: 'threads',
+            localField: 'thread',
+            foreignField: '_id',
+            as: 'threadData',
+          },
+        },
+        {
+          $match: {
+            'threadData.project': new ObjectId(projectId)
+          },
+        },
+        {
+          $project: {
+            name: 1,
+            thread: 1,
+            content: 1,
+          },
+        },
+        {
+          $sort: { _id: -1 },
+        },
+        {
+          $limit: 10,
+        },
+      ])
+      .exec();
+  }
+
   async update(id: string, docData: Partial<Doc>): Promise<Doc> {
     return this.docModel.findByIdAndUpdate(id, docData, { new: true }).exec();
   }

@@ -16,6 +16,11 @@ export class DocController {
     return await this.docService.findByThread(threadId);
   }
 
+  @Get('project/:projectId')
+  async getByProject(@Param('projectId') projectId: string): Promise<Doc[]> {
+    return await this.docService.findByProject(projectId);
+  }
+
   @Post()
   async create(@Body() doc: Doc): Promise<Doc> {
     return await this.docService.create(doc);
