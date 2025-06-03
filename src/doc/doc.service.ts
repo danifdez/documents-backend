@@ -36,13 +36,24 @@ export class DocService {
         },
         {
           $match: {
-            'threadData.project': new ObjectId(projectId)
+            $or: [
+              { 'threadData.project': new ObjectId(projectId) },
+              {
+                project: new ObjectId(projectId),
+                thread: { $exists: false },
+              },
+              {
+                project: new ObjectId(projectId),
+                thread: null,
+              },
+            ],
           },
         },
         {
           $project: {
             name: 1,
             thread: 1,
+            project: 1,
             content: 1,
           },
         },
