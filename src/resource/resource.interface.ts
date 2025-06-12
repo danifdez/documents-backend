@@ -4,14 +4,16 @@ export interface Resource extends Document {
   readonly project: ObjectId;
   readonly name: string;
   readonly hash: string;
-  readonly description?: string;
   readonly type?: ObjectId;
   readonly mimeType: string;
   readonly originalName: string;
   readonly uploadDate: Date;
   readonly fileSize: number;
-  readonly source: string;
   readonly path: string;
+  readonly url?: string;
+  readonly title?: string;
+  readonly publicationDate?: Date;
+  readonly author?: string;
   readonly content?: string;
   readonly translatedContent?: string;
   readonly workingContent?: string;
@@ -20,5 +22,4 @@ export interface Resource extends Document {
     word: string;
     entity: string;
   }>;
-  readonly metadata: object;
 }

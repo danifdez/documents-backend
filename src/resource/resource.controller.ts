@@ -67,9 +67,8 @@ export class ResourceController {
     resourceData: {
       name: string;
       projectId: string;
-      typeId?: string;
-      description?: string;
-      source?: string;
+      type?: string;
+      url?: string;
     },
   ) {
     if (!file) {
@@ -94,8 +93,6 @@ export class ResourceController {
         name: resourceData.name || file.originalname,
         project: resourceData.projectId,
         hash: hash,
-        description: resourceData.description || '',
-        source: resourceData.source || 'manual',
         mimeType: file.mimetype,
         originalName: file.originalname,
         path: result.relativePath,
@@ -103,8 +100,12 @@ export class ResourceController {
         fileSize: file.size,
       };
 
-      if (resourceData.typeId && this.isValidObjectId(resourceData.typeId)) {
-        resourceToCreate.type = resourceData.typeId;
+      if (resourceData.type && resourceData.type === 'webpage') {
+        resourceToCreate.type = '000000000000000000000032';
+      }
+
+      if (resourceData.url) {
+        resourceToCreate.url = resourceData.url;
       }
 
       await this.resourceService.create(resourceToCreate);
@@ -152,15 +153,11 @@ export class ResourceController {
       throw new HttpException('File not found', HttpStatus.NOT_FOUND);
     }
 
-    const metadata = resource.metadata as any;
-    const contentType = resource.mimeType || metadata?.mimeType || 'application/octet-stream';
-
-    const filename = resource.originalName ||
-      metadata?.originalName ||
-      `resource-${resource._id}${metadata?.extension || ''}`;
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', resource.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${resource.originalName}"`,
+    );
     res.send(file);
   }
 
@@ -178,10 +175,7 @@ export class ResourceController {
       throw new HttpException('File not found', HttpStatus.NOT_FOUND);
     }
 
-    const metadata = resource.metadata as any;
-    const contentType = resource.mimeType || metadata?.mimeType || 'application/octet-stream';
-
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', resource.mimeType);
     res.setHeader('Content-Disposition', 'inline');
     res.send(file);
   }

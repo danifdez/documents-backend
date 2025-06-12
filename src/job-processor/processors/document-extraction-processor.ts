@@ -45,8 +45,13 @@ export class DocumentExtractionProcessor implements JobProcessor {
       throw new Error(`Resource with hash ${hash} not found`);
     }
 
+    const { title, author, publication_date, content } = extractedContent;
+
     await this.resourceService.update(resource._id.toString(), {
-      content: extractedContent.content,
+      title,
+      author,
+      publicationDate: publication_date,
+      content,
     });
 
     this.notificationGateway.sendNotification({
