@@ -4,6 +4,7 @@ export interface Resource extends Document {
   readonly project: ObjectId;
   readonly name: string;
   readonly hash: string;
+  readonly relatedTo?: ObjectId;
   readonly type?: ObjectId;
   readonly mimeType: string;
   readonly originalName: string;

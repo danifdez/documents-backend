@@ -14,7 +14,7 @@ export class ResourceService {
     return this.resourceModel.findOne({ _id: id }).populate('type').exec();
   }
 
-  async create(resource: Resource): Promise<Resource> {
+  async create(resource: Partial<Resource>): Promise<Resource> {
     const createdResource = new this.resourceModel(resource);
     return createdResource.save();
   }

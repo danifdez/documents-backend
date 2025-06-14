@@ -8,6 +8,11 @@ export const ResourceSchema = new mongoose.Schema({
   },
   name: { type: String, required: true },
   hash: { type: String, required: true, unique: true },
+  relatedTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Resource',
+    required: false,
+  },
   type: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'ResourceType',

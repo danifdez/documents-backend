@@ -40,12 +40,6 @@ export class ResourceController {
     return await this.resourceService.findByProject(projectId);
   }
 
-  @Post()
-  async create(@Body() resource: Resource): Promise<Resource> {
-    const resourceCreated = await this.resourceService.create(resource);
-    return resourceCreated;
-  }
-
   @Patch(':id')
   async update(
     @Param('id') id: string,
@@ -69,6 +63,8 @@ export class ResourceController {
       projectId: string;
       type?: string;
       url?: string;
+      relatedTo?: string;
+      originalName?: string;
     },
   ) {
     if (!file) {
@@ -94,7 +90,7 @@ export class ResourceController {
         project: resourceData.projectId,
         hash: hash,
         mimeType: file.mimetype,
-        originalName: file.originalname,
+        originalName: resourceData.originalName || file.originalname,
         path: result.relativePath,
         uploadDate: new Date(),
         fileSize: file.size,
@@ -108,12 +104,18 @@ export class ResourceController {
         resourceToCreate.url = resourceData.url;
       }
 
+      if (resourceData.relatedTo) {
+        resourceToCreate.relatedTo = resourceData.relatedTo;
+      }
+
       await this.resourceService.create(resourceToCreate);
-      await this.jobService.create('document-extraction', {
-        hash: result.hash,
-        extension: result.extension,
-        resourceId: resourceToCreate._id,
-      });
+      if (!file.mimetype.startsWith('image/')) {
+        await this.jobService.create('document-extraction', {
+          hash: result.hash,
+          extension: result.extension,
+          resourceId: resourceToCreate._id,
+        });
+      }
 
       return {
         success: true,
