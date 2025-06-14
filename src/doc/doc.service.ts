@@ -70,4 +70,9 @@ export class DocService {
   async update(id: string, docData: Partial<Doc>): Promise<Doc> {
     return this.docModel.findByIdAndUpdate(id, docData, { new: true }).exec();
   }
+
+  async remove(id: string): Promise<{ deleted: boolean }> {
+    const result = await this.docModel.deleteOne({ _id: id }).exec();
+    return { deleted: result.deletedCount > 0 };
+  }
 }

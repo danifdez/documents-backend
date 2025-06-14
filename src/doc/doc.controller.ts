@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
 import { DocService } from './doc.service';
 import { Doc } from './doc.interface';
 
@@ -29,5 +29,10 @@ export class DocController {
   @Patch(':id')
   async update(@Param('id') id: string, @Body() doc: Partial<Doc>): Promise<Doc> {
     return await this.docService.update(id, doc);
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    return await this.docService.remove(id);
   }
 }
