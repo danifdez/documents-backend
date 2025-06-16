@@ -41,7 +41,10 @@ export class ResourceService {
       .exec();
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string): Promise<Resource | null> {
+    const resource = await this.resourceModel.findById(id).exec();
+    if (!resource) return null;
     await this.resourceModel.findByIdAndDelete(id).exec();
+    return resource;
   }
 }

@@ -50,7 +50,10 @@ export class ResourceController {
 
   @Delete(':id')
   async remove(@Param('id') id: string): Promise<void> {
-    await this.resourceService.remove(id);
+    const resource = await this.resourceService.remove(id);
+    if (resource && resource.path) {
+      await this.fileStorageService.deleteFile(resource.path);
+    }
   }
 
   @Post('upload')
