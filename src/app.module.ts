@@ -16,6 +16,7 @@ import { ConfigModule } from '@nestjs/config';
 import { CommentModule } from './comment/comment.module';
 import { MarkModule } from './mark/mark.module';
 import { RagModule } from './rag/rag.module';
+import { AskController } from './ask.controller';
 
 @Module({
   imports: [
@@ -37,7 +38,7 @@ import { RagModule } from './rag/rag.module';
     MarkModule,
     RagModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, AskController],
   providers: [AppService],
 })
 export class AppModule { }
