@@ -30,6 +30,7 @@ export const ResourceSchema = new mongoose.Schema({
   content: { type: String },
   translatedContent: { type: String },
   workingContent: { type: String },
+  summary: { type: String },
   language: { type: String },
   entities: { type: Array },
 });

@@ -12,6 +12,7 @@ import { HttpModule } from '@nestjs/axios';
 import { JobProcessorClientService } from './job-processor-client.service';
 import { IngestContentProcessor } from './processors/ingest-content-processor';
 import { RagModule } from 'src/rag/rag.module';
+import { SummarizeProcessor } from './processors/summarize-processor';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { RagModule } from 'src/rag/rag.module';
     EntityExtractionProcessor,
     JobProcessorClientService,
     IngestContentProcessor,
+    SummarizeProcessor,
   ],
   exports: [JobProcessorFactory, JobProcessorClientService],
 })

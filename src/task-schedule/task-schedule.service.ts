@@ -43,7 +43,7 @@ export class TaskScheduleService {
 
     if (cpuUsagePercent > 80 || memoryUsagePercent > 80) {
       this.logger.warn(
-        `Skipping job processing ${cpuUsagePercent.toFixed(2)}%.`,
+        `Skipping job processing ${cpuUsagePercent.toFixed(2)}% CPU ${memoryUsagePercent.toFixed(2)}% Memory.`,
       );
       return;
     }

@@ -18,6 +18,7 @@ export interface Resource extends Document {
   readonly content?: string;
   readonly translatedContent?: string;
   readonly workingContent?: string;
+  readonly summary?: string;
   readonly language?: string;
   readonly entities?: Array<{
     word: string;
