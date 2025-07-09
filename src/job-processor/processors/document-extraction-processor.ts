@@ -1,11 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { FileStorageService } from 'src/file-storage/file-storage.service';
-import { Job } from 'src/job/job.interface';
+import { Job, JobPriority } from 'src/job/job.interface';
 import { ResourceService } from 'src/resource/resource.service';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobService } from 'src/job/job.service';
-import { JobProcessorClientService } from '../job-processor-client.service';
 
 @Injectable()
 export class DocumentExtractionProcessor implements JobProcessor {
@@ -13,11 +11,9 @@ export class DocumentExtractionProcessor implements JobProcessor {
   private readonly JOB_TYPE = 'document-extraction';
 
   constructor(
-    private readonly fileService: FileStorageService,
     private readonly resourceService: ResourceService,
     private readonly notificationGateway: NotificationGateway,
     private readonly jobService: JobService,
-    private readonly jobProcessorClientService: JobProcessorClientService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -27,27 +23,23 @@ export class DocumentExtractionProcessor implements JobProcessor {
   async process(job: Job): Promise<any> {
     const hash = job.payload['hash'] as string;
     const extension = job.payload['extension'] as string;
+    const resourceId = job.payload['resourceId'] as string;
+    const result = job.result as {
+      title: string;
+      author: string;
+      publication_date: Date;
+      content: string;
+    };
 
-    if (!hash || !extension) {
-      throw new Error('Job payload missing required parameters (hash or extension)');
+    if (!hash || !extension || !resourceId || !result) {
+      throw new Error(
+        'Job payload missing required parameters (hash, extension, resourceId, or result)',
+      );
     }
 
-    const fullPath = this.fileService.getFullPath(hash, extension);
+    const { title, author, publication_date, content } = result;
 
-    const extractedContent = await this.extractDocument(fullPath);
-
-    if (extractedContent.error) {
-      throw new Error(`Extraction failed: ${extractedContent.error}`);
-    }
-
-    const resource = await this.resourceService.findByHash(hash);
-    if (!resource) {
-      throw new Error(`Resource with hash ${hash} not found`);
-    }
-
-    const { title, author, publication_date, content } = extractedContent;
-
-    await this.resourceService.update(resource._id.toString(), {
+    await this.resourceService.update(resourceId, {
       title,
       author,
       publicationDate: publication_date,
@@ -57,17 +49,52 @@ export class DocumentExtractionProcessor implements JobProcessor {
     this.notificationGateway.sendNotification({
       type: 'document-extraction',
       message: `Document extraction completed for resource with hash ${hash}`,
-      resourceId: resource._id,
+      resourceId,
     });
 
-    this.jobService.create('detect-language', {
-      resourceId: resource._id.toString(),
+    const samples = this.extractTextSamples(content);
+
+    this.jobService.create('detect-language', JobPriority.NORMAL, {
+      resourceId,
+      samples,
     });
 
-    return { success: true, resourceId: resource._id };
+    return { success: true, resourceId };
   }
 
-  private async extractDocument(filePath: string): Promise<any> {
-    return await this.jobProcessorClientService.post('extraction', { file: filePath });
+  private extractTextSamples(html: string): string[] {
+    try {
+      const fullText = html
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const samples: string[] = [];
+
+      if (fullText.length <= 400) {
+        const midpoint = Math.floor(fullText.length / 2);
+        samples.push(fullText.substring(0, Math.min(200, midpoint)).trim());
+        samples.push(
+          fullText
+            .substring(
+              midpoint,
+              midpoint + Math.min(200, fullText.length - midpoint),
+            )
+            .trim(),
+        );
+      } else {
+        for (let i = 0; i < 2; i++) {
+          const maxStart = fullText.length - 200;
+          const start = Math.floor(Math.random() * maxStart);
+          const end = Math.min(start + 200, fullText.length);
+          samples.push(fullText.substring(start, end).trim());
+        }
+      }
+
+      return samples;
+    } catch (error) {
+      this.logger.error(`Error extracting text samples: ${error.message}`);
+      return [];
+    }
   }
 }

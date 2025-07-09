@@ -4,9 +4,9 @@ import { Job } from 'src/job/job.interface';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 
 @Injectable()
-export class IngestContentProcessor implements JobProcessor {
-  private readonly logger = new Logger(IngestContentProcessor.name);
-  private readonly JOB_TYPE = 'ingest-content';
+export class AskProcessor implements JobProcessor {
+  private readonly logger = new Logger(AskProcessor.name);
+  private readonly JOB_TYPE = 'ask';
 
   constructor(private readonly notificationGateway: NotificationGateway) { }
 
@@ -15,12 +15,13 @@ export class IngestContentProcessor implements JobProcessor {
   }
 
   async process(job: Job): Promise<any> {
-    const resourceId = job.payload['resourceId'] as string;
-
-    this.notificationGateway.sendNotification({
-      type: 'ingest-content',
-      message: `Document ingestion completed for resource with ID ${resourceId}`,
-      resourceId,
+    const response = job.result['response'] as string;
+    this.notificationGateway.sendAskResponse({
+      response,
     });
+
+    return {
+      success: true,
+    };
   }
 }

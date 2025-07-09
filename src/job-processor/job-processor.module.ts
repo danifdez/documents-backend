@@ -9,9 +9,8 @@ import { JobModule } from 'src/job/job.module';
 import { TranslateProcessor } from './processors/translate-processor';
 import { EntityExtractionProcessor } from './processors/entity-extraction-processor';
 import { HttpModule } from '@nestjs/axios';
-import { JobProcessorClientService } from './job-processor-client.service';
 import { IngestContentProcessor } from './processors/ingest-content-processor';
-import { RagModule } from 'src/rag/rag.module';
+import { AskProcessor } from './processors/ask-processor';
 import { SummarizeProcessor } from './processors/summarize-processor';
 
 @Module({
@@ -21,7 +20,6 @@ import { SummarizeProcessor } from './processors/summarize-processor';
     NotificationModule,
     JobModule,
     HttpModule,
-    RagModule,
   ],
   providers: [
     JobProcessorFactory,
@@ -29,10 +27,10 @@ import { SummarizeProcessor } from './processors/summarize-processor';
     DetectLanguageProcessor,
     TranslateProcessor,
     EntityExtractionProcessor,
-    JobProcessorClientService,
     IngestContentProcessor,
     SummarizeProcessor,
+    AskProcessor,
   ],
-  exports: [JobProcessorFactory, JobProcessorClientService],
+  exports: [JobProcessorFactory],
 })
 export class JobProcessorModule { }

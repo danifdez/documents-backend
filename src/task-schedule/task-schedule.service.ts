@@ -48,7 +48,7 @@ export class TaskScheduleService {
       return;
     }
 
-    const pendingJobs = await this.jobService.findByStatus(JobStatus.PENDING);
+    const pendingJobs = await this.jobService.findByStatus(JobStatus.PROCESSED);
 
     const firstJob = pendingJobs[0];
     if (
@@ -58,8 +58,6 @@ export class TaskScheduleService {
     ) {
       return;
     }
-
-    await this.jobService.markAsRunning(firstJob._id.toString());
 
     try {
       const processor = this.jobProcessorFactory.getProcessor(firstJob.type);

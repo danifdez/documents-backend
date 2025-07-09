@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Model } from 'mongoose';
-import { Job, JobStatus } from './job.interface';
+import { Job, JobPriority, JobStatus } from './job.interface';
 
 @Injectable()
 export class JobService {
@@ -17,10 +17,15 @@ export class JobService {
    * @param payload The job payload data
    * @returns The created job
    */
-  async create(type: string, payload: object): Promise<Job> {
+  async create(
+    type: string,
+    priority: JobPriority,
+    payload: object,
+  ): Promise<Job> {
     const newJob = new this.jobModel({
       type,
       payload,
+      priority,
       status: JobStatus.PENDING,
     });
     return await newJob.save();
@@ -49,7 +54,7 @@ export class JobService {
    * @returns Array of matching jobs
    */
   async findByStatus(status: JobStatus): Promise<Job[]> {
-    return this.jobModel.find({ status }).exec();
+    return this.jobModel.find({ status }).sort({ _id: 1 }).exec();
   }
 
   /**
@@ -60,9 +65,12 @@ export class JobService {
    */
   async updateStatus(id: string, status: JobStatus): Promise<Job> {
     this.logger.log(`Updating job ${id} status to: ${status}`);
-    return this.jobModel
-      .findByIdAndUpdate(id, { status }, { new: true })
-      .exec();
+    const jobUpdate = { status };
+    if (status === JobStatus.COMPLETED || status === JobStatus.FAILED) {
+      jobUpdate['expiresAt'] = new Date(Date.now() + 2 * 24 * 3600 * 1000); // expires in 2 days
+    }
+
+    return this.jobModel.findByIdAndUpdate(id, jobUpdate, { new: true }).exec();
   }
 
   /**

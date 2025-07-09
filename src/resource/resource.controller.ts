@@ -19,6 +19,7 @@ import { ResourceService } from './resource.service';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { JobService } from '../job/job.service';
 import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
+import { JobPriority } from 'src/job/job.interface';
 
 @Controller('resources')
 export class ResourceController {
@@ -111,13 +112,17 @@ export class ResourceController {
         resourceToCreate.relatedTo = resourceData.relatedTo;
       }
 
-      await this.resourceService.create(resourceToCreate);
+      const resourceCreated = await this.resourceService.create(resourceToCreate);
       if (!file.mimetype.startsWith('image/')) {
-        await this.jobService.create('document-extraction', {
-          hash: result.hash,
-          extension: result.extension,
-          resourceId: resourceToCreate._id,
-        });
+        await this.jobService.create(
+          'document-extraction',
+          JobPriority.NORMAL,
+          {
+            hash: result.hash,
+            extension: result.extension,
+            resourceId: resourceCreated._id,
+          },
+        );
       }
 
       return {
@@ -133,15 +138,6 @@ export class ResourceController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
-  }
-  /**
-   * Validates if the given ID is a valid MongoDB ObjectId.
-   * @param id The ID to validate.
-   * @returns True if the ID is valid, false otherwise.
-   */
-  private isValidObjectId(id: string): boolean {
-    const objectIdPattern = /^[0-9a-fA-F]{24}$/;
-    return objectIdPattern.test(id);
   }
 
   @Get(':id/download')

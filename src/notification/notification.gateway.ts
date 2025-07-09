@@ -13,4 +13,8 @@ export class NotificationGateway {
   sendNotification(data: any) {
     this.server.emit('notification', data);
   }
+
+  sendAskResponse(data: any) {
+    this.server.emit('askResponse', data);
+  }
 }

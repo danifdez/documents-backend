@@ -1,5 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
-import { Job } from './job.interface';
+import { Job, JobPriority } from './job.interface';
 import { JobService } from './job.service';
 import { JobRequest } from './job-request.interface';
 
@@ -9,7 +9,7 @@ export class JobController {
 
   @Post()
   async create(@Body() job: JobRequest): Promise<Job> {
-    return await this.jobService.create(job.type, {
+    return await this.jobService.create(job.type, JobPriority.NORMAL, {
       content: job.content,
       sourceLanguage: job.sourceLanguage,
       targetLanguage: job.targetLanguage,
