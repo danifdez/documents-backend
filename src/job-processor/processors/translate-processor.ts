@@ -21,7 +21,7 @@ export class TranslateProcessor implements JobProcessor {
 
   async process(job: Job): Promise<any> {
     const resourceId = job.payload['resourceId'] as string;
-    const saveTo = job.payload['saveTo'] as string;
+    const saveTo = job.payload['saveTo'] || 'translatedContent';
     const results = job.result as {
       response: Array<{
         path: string;

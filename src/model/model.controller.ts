@@ -16,6 +16,7 @@ export class ModelController {
     summarizeData: {
       content: string;
       sourceLanguage: string;
+      targetLanguage: string;
       resourceId: string;
     },
   ): Promise<void> {
@@ -23,6 +24,25 @@ export class ModelController {
       summarizeData.content,
       summarizeData.sourceLanguage,
       summarizeData.resourceId,
+      summarizeData.targetLanguage,
+    );
+  }
+
+  @Post('translate')
+  async translate(
+    @Body()
+    translateData: {
+      content: string;
+      sourceLanguage: string;
+      targetLanguage: string;
+      resourceId: string;
+    },
+  ): Promise<void> {
+    await this.modelService.translate(
+      translateData.content,
+      translateData.sourceLanguage,
+      translateData.resourceId,
+      translateData.targetLanguage,
     );
   }
 }
