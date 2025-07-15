@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { ReferenceModule } from './reference/reference.module';
 import { ProjectModule } from './project/project.module';
 import { ThreadModule } from './thread/thread.module';
 import { DocModule } from './doc/doc.module';
@@ -36,6 +37,7 @@ import { ModelModule } from './model/model.module';
     CommentModule,
     MarkModule,
     ModelModule,
+    ReferenceModule,
   ],
   controllers: [AppController],
   providers: [AppService],

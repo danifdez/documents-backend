@@ -31,6 +31,16 @@ export class ResourceService {
       .exec();
   }
 
+  async search(query: string): Promise<Resource[]> {
+    if (!query || !query.trim()) return [];
+
+    return this.resourceModel
+      .find({ name: { $regex: query, $options: 'i' } })
+      .sort({ _id: -1 })
+      .limit(10)
+      .exec();
+  }
+
   async findByHash(hash: string): Promise<Resource | null> {
     return this.resourceModel.findOne({ hash }).exec();
   }

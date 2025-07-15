@@ -23,6 +23,15 @@ export class MarkService {
     return this.markModel.find({ doc: new ObjectId(docId) }).exec();
   }
 
+  async search(query: string): Promise<Mark[]> {
+    if (!query || !query.trim()) return [];
+    return this.markModel
+      .find({ content: { $regex: query, $options: 'i' } })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .exec();
+  }
+
   async update(id: string, markData: Partial<Mark>): Promise<Mark> {
     return this.markModel.findByIdAndUpdate(id, markData, { new: true }).exec();
   }
