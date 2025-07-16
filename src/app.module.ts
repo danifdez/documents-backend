@@ -17,6 +17,7 @@ import { ConfigModule } from '@nestjs/config';
 import { CommentModule } from './comment/comment.module';
 import { MarkModule } from './mark/mark.module';
 import { ModelModule } from './model/model.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { ModelModule } from './model/model.module';
     MarkModule,
     ModelModule,
     ReferenceModule,
+    SearchModule,
   ],
   controllers: [AppController],
   providers: [AppService],

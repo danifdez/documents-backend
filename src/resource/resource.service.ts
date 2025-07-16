@@ -57,4 +57,22 @@ export class ResourceService {
     await this.resourceModel.findByIdAndDelete(id).exec();
     return resource;
   }
+
+  async globalSearch(searchTerm: string): Promise<any[]> {
+    const commonQueryOptions = {
+      $text: { $search: searchTerm },
+    };
+
+    return this.resourceModel
+      .find(commonQueryOptions, {
+        score: { $meta: 'textScore' },
+        title: 1,
+        name: 1,
+        content: 1,
+      })
+      .sort({ score: { $meta: 'textScore' } })
+      .limit(50)
+      .lean()
+      .exec();
+  }
 }

@@ -75,4 +75,20 @@ export class DocService {
     const result = await this.docModel.deleteOne({ _id: id }).exec();
     return { deleted: result.deletedCount > 0 };
   }
+
+  async globalSearch(searchTerm: string): Promise<any[]> {
+    const commonQueryOptions = {
+      $text: { $search: searchTerm },
+    };
+
+    return await this.docModel
+      .find(
+        commonQueryOptions,
+        { score: { $meta: 'textScore' }, name: 1, content: 1 }, // Incluye los campos para resaltar
+      )
+      .sort({ score: { $meta: 'textScore' } })
+      .limit(50)
+      .lean()
+      .exec();
+  }
 }
