@@ -45,4 +45,18 @@ export class ModelController {
       translateData.targetLanguage,
     );
   }
+
+  @Post('key_points')
+  async keyPoints(
+    @Body()
+    keyPointsData: {
+      document: string;
+      resourceId: string;
+    },
+  ): Promise<void> {
+    await this.modelService.keyPoints(
+      keyPointsData.document,
+      keyPointsData.resourceId,
+    );
+  }
 }

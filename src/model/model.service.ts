@@ -43,4 +43,11 @@ export class ModelService {
       texts: extractedTexts,
     });
   }
+
+  async keyPoints(document: string, resourceId: string): Promise<void> {
+    this.jobService.create('key_points', JobPriority.NORMAL, {
+      document,
+      resourceId,
+    });
+  }
 }

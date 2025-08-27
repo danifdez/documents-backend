@@ -33,4 +33,5 @@ export const ResourceSchema = new mongoose.Schema({
   summary: { type: String },
   language: { type: String },
   entities: { type: Array },
+  key_points: { type: Array },
 });

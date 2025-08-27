@@ -24,4 +24,5 @@ export interface Resource extends Document {
     word: string;
     entity: string;
   }>;
+  readonly key_points?: string[];
 }

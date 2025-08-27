@@ -12,6 +12,7 @@ import { HttpModule } from '@nestjs/axios';
 import { IngestContentProcessor } from './processors/ingest-content-processor';
 import { AskProcessor } from './processors/ask-processor';
 import { SummarizeProcessor } from './processors/summarize-processor';
+import { KeyPointProcessor } from './processors/key-point-processor';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SummarizeProcessor } from './processors/summarize-processor';
     IngestContentProcessor,
     SummarizeProcessor,
     AskProcessor,
+    KeyPointProcessor,
   ],
   exports: [JobProcessorFactory],
 })
