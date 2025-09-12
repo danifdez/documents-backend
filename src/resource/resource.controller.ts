@@ -83,7 +83,7 @@ export class ResourceController {
       };
 
       if (resourceData.type && resourceData.type === 'webpage') {
-        resourceToCreate.type = '000000000000000000000032';
+        resourceToCreate.type = 51;
       }
 
       if (resourceData.url) {
