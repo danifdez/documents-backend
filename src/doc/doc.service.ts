@@ -1,94 +1,67 @@
-import { Model } from 'mongoose';
-import { Injectable, Inject } from '@nestjs/common';
-import { Doc } from './doc.interface';
-import { ObjectId } from 'mongodb';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { DocEntity } from './doc.entity';
 
 @Injectable()
 export class DocService {
   constructor(
-    @Inject('DOCUMENT_MODEL')
-    private docModel: Model<Doc>,
+    @InjectRepository(DocEntity)
+    private readonly repository: Repository<DocEntity>,
   ) { }
 
-  async findOne(id: string): Promise<Doc> {
-    return this.docModel.findOne({ _id: id }).exec();
+  async findOne(id: number): Promise<DocEntity | null> {
+    return await this.repository.findOneBy({ id });
   }
 
-  async create(doc: Doc): Promise<Doc> {
-    const createdDoc = new this.docModel(doc);
-    return createdDoc.save();
+  async create(doc: Partial<DocEntity>): Promise<DocEntity> {
+    const created = this.repository.create(doc);
+    return await this.repository.save(created);
   }
 
-  async findByThread(threadId: string): Promise<Doc[]> {
-    return this.docModel.find({ thread: new ObjectId(threadId) }).exec();
+  async findByThread(threadId: number): Promise<DocEntity[]> {
+    return await this.repository.find({
+      where: { thread: { id: threadId } },
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async findByProject(projectId: string): Promise<Doc[]> {
-    return this.docModel
-      .aggregate([
-        {
-          $lookup: {
-            from: 'threads',
-            localField: 'thread',
-            foreignField: '_id',
-            as: 'threadData',
-          },
-        },
-        {
-          $match: {
-            $or: [
-              { 'threadData.project': new ObjectId(projectId) },
-              {
-                project: new ObjectId(projectId),
-                thread: { $exists: false },
-              },
-              {
-                project: new ObjectId(projectId),
-                thread: null,
-              },
-            ],
-          },
-        },
-        {
-          $project: {
-            name: 1,
-            thread: 1,
-            project: 1,
-            content: 1,
-          },
-        },
-        {
-          $sort: { _id: -1 },
-        },
-        {
-          $limit: 10,
-        },
-      ])
-      .exec();
+  async findByProject(projectId: number): Promise<DocEntity[]> {
+    return this.repository.find({
+      where: { project: { id: projectId } },
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async update(id: string, docData: Partial<Doc>): Promise<Doc> {
-    return this.docModel.findByIdAndUpdate(id, docData, { new: true }).exec();
+  async update(
+    id: number,
+    docData: Partial<DocEntity>,
+  ): Promise<DocEntity | null> {
+    const doc = await this.repository.preload({ id, ...docData });
+    if (!doc) return null;
+    return await this.repository.save(doc);
   }
 
-  async remove(id: string): Promise<{ deleted: boolean }> {
-    const result = await this.docModel.deleteOne({ _id: id }).exec();
-    return { deleted: result.deletedCount > 0 };
+  async remove(id: number): Promise<{ deleted: boolean }> {
+    const doc = await this.repository.findOneBy({ id });
+    if (!doc) {
+      return { deleted: false };
+    }
+
+    await this.repository.remove(doc);
+    return { deleted: true };
   }
 
-  async globalSearch(searchTerm: string): Promise<any[]> {
-    const commonQueryOptions = {
-      $text: { $search: searchTerm },
-    };
-
-    return await this.docModel
-      .find(
-        commonQueryOptions,
-        { score: { $meta: 'textScore' }, name: 1, content: 1 }, // Incluye los campos para resaltar
-      )
-      .sort({ score: { $meta: 'textScore' } })
+  async globalSearch(searchTerm: string): Promise<DocEntity[]> {
+    if (!searchTerm || searchTerm.trim() === '') return [];
+    const like = `%${searchTerm}%`;
+    return await this.repository
+      .createQueryBuilder('d')
+      .select(['d.id', 'd.name', 'd.content'])
+      .where('d.name ILIKE :q OR d.content ILIKE :q', { q: like })
+      .orderBy('similarity(d.name, :s)', 'DESC')
+      .setParameter('s', searchTerm)
       .limit(50)
-      .lean()
-      .exec();
+      .getRawMany();
   }
 }

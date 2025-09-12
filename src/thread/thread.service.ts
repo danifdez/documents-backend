@@ -1,24 +1,28 @@
-import { Model } from 'mongoose';
-import { Injectable, Inject } from '@nestjs/common';
-import { Thread } from './thread.interface';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ThreadEntity } from './thread.entity';
 
 @Injectable()
 export class ThreadService {
   constructor(
-    @Inject('THREAD_MODEL')
-    private threadModel: Model<Thread>,
+    @InjectRepository(ThreadEntity)
+    private readonly repository: Repository<ThreadEntity>,
   ) { }
 
-  async findOne(id: string): Promise<Thread> {
-    return this.threadModel.findOne({ _id: id }).exec();
+  async findOne(id: number): Promise<ThreadEntity | null> {
+    return await this.repository.findOneBy({ id });
   }
 
-  async create(project: Thread): Promise<Thread> {
-    const createdCat = new this.threadModel(project);
-    return createdCat.save();
+  async create(thread: Partial<ThreadEntity>): Promise<ThreadEntity> {
+    const created = this.repository.create(thread);
+    return await this.repository.save(created);
   }
 
-  async findByProject(projectId: string): Promise<Thread[]> {
-    return this.threadModel.find({ project: projectId }).exec();
+  async findByProject(projectId: number): Promise<ThreadEntity[]> {
+    return await this.repository.find({
+      where: { project: { id: projectId } },
+      order: { createdAt: 'DESC' },
+    });
   }
 }

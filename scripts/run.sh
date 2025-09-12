@@ -4,8 +4,5 @@
 cd /app
 
 # Run install
-yarn install --frozen-lockfile
-
-node_modules/.bin/migrate-mongo up
-
+yarn install
 yarn start:debug

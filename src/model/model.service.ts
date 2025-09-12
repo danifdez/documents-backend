@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { JobPriority } from 'src/job/job.interface';
+import { JobPriority } from 'src/job/job-priority.enum';
 import { JobService } from 'src/job/job.service';
 import { extractTextFromHtml } from 'src/utils/text';
 
@@ -17,7 +17,7 @@ export class ModelService {
   async summarize(
     content: string,
     sourceLanguage: string,
-    resourceId: string,
+    resourceId: number,
     language: string,
   ): Promise<void> {
     this.jobService.create('summarize', JobPriority.NORMAL, {
@@ -31,7 +31,7 @@ export class ModelService {
   async translate(
     content: string,
     sourceLanguage: string,
-    resourceId: string,
+    resourceId: number,
     language: string,
   ): Promise<void> {
     const extractedTexts = extractTextFromHtml(content);
@@ -44,7 +44,7 @@ export class ModelService {
     });
   }
 
-  async keyPoints(document: string, resourceId: string): Promise<void> {
+  async keyPoints(document: string, resourceId: number): Promise<void> {
     this.jobService.create('key_points', JobPriority.NORMAL, {
       document,
       resourceId,

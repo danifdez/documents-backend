@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { Job } from 'src/job/job.interface';
 import { ResourceService } from 'src/resource/resource.service';
 import { NotificationGateway } from 'src/notification/notification.gateway';
+import { JobEntity } from 'src/job/job.entity';
 
 @Injectable()
 export class KeyPointProcessor implements JobProcessor {
@@ -18,8 +18,8 @@ export class KeyPointProcessor implements JobProcessor {
     return jobType === this.JOB_TYPE;
   }
 
-  async process(job: Job): Promise<any> {
-    const resourceId = job.payload['resourceId'] as string;
+  async process(job: JobEntity): Promise<any> {
+    const resourceId = Number(job.payload['resourceId']) as number;
     const result = job.result as { data: { response: string[] } };
 
     await this.resourceService.update(resourceId, {

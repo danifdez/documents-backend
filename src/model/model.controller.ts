@@ -17,7 +17,7 @@ export class ModelController {
       content: string;
       sourceLanguage: string;
       targetLanguage: string;
-      resourceId: string;
+      resourceId: number;
     },
   ): Promise<void> {
     await this.modelService.summarize(
@@ -35,7 +35,7 @@ export class ModelController {
       content: string;
       sourceLanguage: string;
       targetLanguage: string;
-      resourceId: string;
+      resourceId: number;
     },
   ): Promise<void> {
     await this.modelService.translate(
@@ -51,7 +51,7 @@ export class ModelController {
     @Body()
     keyPointsData: {
       document: string;
-      resourceId: string;
+      resourceId: number;
     },
   ): Promise<void> {
     await this.modelService.keyPoints(

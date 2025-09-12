@@ -9,26 +9,24 @@ export class ReferenceService {
     private readonly markService: MarkService,
   ) { }
 
-  async search(query: string) {
-    if (!query || !query.trim()) return { resources: [], marks: [] };
+  async search(query: string): Promise<any[]> {
+    if (!query || !query.trim()) return [];
 
     const resources = await this.resourceService.search(query);
-
-    // Search marks by content
     const marks = await this.markService.search(query);
 
-    const merged = [
-      ...resources.map((r) => ({
-        _id: r._id,
-        type: 'resource',
+    const merged: any[] = [
+      ...resources.map((r: any) => ({
+        id: r.id,
+        type: 'resource' as const,
         name: r.name,
       })),
-      ...marks.map((m) => ({
-        _id: m._id,
-        type: 'mark',
+      ...marks.map((m: any) => ({
+        id: m.id,
+        type: 'mark' as const,
         content: m.content,
       })),
-    ];
+    ].filter(item => item.id != null);
 
     return merged;
   }

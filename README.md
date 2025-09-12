@@ -20,31 +20,42 @@ The backend service orchestrates document processing jobs, manages resources, an
 1. Ensure Docker is installed on your system.
 
 2. Build the backend Docker image:
+
    ```bash
    docker build -t documents-backend ./backend
    ```
+
 3. Run the backend container:
+
    ```bash
    docker run -p 3000:3000 --env-file ./backend/.env documents-backend
    ```
-   Make sure to provide any required environment variables and ensure MongoDB is running and accessible to the backend.
+
+   Make sure to provide any required environment variables and ensure PostgreSQL is running and accessible to the backend.
 
 ### Local
 
 1. Install Node.js and Yarn if not already installed.
 2. Navigate to the backend directory:
+
    ```bash
    cd backend
    ```
+
 3. Install dependencies:
+
    ```bash
    yarn install
    ```
+
 4. Start the development server:
+
    ```bash
    yarn start:dev
    ```
+
 5. For testing, run:
+
    ```bash
    yarn test
    ```

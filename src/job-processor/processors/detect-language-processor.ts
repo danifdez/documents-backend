@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { Job, JobPriority } from 'src/job/job.interface';
+import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
 import { JobService } from 'src/job/job.service';
 import { extractTextFromHtml } from 'src/utils/text';
+import { JobEntity } from 'src/job/job.entity';
 
 @Injectable()
 export class DetectLanguageProcessor implements JobProcessor {
@@ -19,8 +20,8 @@ export class DetectLanguageProcessor implements JobProcessor {
     return jobType === this.JOB_TYPE;
   }
 
-  async process(job: Job): Promise<any> {
-    const resourceId = job.payload['resourceId'] as string;
+  async process(job: JobEntity): Promise<any> {
+    const resourceId = Number(job.payload['resourceId']) as number;
     const results = (job.result as { results: { language: string }[] }).results;
 
     if (
@@ -48,6 +49,7 @@ export class DetectLanguageProcessor implements JobProcessor {
           from: 'content',
           texts: extractedTexts,
         });
+        console.log('Creating ingest-content job for resource', resource);
         this.jobService.create('ingest-content', JobPriority.NORMAL, {
           resourceId: resourceId,
           projectId: resource.project,

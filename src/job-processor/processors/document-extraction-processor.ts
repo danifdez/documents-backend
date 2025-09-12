@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { Job, JobPriority } from 'src/job/job.interface';
+import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobService } from 'src/job/job.service';
+import { JobEntity } from 'src/job/job.entity';
 
 @Injectable()
 export class DocumentExtractionProcessor implements JobProcessor {
@@ -20,10 +21,10 @@ export class DocumentExtractionProcessor implements JobProcessor {
     return jobType === this.JOB_TYPE;
   }
 
-  async process(job: Job): Promise<any> {
+  async process(job: JobEntity): Promise<any> {
     const hash = job.payload['hash'] as string;
     const extension = job.payload['extension'] as string;
-    const resourceId = job.payload['resourceId'] as string;
+    const resourceId = Number(job.payload['resourceId']) as number;
     const result = job.result as {
       title: string;
       author: string;

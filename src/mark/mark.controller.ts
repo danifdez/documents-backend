@@ -1,44 +1,38 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Patch,
-  Delete,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { MarkService } from './mark.service';
-import { Mark } from './mark.interface';
+import { MarkEntity } from './mark.entity';
 
 @Controller('marks')
 export class MarkController {
   constructor(private readonly markService: MarkService) { }
 
   @Get(':id')
-  async getId(@Param('id') id: string): Promise<Mark> {
+  async getId(@Param('id', ParseIntPipe) id: number): Promise<MarkEntity | null> {
     return await this.markService.findOne(id);
   }
 
   @Get('doc/:docId')
-  async getByDoc(@Param('docId') docId: string): Promise<Mark[]> {
+  async getByDoc(
+    @Param('docId', ParseIntPipe) docId: number,
+  ): Promise<MarkEntity[]> {
     return await this.markService.findByDoc(docId);
   }
 
   @Post()
-  async create(@Body() doc: Mark): Promise<Mark> {
+  async create(@Body() doc: Partial<MarkEntity>): Promise<MarkEntity> {
     return await this.markService.create(doc);
   }
 
   @Patch(':id')
   async update(
-    @Param('id') id: string,
-    @Body() doc: Partial<Mark>,
-  ): Promise<Mark> {
+    @Param('id', ParseIntPipe) id: number,
+    @Body() doc: Partial<MarkEntity>,
+  ): Promise<MarkEntity | null> {
     return await this.markService.update(id, doc);
   }
 
   @Delete(':id')
-  async delete(@Param('id') id: string): Promise<void> {
+  async delete(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return await this.markService.delete(id);
   }
 }

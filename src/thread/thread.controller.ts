@@ -1,23 +1,25 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, ParseIntPipe } from '@nestjs/common';
 import { ThreadService } from './thread.service';
-import { Thread } from './thread.interface';
+import { ThreadEntity } from './thread.entity';
 
 @Controller('threads')
 export class ThreadController {
   constructor(private readonly threadService: ThreadService) { }
 
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<Thread> {
+  async findOne(@Param('id', ParseIntPipe) id: number): Promise<ThreadEntity | null> {
     return await this.threadService.findOne(id);
   }
 
   @Get('by-project/:projectId')
-  async getAll(@Param('projectId') projectId: string): Promise<Thread[]> {
+  async getAll(
+    @Param('projectId', ParseIntPipe) projectId: number,
+  ): Promise<ThreadEntity[]> {
     return await this.threadService.findByProject(projectId);
   }
 
   @Post()
-  async create(@Body() thread: Thread): Promise<Thread> {
+  async create(@Body() thread: Partial<ThreadEntity>): Promise<ThreadEntity> {
     return await this.threadService.create(thread);
   }
 }

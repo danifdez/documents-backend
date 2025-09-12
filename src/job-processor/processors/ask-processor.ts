@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { Job } from 'src/job/job.interface';
 import { NotificationGateway } from 'src/notification/notification.gateway';
+import { JobEntity } from 'src/job/job.entity';
 
 @Injectable()
 export class AskProcessor implements JobProcessor {
@@ -14,7 +14,7 @@ export class AskProcessor implements JobProcessor {
     return jobType === this.JOB_TYPE;
   }
 
-  async process(job: Job): Promise<any> {
+  async process(job: JobEntity): Promise<any> {
     const response = job.result['response'] as string;
     this.notificationGateway.sendAskResponse({
       response,

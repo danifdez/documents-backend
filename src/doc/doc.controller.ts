@@ -1,38 +1,43 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { DocService } from './doc.service';
-import { Doc } from './doc.interface';
+import { DocEntity } from 'src/doc/doc.entity';
 
 @Controller('docs')
 export class DocController {
   constructor(private readonly docService: DocService) { }
 
   @Get(':id')
-  async getId(@Param('id') id: string): Promise<Doc> {
+  async getId(@Param('id', ParseIntPipe) id: number): Promise<DocEntity | null> {
     return await this.docService.findOne(id);
   }
 
   @Get('thread/:threadId')
-  async getByThread(@Param('threadId') threadId: string): Promise<Doc[]> {
+  async getByThread(
+    @Param('threadId', ParseIntPipe) threadId: number,
+  ): Promise<DocEntity[]> {
     return await this.docService.findByThread(threadId);
   }
 
   @Get('project/:projectId')
-  async getByProject(@Param('projectId') projectId: string): Promise<Doc[]> {
+  async getByProject(
+    @Param('projectId', ParseIntPipe) projectId: number,
+  ): Promise<DocEntity[]> {
     return await this.docService.findByProject(projectId);
   }
 
   @Post()
-  async create(@Body() doc: Doc): Promise<Doc> {
+  async create(@Body() doc: Partial<DocEntity>): Promise<DocEntity> {
     return await this.docService.create(doc);
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() doc: Partial<Doc>): Promise<Doc> {
+  async update(
+    @Param('id', ParseIntPipe) id: number, @Body() doc: Partial<DocEntity>): Promise<DocEntity | null> {
     return await this.docService.update(id, doc);
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.docService.remove(id);
   }
 }

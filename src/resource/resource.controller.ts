@@ -1,25 +1,12 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Delete,
-  Patch,
-  UseInterceptors,
-  UploadedFile,
-  Res,
-  HttpException,
-  HttpStatus,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Res, HttpException, HttpStatus, ParseIntPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
-import { Resource } from './resource.interface';
 import { ResourceService } from './resource.service';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { JobService } from '../job/job.service';
 import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
-import { JobPriority } from 'src/job/job.interface';
+import { JobPriority } from 'src/job/job-priority.enum';
+import { ResourceEntity } from './resource.entity';
 
 @Controller('resources')
 export class ResourceController {
@@ -30,27 +17,29 @@ export class ResourceController {
   ) { }
 
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<Resource> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ResourceEntity | null> {
     return await this.resourceService.findOne(id);
   }
 
   @Get('project/:projectId')
   async getByProject(
-    @Param('projectId') projectId: string,
-  ): Promise<Resource[]> {
+    @Param('projectId', ParseIntPipe) projectId: number,
+  ): Promise<ResourceEntity[]> {
     return await this.resourceService.findByProject(projectId);
   }
 
   @Patch(':id')
   async update(
-    @Param('id') id: string,
-    @Body() resource: Partial<Resource>,
-  ): Promise<Resource> {
+    @Param('id', ParseIntPipe) id: number,
+    @Body() resource: Partial<ResourceEntity>,
+  ): Promise<ResourceEntity | null> {
     return await this.resourceService.update(id, resource);
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string): Promise<void> {
+  async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     const resource = await this.resourceService.remove(id);
     if (resource && resource.path) {
       await this.fileStorageService.deleteFile(resource.path);
@@ -62,14 +51,7 @@ export class ResourceController {
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body()
-    resourceData: {
-      name: string;
-      projectId: string;
-      type?: string;
-      url?: string;
-      relatedTo?: string;
-      originalName?: string;
-    },
+    resourceData: Partial<ResourceEntity>,
   ) {
     if (!file) {
       throw new HttpException('No file uploaded', HttpStatus.BAD_REQUEST);
@@ -91,7 +73,7 @@ export class ResourceController {
 
       const resourceToCreate: any = {
         name: resourceData.name || file.originalname,
-        project: resourceData.projectId,
+        project: resourceData.project,
         hash: hash,
         mimeType: file.mimetype,
         originalName: resourceData.originalName || file.originalname,
@@ -120,7 +102,7 @@ export class ResourceController {
           {
             hash: result.hash,
             extension: result.extension,
-            resourceId: resourceCreated._id,
+            resourceId: resourceCreated.id,
           },
         );
       }
@@ -141,7 +123,10 @@ export class ResourceController {
   }
 
   @Get(':id/download')
-  async downloadFile(@Param('id') id: string, @Res() res: Response) {
+  async downloadFile(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
     const resource = await this.resourceService.findOne(id);
 
     if (!resource || !resource.path) {
@@ -163,7 +148,7 @@ export class ResourceController {
   }
 
   @Get(':id/view')
-  async viewFile(@Param('id') id: string, @Res() res: Response) {
+  async viewFile(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
     const resource = await this.resourceService.findOne(id);
 
     if (!resource || !resource.path) {

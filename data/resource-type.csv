@@ -1,52 +1,52 @@
-_id,abbreviation,name,description,example
-000000000000000000000000,ABST,Abstract,"Summary of a publication, usually without the full text.",Conference abstract.
-000000000000000000000001,ADVS,Audiovisual Material,"Audio or video materials like documentaries, films, etc.",Scientific documentary.
-000000000000000000000002,AGGR,Aggregated Database,Compiled set of databases.,Collection of academic databases.
-000000000000000000000003,ANCIENT,Ancient Text,Classical or ancient texts.,Translation of an ancient Greek manuscript.
-000000000000000000000004,ART,Art Work,Art piece such as a painting or sculpture.,Van Gogh painting.
-000000000000000000000005,BILL,Bill,Proposed legislation or law.,US congressional bill.
-000000000000000000000006,BLOG,Blog,Blog post or entry.,Academic blog post.
-000000000000000000000007,BOOK,Book,A complete book.,University textbook.
-000000000000000000000008,CASE,Case,Legal or judicial case.,Brown v. Board of Education.
-000000000000000000000009,CHAP,Book Chapter,A chapter from a book.,Chapter on bioethics in a medical book.
-00000000000000000000000a,CHART,Chart,Standalone chart or statistical table.,Statistical chart in a report.
-00000000000000000000000b,CLSWKR,Classical Work,Classic literary work.,Homer's Odyssey.
-00000000000000000000000c,COMP,Computer Program,Software or application.,Python script for data analysis.
-00000000000000000000000d,CONF,Conference Proceeding,Work presented at a conference.,Engineering conference presentation.
-00000000000000000000000e,CPAPER,Conference Paper,Individual paper from a conference.,AI research paper at a symposium.
-00000000000000000000000f,CTLG,Catalog,"Library, museum, or exhibition catalog.",Art exhibit catalog.
-000000000000000000000010,DATA,Data File,Published dataset.,National census dataset.
-000000000000000000000011,ELEC,Electronic Article,Article published electronically.,Online journal article.
-000000000000000000000012,ENCYC,Encyclopedia Article,Entry in an encyclopedia.,Britannica article on biology.
-000000000000000000000013,EBOOK,Electronic Book,Digital book (e-book).,E-book on personal finance.
-000000000000000000000014,EDITED,Edited Book,Book compiled by editors.,Edited anthology of essays.
-000000000000000000000015,EMAIL,Email,Email communication.,Email from a cited researcher.
-000000000000000000000016,EQUA,Equation,Mathematical formula or equation.,Relativity formula.
-000000000000000000000017,FIGURE,Figure,Illustration or figure image.,Diagram in a scientific publication.
-000000000000000000000018,GEN,Generic,General or undefined type.,Default when no other type fits.
-000000000000000000000019,GOVDOC,Government Document,Official government publication.,Population census report.
-00000000000000000000001a,GRANT,Grant,Research funding or grant.,NIH grant for clinical study.
-00000000000000000000001b,HEAR,Hearing,Legislative or public hearing.,Senate hearing on technology.
-00000000000000000000001c,ICOMM,Internet Communication,"Online communications (forums, comments).",Reddit post cited in research.
-00000000000000000000001d,INPR,In Press,"Accepted for publication, not yet published.",Accepted article pending publication.
-00000000000000000000001e,JFULL,Journal (Full),Entire journal issue.,Full issue of a scientific journal.
-00000000000000000000001f,JOUR,Journal Article,Academic journal article.,Nature article on biotechnology.
-000000000000000000000020,LEGAL,Legal Rule or Regulation,Legal rule or regulation.,EU regulation on privacy.
-000000000000000000000021,MANSCPT,Manuscript,Unpublished manuscript.,Doctoral thesis draft.
-000000000000000000000022,MAP,Map,Physical or digital map.,Geological map.
-000000000000000000000023,MGZN,Magazine Article,Non-academic magazine article.,National Geographic feature.
-000000000000000000000024,MPCT,Motion Picture,Film or cinematic video.,Climate change documentary.
-000000000000000000000025,MUSIC,Music,Musical composition.,Symphony sheet music.
-000000000000000000000026,NEWS,Newspaper Article,Newspaper article.,The New York Times news report.
-000000000000000000000027,PAMP,Pamphlet,Pamphlet or leaflet.,Vaccination information leaflet.
-000000000000000000000028,PAT,Patent,Registered patent.,Patent for a medical device.
-000000000000000000000029,PCOMM,Personal Communication,Unpublished personal communication.,Interview with an expert.
-00000000000000000000002a,RPRT,Report,Technical or research report.,IPCC climate change report.
-00000000000000000000002b,SER,Serial Publication,Non-academic periodical.,Monthly organization newsletter.
-00000000000000000000002c,SLIDE,Slide,Presentation slide.,PowerPoint slide in a lecture.
-00000000000000000000002d,SOUND,Sound Recording,Audio recording.,Academic podcast.
-00000000000000000000002e,STAT,Standard,Technical standard.,ISO standard for data security.
-00000000000000000000002f,THES,Thesis/Dissertation,Academic thesis or dissertation.,PhD dissertation in psychology.
-000000000000000000000030,UNBILL,Unenacted Bill,Unapproved bill or law proposal.,Unpassed legislative proposal.
-000000000000000000000031,VIDEO,Video Recording,Video file or footage.,Educational YouTube video.
-000000000000000000000032,WEB,Web Page,Web page.,Website of a scientific organization.
+id,abbreviation,name,description,example
+1,ABST,Abstract,"Summary of a publication, usually without the full text.",Conference abstract.
+2,ADVS,Audiovisual Material,"Audio or video materials like documentaries, films, etc.",Scientific documentary.
+3,AGGR,Aggregated Database,Compiled set of databases.,Collection of academic databases.
+4,ANCIENT,Ancient Text,Classical or ancient texts.,Translation of an ancient Greek manuscript.
+5,ART,Art Work,Art piece such as a painting or sculpture.,Van Gogh painting.
+6,BILL,Bill,Proposed legislation or law.,US congressional bill.
+7,BLOG,Blog,Blog post or entry.,Academic blog post.
+8,BOOK,Book,A complete book.,University textbook.
+9,CASE,Case,Legal or judicial case.,Brown v. Board of Education.
+10,CHAP,Book Chapter,A chapter from a book.,Chapter on bioethics in a medical book.
+11,CHART,Chart,Standalone chart or statistical table.,Statistical chart in a report.
+12,CLSWKR,Classical Work,Classic literary work.,Homer's Odyssey.
+13,COMP,Computer Program,Software or application.,Python script for data analysis.
+14,CONF,Conference Proceeding,Work presented at a conference.,Engineering conference presentation.
+15,CPAPER,Conference Paper,Individual paper from a conference.,AI research paper at a symposium.
+16,CTLG,Catalog,"Library, museum, or exhibition catalog.",Art exhibit catalog.
+17,DATA,Data File,Published dataset.,National census dataset.
+18,ELEC,Electronic Article,Article published electronically.,Online journal article.
+19,ENCYC,Encyclopedia Article,Entry in an encyclopedia.,Britannica article on biology.
+20,EBOOK,Electronic Book,Digital book (e-book).,E-book on personal finance.
+21,EDITED,Edited Book,Book compiled by editors.,Edited anthology of essays.
+22,EMAIL,Email,Email communication.,Email from a cited researcher.
+23,EQUA,Equation,Mathematical formula or equation.,Relativity formula.
+24,FIGURE,Figure,Illustration or figure image.,Diagram in a scientific publication.
+25,GEN,Generic,General or undefined type.,Default when no other type fits.
+26,GOVDOC,Government Document,Official government publication.,Population census report.
+27,GRANT,Grant,Research funding or grant.,NIH grant for clinical study.
+28,HEAR,Hearing,Legislative or public hearing.,Senate hearing on technology.
+29,ICOMM,Internet Communication,"Online communications (forums, comments).",Reddit post cited in research.
+30,INPR,In Press,"Accepted for publication, not yet published.",Accepted article pending publication.
+31,JFULL,Journal (Full),Entire journal issue.,Full issue of a scientific journal.
+32,JOUR,Journal Article,Academic journal article.,Nature article on biotechnology.
+33,LEGAL,Legal Rule or Regulation,Legal rule or regulation.,EU regulation on privacy.
+34,MANSCPT,Manuscript,Unpublished manuscript.,Doctoral thesis draft.
+35,MAP,Map,Physical or digital map.,Geological map.
+36,MGZN,Magazine Article,Non-academic magazine article.,National Geographic feature.
+37,MPCT,Motion Picture,Film or cinematic video.,Climate change documentary.
+38,MUSIC,Music,Musical composition.,Symphony sheet music.
+39,NEWS,Newspaper Article,Newspaper article.,The New York Times news report.
+40,PAMP,Pamphlet,Pamphlet or leaflet.,Vaccination information leaflet.
+41,PAT,Patent,Registered patent.,Patent for a medical device.
+42,PCOMM,Personal Communication,Unpublished personal communication.,Interview with an expert.
+43,RPRT,Report,Technical or research report.,IPCC climate change report.
+44,SER,Serial Publication,Non-academic periodical.,Monthly organization newsletter.
+45,SLIDE,Slide,Presentation slide.,PowerPoint slide in a lecture.
+46,SOUND,Sound Recording,Audio recording.,Academic podcast.
+47,STAT,Standard,Technical standard.,ISO standard for data security.
+48,THES,Thesis/Dissertation,Academic thesis or dissertation.,PhD dissertation in psychology.
+49,UNBILL,Unenacted Bill,Unapproved bill or law proposal.,Unpassed legislative proposal.
+50,VIDEO,Video Recording,Video file or footage.,Educational YouTube video.
+51,WEB,Web Page,Web page.,Website of a scientific organization.

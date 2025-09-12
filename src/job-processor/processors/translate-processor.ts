@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { Job, JobPriority } from 'src/job/job.interface';
+import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
 import * as cheerio from 'cheerio';
 import { JobService } from 'src/job/job.service';
+import { JobEntity } from 'src/job/job.entity';
 
 @Injectable()
 export class TranslateProcessor implements JobProcessor {
@@ -19,8 +20,8 @@ export class TranslateProcessor implements JobProcessor {
     return jobType === this.JOB_TYPE;
   }
 
-  async process(job: Job): Promise<any> {
-    const resourceId = job.payload['resourceId'] as string;
+  async process(job: JobEntity): Promise<any> {
+    const resourceId = Number(job.payload['resourceId']) as number;
     const saveTo = job.payload['saveTo'] || 'translatedContent';
     const results = job.result as {
       response: Array<{

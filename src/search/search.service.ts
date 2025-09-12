@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DocService } from 'src/doc/doc.service';
 import { ResourceService } from 'src/resource/resource.service';
 import * as cheerio from 'cheerio';
+import { SearchResultDto } from './dto/search-result.dto';
 
 @Injectable()
 export class SearchService {
@@ -52,26 +53,22 @@ export class SearchService {
     return fragment;
   }
 
-  async globalSearch(searchTerm: string) {
+  async globalSearch(searchTerm: string): Promise<SearchResultDto[]> {
     const docsRawResults = await this.docService.globalSearch(searchTerm);
 
-    const docsProcessed = docsRawResults.map((doc) => ({
-      _id: doc._id,
+    const docsProcessed: SearchResultDto[] = docsRawResults.map((doc: any) => ({
+      id: doc.id,
       name: doc.name,
       score: doc.score,
       collection: 'docs',
       highlightedName: this.highlightTextInHtml(doc.name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(
-        doc.content,
-        searchTerm,
-        100,
-      ),
+      highlightedContent: this.highlightTextInHtml(doc.content, searchTerm, 100),
     }));
 
     const resourcesRawResults = await this.resourceService.globalSearch(searchTerm);
 
-    const resourcesProcessed = resourcesRawResults.map((resource) => ({
-      _id: resource._id,
+    const resourcesProcessed: SearchResultDto[] = resourcesRawResults.map((resource: any) => ({
+      id: resource.id,
       name: resource.name,
       score: resource.score,
       collection: 'resources',

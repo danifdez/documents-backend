@@ -1,56 +1,43 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Delete,
-  Patch,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Patch, Query, ParseIntPipe } from '@nestjs/common';
 import { ProjectService } from './project.service';
-import { Project } from './project.interface';
-import { ThreadService } from 'src/thread/thread.service';
-import { DocService } from 'src/doc/doc.service';
+import { ProjectEntity } from './project.entity';
 
 @Controller('projects')
 export class ProjectController {
   constructor(
     private readonly projectService: ProjectService,
-    private readonly threadService: ThreadService,
-    private readonly docService: DocService,
   ) { }
 
   @Get('search')
-  async search(@Query('q') query: string): Promise<Project[]> {
+  async search(@Query('q') query: string): Promise<ProjectEntity[]> {
     return await this.projectService.search(query);
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<Project> {
+  async findOne(@Param('id', ParseIntPipe) id: number): Promise<ProjectEntity | null> {
     return await this.projectService.findOne(id);
   }
 
   @Get()
-  async getAll(): Promise<Project[]> {
+  async getAll(): Promise<ProjectEntity[]> {
     return await this.projectService.findAll();
   }
 
   @Post()
-  async create(@Body() project: Project): Promise<Project> {
+  async create(@Body() project: Partial<ProjectEntity>): Promise<ProjectEntity> {
     return await this.projectService.create(project);
   }
 
   @Patch(':id')
   async update(
-    @Param('id') id: string,
-    @Body() project: Partial<Project>,
-  ): Promise<Project> {
+    @Param('id', ParseIntPipe) id: number,
+    @Body() project: Partial<ProjectEntity>,
+  ): Promise<ProjectEntity | null> {
     return await this.projectService.update(id, project);
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string): Promise<void> {
+  async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.projectService.remove(id);
   }
 }

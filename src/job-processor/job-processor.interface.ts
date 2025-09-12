@@ -1,4 +1,4 @@
-import { Job } from 'src/job/job.interface';
+import { JobEntity } from 'src/job/job.entity';
 
 /**
  * Interface for job processors
@@ -10,7 +10,7 @@ export interface JobProcessor {
    * @param job The job to process
    * @returns Promise resolving to the processing result
    */
-  process(job: Job): Promise<any>;
+  process(job: JobEntity): Promise<any>;
 
   /**
    * Checks if this processor can handle the given job type

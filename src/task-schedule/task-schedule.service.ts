@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import * as os from 'os';
 import * as process from 'process';
-import { JobStatus } from 'src/job/job.interface';
+import { JobStatus } from 'src/job/job-status.enum';
 import { JobService } from 'src/job/job.service';
 import { JobProcessorFactory } from 'src/job-processor/job-processor.factory';
 
@@ -64,22 +64,20 @@ export class TaskScheduleService {
 
       if (!processor) {
         this.logger.error(`No processor found for job type: ${firstJob.type}`);
-        await this.jobService.markAsFailed(firstJob._id.toString());
+        await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
         return;
       }
 
-      this.logger.log(
-        `Processing job ${firstJob._id} of type ${firstJob.type}`,
-      );
+      this.logger.log(`Processing job ${firstJob.id} of type ${firstJob.type}`);
       await processor.process(firstJob);
 
-      await this.jobService.markAsCompleted(firstJob._id.toString());
+      await this.jobService.markAsCompleted((firstJob as any).id?.toString?.() || String((firstJob as any).id));
 
     } catch (error) {
       this.logger.error(
-        `Error processing job ${firstJob._id}: ${error.message}`,
+        `Error processing job ${firstJob.id}: ${error.message}`,
       );
-      await this.jobService.markAsFailed(firstJob._id.toString());
+      await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
     }
   }
 }

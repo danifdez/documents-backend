@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { Job } from 'src/job/job.interface';
 import { ResourceService } from 'src/resource/resource.service';
+import { JobEntity } from 'src/job/job.entity';
 
 @Injectable()
 export class EntityExtractionProcessor implements JobProcessor {
@@ -14,8 +14,8 @@ export class EntityExtractionProcessor implements JobProcessor {
     return jobType === this.JOB_TYPE;
   }
 
-  async process(job: Job): Promise<any> {
-    const resourceId = job.payload['resourceId'] as string;
+  async process(job: JobEntity): Promise<any> {
+    const resourceId = Number(job.payload['resourceId']) as number;
     const result = job.result as { entities: any };
 
     this.resourceService.update(resourceId, {

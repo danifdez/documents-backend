@@ -1,46 +1,38 @@
-import { Model } from 'mongoose';
-import { Injectable, Inject } from '@nestjs/common';
-import { ResourceType } from './resource-type.interface';
-import { ObjectId } from 'mongodb';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ResourceTypeEntity } from './resource-type.entity';
 
 @Injectable()
 export class ResourceTypeService {
   constructor(
-    @Inject('RESOURCE_TYPE_MODEL')
-    private resourceTypeModel: Model<ResourceType>,
+    @InjectRepository(ResourceTypeEntity)
+    private readonly repository?: Repository<ResourceTypeEntity>,
   ) { }
 
-  async findOne(id: string): Promise<ResourceType> {
-    return this.resourceTypeModel.findOne({ _id: id }).exec();
+  async findOne(id: number): Promise<ResourceTypeEntity | null> {
+    return await this.repository.findOneBy({ id });
   }
 
-  async create(resource: ResourceType): Promise<ResourceType> {
-    const createdResource = new this.resourceTypeModel(resource);
-    return createdResource.save();
-  }
-
-  async findByProject(projectId: string): Promise<ResourceType[]> {
-    return this.resourceTypeModel
-      .find({ project: new ObjectId(projectId) }, { name: 1, type: 1 })
-      .sort({ _id: -1 })
-      .limit(10)
-      .exec();
+  async create(resource: Partial<ResourceTypeEntity>): Promise<ResourceTypeEntity> {
+    const created = this.repository.create(resource);
+    return await this.repository.save(created);
   }
 
   async update(
-    id: string,
-    resource: Partial<ResourceType>,
-  ): Promise<ResourceType> {
-    return this.resourceTypeModel
-      .findByIdAndUpdate(id, resource, { new: true })
-      .exec();
+    id: number,
+    resource: Partial<ResourceTypeEntity>,
+  ): Promise<ResourceTypeEntity | null> {
+    const existing = await this.repository.preload({ id, ...resource });
+    if (!existing) return null;
+    return await this.repository.save(existing);
   }
 
-  async remove(id: string): Promise<void> {
-    await this.resourceTypeModel.findByIdAndDelete(id).exec();
+  async remove(id: number): Promise<void> {
+    this.repository.delete({ id });
   }
 
-  async findAll(): Promise<ResourceType[]> {
-    return this.resourceTypeModel.find().exec();
+  async findAll(): Promise<ResourceTypeEntity[]> {
+    return await this.repository.find({ order: { createdAt: 'DESC' } });
   }
 }

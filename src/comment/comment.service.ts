@@ -1,35 +1,41 @@
-import { Model } from 'mongoose';
-import { Injectable, Inject } from '@nestjs/common';
-import { Comment } from './comment.interface';
-import { ObjectId } from 'mongodb';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { CommentEntity } from './comment.entity';
 
 @Injectable()
 export class CommentService {
   constructor(
-    @Inject('COMMENT_MODEL')
-    private commentModel: Model<Comment>,
+    @InjectRepository(CommentEntity)
+    private readonly repository: Repository<CommentEntity>,
   ) { }
 
-  async findOne(id: string): Promise<Comment> {
-    return this.commentModel.findOne({ _id: id }).exec();
+  async findOne(id: number): Promise<CommentEntity | null> {
+    return this.repository.findOneBy({ id });
   }
 
-  async create(comment: Comment): Promise<Comment> {
-    const createdComment = new this.commentModel(comment);
-    return createdComment.save();
+  async create(comment: Partial<CommentEntity>): Promise<CommentEntity> {
+    const created = this.repository.create(comment);
+    return await this.repository.save(created);
   }
 
-  async findByDoc(docId: string): Promise<Comment[]> {
-    return this.commentModel.find({ doc: new ObjectId(docId) }).exec();
+  async findByDoc(docId: number): Promise<CommentEntity[]> {
+    return this.repository.find({
+      where: { doc: { id: docId } },
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async update(id: string, commentData: Partial<Comment>): Promise<Comment> {
-    return this.commentModel
-      .findByIdAndUpdate(id, commentData, { new: true })
-      .exec();
+  async update(
+    id: number,
+    commentData: Partial<CommentEntity>,
+  ): Promise<CommentEntity | null> {
+    const comment = await this.repository.preload({ id, ...commentData });
+    if (!comment) return null;
+    return this.repository.save(comment);
   }
 
-  async delete(id: string): Promise<void> {
-    await this.commentModel.findByIdAndDelete(id).exec();
+  async delete(id: number): Promise<void> {
+    await this.repository.delete({ id });
   }
 }

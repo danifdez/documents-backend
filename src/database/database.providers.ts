@@ -1,20 +1,22 @@
-import * as mongoose from 'mongoose';
 import { ConfigService } from '@nestjs/config';
+import { Pool } from 'pg';
 
 export const databaseProviders = [
   {
-    provide: 'DATABASE_CONNECTION',
+    provide: 'PG_POOL',
     inject: [ConfigService],
-    useFactory: async (configService: ConfigService): Promise<typeof mongoose> => {
-      const username = configService.get('MONGO_USERNAME');
-      const password = configService.get('MONGO_PASSWORD');
-      const host = configService.get('MONGO_HOST');
-      const port = configService.get('MONGO_PORT');
-      const database = configService.get('MONGO_DATABASE');
+    useFactory: async (configService: ConfigService): Promise<Pool> => {
+      // Coerce all env values to strings to avoid pg errors when values are non-string
+      const host = String(configService.get('POSTGRES_HOST') ?? 'database');
+      const port = Number(configService.get('POSTGRES_PORT') ?? 5432);
+      const user = String(configService.get('POSTGRES_USER') ?? 'postgres');
+      const password = String(configService.get('POSTGRES_PASSWORD') ?? '');
+      const database = String(configService.get('POSTGRES_DB') ?? 'documents');
 
-      const uri = `mongodb://${username}:${password}@${host}:${port}/`;
+      const pool = new Pool({ host, port, user, password, database });
 
-      return mongoose.connect(uri, { dbName: database });
+      await pool.query('SELECT 1');
+      return pool;
     },
   },
 ];
