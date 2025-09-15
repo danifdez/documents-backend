@@ -9,7 +9,7 @@ export class SearchService {
   constructor(
     private readonly docService: DocService,
     private readonly resourceService: ResourceService,
-  ) { }
+  ) {}
 
   private highlightTextInHtml(
     fullContent: string,
@@ -62,20 +62,39 @@ export class SearchService {
       score: doc.score,
       collection: 'docs',
       highlightedName: this.highlightTextInHtml(doc.name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(doc.content, searchTerm, 100),
+      highlightedContent: this.highlightTextInHtml(
+        doc.content,
+        searchTerm,
+        100,
+      ),
     }));
 
-    const resourcesRawResults = await this.resourceService.globalSearch(searchTerm);
+    const resourcesRawResults =
+      await this.resourceService.globalSearch(searchTerm);
 
-    const resourcesProcessed: SearchResultDto[] = resourcesRawResults.map((resource: any) => ({
-      id: resource.id,
-      name: resource.name,
-      score: resource.score,
-      collection: 'resources',
-      highlightedTitle: this.highlightTextInHtml(resource.title, searchTerm, 50),
-      highlightedName: this.highlightTextInHtml(resource.name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(resource.content, searchTerm, 100),
-    }));
+    const resourcesProcessed: SearchResultDto[] = resourcesRawResults.map(
+      (resource: any) => ({
+        id: resource.id,
+        name: resource.name,
+        score: resource.score,
+        collection: 'resources',
+        highlightedTitle: this.highlightTextInHtml(
+          resource.title,
+          searchTerm,
+          50,
+        ),
+        highlightedName: this.highlightTextInHtml(
+          resource.name,
+          searchTerm,
+          50,
+        ),
+        highlightedContent: this.highlightTextInHtml(
+          resource.content,
+          searchTerm,
+          100,
+        ),
+      }),
+    );
 
     const combinedResults = [...docsProcessed, ...resourcesProcessed];
 

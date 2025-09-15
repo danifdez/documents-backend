@@ -8,7 +8,7 @@ export class ResourceService {
   constructor(
     @InjectRepository(ResourceEntity)
     private readonly repo: Repository<ResourceEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<ResourceEntity | null> {
     return await this.repo.findOneBy({ id });
@@ -20,19 +20,31 @@ export class ResourceService {
   }
 
   async findByProject(projectId: number): Promise<ResourceEntity[]> {
-    return await this.repo.find({ where: { project: { id: projectId } }, order: { createdAt: 'DESC' }, take: 10 });
+    return await this.repo.find({
+      where: { project: { id: projectId } },
+      order: { createdAt: 'DESC' },
+      take: 10,
+    });
   }
 
   async search(query: string): Promise<ResourceEntity[]> {
     if (!query || !query.trim()) return [];
-    return await this.repo.createQueryBuilder('r').where('r.name ILIKE :q', { q: `%${query}%` }).orderBy('r.createdAt', 'DESC').limit(10).getMany();
+    return await this.repo
+      .createQueryBuilder('r')
+      .where('r.name ILIKE :q', { q: `%${query}%` })
+      .orderBy('r.createdAt', 'DESC')
+      .limit(10)
+      .getMany();
   }
 
   async findByHash(hash: string): Promise<ResourceEntity | null> {
     return await this.repo.findOne({ where: { hash } });
   }
 
-  async update(id: number, resource: Partial<any>): Promise<ResourceEntity | null> {
+  async update(
+    id: number,
+    resource: Partial<any>,
+  ): Promise<ResourceEntity | null> {
     const existing = await this.repo.preload({ id, ...resource });
     if (!existing) return null;
     return await this.repo.save(existing);
@@ -47,7 +59,8 @@ export class ResourceService {
 
   async globalSearch(searchTerm: string): Promise<ResourceEntity[]> {
     if (!searchTerm || !searchTerm.trim()) return [];
-    return await this.repo.createQueryBuilder('r')
+    return await this.repo
+      .createQueryBuilder('r')
       .where('r.content ILIKE :q OR r.name ILIKE :q', { q: `%${searchTerm}%` })
       .orderBy('similarity(r.content, :s)', 'DESC')
       .setParameter('s', searchTerm)

@@ -14,7 +14,7 @@ export class TranslateProcessor implements JobProcessor {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly jobService: JobService,
-  ) { }
+  ) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;

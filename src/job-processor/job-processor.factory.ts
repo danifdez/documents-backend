@@ -9,7 +9,7 @@ export class JobProcessorFactory implements OnModuleInit {
   private readonly logger = new Logger(JobProcessorFactory.name);
   private readonly processors: JobProcessor[] = [];
 
-  constructor(private readonly moduleRef: ModuleRef) { }
+  constructor(private readonly moduleRef: ModuleRef) {}
 
   async onModuleInit() {
     await this.registerProcessors();
@@ -29,14 +29,19 @@ export class JobProcessorFactory implements OnModuleInit {
           if (processorName) {
             try {
               const processorModule = await import(`./processors/${file}`);
-              const processor = this.moduleRef.get(processorModule[processorName], { strict: false });
+              const processor = this.moduleRef.get(
+                processorModule[processorName],
+                { strict: false },
+              );
 
               if (processor && typeof processor.canProcess === 'function') {
                 this.registerProcessor(processor);
                 this.logger.log(`Registered processor: ${processorName}`);
               }
             } catch (err) {
-              this.logger.error(`Failed to register processor from file ${file}: ${err.message}`);
+              this.logger.error(
+                `Failed to register processor from file ${file}: ${err.message}`,
+              );
             }
           }
         }
@@ -56,7 +61,7 @@ export class JobProcessorFactory implements OnModuleInit {
 
     const pascalCase = name
       .split('-')
-      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join('');
 
     return pascalCase;
@@ -76,7 +81,7 @@ export class JobProcessorFactory implements OnModuleInit {
    * @returns The processor for the job type or undefined if no processor is found
    */
   getProcessor(jobType: string): JobProcessor | undefined {
-    const processor = this.processors.find(p => p.canProcess(jobType));
+    const processor = this.processors.find((p) => p.canProcess(jobType));
 
     if (!processor) {
       this.logger.warn(`No processor found for job type: ${jobType}`);

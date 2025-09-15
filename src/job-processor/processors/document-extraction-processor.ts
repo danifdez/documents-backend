@@ -15,7 +15,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
     private readonly resourceService: ResourceService,
     private readonly notificationGateway: NotificationGateway,
     private readonly jobService: JobService,
-  ) { }
+  ) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;

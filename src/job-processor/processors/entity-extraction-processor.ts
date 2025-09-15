@@ -8,7 +8,7 @@ export class EntityExtractionProcessor implements JobProcessor {
   private readonly logger = new Logger(EntityExtractionProcessor.name);
   private readonly JOB_TYPE = 'entity-extraction';
 
-  constructor(private readonly resourceService: ResourceService) { }
+  constructor(private readonly resourceService: ResourceService) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;

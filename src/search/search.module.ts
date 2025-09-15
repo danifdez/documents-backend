@@ -11,4 +11,4 @@ import { ResourceModule } from 'src/resource/resource.module';
   controllers: [SearchController],
   providers: [SearchService],
 })
-export class SearchModule { }
+export class SearchModule {}

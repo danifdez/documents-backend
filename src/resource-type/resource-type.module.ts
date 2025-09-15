@@ -9,4 +9,4 @@ import { ResourceTypeService } from './resource-type.service';
   providers: [ResourceTypeService],
   exports: [ResourceTypeService],
 })
-export class ResourceTypeModule { }
+export class ResourceTypeModule {}

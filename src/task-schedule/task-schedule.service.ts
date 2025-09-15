@@ -13,7 +13,7 @@ export class TaskScheduleService {
   constructor(
     private readonly jobService: JobService,
     private readonly jobProcessorFactory: JobProcessorFactory,
-  ) { }
+  ) {}
 
   private getCPUAndMemoryUsage() {
     const cpuCount = os.cpus().length;
@@ -64,20 +64,25 @@ export class TaskScheduleService {
 
       if (!processor) {
         this.logger.error(`No processor found for job type: ${firstJob.type}`);
-        await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
+        await this.jobService.markAsFailed(
+          (firstJob as any).id?.toString?.() || String((firstJob as any).id),
+        );
         return;
       }
 
       this.logger.log(`Processing job ${firstJob.id} of type ${firstJob.type}`);
       await processor.process(firstJob);
 
-      await this.jobService.markAsCompleted((firstJob as any).id?.toString?.() || String((firstJob as any).id));
-
+      await this.jobService.markAsCompleted(
+        (firstJob as any).id?.toString?.() || String((firstJob as any).id),
+      );
     } catch (error) {
       this.logger.error(
         `Error processing job ${firstJob.id}: ${error.message}`,
       );
-      await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
+      await this.jobService.markAsFailed(
+        (firstJob as any).id?.toString?.() || String((firstJob as any).id),
+      );
     }
   }
 }

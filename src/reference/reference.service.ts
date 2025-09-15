@@ -7,7 +7,7 @@ export class ReferenceService {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly markService: MarkService,
-  ) { }
+  ) {}
 
   async search(query: string): Promise<any[]> {
     if (!query || !query.trim()) return [];
@@ -26,7 +26,7 @@ export class ReferenceService {
         type: 'mark' as const,
         content: m.content,
       })),
-    ].filter(item => item.id != null);
+    ].filter((item) => item.id != null);
 
     return merged;
   }

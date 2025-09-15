@@ -8,7 +8,7 @@ export class ThreadService {
   constructor(
     @InjectRepository(ThreadEntity)
     private readonly repository: Repository<ThreadEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<ThreadEntity | null> {
     return await this.repository.findOneBy({ id });

@@ -13,7 +13,9 @@ export class ResourceEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => ProjectEntity, (project) => project.resources, { nullable: true })
+  @ManyToOne(() => ProjectEntity, (project) => project.resources, {
+    nullable: true,
+  })
   project: ProjectEntity | null;
 
   @Column()

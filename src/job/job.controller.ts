@@ -5,7 +5,7 @@ import { JobEntity } from 'src/job/job.entity';
 
 @Controller('jobs')
 export class JobController {
-  constructor(private readonly jobService: JobService) { }
+  constructor(private readonly jobService: JobService) {}
 
   @Post()
   async create(@Body() job: any): Promise<JobEntity> {

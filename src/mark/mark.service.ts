@@ -8,7 +8,7 @@ export class MarkService {
   constructor(
     @InjectRepository(MarkEntity)
     private readonly repository: Repository<MarkEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<MarkEntity | null> {
     return await this.repository.findOneBy({ id });

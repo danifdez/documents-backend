@@ -9,7 +9,9 @@ import { CommentEntity } from '../comment/comment.entity';
 import { ResourceTypeEntity } from '../resource-type/resource-type.entity';
 import { ThreadEntity } from '../thread/thread.entity';
 
-export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
+export const getTypeOrmConfig = async (
+  configService: ConfigService,
+): Promise<TypeOrmModuleOptions> => {
   return {
     type: 'postgres',
     host: String(configService.get('POSTGRES_HOST') ?? 'database'),

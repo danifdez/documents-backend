@@ -1,18 +1,31 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  Patch,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { ResourceTypeService } from './resource-type.service';
 import { ResourceTypeEntity } from './resource-type.entity';
 
 @Controller('resource-types')
 export class ResourceTypeController {
-  constructor(private readonly resourceTypeService: ResourceTypeService) { }
+  constructor(private readonly resourceTypeService: ResourceTypeService) {}
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<ResourceTypeEntity | null> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ResourceTypeEntity | null> {
     return await this.resourceTypeService.findOne(id);
   }
 
   @Post()
-  async create(@Body() resourceType: ResourceTypeEntity): Promise<ResourceTypeEntity | any> {
+  async create(
+    @Body() resourceType: ResourceTypeEntity,
+  ): Promise<ResourceTypeEntity | any> {
     return await this.resourceTypeService.create(resourceType);
   }
 

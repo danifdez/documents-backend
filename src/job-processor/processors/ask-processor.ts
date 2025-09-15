@@ -8,7 +8,7 @@ export class AskProcessor implements JobProcessor {
   private readonly logger = new Logger(AskProcessor.name);
   private readonly JOB_TYPE = 'ask';
 
-  constructor(private readonly notificationGateway: NotificationGateway) { }
+  constructor(private readonly notificationGateway: NotificationGateway) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;

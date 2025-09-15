@@ -11,4 +11,4 @@ import { JobModule } from 'src/job/job.module';
   providers: [ResourceService],
   exports: [ResourceService],
 })
-export class ResourceModule { }
+export class ResourceModule {}

@@ -1,4 +1,18 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Res, HttpException, HttpStatus, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  Patch,
+  UseInterceptors,
+  UploadedFile,
+  Res,
+  HttpException,
+  HttpStatus,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { ResourceService } from './resource.service';
@@ -14,7 +28,7 @@ export class ResourceController {
     private readonly resourceService: ResourceService,
     private readonly fileStorageService: FileStorageService,
     private readonly jobService: JobService,
-  ) { }
+  ) {}
 
   @Get(':id')
   async findOne(
@@ -62,7 +76,10 @@ export class ResourceController {
 
       const existingResource = await this.resourceService.findByHash(hash);
       if (existingResource) {
-        throw new AlreadyExistException('File', 'File with the same content already exists');
+        throw new AlreadyExistException(
+          'File',
+          'File with the same content already exists',
+        );
       }
 
       const result = await this.fileStorageService.storeFile(
@@ -94,7 +111,8 @@ export class ResourceController {
         resourceToCreate.relatedTo = resourceData.relatedTo;
       }
 
-      const resourceCreated = await this.resourceService.create(resourceToCreate);
+      const resourceCreated =
+        await this.resourceService.create(resourceToCreate);
       if (!file.mimetype.startsWith('image/')) {
         await this.jobService.create(
           'document-extraction',

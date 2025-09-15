@@ -12,7 +12,7 @@ export class SummarizeProcessor implements JobProcessor {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly notificationGateway: NotificationGateway,
-  ) { }
+  ) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;

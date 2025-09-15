@@ -35,4 +35,4 @@ import { KeyPointProcessor } from './processors/key-point-processor';
   ],
   exports: [JobProcessorFactory],
 })
-export class JobProcessorModule { }
+export class JobProcessorModule {}

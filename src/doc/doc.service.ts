@@ -8,7 +8,7 @@ export class DocService {
   constructor(
     @InjectRepository(DocEntity)
     private readonly repository: Repository<DocEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<DocEntity | null> {
     return await this.repository.findOneBy({ id });

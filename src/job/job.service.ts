@@ -12,7 +12,7 @@ export class JobService {
   constructor(
     @InjectRepository(JobEntity)
     private readonly repo: Repository<JobEntity>,
-  ) { }
+  ) {}
 
   async create(type: string, priority: JobPriority, payload: object) {
     const job = this.repo.create({

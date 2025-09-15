@@ -10,4 +10,4 @@ import { MarkModule } from '../mark/mark.module';
   providers: [ReferenceService],
   exports: [ReferenceService, ReferenceModule],
 })
-export class ReferenceModule { }
+export class ReferenceModule {}

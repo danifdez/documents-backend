@@ -9,4 +9,4 @@ import { JobController } from './job.controller';
   exports: [JobService],
   controllers: [JobController],
 })
-export class JobModule { }
+export class JobModule {}

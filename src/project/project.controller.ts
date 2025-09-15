@@ -1,12 +1,20 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, Query, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  Patch,
+  Query,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { ProjectService } from './project.service';
 import { ProjectEntity } from './project.entity';
 
 @Controller('projects')
 export class ProjectController {
-  constructor(
-    private readonly projectService: ProjectService,
-  ) { }
+  constructor(private readonly projectService: ProjectService) {}
 
   @Get('search')
   async search(@Query('q') query: string): Promise<ProjectEntity[]> {
@@ -14,7 +22,9 @@ export class ProjectController {
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<ProjectEntity | null> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ProjectEntity | null> {
     return await this.projectService.findOne(id);
   }
 
@@ -24,7 +34,9 @@ export class ProjectController {
   }
 
   @Post()
-  async create(@Body() project: Partial<ProjectEntity>): Promise<ProjectEntity> {
+  async create(
+    @Body() project: Partial<ProjectEntity>,
+  ): Promise<ProjectEntity> {
     return await this.projectService.create(project);
   }
 

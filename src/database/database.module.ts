@@ -18,7 +18,8 @@ import { ThreadEntity } from '../thread/thread.entity';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => getTypeOrmConfig(configService),
+      useFactory: (configService: ConfigService) =>
+        getTypeOrmConfig(configService),
     }),
     TypeOrmModule.forFeature([
       JobEntity,
@@ -34,4 +35,4 @@ import { ThreadEntity } from '../thread/thread.entity';
   providers: [...databaseProviders],
   exports: [...databaseProviders, TypeOrmModule],
 })
-export class DatabaseModule { }
+export class DatabaseModule {}

@@ -5,14 +5,13 @@ import { extractTextFromHtml } from 'src/utils/text';
 
 @Injectable()
 export class ModelService {
-  constructor(private readonly jobService: JobService) { }
+  constructor(private readonly jobService: JobService) {}
 
   async ask(question: string): Promise<void> {
     this.jobService.create('ask', JobPriority.HIGH, {
       question,
     });
   }
-
 
   async summarize(
     content: string,

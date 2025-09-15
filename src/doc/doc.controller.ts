@@ -1,13 +1,24 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { DocService } from './doc.service';
 import { DocEntity } from 'src/doc/doc.entity';
 
 @Controller('docs')
 export class DocController {
-  constructor(private readonly docService: DocService) { }
+  constructor(private readonly docService: DocService) {}
 
   @Get(':id')
-  async getId(@Param('id', ParseIntPipe) id: number): Promise<DocEntity | null> {
+  async getId(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<DocEntity | null> {
     return await this.docService.findOne(id);
   }
 
@@ -32,7 +43,9 @@ export class DocController {
 
   @Patch(':id')
   async update(
-    @Param('id', ParseIntPipe) id: number, @Body() doc: Partial<DocEntity>): Promise<DocEntity | null> {
+    @Param('id', ParseIntPipe) id: number,
+    @Body() doc: Partial<DocEntity>,
+  ): Promise<DocEntity | null> {
     return await this.docService.update(id, doc);
   }
 

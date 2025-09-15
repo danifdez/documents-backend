@@ -1,10 +1,19 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { CommentService } from './comment.service';
 import { CommentEntity } from 'src/comment/comment.entity';
 
 @Controller('comments')
 export class CommentController {
-  constructor(private readonly commentService: CommentService) { }
+  constructor(private readonly commentService: CommentService) {}
 
   @Get(':id')
   async getId(

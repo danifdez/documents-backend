@@ -8,7 +8,7 @@ export class IngestContentProcessor implements JobProcessor {
   private readonly logger = new Logger(IngestContentProcessor.name);
   private readonly JOB_TYPE = 'ingest-content';
 
-  constructor(private readonly notificationGateway: NotificationGateway) { }
+  constructor(private readonly notificationGateway: NotificationGateway) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;

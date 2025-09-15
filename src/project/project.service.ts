@@ -8,7 +8,7 @@ export class ProjectService {
   constructor(
     @InjectRepository(ProjectEntity)
     private readonly repository: Repository<ProjectEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<ProjectEntity | null> {
     return await this.repository.findOneBy({ id });
@@ -34,7 +34,10 @@ export class ProjectService {
       .getMany();
   }
 
-  async update(id: number, project: Partial<ProjectEntity>): Promise<ProjectEntity | null> {
+  async update(
+    id: number,
+    project: Partial<ProjectEntity>,
+  ): Promise<ProjectEntity | null> {
     const existing = await this.repository.findOneBy({ id });
     if (!existing) return null;
     Object.assign(existing, project);

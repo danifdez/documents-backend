@@ -9,4 +9,4 @@ import { ModelService } from './model.service';
   providers: [ModelService],
   exports: [ModelService],
 })
-export class ModelModule { }
+export class ModelModule {}

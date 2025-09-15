@@ -4,7 +4,7 @@ import { SearchResultDto } from './dto/search-result.dto';
 
 @Controller('search')
 export class SearchController {
-  constructor(private readonly searchService: SearchService) { }
+  constructor(private readonly searchService: SearchService) {}
 
   @Post('')
   async search(@Body('term') term: string): Promise<SearchResultDto[]> {

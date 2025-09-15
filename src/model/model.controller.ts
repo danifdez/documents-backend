@@ -3,7 +3,7 @@ import { ModelService } from './model.service';
 
 @Controller('model')
 export class ModelController {
-  constructor(private readonly modelService: ModelService) { }
+  constructor(private readonly modelService: ModelService) {}
 
   @Post('ask')
   async askQuestion(@Body() questionData: { question: string }): Promise<void> {

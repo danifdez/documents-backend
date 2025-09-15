@@ -17,4 +17,4 @@ import { DatabaseModule } from 'src/database/database.module';
   providers: [TaskScheduleService],
   exports: [TaskScheduleService],
 })
-export class TaskScheduleModule { }
+export class TaskScheduleModule {}
