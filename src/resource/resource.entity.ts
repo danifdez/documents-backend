@@ -73,9 +73,6 @@ export class ResourceEntity {
   @Column({ type: 'jsonb', nullable: true })
   entities: any | null;
 
-  @Column({ type: 'jsonb', nullable: true, name: 'key_points' })
-  keyPoints: any | null;
-
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
