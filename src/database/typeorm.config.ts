@@ -8,6 +8,9 @@ import { MarkEntity } from '../mark/mark.entity';
 import { CommentEntity } from '../comment/comment.entity';
 import { ResourceTypeEntity } from '../resource-type/resource-type.entity';
 import { ThreadEntity } from '../thread/thread.entity';
+import { EntityTypeEntity } from '../entity-type/entity-type.entity';
+import { EntityEntity } from '../entity/entity.entity';
+import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity';
 
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
@@ -26,6 +29,9 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       CommentEntity,
       ResourceTypeEntity,
       ThreadEntity,
+      EntityTypeEntity,
+      EntityEntity,
+      ResourceEntityEntity,
     ],
     synchronize: false,
     logging: false,

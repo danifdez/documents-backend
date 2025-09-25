@@ -6,7 +6,10 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  ManyToMany,
+  JoinTable,
 } from 'typeorm';
+import { EntityEntity } from '../entity/entity.entity';
 
 @Entity({ name: 'resources' })
 export class ResourceEntity {
@@ -70,8 +73,19 @@ export class ResourceEntity {
   @Column({ nullable: true })
   language: string | null;
 
-  @Column({ type: 'jsonb', nullable: true })
-  entities: any | null;
+  @ManyToMany(() => EntityEntity, (entity) => entity.resources)
+  @JoinTable({
+    name: 'resource_entities',
+    joinColumn: {
+      name: 'resource_id',
+      referencedColumnName: 'id',
+    },
+    inverseJoinColumn: {
+      name: 'entity_id',
+      referencedColumnName: 'id',
+    },
+  })
+  entities: EntityEntity[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

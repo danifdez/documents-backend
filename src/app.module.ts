@@ -18,6 +18,8 @@ import { CommentModule } from './comment/comment.module';
 import { MarkModule } from './mark/mark.module';
 import { ModelModule } from './model/model.module';
 import { SearchModule } from './search/search.module';
+import { EntityTypeModule } from './entity-type/entity-type.module';
+import { EntityModule } from './entity/entity.module';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { SearchModule } from './search/search.module';
     ModelModule,
     ReferenceModule,
     SearchModule,
+    EntityTypeModule,
+    EntityModule,
   ],
   controllers: [AppController],
   providers: [AppService],

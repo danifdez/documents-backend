@@ -30,6 +30,20 @@ export class ResourceController {
     return await this.resourceService.findByProject(projectId);
   }
 
+  @Get('entity/:entityId')
+  async getByEntityId(
+    @Param('entityId', ParseIntPipe) entityId: number,
+  ): Promise<ResourceEntity[]> {
+    return await this.resourceService.findByEntityId(entityId);
+  }
+
+  @Get('entity/search/:entityName')
+  async getByEntityName(
+    @Param('entityName') entityName: string,
+  ): Promise<ResourceEntity[]> {
+    return await this.resourceService.findByEntityName(entityName);
+  }
+
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,

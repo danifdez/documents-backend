@@ -12,6 +12,8 @@ import { HttpModule } from '@nestjs/axios';
 import { IngestContentProcessor } from './processors/ingest-content-processor';
 import { AskProcessor } from './processors/ask-processor';
 import { SummarizeProcessor } from './processors/summarize-processor';
+import { EntityModule } from 'src/entity/entity.module';
+import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { SummarizeProcessor } from './processors/summarize-processor';
     NotificationModule,
     JobModule,
     HttpModule,
+    EntityModule,
+    DatabaseModule,
   ],
   providers: [
     JobProcessorFactory,
