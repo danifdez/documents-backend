@@ -130,6 +130,20 @@ export class ResourceService {
     }
   }
 
+  async removeEntityFromResource(resourceId: number, entityId: number): Promise<void> {
+    console.log(`ResourceService.removeEntityFromResource: Removing entity ${entityId} from resource ${resourceId}`);
+
+    try {
+      await this.repo.query(
+        'DELETE FROM resource_entities WHERE resource_id = $1 AND entity_id = $2',
+        [resourceId, entityId]
+      );
+    } catch (error) {
+      console.error(`ResourceService.removeEntityFromResource: Error:`, error);
+      throw error;
+    }
+  }
+
   async resourceExists(id: number): Promise<boolean> {
     try {
       const count = await this.repo.count({ where: { id } });

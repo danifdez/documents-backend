@@ -9,10 +9,22 @@ export class EntityController {
 
     @Get()
     async findAll(): Promise<EntityEntity[]> {
-        return await this.entityService.findAll();
+        const results = await this.entityService.findAll();
+
+        return results;
     }
 
     @Get('search')
+    async searchByName(@Query('q') searchTerm: string): Promise<EntityEntity[]> {
+        if (!searchTerm) {
+            return [];
+        }
+        const results = await this.entityService.searchByName(searchTerm);
+
+        return results;
+    }
+
+    @Get('search/exact')
     async findByName(@Query('name') name: string): Promise<EntityEntity | null> {
         if (!name) {
             return null;
@@ -41,5 +53,13 @@ export class EntityController {
     @Delete(':id')
     async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
         await this.entityService.remove(id);
+    }
+
+    @Post(':sourceId/merge/:targetId')
+    async merge(
+        @Param('sourceId', ParseIntPipe) sourceId: number,
+        @Param('targetId', ParseIntPipe) targetId: number,
+    ): Promise<EntityEntity> {
+        return await this.entityService.merge(sourceId, targetId);
     }
 }

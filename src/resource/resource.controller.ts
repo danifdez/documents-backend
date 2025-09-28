@@ -60,6 +60,14 @@ export class ResourceController {
     }
   }
 
+  @Delete(':id/entities/:entityId')
+  async removeEntityFromResource(
+    @Param('id', ParseIntPipe) resourceId: number,
+    @Param('entityId', ParseIntPipe) entityId: number,
+  ): Promise<void> {
+    await this.resourceService.removeEntityFromResource(resourceId, entityId);
+  }
+
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   async uploadFile(
