@@ -5,10 +5,22 @@ export class SeedEntityTypes1757668140105 implements MigrationInterface {
 
     public async up(queryRunner: QueryRunner): Promise<void> {
         const entityTypes = [
-            { name: 'PERSON', description: 'Person names and proper nouns referring to people' },
-            { name: 'ORGANIZATION', description: 'Organizations, companies, institutions' },
-            { name: 'LOCATION', description: 'Geographical locations, places, addresses' },
-            { name: 'MISC', description: 'Miscellaneous entities that don\'t fit other categories' },
+            // Geographic and political entities
+            { name: 'GEOPOLITICAL', description: 'Countries, cities, states' },
+            { name: 'LOCATION', description: 'Non-GPE locations, mountain ranges, bodies of water' },
+            { name: 'NATIONALITY', description: 'Nationalities or religious or political groups' },
+
+            // Human and organizational entities
+            { name: 'PERSON', description: 'People, including fictional' },
+            { name: 'ORGANIZATION', description: 'Companies, agencies, institutions, etc.' },
+
+            // Cultural and creative entities
+            { name: 'EVENT', description: 'Named hurricanes, battles, wars, sports events, etc.' },
+            { name: 'FACILITY', description: 'Buildings, airports, highways, bridges, etc.' },
+            { name: 'PRODUCT', description: 'Objects, vehicles, foods, etc. (not services)' },
+            { name: 'WORK_OF_ART', description: 'Titles of books, songs, etc.' },
+            { name: 'LANGUAGE', description: 'Any named language' },
+            { name: 'LAW', description: 'Named documents made into laws' },
         ];
 
         for (const entityType of entityTypes) {
@@ -21,6 +33,10 @@ export class SeedEntityTypes1757668140105 implements MigrationInterface {
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DELETE FROM "entity_types" WHERE "name" IN ('PERSON', 'ORGANIZATION', 'LOCATION', 'MISC', 'DATE', 'MONEY', 'PERCENT', 'TIME')`);
+        await queryRunner.query(`DELETE FROM "entity_types" WHERE "name" IN (
+            'GEOPOLITICAL', 'LOCATION', 'NATIONALITY', 
+            'PERSON', 'ORGANIZATION', 
+            'EVENT', 'FACILITY', 'PRODUCT', 'WORK_OF_ART', 'LANGUAGE', 'LAW'
+        )`);
     }
 }

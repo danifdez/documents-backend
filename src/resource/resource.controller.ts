@@ -73,7 +73,7 @@ export class ResourceController {
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body()
-    resourceData: Partial<ResourceEntity>,
+    resourceData: Partial<ResourceEntity> & { projectId?: string },
   ) {
     if (!file) {
       throw new HttpException('No file uploaded', HttpStatus.BAD_REQUEST);
@@ -95,7 +95,7 @@ export class ResourceController {
 
       const resourceToCreate: any = {
         name: resourceData.name || file.originalname,
-        project: resourceData.project,
+        project: resourceData.projectId ? { id: Number(resourceData.projectId) } : null,
         hash: hash,
         mimeType: file.mimetype,
         originalName: resourceData.originalName || file.originalname,

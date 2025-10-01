@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { EntityEntity } from './entity.entity';
+import { EntityEntity, EntityAlias, EntityTranslation } from './entity.entity';
 import { CreateEntityDto, UpdateEntityDto } from './dto/entity.dto';
 import { EntityTypeService } from '../entity-type/entity-type.service';
 
@@ -56,7 +56,18 @@ export class EntityService {
             .where('LOWER(entity.name) LIKE LOWER(:searchTerm)', {
                 searchTerm: `%${trimmedTerm}%`
             })
-            .orWhere('entity.aliases::text ILIKE :searchTerm', {
+            .orWhere(
+                `EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(entity.aliases) AS alias_obj
+                    WHERE LOWER(alias_obj->>'value') LIKE LOWER(:searchTerm)
+                )`, {
+                searchTerm: `%${trimmedTerm}%`
+            })
+            .orWhere(
+                `EXISTS (
+                    SELECT 1 FROM jsonb_each_text(entity.translations) AS trans(locale, name)
+                    WHERE LOWER(trans.name) LIKE LOWER(:searchTerm)
+                )`, {
                 searchTerm: `%${trimmedTerm}%`
             })
             .orderBy('entity.name', 'ASC')
@@ -74,6 +85,7 @@ export class EntityService {
 
         const entity = this.repository.create({
             name: createEntityDto.name,
+            translations: createEntityDto.translations,
             aliases: createEntityDto.aliases,
             entityType,
         });
@@ -103,11 +115,65 @@ export class EntityService {
             existingEntity.name = updateEntityDto.name;
         }
 
+        if (updateEntityDto.translations !== undefined) {
+            existingEntity.translations = updateEntityDto.translations;
+        }
+
         if (updateEntityDto.aliases !== undefined) {
             existingEntity.aliases = updateEntityDto.aliases;
         }
 
         return await this.repository.save(existingEntity);
+    }
+
+    /**
+     * Update only the translations JSONB column for an entity using a direct query
+     * to avoid triggering relation metadata handling in TypeORM save routines.
+     */
+    async updateTranslations(id: number, translations: EntityTranslation): Promise<EntityEntity | null> {
+        await this.repository.createQueryBuilder()
+            .update()
+            .set({ translations: Object.keys(translations).length > 0 ? translations : null })
+            .where('id = :id', { id })
+            .execute();
+
+        return await this.findOne(id);
+    }
+
+    /**
+     * Merge new translations into the existing translations JSONB column using SQL jsonb concatenation.
+     * This avoids loading the entity and touching relation metadata.
+     */
+    async mergeTranslations(id: number, translations: EntityTranslation): Promise<EntityEntity | null> {
+        // If there are no translations to merge, just return the entity
+        if (!translations || Object.keys(translations).length === 0) {
+            return await this.findOne(id);
+        }
+
+        // Use raw SQL to merge JSONB objects (existing translations || new translations)
+        await this.repository.query(
+            `UPDATE entities SET translations = COALESCE(translations, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+            [JSON.stringify(translations), id]
+        );
+
+        return await this.findOne(id);
+    }
+
+    /**
+     * Merge new translations into the existing translations JSONB column using SQL jsonb concatenation.
+     * This version does not return the entity to avoid loading relations.
+     */
+    async mergeTranslationsOnly(id: number, translations: EntityTranslation): Promise<void> {
+        // If there are no translations to merge, do nothing
+        if (!translations || Object.keys(translations).length === 0) {
+            return;
+        }
+
+        // Use raw SQL to merge JSONB objects (existing translations || new translations)
+        await this.repository.query(
+            `UPDATE entities SET translations = COALESCE(translations, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
+            [JSON.stringify(translations), id]
+        );
     }
 
     async remove(id: number): Promise<void> {
@@ -134,25 +200,85 @@ export class EntityService {
             throw new Error(`Target entity with id ${targetEntityId} not found`);
         }
 
-        // Merge aliases
+        // Merge aliases with locale information
         const sourceAliases = sourceEntity.aliases || [];
         const targetAliases = targetEntity.aliases || [];
 
-        // Add source entity name as alias if not already present
-        const allAliases = [...targetAliases];
-        if (!allAliases.includes(sourceEntity.name)) {
-            allAliases.push(sourceEntity.name);
+        // Create a map for easier duplicate checking
+        const aliasMap = new Map<string, EntityAlias>();
+
+        // Add target aliases first
+        targetAliases.forEach(alias => {
+            const key = `${alias.locale}:${alias.value}`;
+            aliasMap.set(key, alias);
+        });
+
+        // Add source entity name as alias (assuming default locale 'en' if not specified)
+        const sourceNameAlias: EntityAlias = { locale: 'en', value: sourceEntity.name };
+        const sourceNameKey = `${sourceNameAlias.locale}:${sourceNameAlias.value}`;
+        if (!aliasMap.has(sourceNameKey)) {
+            aliasMap.set(sourceNameKey, sourceNameAlias);
         }
 
         // Add source aliases that aren't already present
         sourceAliases.forEach(alias => {
-            if (!allAliases.includes(alias)) {
-                allAliases.push(alias);
+            const key = `${alias.locale}:${alias.value}`;
+            if (!aliasMap.has(key)) {
+                aliasMap.set(key, alias);
             }
         });
 
-        // Update target entity with new aliases
-        targetEntity.aliases = allAliases;
+        // Also add every translation from the source entity as an alias
+        // (locale -> value). This ensures all translated names become searchable as aliases.
+        const sourceTranslationsForAliases = sourceEntity.translations || {};
+        Object.keys(sourceTranslationsForAliases).forEach(locale => {
+            const value = sourceTranslationsForAliases[locale];
+            if (value && value.trim().length > 0) {
+                const alias: EntityAlias = { locale, value };
+                const key = `${alias.locale}:${alias.value}`;
+                if (!aliasMap.has(key)) {
+                    aliasMap.set(key, alias);
+                }
+            }
+        });
+
+
+        // Merge translations
+        const sourceTranslations = sourceEntity.translations || {};
+        const targetTranslations = targetEntity.translations || {};
+        const mergedTranslations: EntityTranslation = { ...targetTranslations };
+
+        // Add source translations that don't conflict with target translations
+        Object.keys(sourceTranslations).forEach(locale => {
+            if (!mergedTranslations[locale]) {
+                mergedTranslations[locale] = sourceTranslations[locale];
+            }
+        });
+
+        // Add all source translations as aliases as well (e.g. { es: 'Nombre' } -> alias { locale: 'es', value: 'Nombre' })
+        Object.entries(sourceTranslations).forEach(([locale, translatedValue]) => {
+            if (!translatedValue) return;
+            const key = `${locale}:${translatedValue}`;
+            if (!aliasMap.has(key)) {
+                aliasMap.set(key, { locale, value: translatedValue });
+            }
+        });
+
+        // Also ensure that translations are represented in aliases for the target if missing
+        // (so searching by translated name via aliases works consistently)
+        const finalAliases = Array.from(aliasMap.values());
+        Object.entries(mergedTranslations).forEach(([locale, value]) => {
+            if (!value) return;
+            const key = `${locale}:${value}`;
+            if (!aliasMap.has(key)) {
+                finalAliases.push({ locale, value });
+                aliasMap.set(key, { locale, value });
+            }
+        });
+
+        // Update target entity with merged data
+        targetEntity.aliases = finalAliases.length > 0 ? finalAliases : null;
+        targetEntity.translations = Object.keys(mergedTranslations).length > 0 ? mergedTranslations : null;
         await this.repository.save(targetEntity);
 
         // Move all resource relationships from source to target
@@ -181,7 +307,7 @@ export class EntityService {
         return targetEntity;
     }
 
-    async findOrCreate(name: string, entityTypeName: string, aliases?: string[]): Promise<EntityEntity> {
+    async findOrCreate(name: string, entityTypeName: string, aliases?: EntityAlias[]): Promise<EntityEntity> {
         // First try to find by name and type
         const entityType = await this.entityTypeService.findByName(entityTypeName);
         if (!entityType) {

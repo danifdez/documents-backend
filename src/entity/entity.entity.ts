@@ -2,6 +2,15 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { EntityTypeEntity } from '../entity-type/entity-type.entity';
 import { ResourceEntity } from '../resource/resource.entity';
 
+export interface EntityTranslation {
+    [locale: string]: string;
+}
+
+export interface EntityAlias {
+    locale: string;
+    value: string;
+}
+
 @Entity({ name: 'entities' })
 export class EntityEntity {
     @PrimaryGeneratedColumn()
@@ -11,7 +20,10 @@ export class EntityEntity {
     name: string;
 
     @Column({ type: 'jsonb', nullable: true })
-    aliases: string[] | null;
+    translations: EntityTranslation | null;
+
+    @Column({ type: 'jsonb', nullable: true })
+    aliases: EntityAlias[] | null;
 
     @ManyToOne(() => EntityTypeEntity, (entityType) => entityType.entities, { nullable: false })
     @JoinColumn({ name: 'entity_type_id' })

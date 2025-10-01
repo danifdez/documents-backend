@@ -1,4 +1,20 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, MaxLength, ValidateNested, IsObject } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export interface EntityTranslation {
+    [locale: string]: string;
+}
+
+export class EntityAliasDto {
+    @IsString()
+    @IsNotEmpty()
+    locale: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(200)
+    value: string;
+}
 
 export class CreateEntityDto {
     @IsString()
@@ -6,9 +22,15 @@ export class CreateEntityDto {
     @MaxLength(200)
     name: string;
 
+    @IsObject()
+    @IsOptional()
+    translations?: EntityTranslation;
+
     @IsArray()
     @IsOptional()
-    aliases?: string[];
+    @ValidateNested({ each: true })
+    @Type(() => EntityAliasDto)
+    aliases?: EntityAliasDto[];
 
     @IsNumber()
     @IsNotEmpty()
@@ -21,9 +43,15 @@ export class UpdateEntityDto {
     @MaxLength(200)
     name?: string;
 
+    @IsObject()
+    @IsOptional()
+    translations?: EntityTranslation;
+
     @IsArray()
     @IsOptional()
-    aliases?: string[];
+    @ValidateNested({ each: true })
+    @Type(() => EntityAliasDto)
+    aliases?: EntityAliasDto[];
 
     @IsNumber()
     @IsOptional()
