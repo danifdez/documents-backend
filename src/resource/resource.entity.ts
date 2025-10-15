@@ -10,6 +10,7 @@ import {
   JoinTable,
 } from 'typeorm';
 import { EntityEntity } from '../entity/entity.entity';
+import { AuthorEntity } from '../author/author.entity';
 
 @Entity({ name: 'resources' })
 export class ResourceEntity {
@@ -55,8 +56,19 @@ export class ResourceEntity {
   @Column({ name: 'publication_date', nullable: true })
   publicationDate: string | null;
 
-  @Column({ nullable: true })
-  author: string | null;
+  @ManyToMany(() => AuthorEntity, (author) => author.resources)
+  @JoinTable({
+    name: 'resource_authors',
+    joinColumn: {
+      name: 'resource_id',
+      referencedColumnName: 'id',
+    },
+    inverseJoinColumn: {
+      name: 'author_id',
+      referencedColumnName: 'id',
+    },
+  })
+  authors: AuthorEntity[];
 
   @Column({ type: 'text', nullable: true })
   content: string | null;

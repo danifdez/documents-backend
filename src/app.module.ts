@@ -20,6 +20,7 @@ import { ModelModule } from './model/model.module';
 import { SearchModule } from './search/search.module';
 import { EntityTypeModule } from './entity-type/entity-type.module';
 import { EntityModule } from './entity/entity.module';
+import { AuthorModule } from './author/author.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { EntityModule } from './entity/entity.module';
     SearchModule,
     EntityTypeModule,
     EntityModule,
+    AuthorModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -11,6 +11,8 @@ import { ThreadEntity } from '../thread/thread.entity';
 import { EntityTypeEntity } from '../entity-type/entity-type.entity';
 import { EntityEntity } from '../entity/entity.entity';
 import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity';
+import { AuthorEntity } from '../author/author.entity';
+import { ResourceAuthorEntity } from '../author/resource-author.entity';
 
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
@@ -32,6 +34,8 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       EntityTypeEntity,
       EntityEntity,
       ResourceEntityEntity,
+      AuthorEntity,
+      ResourceAuthorEntity,
     ],
     synchronize: false,
     logging: false,

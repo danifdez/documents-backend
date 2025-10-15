@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ResourceEntity } from './resource.entity';
 import { EntityEntity } from '../entity/entity.entity';
+import { AuthorEntity } from '../author/author.entity';
 
 @Injectable()
 export class ResourceService {
@@ -15,7 +16,7 @@ export class ResourceService {
     try {
       const resource = await this.repo.findOne({
         where: { id },
-        relations: ['entities', 'entities.entityType']
+        relations: ['entities', 'entities.entityType', 'authors']
       });
 
       if (!resource) {
@@ -38,7 +39,7 @@ export class ResourceService {
   async findByProject(projectId: number): Promise<ResourceEntity[]> {
     return await this.repo.find({
       where: { project: { id: projectId } },
-      relations: ['entities', 'entities.entityType'],
+      relations: ['entities', 'entities.entityType', 'authors'],
       order: { createdAt: 'DESC' },
       take: 10
     });
@@ -152,5 +153,59 @@ export class ResourceService {
       console.error(`ResourceService.resourceExists: Error checking if resource ${id} exists:`, error);
       return false;
     }
+  }
+
+  async addAuthorToResource(resourceId: number, author: AuthorEntity): Promise<void> {
+    try {
+      const existing = await this.repo.query(
+        'SELECT 1 FROM resource_authors WHERE resource_id = $1 AND author_id = $2',
+        [resourceId, author.id]
+      );
+
+      if (existing.length === 0) {
+        await this.repo.query(
+          'INSERT INTO resource_authors (resource_id, author_id, created_at) VALUES ($1, $2, NOW())',
+          [resourceId, author.id]
+        );
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async removeAuthorFromResource(resourceId: number, authorId: number): Promise<void> {
+    try {
+      await this.repo.query(
+        'DELETE FROM resource_authors WHERE resource_id = $1 AND author_id = $2',
+        [resourceId, authorId]
+      );
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async clearResourceAuthors(resourceId: number): Promise<void> {
+    try {
+      await this.repo.query(
+        'DELETE FROM resource_authors WHERE resource_id = $1',
+        [resourceId]
+      );
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async findByAuthorId(authorId: number): Promise<ResourceEntity[]> {
+    return await this.repo.createQueryBuilder('resource')
+      .innerJoin('resource.authors', 'author')
+      .where('author.id = :authorId', { authorId })
+      .getMany();
+  }
+
+  async findByAuthorName(authorName: string): Promise<ResourceEntity[]> {
+    return await this.repo.createQueryBuilder('resource')
+      .innerJoin('resource.authors', 'author')
+      .where('author.name ILIKE :authorName', { authorName: `%${authorName}%` })
+      .getMany();
   }
 }

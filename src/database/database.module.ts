@@ -14,6 +14,8 @@ import { ThreadEntity } from '../thread/thread.entity';
 import { EntityTypeEntity } from '../entity-type/entity-type.entity';
 import { EntityEntity } from '../entity/entity.entity';
 import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity';
+import { AuthorEntity } from '../author/author.entity';
+import { ResourceAuthorEntity } from '../author/resource-author.entity';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity'
       EntityTypeEntity,
       EntityEntity,
       ResourceEntityEntity,
+      AuthorEntity,
+      ResourceAuthorEntity,
     ]),
   ],
   providers: [...databaseProviders],

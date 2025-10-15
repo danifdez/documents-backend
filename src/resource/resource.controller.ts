@@ -7,6 +7,7 @@ import { JobService } from '../job/job.service';
 import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
 import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceEntity } from './resource.entity';
+import { AuthorService } from '../author/author.service';
 
 @Controller('resources')
 export class ResourceController {
@@ -14,6 +15,7 @@ export class ResourceController {
     private readonly resourceService: ResourceService,
     private readonly fileStorageService: FileStorageService,
     private readonly jobService: JobService,
+    private readonly authorService: AuthorService,
   ) { }
 
   @Get(':id')
@@ -66,6 +68,33 @@ export class ResourceController {
     @Param('entityId', ParseIntPipe) entityId: number,
   ): Promise<void> {
     await this.resourceService.removeEntityFromResource(resourceId, entityId);
+  }
+
+  @Post(':id/authors/:authorId')
+  async addAuthorToResource(
+    @Param('id', ParseIntPipe) resourceId: number,
+    @Param('authorId', ParseIntPipe) authorId: number,
+  ): Promise<void> {
+    const author = await this.authorService.findOne(authorId);
+    if (!author) {
+      throw new HttpException('Author not found', HttpStatus.NOT_FOUND);
+    }
+    await this.resourceService.addAuthorToResource(resourceId, author);
+  }
+
+  @Delete(':id/authors/:authorId')
+  async removeAuthorFromResource(
+    @Param('id', ParseIntPipe) resourceId: number,
+    @Param('authorId', ParseIntPipe) authorId: number,
+  ): Promise<void> {
+    await this.resourceService.removeAuthorFromResource(resourceId, authorId);
+  }
+
+  @Delete(':id/authors')
+  async clearResourceAuthors(
+    @Param('id', ParseIntPipe) resourceId: number,
+  ): Promise<void> {
+    await this.resourceService.clearResourceAuthors(resourceId);
   }
 
   @Post('upload')
