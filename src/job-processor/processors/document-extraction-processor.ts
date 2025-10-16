@@ -30,6 +30,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
       author: string;
       publication_date: Date;
       content: string;
+      pages?: number;
     };
 
     if (!hash || !extension || !resourceId || !result) {
@@ -38,14 +39,20 @@ export class DocumentExtractionProcessor implements JobProcessor {
       );
     }
 
-    const { title, author, publication_date, content } = result;
+    const { title, author, publication_date, content, pages } = result;
 
-    await this.resourceService.update(resourceId, {
+    const updateData: any = {
       title,
       author,
       publicationDate: publication_date,
       content,
-    });
+    };
+
+    if (pages !== undefined) {
+      updateData.pages = pages;
+    }
+
+    await this.resourceService.update(resourceId, updateData);
 
     this.notificationGateway.sendNotification({
       type: 'document-extraction',

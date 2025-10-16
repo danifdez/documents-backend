@@ -44,6 +44,9 @@ export class ResourceEntity {
   @Column({ name: 'file_size', type: 'int', nullable: true })
   fileSize: number | null;
 
+  @Column({ type: 'int', nullable: true })
+  pages: number | null;
+
   @Column({ nullable: true })
   path: string | null;
 
