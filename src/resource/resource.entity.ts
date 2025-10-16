@@ -88,6 +88,9 @@ export class ResourceEntity {
   @Column({ nullable: true })
   language: string | null;
 
+  @Column({ nullable: true })
+  license: string | null;
+
   @ManyToMany(() => EntityEntity, (entity) => entity.resources)
   @JoinTable({
     name: 'resource_entities',
