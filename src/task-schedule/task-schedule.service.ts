@@ -80,4 +80,21 @@ export class TaskScheduleService {
       await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
     }
   }
+
+  @Cron(CronExpression.EVERY_HOUR, {
+    waitForCompletion: true,
+  })
+  async cleanupExpiredJobs() {
+    this.logger.log('Running cleanup task for expired jobs...');
+    try {
+      const deletedCount = await this.jobService.deleteExpiredJobs();
+      if (deletedCount > 0) {
+        this.logger.log(`Cleanup completed: ${deletedCount} expired job(s) deleted`);
+      } else {
+        this.logger.log('Cleanup completed: No expired jobs found');
+      }
+    } catch (error) {
+      this.logger.error(`Error during cleanup of expired jobs: ${error.message}`);
+    }
+  }
 }

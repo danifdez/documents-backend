@@ -69,4 +69,19 @@ export class JobService {
     await this.repo.remove(job);
     return job;
   }
+
+  async deleteExpiredJobs() {
+    const now = new Date();
+    const expiredJobs = await this.repo
+      .createQueryBuilder('job')
+      .where('job.expires_at IS NOT NULL')
+      .andWhere('job.expires_at <= :now', { now })
+      .getMany();
+
+    if (expiredJobs.length > 0) {
+      await this.repo.remove(expiredJobs);
+    }
+
+    return expiredJobs.length;
+  }
 }
