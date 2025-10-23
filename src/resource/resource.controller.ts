@@ -216,4 +216,32 @@ export class ResourceController {
     res.setHeader('Content-Disposition', 'inline');
     res.send(file);
   }
+
+  @Get(':id/content')
+  async getContent(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const resource = await this.resourceService.getContentById(id);
+
+    if (!resource) {
+      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
+    }
+
+    return {
+      content: resource ?? null,
+    };
+  }
+
+  @Get(':id/entities')
+  async getEntities(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const exists = await this.resourceService.resourceExists(id);
+    if (!exists) {
+      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
+    }
+
+    const entities = await this.resourceService.getEntitiesByResourceId(id);
+    return entities;
+  }
 }

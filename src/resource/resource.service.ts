@@ -15,8 +15,8 @@ export class ResourceService {
   async findOne(id: number): Promise<ResourceEntity | null> {
     try {
       const resource = await this.repo.findOne({
+        select: ['id', 'name', 'title', 'path', 'originalName', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'createdAt', 'updatedAt'],
         where: { id },
-        relations: ['entities', 'entities.entityType', 'authors']
       });
 
       if (!resource) {
@@ -24,6 +24,23 @@ export class ResourceService {
       }
 
       return resource;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getContentById(id: number): Promise<string | null> {
+    try {
+      const resource = await this.repo.findOne({
+        select: ['content'],
+        where: { id },
+      });
+
+      if (!resource) {
+        return null;
+      }
+
+      return resource.content;
     } catch (error) {
       throw error;
     }
@@ -193,5 +210,23 @@ export class ResourceService {
       .innerJoin('resource.authors', 'author')
       .where('author.name ILIKE :authorName', { authorName: `%${authorName}%` })
       .getMany();
+  }
+
+  async getEntitiesByResourceId(resourceId: number): Promise<any[]> {
+    // Fetch EntityEntity objects related to the resource and include their entityType
+    try {
+      const entityRepo = this.repo.manager.getRepository(EntityEntity);
+      const entities = await entityRepo.createQueryBuilder('entity')
+        // join the junction table directly to avoid issues with inverse JoinTable metadata
+        .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
+        .where('re.resource_id = :resourceId', { resourceId })
+        .leftJoinAndSelect('entity.entityType', 'entityType')
+        .select(['entity.id', 'entity.name', 'entity.translations', 'entity.aliases', 'entityType.id', 'entityType.name'])
+        .getMany();
+
+      return entities;
+    } catch (error) {
+      throw error;
+    }
   }
 }
