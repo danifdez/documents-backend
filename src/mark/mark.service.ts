@@ -26,6 +26,13 @@ export class MarkService {
     });
   }
 
+  async findByResource(resourceId: number): Promise<MarkEntity[]> {
+    return await this.repository.find({
+      where: { resource: { id: resourceId } },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async search(query: string): Promise<MarkEntity[]> {
     if (!query || !query.trim()) return [];
     const like = `%${query}%`;
@@ -48,6 +55,7 @@ export class MarkService {
     return {
       id: saved.id,
       doc: saved.doc,
+      resource: saved.resource,
       content: saved.content,
       createdAt: saved.createdAt ?? (saved as any).created_at,
       updatedAt: saved.updatedAt ?? (saved as any).updated_at,

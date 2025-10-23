@@ -18,9 +18,27 @@ export class MarkController {
     return await this.markService.findByDoc(docId);
   }
 
+  @Get('resource/:resourceId')
+  async getByResource(
+    @Param('resourceId', ParseIntPipe) resourceId: number,
+  ): Promise<MarkEntity[]> {
+    return await this.markService.findByResource(resourceId);
+  }
+
   @Post()
-  async create(@Body() doc: Partial<MarkEntity>): Promise<MarkEntity> {
-    return await this.markService.create(doc);
+  async create(@Body() body: any): Promise<MarkEntity> {
+    const markData: Partial<MarkEntity> = {
+      content: body.content,
+    };
+
+    // Support both doc and resource
+    if (body.doc) {
+      markData.doc = { id: parseInt(body.doc) } as any;
+    } else if (body.resource) {
+      markData.resource = { id: parseInt(body.resource) } as any;
+    }
+
+    return await this.markService.create(markData);
   }
 
   @Patch(':id')

@@ -43,11 +43,21 @@ export class ModelService {
   }
 
   async translate(
-    content: string,
-    sourceLanguage: string,
     resourceId: number,
     language: string,
   ): Promise<void> {
+    // Fetch the resource to get content and source language
+    const resource = await this.resourceService.findOne(resourceId);
+    if (!resource) {
+      throw new Error(`Resource with ID ${resourceId} not found`);
+    }
+
+    const content = await this.resourceService.getContentById(resourceId);
+    if (!content) {
+      throw new Error(`Resource with ID ${resourceId} has no content`);
+    }
+
+    const sourceLanguage = resource.language || 'en';
     const extractedTexts = extractTextFromHtml(content);
 
     this.jobService.create('translate', JobPriority.NORMAL, {

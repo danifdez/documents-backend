@@ -26,6 +26,13 @@ export class CommentService {
     });
   }
 
+  async findByResource(resourceId: number): Promise<CommentEntity[]> {
+    return this.repository.find({
+      where: { resource: { id: resourceId } },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async update(
     id: number,
     commentData: Partial<CommentEntity>,

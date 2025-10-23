@@ -20,9 +20,27 @@ export class CommentController {
     return await this.commentService.findByDoc(docId);
   }
 
+  @Get('resource/:resourceId')
+  async getByResource(
+    @Param('resourceId', ParseIntPipe) resourceId: number,
+  ): Promise<CommentEntity[]> {
+    return await this.commentService.findByResource(resourceId);
+  }
+
   @Post()
-  async create(@Body() doc: CommentEntity): Promise<CommentEntity> {
-    return await this.commentService.create(doc);
+  async create(@Body() body: any): Promise<CommentEntity> {
+    const commentData: Partial<CommentEntity> = {
+      content: body.content,
+    };
+
+    // Support both doc and resource
+    if (body.doc) {
+      commentData.doc = { id: parseInt(body.doc) } as any;
+    } else if (body.resource) {
+      commentData.resource = { id: parseInt(body.resource) } as any;
+    }
+
+    return await this.commentService.create(commentData);
   }
 
   @Patch(':id')

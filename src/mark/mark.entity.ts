@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
 import { DocEntity } from '../doc/doc.entity';
+import { ResourceEntity } from '../resource/resource.entity';
 
 @Entity({ name: 'marks' })
 export class MarkEntity {
@@ -8,6 +9,9 @@ export class MarkEntity {
 
   @ManyToOne(() => DocEntity, (doc) => doc.marks, { nullable: true })
   doc: DocEntity | null;
+
+  @ManyToOne(() => ResourceEntity, { nullable: true })
+  resource: ResourceEntity | null;
 
   @Column({ type: 'text', nullable: true })
   content: string | null;

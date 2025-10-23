@@ -28,15 +28,11 @@ export class ModelController {
   async translate(
     @Body()
     translateData: {
-      content: string;
-      sourceLanguage: string;
       targetLanguage: string;
       resourceId: number;
     },
   ): Promise<void> {
     await this.modelService.translate(
-      translateData.content,
-      translateData.sourceLanguage,
       translateData.resourceId,
       translateData.targetLanguage,
     );
