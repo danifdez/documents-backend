@@ -15,7 +15,7 @@ export class ResourceService {
   async findOne(id: number): Promise<ResourceEntity | null> {
     try {
       const resource = await this.repo.findOne({
-        select: ['id', 'name', 'title', 'path', 'originalName', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'createdAt', 'updatedAt'],
+        select: ['id', 'name', 'title', 'path', 'summary', 'originalName', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'createdAt', 'updatedAt'],
         where: { id },
       });
 
