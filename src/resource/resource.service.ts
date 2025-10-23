@@ -20,13 +20,11 @@ export class ResourceService {
       });
 
       if (!resource) {
-        console.log(`ResourceService.findOne: No resource found with id ${id}`);
         return null;
       }
 
       return resource;
     } catch (error) {
-      console.error(`ResourceService.findOne: Error finding resource ${id}:`, error);
       throw error;
     }
   }
@@ -38,8 +36,8 @@ export class ResourceService {
 
   async findByProject(projectId: number): Promise<ResourceEntity[]> {
     return await this.repo.find({
+      select: ['id', 'name', 'createdAt'],
       where: { project: { id: projectId } },
-      relations: ['entities', 'entities.entityType', 'authors'],
       order: { createdAt: 'DESC' },
       take: 10
     });
@@ -92,10 +90,7 @@ export class ResourceService {
   }
 
   async clearResourceEntities(resourceId: number): Promise<void> {
-    console.log(`ResourceService.clearResourceEntities: Starting for resource ${resourceId}`);
-
     try {
-      // Use raw SQL to delete relationships
       await this.repo.query(
         'DELETE FROM resource_entities WHERE resource_id = $1',
         [resourceId]
@@ -107,8 +102,6 @@ export class ResourceService {
   }
 
   async addEntityToResource(resourceId: number, entity: EntityEntity): Promise<void> {
-    console.log(`ResourceService.addEntityToResource: Adding entity ${entity.name} (id: ${entity.id}) to resource ${resourceId}`);
-
     try {
       // Check if relationship already exists using raw SQL
       const existing = await this.repo.query(
@@ -122,25 +115,19 @@ export class ResourceService {
           'INSERT INTO resource_entities (resource_id, entity_id, created_at) VALUES ($1, $2, NOW())',
           [resourceId, entity.id]
         );
-      } else {
-        console.log(`ResourceService.addEntityToResource: Entity ${entity.name} already exists on resource ${resourceId}`);
       }
     } catch (error) {
-      console.error(`ResourceService.addEntityToResource: Error:`, error);
       throw error;
     }
   }
 
   async removeEntityFromResource(resourceId: number, entityId: number): Promise<void> {
-    console.log(`ResourceService.removeEntityFromResource: Removing entity ${entityId} from resource ${resourceId}`);
-
     try {
       await this.repo.query(
         'DELETE FROM resource_entities WHERE resource_id = $1 AND entity_id = $2',
         [resourceId, entityId]
       );
     } catch (error) {
-      console.error(`ResourceService.removeEntityFromResource: Error:`, error);
       throw error;
     }
   }
@@ -150,7 +137,6 @@ export class ResourceService {
       const count = await this.repo.count({ where: { id } });
       return count > 0;
     } catch (error) {
-      console.error(`ResourceService.resourceExists: Error checking if resource ${id} exists:`, error);
       return false;
     }
   }

@@ -53,18 +53,17 @@ export class EntityExtractionProcessor implements JobProcessor {
       throw new Error(errorMessage);
     }
 
-    // Check if resource exists first
-    const resourceExists = await this.resourceService.resourceExists(resourceId);
-    if (!resourceExists) {
-      const errorMessage = `Resource with id ${resourceId} does not exist in database`;
+    // Get the resource and validate it exists. Avoid double DB calls (resourceExists + findOne).
+    const resource = await this.resourceService.findOne(resourceId);
+    if (!resource) {
+      const errorMessage = `Resource with id ${resourceId} does not exist or could not be loaded`;
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
     }
 
-    // Get the resource first to verify it exists
-    const resource = await this.resourceService.findOne(resourceId);
-    if (!resource) {
-      const errorMessage = `Resource with id ${resourceId} not found (exists check passed but findOne returned null)`;
+    // Validate job result shape early to fail fast and avoid unnecessary DB work
+    if (!result || !Array.isArray(result.entities)) {
+      const errorMessage = `Invalid job result for entity-extraction on resource ${resourceId}`;
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
     }
@@ -77,37 +76,55 @@ export class EntityExtractionProcessor implements JobProcessor {
       throw error;
     }
 
-    // Process each extracted entity
-    const processedEntities = [];
-    for (const entityData of result.entities) {
-      try {
-        // Map the entity type from ML model to database entity type
-        const mappedEntityType = this.entityTypeMapping[entityData.entity];
+    // Process each extracted entity with limited concurrency to avoid blocking the event loop
+    const concurrency = 5; // small default concurrency; consider making this configurable
 
-        // Find or create the entity
-        const entity = await this.entityService.findOrCreate(
-          entityData.word,
-          mappedEntityType
-        );
+    // Simple concurrency-limited mapper
+    const mapWithConcurrency = async <T, R>(items: T[], fn: (t: T, idx: number) => Promise<R>, limit = 5): Promise<R[]> => {
+      const results: R[] = new Array(items.length);
+      let idx = 0;
 
-        // Add entity to resource
-        await this.resourceService.addEntityToResource(resourceId, entity);
-        processedEntities.push(entity);
-      } catch (error) {
-        this.logger.warn(`Failed to process entity ${entityData.word}:`, error.message);
+      const workers = new Array(Math.min(limit, items.length)).fill(null).map(async () => {
+        while (true) {
+          const i = idx++;
+          if (i >= items.length) break;
+          try {
+            results[i] = await fn(items[i], i);
+          } catch (err) {
+            // Preserve position with undefined result for failures
+            this.logger.warn(`mapWithConcurrency: item ${i} failed: ${err?.message ?? err}`);
+            results[i] = undefined as unknown as R;
+          }
+        }
+      });
+
+      await Promise.all(workers);
+      return results;
+    };
+
+    const processedEntities = (await mapWithConcurrency(result.entities, async (entityData) => {
+      if (!entityData || !entityData.word) {
+        throw new Error('Invalid entity data');
       }
-    }
+
+      // Map the entity type from ML model to database entity type (fallback to null)
+      const mappedEntityType = this.entityTypeMapping[entityData.entity] || null;
+
+      // Find or create the entity, then attach it to the resource.
+      const entity = await this.entityService.findOrCreate(entityData.word, mappedEntityType);
+      await this.resourceService.addEntityToResource(resourceId, entity);
+      return entity;
+    }, concurrency)).filter(Boolean);
+
 
     // Build a batch of texts for entities that need Spanish translations
     const textsForTranslation: Array<{ text: string }> = [];
     const entityIdByIndex: number[] = [];
 
     for (const entity of processedEntities) {
-      const hasSpanishTranslation = entity.translations && entity.translations['es'];
+      if (!entity) continue;
+      const hasSpanishTranslation = !!(entity.translations && entity.translations['es']);
       if (!hasSpanishTranslation) {
-        // Use resource language as source; if missing, assume 'en' (we still translate to 'es')
-        const sourceLanguage = 'en';
-        // Only translate when source is different from target
         textsForTranslation.push({ text: entity.name });
         entityIdByIndex.push(entity.id);
       }
