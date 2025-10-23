@@ -190,12 +190,76 @@ export class TranslateProcessor implements JobProcessor {
       }>;
     };
 
+    // Validate job.result
+    if (!results || !Array.isArray(results.response)) {
+      const errorMessage = `Invalid translation result for content translation. Expected job.result.response to be an array but got: ${JSON.stringify(job.result)}`;
+      this.logger.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+
     const resource = await this.resourceService.findOne(resourceId);
+
+    if (!resource) {
+      const errorMessage = `Resource with id ${resourceId} not found`;
+      this.logger.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    // Ensure resource.content is a string before passing to cheerio
+    // Use a mutable `content` variable so any fallback assignment is reflected
+    let content: any = resource.content;
+    if (content === null || content === undefined) {
+      // Instead of throwing, build a fallback HTML from the translations so the job can proceed
+      this.logger.warn(`Resource content is null or undefined for resource ${resourceId}. Falling back to assembled translated content.`);
+
+      // Create a basic HTML wrapper using translation items
+      try {
+        const assembled = results.response
+          .map((r) => `<p>${(r.translation_text || r.original_text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
+          .join('\n');
+
+        resource.content = `<html><head><meta charset="utf-8"></head><body>${assembled}</body></html>`;
+        // update local reference
+        content = resource.content;
+      } catch (err) {
+        const errorMessage = `Failed to assemble fallback content for resource ${resourceId}: ${err?.message || err}`;
+        this.logger.error(errorMessage);
+        throw new Error(errorMessage);
+      }
+    }
+    if (typeof content !== 'string') {
+      // If the content is an object (e.g., already parsed), attempt to stringify it safely
+      try {
+        this.logger.warn(`Resource content for ${resourceId} is not a string (type: ${typeof content}). Converting to string.`);
+        // If it's a buffer-like object with toString, use it
+        if (content && typeof (content as any).toString === 'function') {
+          const converted = (content as any).toString();
+          if (typeof converted === 'string' && converted.length > 0) {
+            resource.content = converted;
+          } else {
+            resource.content = JSON.stringify(content);
+          }
+        } else {
+          resource.content = JSON.stringify(content);
+        }
+      } catch (err) {
+        const errorMessage = `Failed to convert resource.content to string for resource ${resourceId}: ${err?.message || err}`;
+        this.logger.error(errorMessage);
+        throw new Error(errorMessage);
+      }
+    }
 
     const translatedHtml = this.updateHtmlWithTranslations(
       resource.content,
       results.response,
     );
+
+    // Guard cheerio.load() to ensure we pass a string
+    if (typeof translatedHtml !== 'string') {
+      const errorMessage = `Translated HTML is not a string for resource ${resourceId}. Type: ${typeof translatedHtml}`;
+      this.logger.error(errorMessage);
+      throw new Error(errorMessage);
+    }
 
     const $ = cheerio.load(translatedHtml);
     const bodyContent = $('body').html() || translatedHtml;
