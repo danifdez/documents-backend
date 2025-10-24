@@ -46,6 +46,23 @@ export class ResourceService {
     }
   }
 
+  async getTranslatedContentById(id: number): Promise<string | null> {
+    try {
+      const resource = await this.repo.findOne({
+        select: ['translatedContent'],
+        where: { id },
+      });
+
+      if (!resource) {
+        return null;
+      }
+
+      return resource.translatedContent;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async create(resource: Partial<ResourceEntity>): Promise<ResourceEntity> {
     const created = this.repo.create(resource);
     return await this.repo.save(created);

@@ -232,6 +232,21 @@ export class ResourceController {
     };
   }
 
+  @Get(':id/translated-content')
+  async getTranslatedContent(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const translated = await this.resourceService.getTranslatedContentById(id);
+
+    if (!translated) {
+      throw new HttpException('Translated content not found', HttpStatus.NOT_FOUND);
+    }
+
+    return {
+      translatedContent: translated,
+    };
+  }
+
   @Get(':id/entities')
   async getEntities(
     @Param('id', ParseIntPipe) id: number,
