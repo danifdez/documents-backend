@@ -33,7 +33,8 @@ export class DetectLanguageProcessor implements JobProcessor {
       });
 
       const resource = await this.resourceService.findOne(resourceId);
-      const extractedTexts = extractTextFromHtml(resource.content);
+      const content = await this.resourceService.getContentById(resourceId);
+      const extractedTexts = extractTextFromHtml(content);
 
       if (results[0].language !== 'en') {
         this.jobService.create('translate', JobPriority.NORMAL, {
@@ -44,16 +45,10 @@ export class DetectLanguageProcessor implements JobProcessor {
           texts: extractedTexts,
         });
       } else {
-        this.jobService.create('entity-extraction', JobPriority.NORMAL, {
-          resourceId: resourceId,
-          from: 'content',
-          texts: extractedTexts,
-        });
-        console.log('Creating ingest-content job for resource', resource);
         this.jobService.create('ingest-content', JobPriority.NORMAL, {
           resourceId: resourceId,
           projectId: resource.project,
-          content: resource.content,
+          content: content,
         });
       }
     }

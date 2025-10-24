@@ -67,4 +67,25 @@ export class ModelService {
       texts: extractedTexts,
     });
   }
+
+  async extractEntities(resourceId: number): Promise<void> {
+    const resource = await this.resourceService.findOne(resourceId);
+    if (!resource) {
+      throw new Error(`Resource with ID ${resourceId} not found`);
+    }
+
+    const content = await this.resourceService.getContentById(resourceId);
+    if (!content) {
+      throw new Error(`Resource with ID ${resourceId} has no content`);
+    }
+
+    const extractedTexts = extractTextFromHtml(content);
+
+    // Create job for entity extraction
+    this.jobService.create('entity-extraction', JobPriority.NORMAL, {
+      resourceId: resourceId,
+      from: 'content',
+      texts: extractedTexts,
+    });
+  }
 }

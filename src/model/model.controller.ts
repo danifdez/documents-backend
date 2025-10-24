@@ -37,4 +37,12 @@ export class ModelController {
       translateData.targetLanguage,
     );
   }
+
+  @Post('extract-entities')
+  async extractEntities(
+    @Body()
+    body: { resourceId: number },
+  ): Promise<void> {
+    await this.modelService.extractEntities(body.resourceId);
+  }
 }

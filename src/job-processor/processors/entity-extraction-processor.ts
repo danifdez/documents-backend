@@ -131,7 +131,6 @@ export class EntityExtractionProcessor implements JobProcessor {
     }
 
     if (textsForTranslation.length > 0) {
-      // Create a single batch translate job to translate all missing entity names to Spanish
       await this.jobService.create('translate', JobPriority.LOW, {
         translationType: 'entities-batch',
         sourceLanguage: 'en',
@@ -140,11 +139,8 @@ export class EntityExtractionProcessor implements JobProcessor {
         entityIdByIndex,
         resourceId,
       });
-
-      this.logger.log(`Created batch translate job for ${textsForTranslation.length} entities for resource ${resourceId}`);
     }
 
-    this.logger.log(`Successfully processed ${result.entities.length} entities for resource ${resourceId}`);
     return { success: true, entitiesProcessed: result.entities.length };
   }
 }
