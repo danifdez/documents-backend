@@ -197,7 +197,7 @@ export class TranslateProcessor implements JobProcessor {
       throw new Error(errorMessage);
     }
 
-    const resource = await this.resourceService.findOne(resourceId);
+    const resource = await this.resourceService.getContentById(resourceId);
 
     if (!resource) {
       const errorMessage = `Resource with id ${resourceId} not found`;
@@ -205,42 +205,32 @@ export class TranslateProcessor implements JobProcessor {
       throw new Error(errorMessage);
     }
 
-    // Ensure resource.content is a string before passing to cheerio
-    // Use a mutable `content` variable so any fallback assignment is reflected
-    let content: any = resource.content;
-    if (content === null || content === undefined) {
-      // Instead of throwing, build a fallback HTML from the translations so the job can proceed
-      this.logger.warn(`Resource content is null or undefined for resource ${resourceId}. Falling back to assembled translated content.`);
+    // Determine source content: try content, workingContent, then translatedContent
+    let sourceContent = resource;
+    let contentSource = 'content';
 
-      // Create a basic HTML wrapper using translation items
-      try {
-        const assembled = results.response
-          .map((r) => `<p>${(r.translation_text || r.original_text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
-          .join('\n');
-
-        resource.content = `<html><head><meta charset="utf-8"></head><body>${assembled}</body></html>`;
-        // update local reference
-        content = resource.content;
-      } catch (err) {
-        const errorMessage = `Failed to assemble fallback content for resource ${resourceId}: ${err?.message || err}`;
-        this.logger.error(errorMessage);
-        throw new Error(errorMessage);
-      }
+    if (!sourceContent) {
+      const errorMessage = `Resource ${resourceId} has no content in any field (content, workingContent, translatedContent). Cannot translate.`;
+      this.logger.error(errorMessage);
+      throw new Error(errorMessage);
     }
-    if (typeof content !== 'string') {
+
+    this.logger.log(`Using ${contentSource} as source for translation of resource ${resourceId}`);
+
+    if (typeof sourceContent !== 'string') {
       // If the content is an object (e.g., already parsed), attempt to stringify it safely
       try {
-        this.logger.warn(`Resource content for ${resourceId} is not a string (type: ${typeof content}). Converting to string.`);
+        this.logger.warn(`Resource content for ${resourceId} is not a string (type: ${typeof sourceContent}). Converting to string.`);
         // If it's a buffer-like object with toString, use it
-        if (content && typeof (content as any).toString === 'function') {
-          const converted = (content as any).toString();
+        if (sourceContent && typeof (sourceContent as any).toString === 'function') {
+          const converted = (sourceContent as any).toString();
           if (typeof converted === 'string' && converted.length > 0) {
-            resource.content = converted;
+            sourceContent = converted;
           } else {
-            resource.content = JSON.stringify(content);
+            sourceContent = JSON.stringify(sourceContent);
           }
         } else {
-          resource.content = JSON.stringify(content);
+          sourceContent = JSON.stringify(sourceContent);
         }
       } catch (err) {
         const errorMessage = `Failed to convert resource.content to string for resource ${resourceId}: ${err?.message || err}`;
@@ -250,7 +240,7 @@ export class TranslateProcessor implements JobProcessor {
     }
 
     const translatedHtml = this.updateHtmlWithTranslations(
-      resource.content,
+      sourceContent,
       results.response,
     );
 
@@ -268,31 +258,13 @@ export class TranslateProcessor implements JobProcessor {
       [saveTo]: bodyContent,
     });
 
-    if (
-      job.payload['saveTo'] === 'workingContent' &&
-      job.payload['targetLanguage'] === 'en'
-    ) {
-      this.jobService.create('entity-extraction', JobPriority.NORMAL, {
-        resourceId: resourceId,
-        from: 'content',
-        texts: results.response.map((item) => ({
-          text: item.translation_text,
-        })),
-      });
-      this.jobService.create('ingest-content', JobPriority.NORMAL, {
-        resourceId: resourceId,
-        projectId: resource.project,
-        content: bodyContent,
-      });
-    }
-
     return {
       success: true,
     };
   }
 
   /**
-   * Updates HTML content with translated text
+   * Updates HTML content with translated text while preserving the original structure
    * @param html Original HTML content
    * @param translations Array of objects with path and translated text
    * @returns Updated HTML content with translations applied
@@ -305,23 +277,32 @@ export class TranslateProcessor implements JobProcessor {
       translation_text: string;
     }>,
   ): string {
+    // Load HTML with default options
     const $ = cheerio.load(html);
 
     translations.forEach((item) => {
       try {
-        const containerElement = item.path.includes('>')
-          ? $(item.path)
-          : $(`${item.path}`);
+        // Find the element using the path from translation
+        const containerElement = $(item.path);
 
-        if (containerElement.length) {
+        if (containerElement.length > 0) {
+          // Iterate through all text nodes in the container
           containerElement.contents().each((_, node) => {
-            if (
-              node.type === 'text' &&
-              $(node).text().trim() === item.original_text
-            ) {
-              $(node).replaceWith(item.translation_text);
+            if (node.type === 'text') {
+              const nodeText = $(node).text();
+              // Match the original text more flexibly (trim whitespace for comparison)
+              if (nodeText.trim() === item.original_text.trim()) {
+                // Replace with translated text, preserving any surrounding whitespace
+                const leadingSpace = nodeText.match(/^\s*/)?.[0] || '';
+                const trailingSpace = nodeText.match(/\s*$/)?.[0] || '';
+                $(node).replaceWith(`${leadingSpace}${item.translation_text}${trailingSpace}`);
+              }
             }
           });
+        } else {
+          this.logger.warn(
+            `Element not found for path "${item.path}" while translating "${item.original_text.substring(0, 50)}..."`,
+          );
         }
       } catch (error) {
         this.logger.error(
