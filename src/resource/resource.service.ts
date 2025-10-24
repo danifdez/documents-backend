@@ -17,6 +17,7 @@ export class ResourceService {
       const resource = await this.repo.findOne({
         select: ['id', 'name', 'title', 'path', 'project', 'summary', 'originalName', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'createdAt', 'updatedAt'],
         where: { id },
+        relations: ['project'],
       });
 
       if (!resource) {

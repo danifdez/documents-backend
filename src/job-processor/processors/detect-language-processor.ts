@@ -45,9 +45,10 @@ export class DetectLanguageProcessor implements JobProcessor {
           texts: extractedTexts,
         });
       } else {
+        const projectId = (resource.project && (resource.project as any).id) || (resource as any).projectId || null;
         this.jobService.create('ingest-content', JobPriority.NORMAL, {
           resourceId: resourceId,
-          projectId: resource.project,
+          projectId,
           content: content,
         });
       }

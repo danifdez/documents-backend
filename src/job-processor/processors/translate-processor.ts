@@ -260,9 +260,10 @@ export class TranslateProcessor implements JobProcessor {
 
     if (saveTo === 'workingContent') {
       const resourceEntity = await this.resourceService.findOne(resourceId);
+      const projectId = (resourceEntity.project && (resourceEntity.project as any).id) || (resourceEntity as any).projectId || null;
       this.jobService.create('ingest-content', JobPriority.NORMAL, {
         resourceId: resourceId,
-        projectId: resourceEntity.project,
+        projectId,
         content: bodyContent,
       });
     }
