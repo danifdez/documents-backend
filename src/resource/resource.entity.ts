@@ -91,6 +91,9 @@ export class ResourceEntity {
   @Column({ nullable: true })
   license: string | null;
 
+  @Column({ name: 'confirmation_status', default: 'confirmed' })
+  confirmationStatus: string;
+
   @ManyToMany(() => EntityEntity, (entity) => entity.resources)
   @JoinTable({
     name: 'resource_entities',

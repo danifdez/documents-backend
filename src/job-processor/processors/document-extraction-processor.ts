@@ -46,6 +46,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
       author,
       publicationDate: publication_date,
       content,
+      confirmationStatus: 'pending',
     };
 
     if (pages !== undefined) {
@@ -56,18 +57,14 @@ export class DocumentExtractionProcessor implements JobProcessor {
 
     this.notificationGateway.sendNotification({
       type: 'document-extraction',
-      message: `Document extraction completed for resource with hash ${hash}`,
+      message: `Document extraction completed for resource with hash ${hash}. Pending confirmation.`,
       resourceId,
     });
 
-    const samples = this.extractTextSamples(content);
+    // No longer automatically create detect-language job
+    // It will be created when the user confirms the extraction
 
-    this.jobService.create('detect-language', JobPriority.NORMAL, {
-      resourceId,
-      samples,
-    });
-
-    return { success: true, resourceId };
+    return { success: true, resourceId, status: 'pending_confirmation' };
   }
 
   private extractTextSamples(html: string): string[] {

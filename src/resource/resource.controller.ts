@@ -54,6 +54,71 @@ export class ResourceController {
     return await this.resourceService.update(id, resource);
   }
 
+  @Post(':id/confirm')
+  async confirmResource(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<{ success: boolean; message: string }> {
+    const resource = await this.resourceService.findOne(id);
+
+    if (!resource) {
+      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (resource.confirmationStatus !== 'pending') {
+      throw new HttpException('Resource is not pending confirmation', HttpStatus.BAD_REQUEST);
+    }
+
+    // Update status to confirmed
+    await this.resourceService.update(id, { confirmationStatus: 'confirmed' });
+
+    // Extract text samples and create detect-language job
+    const samples = this.extractTextSamples(resource.content);
+    await this.jobService.create('detect-language', JobPriority.NORMAL, {
+      resourceId: id,
+      samples,
+    });
+
+    return {
+      success: true,
+      message: 'Resource confirmed and language detection job created',
+    };
+  }
+
+  private extractTextSamples(html: string): string[] {
+    try {
+      const fullText = html
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const samples: string[] = [];
+
+      if (fullText.length <= 400) {
+        const midpoint = Math.floor(fullText.length / 2);
+        samples.push(fullText.substring(0, Math.min(200, midpoint)).trim());
+        samples.push(
+          fullText
+            .substring(
+              midpoint,
+              midpoint + Math.min(200, fullText.length - midpoint),
+            )
+            .trim(),
+        );
+      } else {
+        for (let i = 0; i < 2; i++) {
+          const maxStart = fullText.length - 200;
+          const start = Math.floor(Math.random() * maxStart);
+          const end = Math.min(start + 200, fullText.length);
+          samples.push(fullText.substring(start, end).trim());
+        }
+      }
+
+      return samples;
+    } catch (error) {
+      return [];
+    }
+  }
+
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     const resource = await this.resourceService.remove(id);
