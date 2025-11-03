@@ -68,11 +68,10 @@ export class ResourceController {
       throw new HttpException('Resource is not pending confirmation', HttpStatus.BAD_REQUEST);
     }
 
-    // Update status to confirmed
     await this.resourceService.update(id, { confirmationStatus: 'confirmed' });
 
-    // Extract text samples and create detect-language job
-    const samples = this.extractTextSamples(resource.content);
+    const content = await this.resourceService.getContentById(id);
+    const samples = this.extractTextSamples(content);
     await this.jobService.create('detect-language', JobPriority.NORMAL, {
       resourceId: id,
       samples,

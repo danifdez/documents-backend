@@ -26,21 +26,23 @@ export class CreateAuthors1760000000000 implements MigrationInterface {
             )
         `);
 
-        await queryRunner.query(`
-            ALTER TABLE "resource_authors" 
-            ADD CONSTRAINT "FK_resource_authors_resource_id" 
-            FOREIGN KEY ("resource_id") 
-            REFERENCES "resources"("id") 
-            ON DELETE CASCADE 
-            ON UPDATE CASCADE
-        `);
-
+        // Create foreign key constraints for resource_authors
         await queryRunner.query(`
             ALTER TABLE "resource_authors" 
             ADD CONSTRAINT "FK_resource_authors_author_id" 
             FOREIGN KEY ("author_id") 
             REFERENCES "authors"("id") 
             ON DELETE CASCADE 
+            ON UPDATE CASCADE
+        `);
+
+        // FK to resources: create together with the table to avoid ordering issues
+        await queryRunner.query(`
+            ALTER TABLE "resource_authors" 
+            ADD CONSTRAINT "FK_resource_authors_resource_id"
+            FOREIGN KEY ("resource_id")
+            REFERENCES "resources"("id")
+            ON DELETE CASCADE
             ON UPDATE CASCADE
         `);
 

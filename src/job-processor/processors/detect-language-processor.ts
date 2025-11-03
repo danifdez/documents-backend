@@ -45,6 +45,11 @@ export class DetectLanguageProcessor implements JobProcessor {
           texts: extractedTexts,
         });
       } else {
+        try {
+          await this.resourceService.update(resourceId, { workingContent: content });
+        } catch (err) {
+          this.logger.error(`Failed to save workingContent for resource ${resourceId}: ${err}`);
+        }
         const projectId = (resource.project && (resource.project as any).id) || (resource as any).projectId || null;
         this.jobService.create('ingest-content', JobPriority.NORMAL, {
           resourceId: resourceId,

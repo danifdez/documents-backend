@@ -14,6 +14,7 @@ import { AskProcessor } from './processors/ask-processor';
 import { SummarizeProcessor } from './processors/summarize-processor';
 import { EntityModule } from 'src/entity/entity.module';
 import { DatabaseModule } from 'src/database/database.module';
+import { PendingEntityModule } from 'src/pending-entity/pending-entity.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { DatabaseModule } from 'src/database/database.module';
     HttpModule,
     EntityModule,
     DatabaseModule,
+    PendingEntityModule,
   ],
   providers: [
     JobProcessorFactory,

@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
 import { ResourceService } from 'src/resource/resource.service';
 import { EntityService } from 'src/entity/entity.service';
+import { JobEntity } from 'src/job/job.entity';
+import { PendingEntityService } from 'src/pending-entity/pending-entity.service';
 import { JobService } from 'src/job/job.service';
 import { JobPriority } from 'src/job/job-priority.enum';
-import { JobEntity } from 'src/job/job.entity';
 
 @Injectable()
 export class EntityExtractionProcessor implements JobProcessor {
@@ -35,6 +36,7 @@ export class EntityExtractionProcessor implements JobProcessor {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly entityService: EntityService,
+    private readonly pendingEntityService: PendingEntityService,
     private readonly jobService: JobService,
   ) { }
 
@@ -69,78 +71,60 @@ export class EntityExtractionProcessor implements JobProcessor {
     }
 
     try {
-      // Clear existing entities for this resource
-      await this.resourceService.clearResourceEntities(resourceId);
+      // Clear existing pending entities for this resource
+      await this.pendingEntityService.clearByResourceId(resourceId);
     } catch (error) {
-      this.logger.error(`Failed to clear entities for resource ${resourceId}:`, error.message);
+      this.logger.error(`Failed to clear pending entities for resource ${resourceId}:`, error.message);
       throw error;
     }
 
-    // Process each extracted entity with limited concurrency to avoid blocking the event loop
-    const concurrency = 5; // small default concurrency; consider making this configurable
+    // Since entities are extracted from working_content (always English),
+    // we need to translate them to:
+    // 1. The original document language (resource.language) - for 'extracted' view
+    // 2. The target language (from settings, default 'es') - for 'translated' view
+    const sourceLanguage = 'en'; // Entities are always in English from working_content
+    const targetLanguage = 'es'; // TODO: Get from settings API
+    const documentLanguage = resource.language || 'en';
 
-    // Simple concurrency-limited mapper
-    const mapWithConcurrency = async <T, R>(items: T[], fn: (t: T, idx: number) => Promise<R>, limit = 5): Promise<R[]> => {
-      const results: R[] = new Array(items.length);
-      let idx = 0;
+    // Build texts array for translation
+    const textsForTranslation: Array<{ text: string }> = result.entities.map(entity => ({
+      text: entity.word
+    }));
 
-      const workers = new Array(Math.min(limit, items.length)).fill(null).map(async () => {
-        while (true) {
-          const i = idx++;
-          if (i >= items.length) break;
-          try {
-            results[i] = await fn(items[i], i);
-          } catch (err) {
-            // Preserve position with undefined result for failures
-            this.logger.warn(`mapWithConcurrency: item ${i} failed: ${err?.message ?? err}`);
-            results[i] = undefined as unknown as R;
-          }
-        }
-      });
+    // Store entity data temporarily in the job payload for the translation processor
+    const entityDataByIndex = result.entities.map(entity => ({
+      word: entity.word,
+      entityType: entity.entity,
+    }));
 
-      await Promise.all(workers);
-      return results;
+    // Determine which languages we need to translate to
+    const languagesToTranslate = new Set<string>();
+    if (documentLanguage !== 'en') {
+      languagesToTranslate.add(documentLanguage);
+    }
+    // Always add target language if it's different from English and document language
+    if (targetLanguage !== documentLanguage) {
+      languagesToTranslate.add(targetLanguage);
+    }
+
+    // Create a single translation job that will translate to all needed languages
+    // and then create the pending entities
+    await this.jobService.create('translate', JobPriority.HIGH, {
+      translationType: 'entities-pending-batch',
+      sourceLanguage,
+      targetLanguages: Array.from(languagesToTranslate), // Multiple target languages
+      texts: textsForTranslation,
+      entityDataByIndex,
+      resourceId,
+    });
+
+    this.logger.log(`Created translation job for ${result.entities.length} entities to languages: ${Array.from(languagesToTranslate).join(', ')}`);
+
+    return {
+      success: true,
+      entitiesProcessed: result.entities.length,
+      pendingTranslation: true,
+      message: 'Entities will be created as pending after translation completes'
     };
-
-    const processedEntities = (await mapWithConcurrency(result.entities, async (entityData) => {
-      if (!entityData || !entityData.word) {
-        throw new Error('Invalid entity data');
-      }
-
-      // Map the entity type from ML model to database entity type (fallback to null)
-      const mappedEntityType = this.entityTypeMapping[entityData.entity] || null;
-
-      // Find or create the entity, then attach it to the resource.
-      const entity = await this.entityService.findOrCreate(entityData.word, mappedEntityType);
-      await this.resourceService.addEntityToResource(resourceId, entity);
-      return entity;
-    }, concurrency)).filter(Boolean);
-
-
-    // Build a batch of texts for entities that need Spanish translations
-    const textsForTranslation: Array<{ text: string }> = [];
-    const entityIdByIndex: number[] = [];
-
-    for (const entity of processedEntities) {
-      if (!entity) continue;
-      const hasSpanishTranslation = !!(entity.translations && entity.translations['es']);
-      if (!hasSpanishTranslation) {
-        textsForTranslation.push({ text: entity.name });
-        entityIdByIndex.push(entity.id);
-      }
-    }
-
-    if (textsForTranslation.length > 0) {
-      await this.jobService.create('translate', JobPriority.LOW, {
-        translationType: 'entities-batch',
-        sourceLanguage: 'en',
-        targetLanguage: 'es',
-        texts: textsForTranslation,
-        entityIdByIndex,
-        resourceId,
-      });
-    }
-
-    return { success: true, entitiesProcessed: result.entities.length };
   }
 }

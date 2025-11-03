@@ -12,8 +12,8 @@ export class CreateResourceEntities1757668140103 implements MigrationInterface {
         )`);
 
         // Create foreign key constraints
-        await queryRunner.query(`ALTER TABLE "resource_entities" ADD CONSTRAINT "FK_resource_entities_resource_id" FOREIGN KEY ("resource_id") REFERENCES "resources"("id") ON DELETE CASCADE ON UPDATE CASCADE`);
         await queryRunner.query(`ALTER TABLE "resource_entities" ADD CONSTRAINT "FK_resource_entities_entity_id" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE CASCADE ON UPDATE CASCADE`);
+        await queryRunner.query(`ALTER TABLE "resource_entities" ADD CONSTRAINT "FK_resource_entities_resource_id" FOREIGN KEY ("resource_id") REFERENCES "resources"("id") ON DELETE CASCADE ON UPDATE CASCADE`);
 
         // Create indexes for better performance
         await queryRunner.query(`CREATE INDEX "IDX_resource_entities_resource_id" ON "resource_entities" ("resource_id")`);
@@ -23,8 +23,8 @@ export class CreateResourceEntities1757668140103 implements MigrationInterface {
     public async down(queryRunner: QueryRunner): Promise<void> {
         await queryRunner.query(`DROP INDEX "IDX_resource_entities_entity_id"`);
         await queryRunner.query(`DROP INDEX "IDX_resource_entities_resource_id"`);
-        await queryRunner.query(`ALTER TABLE "resource_entities" DROP CONSTRAINT "FK_resource_entities_entity_id"`);
         await queryRunner.query(`ALTER TABLE "resource_entities" DROP CONSTRAINT "FK_resource_entities_resource_id"`);
+        await queryRunner.query(`ALTER TABLE "resource_entities" DROP CONSTRAINT "FK_resource_entities_entity_id"`);
         await queryRunner.query(`DROP TABLE "resource_entities"`);
     }
 }

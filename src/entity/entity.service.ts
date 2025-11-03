@@ -44,6 +44,24 @@ export class EntityService {
         });
     }
 
+    async findByNameTypeAndLocale(name: string, entityTypeId: number, locale: string): Promise<EntityEntity | null> {
+        // Try to find an entity that matches the name and entityType and has a translation or alias with the same locale.
+        const qb = this.repository.createQueryBuilder('entity')
+            .leftJoinAndSelect('entity.entityType', 'entityType')
+            .where('entity.name = :name', { name })
+            .andWhere('entityType.id = :entityTypeId', { entityTypeId })
+            .limit(1);
+
+        // Check translations JSONB for the locale
+        qb.orWhere(`(entity.translations ->> :locale) = :name`, { locale, name });
+
+        // Also check aliases array for matching locale and value
+        qb.orWhere(`EXISTS (SELECT 1 FROM jsonb_array_elements(entity.aliases) AS alias_obj WHERE alias_obj->>'locale' = :locale AND alias_obj->>'value' = :name)`, { locale, name });
+
+        const res = await qb.getOne();
+        return res || null;
+    }
+
     async searchByName(searchTerm: string): Promise<EntityEntity[]> {
         if (!searchTerm || searchTerm.trim().length === 0) {
             return [];

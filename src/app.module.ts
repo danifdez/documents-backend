@@ -21,6 +21,7 @@ import { SearchModule } from './search/search.module';
 import { EntityTypeModule } from './entity-type/entity-type.module';
 import { EntityModule } from './entity/entity.module';
 import { AuthorModule } from './author/author.module';
+import { PendingEntityModule } from './pending-entity/pending-entity.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { AuthorModule } from './author/author.module';
     EntityTypeModule,
     EntityModule,
     AuthorModule,
+    PendingEntityModule,
   ],
   controllers: [AppController],
   providers: [AppService],
