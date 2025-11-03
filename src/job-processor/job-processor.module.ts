@@ -6,6 +6,7 @@ import { FileStorageModule } from 'src/file-storage/file-storage.module';
 import { ResourceModule } from 'src/resource/resource.module';
 import { NotificationModule } from 'src/notification/notification.module';
 import { JobModule } from 'src/job/job.module';
+import { DocModule } from 'src/doc/doc.module';
 import { TranslateProcessor } from './processors/translate-processor';
 import { EntityExtractionProcessor } from './processors/entity-extraction-processor';
 import { HttpModule } from '@nestjs/axios';
@@ -21,6 +22,7 @@ import { PendingEntityModule } from 'src/pending-entity/pending-entity.module';
     FileStorageModule,
     ResourceModule,
     NotificationModule,
+    DocModule,
     JobModule,
     HttpModule,
     EntityModule,

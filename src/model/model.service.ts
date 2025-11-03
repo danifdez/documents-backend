@@ -19,26 +19,36 @@ export class ModelService {
 
 
   async summarize(
-    resourceId: number,
-    language: string,
+    targetLanguage: string,
+    resourceId?: number,
+    targetDocId?: number,
+    text?: string,
+    sourceLanguage?: string,
+    type?: string,
   ): Promise<void> {
-    // Fetch the resource to get content and source language
-    const resource = await this.resourceService.findOne(resourceId);
-    const content = await this.resourceService.getContentById(resourceId);
-    if (!content) {
-      throw new Error(`Resource with ID ${resourceId} not found`);
-    }
+    let content: string | null = null;
+    if (resourceId) {
+      const resource = await this.resourceService.findOne(resourceId);
+      if (!content) {
+        throw new Error(`Resource with ID ${resourceId} not found`);
+      }
 
-    const sourceLanguage = resource.language || 'en';
-    if (!content) {
-      throw new Error(`Resource with ID ${resourceId} has no content`);
+      content = await this.resourceService.getContentById(resourceId);
+      if (!content) {
+        throw new Error(`Resource with ID ${resourceId} has no content`);
+      }
+      sourceLanguage = resource.language || 'en';
+    } else if (type === 'workspace-selection' && text) {
+      content = text;
     }
 
     this.jobService.create('summarize', JobPriority.NORMAL, {
       content: content,
       sourceLanguage: sourceLanguage,
-      targetLanguage: language,
+      targetLanguage: targetLanguage,
       resourceId: resourceId,
+      targetDocId: targetDocId,
+      type: type || 'resource',
     });
   }
 

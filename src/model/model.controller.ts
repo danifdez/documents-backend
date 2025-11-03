@@ -15,12 +15,20 @@ export class ModelController {
     @Body()
     summarizeData: {
       targetLanguage: string;
-      resourceId: number;
+      resourceId?: number;
+      text?: string;
+      targetDocId?: number;
+      sourceLanguage?: string;
+      type?: string;
     },
   ): Promise<void> {
     await this.modelService.summarize(
-      summarizeData.resourceId,
       summarizeData.targetLanguage,
+      summarizeData.resourceId,
+      summarizeData.targetDocId,
+      summarizeData.text,
+      summarizeData.sourceLanguage,
+      summarizeData.type,
     );
   }
 
