@@ -3,6 +3,7 @@ import { CommentEntity } from '../comment/comment.entity';
 import { MarkEntity } from '../mark/mark.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { ThreadEntity } from '../thread/thread.entity';
+import { ResourceEntity } from '../resource/resource.entity';
 
 @Entity({ name: 'docs' })
 export class DocEntity {
@@ -17,6 +18,9 @@ export class DocEntity {
 
   @ManyToOne(() => ProjectEntity, (project) => project.docs, { nullable: true })
   project: ProjectEntity | null;
+
+  @ManyToOne(() => ResourceEntity, { nullable: true })
+  resource: ResourceEntity | null;
 
   @Column({ type: 'text', nullable: true })
   content?: string;

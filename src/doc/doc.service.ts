@@ -20,16 +20,28 @@ export class DocService {
   }
 
   async findByThread(threadId: number): Promise<DocEntity[]> {
-    return await this.repository.find({
-      where: { thread: { id: threadId } },
-      order: { createdAt: 'DESC' },
-    });
+    // exclude docs that are workspaces for resources (resource IS NOT NULL)
+    return await this.repository
+      .createQueryBuilder('d')
+      .where('d.threadId = :threadId', { threadId })
+      .andWhere('d."resourceId" IS NULL')
+      .orderBy('d.created_at', 'DESC')
+      .getMany();
   }
 
   async findByProject(projectId: number): Promise<DocEntity[]> {
-    return this.repository.find({
-      where: { project: { id: projectId } },
-      order: { createdAt: 'DESC' },
+    // exclude docs that are workspaces for resources
+    return await this.repository
+      .createQueryBuilder('d')
+      .where('d.projectId = :projectId', { projectId })
+      .andWhere('d."resourceId" IS NULL')
+      .orderBy('d.created_at', 'DESC')
+      .getMany();
+  }
+
+  async findByResource(resourceId: number): Promise<DocEntity | null> {
+    return this.repository.findOne({
+      where: { resource: { id: resourceId } },
     });
   }
 

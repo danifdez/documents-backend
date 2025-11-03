@@ -25,6 +25,13 @@ export class DocController {
     return await this.docService.findByProject(projectId);
   }
 
+  @Get('resource/:resourceId')
+  async getByResource(
+    @Param('resourceId', ParseIntPipe) resourceId: number,
+  ): Promise<DocEntity | null> {
+    return await this.docService.findByResource(resourceId);
+  }
+
   @Post()
   async create(@Body() doc: Partial<DocEntity>): Promise<DocEntity> {
     return await this.docService.create(doc);
