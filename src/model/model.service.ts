@@ -98,4 +98,27 @@ export class ModelService {
       texts: extractedTexts,
     });
   }
+
+  async keyPoints(resourceId: number, targetLanguage?: string): Promise<void> {
+    const resource = await this.resourceService.findOne(resourceId);
+    if (!resource) {
+      throw new Error(`Resource with ID ${resourceId} not found`);
+    }
+
+    // Prefer translated content if available
+    let content = await this.resourceService.getTranslatedContentById(resourceId);
+    if (!content) {
+      content = await this.resourceService.getContentById(resourceId);
+    }
+
+    if (!content) {
+      throw new Error(`Resource with ID ${resourceId} has no content`);
+    }
+
+    this.jobService.create('key-point', JobPriority.NORMAL, {
+      resourceId: resourceId,
+      content: content,
+      targetLanguage: targetLanguage || resource.language || 'en',
+    });
+  }
 }

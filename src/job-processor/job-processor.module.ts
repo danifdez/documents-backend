@@ -13,6 +13,7 @@ import { HttpModule } from '@nestjs/axios';
 import { IngestContentProcessor } from './processors/ingest-content-processor';
 import { AskProcessor } from './processors/ask-processor';
 import { SummarizeProcessor } from './processors/summarize-processor';
+import { KeyPointsProcessor } from './processors/key-points-processor';
 import { EntityModule } from 'src/entity/entity.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { PendingEntityModule } from 'src/pending-entity/pending-entity.module';
@@ -37,6 +38,7 @@ import { PendingEntityModule } from 'src/pending-entity/pending-entity.module';
     EntityExtractionProcessor,
     IngestContentProcessor,
     SummarizeProcessor,
+    KeyPointsProcessor,
     AskProcessor,
   ],
   exports: [JobProcessorFactory],

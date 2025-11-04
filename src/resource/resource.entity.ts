@@ -85,6 +85,9 @@ export class ResourceEntity {
   @Column({ type: 'text', nullable: true })
   summary: string | null;
 
+  @Column({ type: 'json', name: 'key_points', nullable: true })
+  keyPoints: string[] | null;
+
   @Column({ nullable: true })
   language: string | null;
 
