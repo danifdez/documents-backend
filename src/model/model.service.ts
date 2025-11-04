@@ -29,7 +29,7 @@ export class ModelService {
     let content: string | null = null;
     if (resourceId) {
       const resource = await this.resourceService.findOne(resourceId);
-      if (!content) {
+      if (!resource) {
         throw new Error(`Resource with ID ${resourceId} not found`);
       }
 
