@@ -61,4 +61,12 @@ export class ModelController {
   ): Promise<void> {
     await this.modelService.keyPoints(body.resourceId, body.targetLanguage);
   }
+
+  @Post('keywords')
+  async keywords(
+    @Body()
+    body: { resourceId: number; targetLanguage?: string },
+  ): Promise<void> {
+    await this.modelService.keywords(body.resourceId, body.targetLanguage);
+  }
 }

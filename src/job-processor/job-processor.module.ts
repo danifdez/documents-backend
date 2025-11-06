@@ -14,6 +14,7 @@ import { IngestContentProcessor } from './processors/ingest-content-processor';
 import { AskProcessor } from './processors/ask-processor';
 import { SummarizeProcessor } from './processors/summarize-processor';
 import { KeyPointsProcessor } from './processors/key-points-processor';
+import { KeywordsProcessor } from './processors/keywords-processor';
 import { EntityModule } from 'src/entity/entity.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { PendingEntityModule } from 'src/pending-entity/pending-entity.module';
@@ -39,6 +40,7 @@ import { PendingEntityModule } from 'src/pending-entity/pending-entity.module';
     IngestContentProcessor,
     SummarizeProcessor,
     KeyPointsProcessor,
+    KeywordsProcessor,
     AskProcessor,
   ],
   exports: [JobProcessorFactory],
