@@ -253,7 +253,7 @@ export class ResourceService {
         .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
         .where('re.resource_id = :resourceId', { resourceId })
         .leftJoinAndSelect('entity.entityType', 'entityType')
-        .select(['entity.id', 'entity.name', 'entity.translations', 'entity.aliases', 'entityType.id', 'entityType.name'])
+        .select(['entity.id', 'entity.name', 'entity.description', 'entity.translations', 'entity.aliases', 'entityType.id', 'entityType.name'])
         .getMany();
 
       return entities;

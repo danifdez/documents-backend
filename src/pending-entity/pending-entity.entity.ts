@@ -29,6 +29,9 @@ export class PendingEntityEntity {
     @Column()
     name: string;
 
+    @Column({ type: 'text', nullable: true })
+    description: string | null;
+
     @Column({ nullable: true })
     language: string | null;
 

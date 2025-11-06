@@ -22,6 +22,10 @@ export class CreateEntityDto {
     @MaxLength(200)
     name: string;
 
+    @IsString()
+    @IsOptional()
+    description?: string;
+
     @IsObject()
     @IsOptional()
     translations?: EntityTranslation;
@@ -42,6 +46,10 @@ export class UpdateEntityDto {
     @IsOptional()
     @MaxLength(200)
     name?: string;
+
+    @IsString()
+    @IsOptional()
+    description?: string;
 
     @IsObject()
     @IsOptional()

@@ -19,6 +19,9 @@ export class EntityEntity {
     @Column()
     name: string;
 
+    @Column({ type: 'text', nullable: true })
+    description: string | null;
+
     @Column({ type: 'jsonb', nullable: true })
     translations: EntityTranslation | null;
 

@@ -8,6 +8,7 @@ import { ResourceService } from '../resource/resource.service';
 export interface CreatePendingEntityDto {
     resourceId: number;
     name: string;
+    description?: string;
     entityTypeId?: number;
     aliases?: EntityAlias[];
     scope?: EntityScope;
@@ -22,6 +23,7 @@ export interface CreatePendingEntityDto {
 
 export interface UpdatePendingEntityDto {
     name?: string;
+    description?: string;
     entityTypeId?: number;
     aliases?: EntityAlias[];
     scope?: EntityScope;

@@ -133,6 +133,10 @@ export class EntityService {
             existingEntity.name = updateEntityDto.name;
         }
 
+        if (updateEntityDto.description !== undefined) {
+            existingEntity.description = updateEntityDto.description;
+        }
+
         if (updateEntityDto.translations !== undefined) {
             existingEntity.translations = updateEntityDto.translations;
         }

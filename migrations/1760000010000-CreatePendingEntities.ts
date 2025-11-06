@@ -8,6 +8,7 @@ export class CreatePendingEntities1760000010000 implements MigrationInterface {
             "id" SERIAL NOT NULL, 
             "resource_id" integer NOT NULL,
             "name" character varying NOT NULL, 
+            "description" text,
             "translations" jsonb,
             "aliases" jsonb,
             "entity_type_id" integer,
@@ -21,6 +22,9 @@ export class CreatePendingEntities1760000010000 implements MigrationInterface {
             "updated_at" TIMESTAMP NOT NULL DEFAULT now(), 
             CONSTRAINT "PK_pending_entities_id" PRIMARY KEY ("id")
         )`);
+
+        // Add comment for description column
+        await queryRunner.query(`COMMENT ON COLUMN "pending_entities"."description" IS 'Optional description of the pending entity'`);
 
         // The FK to resources is applied in a separate migration to ensure resources table exists first.
 
@@ -47,6 +51,7 @@ export class CreatePendingEntities1760000010000 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "pending_entities" DROP COLUMN "status"`);
         // Drop FK to resources (managed here now)
         await queryRunner.query(`ALTER TABLE "pending_entities" DROP CONSTRAINT "FK_pending_entities_resource_id"`);
+        await queryRunner.query(`ALTER TABLE "pending_entities" DROP COLUMN "description"`);
         await queryRunner.query(`ALTER TABLE "pending_entities" DROP COLUMN "language"`);
         await queryRunner.query(`ALTER TABLE "pending_entities" DROP COLUMN "translations"`);
         await queryRunner.query(`DROP TABLE "pending_entities"`);

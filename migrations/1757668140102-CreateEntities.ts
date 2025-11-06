@@ -7,6 +7,7 @@ export class CreateEntities1757668140102 implements MigrationInterface {
         await queryRunner.query(`CREATE TABLE "entities" (
             "id" SERIAL NOT NULL, 
             "name" character varying NOT NULL, 
+            "description" text,
             "translations" jsonb, 
             "aliases" jsonb, 
             "entity_type_id" integer NOT NULL,
@@ -26,6 +27,7 @@ export class CreateEntities1757668140102 implements MigrationInterface {
         await queryRunner.query(`CREATE UNIQUE INDEX "IDX_entities_name_type_unique" ON "entities" ("name", "entity_type_id")`);
 
         // Add comments to document the schema
+        await queryRunner.query(`COMMENT ON COLUMN "entities"."description" IS 'Optional description of the entity'`);
         await queryRunner.query(`COMMENT ON COLUMN "entities"."translations" IS 'JSONB object containing translations by locale code: {"en": "Name", "es": "Nombre"}'`);
         await queryRunner.query(`COMMENT ON COLUMN "entities"."aliases" IS 'JSONB array of alias objects with locale: [{"locale": "en", "value": "Alias"}]'`);
     }
@@ -35,6 +37,7 @@ export class CreateEntities1757668140102 implements MigrationInterface {
         await queryRunner.query(`DROP INDEX "IDX_entities_entity_type_id"`);
         await queryRunner.query(`DROP INDEX "IDX_entities_name"`);
         await queryRunner.query(`ALTER TABLE "entities" DROP CONSTRAINT "FK_entities_entity_type_id"`);
+        await queryRunner.query(`ALTER TABLE "entities" DROP COLUMN "description"`);
         await queryRunner.query(`DROP TABLE "entities"`);
     }
 }
