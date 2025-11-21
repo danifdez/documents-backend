@@ -28,33 +28,40 @@ export class DetectLanguageProcessor implements JobProcessor {
       results[0].language !== 'unknown' &&
       results[0].language === results[1].language
     ) {
-      this.resourceService.update(resourceId, {
-        language: results[0].language,
+      const detectedLanguage = results[0].language;
+
+      await this.resourceService.update(resourceId, {
+        language: detectedLanguage,
       });
 
       const resource = await this.resourceService.findOne(resourceId);
       const content = await this.resourceService.getContentById(resourceId);
       const extractedTexts = extractTextFromHtml(content);
 
-      if (results[0].language !== 'en') {
-        this.jobService.create('translate', JobPriority.NORMAL, {
+      // TODO: Get default language from settings (hardcoded to 'en' for now)
+      const defaultLanguage = 'es';
+
+      // If detected language is the same as default language, go directly to entities
+      if (detectedLanguage === defaultLanguage) {
+        await this.resourceService.update(resourceId, {
+          status: 'entities',
+        });
+
+        // Launch entity extraction job with texts array
+        await this.jobService.create('entity-extraction', JobPriority.NORMAL, {
           resourceId: resourceId,
-          sourceLanguage: results[0].language,
-          targetLanguage: 'en',
-          saveTo: 'workingContent',
           texts: extractedTexts,
         });
       } else {
-        try {
-          await this.resourceService.update(resourceId, { workingContent: content });
-        } catch (err) {
-          this.logger.error(`Failed to save workingContent for resource ${resourceId}: ${err}`);
-        }
-        const projectId = (resource.project && (resource.project as any).id) || (resource as any).projectId || null;
-        this.jobService.create('ingest-content', JobPriority.NORMAL, {
+        // If language is different, translate first
+        await this.resourceService.update(resourceId, { status: 'translating' });
+
+        await this.jobService.create('translate', JobPriority.NORMAL, {
           resourceId: resourceId,
-          projectId,
-          content: content,
+          sourceLanguage: detectedLanguage,
+          targetLanguage: defaultLanguage,
+          saveTo: 'translatedContent',
+          texts: extractedTexts,
         });
       }
     }

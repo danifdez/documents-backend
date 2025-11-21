@@ -2,13 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobEntity } from 'src/job/job.entity';
+import { ResourceService } from 'src/resource/resource.service';
 
 @Injectable()
 export class IngestContentProcessor implements JobProcessor {
   private readonly logger = new Logger(IngestContentProcessor.name);
   private readonly JOB_TYPE = 'ingest-content';
 
-  constructor(private readonly notificationGateway: NotificationGateway) { }
+  constructor(
+    private readonly notificationGateway: NotificationGateway,
+    private readonly resourceService: ResourceService,
+  ) { }
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;
@@ -17,9 +21,12 @@ export class IngestContentProcessor implements JobProcessor {
   async process(job: JobEntity): Promise<any> {
     const resourceId = Number(job.payload['resourceId']) as number;
 
+    // Update resource status to 'ready'
+    await this.resourceService.update(resourceId, { status: 'ready' });
+
     this.notificationGateway.sendNotification({
       type: 'ingest-content',
-      message: `Document ingestion completed for resource with ID ${resourceId}`,
+      message: `Document ingestion completed for resource with ID ${resourceId}. Resource is now ready.`,
       resourceId,
     });
   }

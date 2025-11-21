@@ -3,9 +3,10 @@ import { DatabaseModule } from '../database/database.module';
 import { EntityController } from './entity.controller';
 import { EntityService } from './entity.service';
 import { EntityTypeModule } from '../entity-type/entity-type.module';
+import { ResourceModule } from '../resource/resource.module';
 
 @Module({
-    imports: [DatabaseModule, EntityTypeModule],
+    imports: [DatabaseModule, EntityTypeModule, ResourceModule],
     controllers: [EntityController],
     providers: [EntityService],
     exports: [EntityService],

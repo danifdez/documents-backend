@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, MaxLength, ValidateNested, IsObject } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, MaxLength, ValidateNested, IsObject, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export interface EntityTranslation {
@@ -39,6 +39,15 @@ export class CreateEntityDto {
     @IsNumber()
     @IsNotEmpty()
     entityTypeId: number;
+
+    @IsBoolean()
+    @IsOptional()
+    global?: boolean;
+
+    @IsArray()
+    @IsOptional()
+    @IsNumber({}, { each: true })
+    projectIds?: number[];
 }
 
 export class UpdateEntityDto {
@@ -64,4 +73,13 @@ export class UpdateEntityDto {
     @IsNumber()
     @IsOptional()
     entityTypeId?: number;
+
+    @IsBoolean()
+    @IsOptional()
+    global?: boolean;
+
+    @IsArray()
+    @IsOptional()
+    @IsNumber({}, { each: true })
+    projectIds?: number[];
 }

@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { EntityEntity, EntityAlias, EntityTranslation } from './entity.entity';
 import { CreateEntityDto, UpdateEntityDto } from './dto/entity.dto';
 import { EntityTypeService } from '../entity-type/entity-type.service';
+import { ResourceService } from '../resource/resource.service';
 
 @Injectable()
 export class EntityService {
@@ -11,6 +12,7 @@ export class EntityService {
         @InjectRepository(EntityEntity)
         private readonly repository: Repository<EntityEntity>,
         private readonly entityTypeService: EntityTypeService,
+        private readonly resourceService: ResourceService,
     ) { }
 
     async findAll(): Promise<EntityEntity[]> {
@@ -106,9 +108,27 @@ export class EntityService {
             translations: createEntityDto.translations,
             aliases: createEntityDto.aliases,
             entityType,
+            global: createEntityDto.global ?? false,
         });
 
-        return await this.repository.save(entity);
+        const savedEntity = await this.repository.save(entity);
+
+        // If projectIds are provided, associate the entity with those projects
+        if (createEntityDto.projectIds && createEntityDto.projectIds.length > 0) {
+            await this.repository
+                .createQueryBuilder()
+                .insert()
+                .into('entity_projects')
+                .values(
+                    createEntityDto.projectIds.map(projectId => ({
+                        entity_id: savedEntity.id,
+                        project_id: projectId,
+                    }))
+                )
+                .execute();
+        }
+
+        return savedEntity;
     }
 
     async update(id: number, updateEntityDto: UpdateEntityDto): Promise<EntityEntity | null> {
@@ -145,7 +165,39 @@ export class EntityService {
             existingEntity.aliases = updateEntityDto.aliases;
         }
 
-        return await this.repository.save(existingEntity);
+        if (updateEntityDto.global !== undefined) {
+            existingEntity.global = updateEntityDto.global;
+        }
+
+        const savedEntity = await this.repository.save(existingEntity);
+
+        // Update project associations if projectIds are provided
+        if (updateEntityDto.projectIds !== undefined) {
+            // First, remove all existing project associations
+            await this.repository
+                .createQueryBuilder()
+                .delete()
+                .from('entity_projects')
+                .where('entity_id = :entityId', { entityId: id })
+                .execute();
+
+            // Then, add new project associations
+            if (updateEntityDto.projectIds.length > 0) {
+                await this.repository
+                    .createQueryBuilder()
+                    .insert()
+                    .into('entity_projects')
+                    .values(
+                        updateEntityDto.projectIds.map(projectId => ({
+                            entity_id: id,
+                            project_id: projectId,
+                        }))
+                    )
+                    .execute();
+            }
+        }
+
+        return savedEntity;
     }
 
     /**
@@ -329,6 +381,98 @@ export class EntityService {
         return targetEntity;
     }
 
+    async findByResourceGroupedByScope(
+        resourceId: number,
+        searchTerm?: string
+    ): Promise<{
+        document: EntityEntity[];
+        project: EntityEntity[];
+        global: EntityEntity[];
+    }> {
+        // Get resource with project relation
+        const resource = await this.resourceService.findOne(resourceId);
+        if (!resource) {
+            return { document: [], project: [], global: [] };
+        }
+
+        const projectId = resource.project?.id;
+
+        // Build base query
+        let query = this.repository.createQueryBuilder('entity')
+            .leftJoinAndSelect('entity.entityType', 'entityType')
+            .leftJoin('resource_entities', 're', 're.entity_id = entity.id')
+            .leftJoin('resources', 'r', 'r.id = re.resource_id')
+            .leftJoin('projects', 'p', 'p.id = r.project_id');
+
+        // Add search filter if provided
+        if (searchTerm && searchTerm.trim().length > 0) {
+            const trimmedTerm = searchTerm.trim();
+            query = query.where(
+                '(LOWER(entity.name) LIKE LOWER(:searchTerm) OR ' +
+                'EXISTS (SELECT 1 FROM jsonb_array_elements(entity.aliases) AS alias_obj WHERE LOWER(alias_obj->>\'value\') LIKE LOWER(:searchTerm)) OR ' +
+                'EXISTS (SELECT 1 FROM jsonb_each_text(entity.translations) AS trans(locale, name) WHERE LOWER(trans.name) LIKE LOWER(:searchTerm)))',
+                { searchTerm: `%${trimmedTerm}%` }
+            );
+        }
+
+        // Get all entities
+        const allEntities = await query
+            .orderBy('entity.name', 'ASC')
+            .getMany();
+
+        // Now categorize each entity based on its resource associations
+        const documentEntities: EntityEntity[] = [];
+        const projectEntities: EntityEntity[] = [];
+        const globalEntities: EntityEntity[] = [];
+
+        for (const entity of allEntities) {
+            // Check if entity is associated with this specific resource (document scope)
+            const isInDocument = await this.repository.createQueryBuilder('entity')
+                .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
+                .where('entity.id = :entityId', { entityId: entity.id })
+                .andWhere('re.resource_id = :resourceId', { resourceId })
+                .getCount();
+
+            if (isInDocument > 0) {
+                documentEntities.push(entity);
+                continue;
+            }
+
+            // Check if entity is associated with resources from the same project (project scope)
+            if (projectId) {
+                const isInProject = await this.repository.createQueryBuilder('entity')
+                    .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
+                    .innerJoin('resources', 'r', 'r.id = re.resource_id')
+                    .innerJoin('projects', 'p', 'p.id = r.project_id')
+                    .where('entity.id = :entityId', { entityId: entity.id })
+                    .andWhere('p.id = :projectId', { projectId })
+                    .getCount();
+
+                if (isInProject > 0) {
+                    projectEntities.push(entity);
+                    continue;
+                }
+            }
+
+            // Check if entity has no resource associations (global scope)
+            const resourceCount = await this.repository.createQueryBuilder('entity')
+                .leftJoin('resource_entities', 're', 're.entity_id = entity.id')
+                .where('entity.id = :entityId', { entityId: entity.id })
+                .andWhere('re.resource_id IS NULL')
+                .getCount();
+
+            if (resourceCount > 0) {
+                globalEntities.push(entity);
+            }
+        }
+
+        return {
+            document: documentEntities,
+            project: projectEntities,
+            global: globalEntities
+        };
+    }
+
     async findOrCreate(name: string, entityTypeName: string, aliases?: EntityAlias[]): Promise<EntityEntity> {
         // First try to find by name and type
         const entityType = await this.entityTypeService.findByName(entityTypeName);
@@ -347,5 +491,28 @@ export class EntityService {
         }
 
         return entity;
+    }
+
+    async addProjectToEntity(entityId: number, projectId: number): Promise<void> {
+        // Check if relation already exists
+        const existing = await this.repository
+            .createQueryBuilder()
+            .select('1')
+            .from('entity_projects', 'ep')
+            .where('ep.entity_id = :entityId', { entityId })
+            .andWhere('ep.project_id = :projectId', { projectId })
+            .getRawOne();
+
+        if (!existing) {
+            await this.repository
+                .createQueryBuilder()
+                .insert()
+                .into('entity_projects')
+                .values({
+                    entity_id: entityId,
+                    project_id: projectId,
+                })
+                .execute();
+        }
     }
 }

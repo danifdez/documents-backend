@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { PendingEntityEntity, EntityAlias, EntityScope, EntityTranslation } from './pending-entity.entity';
 import { EntityService } from '../entity/entity.service';
 import { ResourceService } from '../resource/resource.service';
+import { JobService } from '../job/job.service';
+import { JobPriority } from '../job/job-priority.enum';
 
 export interface CreatePendingEntityDto {
     resourceId: number;
@@ -37,6 +39,7 @@ export class PendingEntityService {
         private readonly repository: Repository<PendingEntityEntity>,
         private readonly entityService: EntityService,
         private readonly resourceService: ResourceService,
+        private readonly jobService: JobService,
     ) { }
 
     // Helper to escape strings for use in RegExp
@@ -138,10 +141,25 @@ export class PendingEntityService {
     }
 
     async confirmEntities(resourceId: number): Promise<{ confirmed: number; errors: string[] }> {
-        const pendingEntities = await this.findByResourceId(resourceId);
+        const allPendingEntities = await this.findByResourceId(resourceId);
+
+        // Filter only entities that are not merged
+        const pendingEntities = allPendingEntities.filter(e => e.status !== 'merged');
 
         let confirmed = 0;
         const errors: string[] = [];
+
+        // Get the resource to check language and working content
+        const resource = await this.resourceService.findOne(resourceId);
+        if (!resource) {
+            throw new Error(`Resource with id ${resourceId} not found`);
+        }
+
+        let workingContent = resource.workingContent || '';
+        let contentWasModified = false;
+
+        // Build a map of entity names and their aliases that need to be replaced
+        const replacements: Array<{ from: string; to: string }> = [];
 
         for (const pending of pendingEntities) {
             try {
@@ -154,16 +172,61 @@ export class PendingEntityService {
                     throw new Error(`Entity type is required for "${pending.name}"`);
                 }
 
-                const entity = await this.entityService.findOrCreate(
-                    pending.name,
-                    entityTypeName,
-                    allAliases.length > 0 ? allAliases : undefined
-                );
+                // Find existing entity or create new one
+                let entity = await this.entityService.findByNameAndType(pending.name, pending.entityType.id);
 
-                // Link entity to resource
+                if (!entity) {
+                    // Create new entity with appropriate scope
+                    const createDto: any = {
+                        name: pending.name,
+                        entityTypeId: pending.entityType.id,
+                        aliases: allAliases.length > 0 ? allAliases : undefined,
+                    };
+
+                    // Set global flag if scope is global
+                    if (pending.scope === 'global') {
+                        createDto.global = true;
+                    }
+
+                    // Set projectIds if scope is project
+                    if (pending.scope === 'project' && resource.project) {
+                        const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
+                        createDto.projectIds = [projectId];
+                    }
+
+                    entity = await this.entityService.create(createDto);
+                } else {
+                    // Entity exists, update scope if needed
+                    if (pending.scope === 'global' && !entity.global) {
+                        await this.entityService.update(entity.id, { global: true });
+                        entity.global = true;
+                    }
+
+                    // If scope is project, ensure entity-project relation exists
+                    if (pending.scope === 'project' && resource.project) {
+                        const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
+                        // Add project relation (this will be handled by addProjectToEntity method)
+                        await this.entityService['addProjectToEntity'](entity.id, projectId);
+                    }
+                }
+
+                // Add aliases to replacements if they exist
+                if (allAliases.length > 0) {
+                    for (const alias of allAliases) {
+                        if (alias.value !== pending.name && alias.scope === 'document') {
+                            // This alias should be replaced in working_content
+                            replacements.push({
+                                from: alias.value,
+                                to: pending.name,
+                            });
+                        }
+                    }
+                }
+
+                // Always link entity to resource (creates resource_entities relation)
                 await this.resourceService.addEntityToResource(resourceId, entity);
 
-                // Remove the pending entity
+                // Remove the pending entity from database
                 await this.repository.remove(pending);
                 confirmed++;
             } catch (error) {
@@ -171,7 +234,170 @@ export class PendingEntityService {
             }
         }
 
+        // Apply replacements to working_content (replace aliases with main entity names)
+        if (replacements.length > 0 && workingContent) {
+            for (const replacement of replacements) {
+                const pattern = new RegExp(`\\b${this.escapeRegExp(replacement.from)}\\b`, 'gi');
+                const newContent = workingContent.replace(pattern, replacement.to);
+                if (newContent !== workingContent) {
+                    workingContent = newContent;
+                    contentWasModified = true;
+                }
+            }
+
+            // Save updated working_content if it was modified
+            if (contentWasModified) {
+                await this.resourceService.update(resourceId, { workingContent });
+            }
+        }
+
+        // If content was modified and resource language is not English, trigger new translation
+        if (contentWasModified && resource.language && resource.language !== 'en') {
+            try {
+                // Create a translation job for the updated working_content
+                await this.jobService.create('translate', JobPriority.NORMAL, {
+                    translationType: 'content',
+                    resourceId,
+                    sourceLanguage: 'en',
+                    targetLanguage: resource.language,
+                    texts: [{ text: workingContent }],
+                });
+            } catch (error) {
+                errors.push(`Failed to create translation job after updating working_content: ${error.message}`);
+            }
+        }
+
+        // Update resource status to 'confirmed' and launch ingest-content job
+        await this.resourceService.update(resourceId, { status: 'confirmed' });
+
+        const projectId = (resource.project && (resource.project as any).id) || (resource as any).projectId || null;
+        await this.jobService.create('ingest-content', JobPriority.NORMAL, {
+            resourceId,
+            projectId,
+            content: workingContent || resource.content,
+        });
+
         return { confirmed, errors };
+    }
+
+    async confirmEntity(id: number): Promise<{ success: boolean; message?: string }> {
+        try {
+            // Find the pending entity
+            const pending = await this.repository.findOne({
+                where: { id },
+                relations: ['entityType', 'resource']
+            });
+
+            if (!pending) {
+                return { success: false, message: 'Pending entity not found' };
+            }
+
+            // Check if entity is already merged
+            if (pending.status === 'merged') {
+                return { success: false, message: 'Cannot confirm a merged entity' };
+            }
+
+            // Get all aliases from the entity
+            const allAliases = pending.aliases || [];
+
+            // Find or create the entity in the main entities table
+            const entityTypeName = pending.entityType?.name;
+            if (!entityTypeName) {
+                return { success: false, message: 'Entity type is required' };
+            }
+
+            // Get resource to access project information
+            const resource = await this.resourceService.findOne(pending.resourceId);
+            if (!resource) {
+                return { success: false, message: 'Resource not found' };
+            }
+
+            // Find existing entity or create new one
+            let entity = await this.entityService.findByNameAndType(pending.name, pending.entityType.id);
+
+            if (!entity) {
+                // Create new entity with appropriate scope
+                const createDto: any = {
+                    name: pending.name,
+                    entityTypeId: pending.entityType.id,
+                    aliases: allAliases.length > 0 ? allAliases : undefined,
+                };
+
+                // Set global flag if scope is global
+                if (pending.scope === 'global') {
+                    createDto.global = true;
+                }
+
+                // Set projectIds if scope is project
+                if (pending.scope === 'project' && resource.project) {
+                    const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
+                    createDto.projectIds = [projectId];
+                }
+
+                entity = await this.entityService.create(createDto);
+            } else {
+                // Entity exists, update scope if needed
+                if (pending.scope === 'global' && !entity.global) {
+                    await this.entityService.update(entity.id, { global: true });
+                    entity.global = true;
+                }
+
+                // If scope is project, ensure entity-project relation exists
+                if (pending.scope === 'project' && resource.project) {
+                    const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
+                    await this.entityService['addProjectToEntity'](entity.id, projectId);
+                }
+            }
+
+            // Always link entity to resource (creates resource_entities relation)
+            await this.resourceService.addEntityToResource(pending.resourceId, entity);
+
+            let workingContent = resource.workingContent || '';
+            let contentWasModified = false;
+
+            // Replace document-scoped aliases in working_content
+            if (allAliases.length > 0 && workingContent) {
+                for (const alias of allAliases) {
+                    if (alias.value !== pending.name && alias.scope === 'document') {
+                        const pattern = new RegExp(`\\b${this.escapeRegExp(alias.value)}\\b`, 'gi');
+                        const newContent = workingContent.replace(pattern, pending.name);
+                        if (newContent !== workingContent) {
+                            workingContent = newContent;
+                            contentWasModified = true;
+                        }
+                    }
+                }
+
+                // Save updated working_content if it was modified
+                if (contentWasModified) {
+                    await this.resourceService.update(pending.resourceId, { workingContent });
+
+                    // If resource language is not English, trigger new translation
+                    if (resource.language && resource.language !== 'en') {
+                        try {
+                            await this.jobService.create('translate', JobPriority.NORMAL, {
+                                translationType: 'content',
+                                resourceId: pending.resourceId,
+                                sourceLanguage: 'en',
+                                targetLanguage: resource.language,
+                                texts: [{ text: workingContent }],
+                            });
+                        } catch (error) {
+                            // Log error but don't fail the confirmation
+                            console.error('Failed to create translation job:', error);
+                        }
+                    }
+                }
+            }
+
+            // Remove the pending entity from database
+            await this.repository.remove(pending);
+
+            return { success: true, message: 'Entity confirmed successfully' };
+        } catch (error) {
+            console.error('Failed to confirm entity:', error);
+            return { success: false, message: `Failed to confirm entity: ${error.message}` };
+        }
     }
 
     async mergeEntity(
@@ -350,6 +576,75 @@ export class PendingEntityService {
     async batchUpdateTranslations(updates: Array<{ id: number; translations: EntityTranslation }>): Promise<void> {
         for (const update of updates) {
             await this.updateTranslations(update.id, update.translations);
+        }
+    }
+
+    /**
+     * Retranslate entity when name changes
+     * Updates the translation for the current language and triggers jobs for missing translations
+     */
+    async retranslateEntity(
+        id: number,
+        newName: string,
+        currentLanguage: string,
+        resourceLanguage: string,
+        targetLanguage: string
+    ): Promise<{ success: boolean; message?: string }> {
+        try {
+            const pending = await this.repository.findOne({
+                where: { id },
+                relations: ['entityType']
+            });
+
+            if (!pending) {
+                return { success: false, message: 'Pending entity not found' };
+            }
+
+            // Update translations object
+            const updatedTranslations = { ...(pending.translations || {}) };
+
+            // Update the current language translation with the new name
+            if (currentLanguage !== 'en') {
+                updatedTranslations[currentLanguage] = newName;
+            }
+
+            // Save updated translations
+            pending.translations = updatedTranslations;
+            await this.repository.save(pending);
+
+            // Determine which languages need translation
+            const languagesToTranslate: string[] = [];
+
+            if (resourceLanguage !== 'en' && !updatedTranslations[resourceLanguage]) {
+                languagesToTranslate.push(resourceLanguage);
+            }
+
+            if (targetLanguage !== 'en' && targetLanguage !== resourceLanguage && !updatedTranslations[targetLanguage]) {
+                languagesToTranslate.push(targetLanguage);
+            }
+
+            // If there are languages to translate, create a translation job
+            if (languagesToTranslate.length > 0) {
+                const translationPayload = {
+                    resourceId: pending.resourceId,
+                    texts: [{ text: pending.name }],
+                    sourceLanguage: 'en',
+                    targetLanguages: languagesToTranslate,
+                    translationType: 'entity-retranslate',
+                    entityId: pending.id,
+                };
+
+                await this.jobService.create(
+                    'translate',
+                    JobPriority.NORMAL,
+                    translationPayload
+                );
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to retranslate entity:', error);
+            return { success: false, message: `Failed to retranslate: ${error.message}` };
         }
     }
 }

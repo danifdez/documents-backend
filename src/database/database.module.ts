@@ -17,6 +17,7 @@ import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity'
 import { AuthorEntity } from '../author/author.entity';
 import { ResourceAuthorEntity } from '../author/resource-author.entity';
 import { PendingEntityEntity } from '../pending-entity/pending-entity.entity';
+import { EntityProjectEntity } from '../entity-project/entity-project.entity';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { PendingEntityEntity } from '../pending-entity/pending-entity.entity';
       AuthorEntity,
       ResourceAuthorEntity,
       PendingEntityEntity,
+      EntityProjectEntity,
     ]),
   ],
   providers: [...databaseProviders],

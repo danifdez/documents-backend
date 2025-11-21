@@ -64,11 +64,11 @@ export class ResourceController {
       throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
     }
 
-    if (resource.confirmationStatus !== 'pending') {
-      throw new HttpException('Resource is not pending confirmation', HttpStatus.BAD_REQUEST);
+    if (resource.status !== 'extracted') {
+      throw new HttpException('Resource is not in extracted state', HttpStatus.BAD_REQUEST);
     }
 
-    await this.resourceService.update(id, { confirmationStatus: 'confirmed' });
+    await this.resourceService.update(id, { status: 'confirmed_extraction' });
 
     const content = await this.resourceService.getContentById(id);
     const samples = this.extractTextSamples(content);
@@ -79,7 +79,7 @@ export class ResourceController {
 
     return {
       success: true,
-      message: 'Resource confirmed and language detection job created',
+      message: 'Resource extraction confirmed and language detection job created',
     };
   }
 

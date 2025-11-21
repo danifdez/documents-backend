@@ -8,6 +8,7 @@ export class CreateEntities1757668140102 implements MigrationInterface {
             "id" SERIAL NOT NULL, 
             "name" character varying NOT NULL, 
             "description" text,
+            "global" boolean NOT NULL DEFAULT false,
             "translations" jsonb, 
             "aliases" jsonb, 
             "entity_type_id" integer NOT NULL,
@@ -28,6 +29,7 @@ export class CreateEntities1757668140102 implements MigrationInterface {
 
         // Add comments to document the schema
         await queryRunner.query(`COMMENT ON COLUMN "entities"."description" IS 'Optional description of the entity'`);
+        await queryRunner.query(`COMMENT ON COLUMN "entities"."global" IS 'Indicates if the entity is globally available across all projects'`);
         await queryRunner.query(`COMMENT ON COLUMN "entities"."translations" IS 'JSONB object containing translations by locale code: {"en": "Name", "es": "Nombre"}'`);
         await queryRunner.query(`COMMENT ON COLUMN "entities"."aliases" IS 'JSONB array of alias objects with locale: [{"locale": "en", "value": "Alias"}]'`);
     }

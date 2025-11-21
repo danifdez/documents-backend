@@ -45,7 +45,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
       author,
       publicationDate: publication_date,
       content,
-      confirmationStatus: 'pending',
+      status: 'extracted',
     };
 
     if (pages !== undefined) {
@@ -56,10 +56,10 @@ export class DocumentExtractionProcessor implements JobProcessor {
 
     this.notificationGateway.sendNotification({
       type: 'document-extraction',
-      message: `Document extraction completed for resource with hash ${hash}. Pending confirmation.`,
+      message: `Document extraction completed for resource with hash ${hash}. Ready for confirmation.`,
       resourceId,
     });
 
-    return { success: true, resourceId, status: 'pending_confirmation' };
+    return { success: true, resourceId, status: 'extracted' };
   }
 }

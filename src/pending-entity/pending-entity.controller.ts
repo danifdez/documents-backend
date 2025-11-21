@@ -48,6 +48,13 @@ export class PendingEntityController {
         return await this.service.confirmEntities(resourceId);
     }
 
+    @Post(':id/confirm')
+    async confirmEntity(
+        @Param('id', ParseIntPipe) id: number
+    ): Promise<{ success: boolean; message?: string }> {
+        return await this.service.confirmEntity(id);
+    }
+
     @Post(':id/merge')
     async mergeEntity(
         @Param('id', ParseIntPipe) id: number,
@@ -59,6 +66,25 @@ export class PendingEntityController {
     @Post(':id/cancel-merge')
     async cancelMerge(@Param('id', ParseIntPipe) id: number): Promise<{ success: boolean; message: string }> {
         return await this.service.cancelMerge(id);
+    }
+
+    @Post(':id/retranslate')
+    async retranslateEntity(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: {
+            newName: string;
+            currentLanguage: string;
+            resourceLanguage: string;
+            targetLanguage: string;
+        }
+    ): Promise<{ success: boolean; message?: string }> {
+        return await this.service.retranslateEntity(
+            id,
+            dto.newName,
+            dto.currentLanguage,
+            dto.resourceLanguage,
+            dto.targetLanguage
+        );
     }
 
     @Delete('resource/:resourceId/clear')

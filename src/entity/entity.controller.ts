@@ -32,6 +32,18 @@ export class EntityController {
         return await this.entityService.findByName(name);
     }
 
+    @Get('by-resource/:resourceId')
+    async findByResource(
+        @Param('resourceId', ParseIntPipe) resourceId: number,
+        @Query('term') searchTerm?: string
+    ): Promise<{
+        document: EntityEntity[];
+        project: EntityEntity[];
+        global: EntityEntity[];
+    }> {
+        return await this.entityService.findByResourceGroupedByScope(resourceId, searchTerm);
+    }
+
     @Get(':id')
     async findOne(@Param('id', ParseIntPipe) id: number): Promise<EntityEntity | null> {
         return await this.entityService.findOne(id);
