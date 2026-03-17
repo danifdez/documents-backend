@@ -1,65 +1,106 @@
 # Documents backend
 
-## Overview
+Central API for the intelligent document processing system. Orchestrates jobs, manages resources, and delivers real-time notifications to the frontend.
 
-The backend service orchestrates document processing jobs, manages resources, and delivers real-time notifications to the user interface. It acts as the central hub for job creation, resource updates, and communication between the user-facing application and the document processing microservice. The backend maintains job and resource state, triggers processors for various document-related tasks, and ensures integration with the models service for extraction, language detection, summarization, translation, and vector search. All resource changes are handled through a dedicated service, and notifications are emitted to keep the user interface updated.
+## Tech Stack
 
-## Features
+- **Framework**: NestJS (TypeScript, Node.js 22)
+- **Database**: PostgreSQL 17.6 with TypeORM
+- **Real-time**: Socket.io (WebSocket)
+- **Scheduling**: @nestjs/schedule
 
-- Job orchestration for document processing tasks (extraction, language detection, summarization, translation, entity extraction, ingestion, and question answering)
-- Resource management, including creation, update, and deletion of documents, marks, comments, references, and projects
-- Real-time notifications to the user interface for job status and resource updates
-- Search functionality across documents, resources, marks, and references
-- Threaded discussions and comment management for collaborative workflows
-- Integration with document processing microservice for advanced analysis and vector search
+## Architecture
+
+The application follows a modular NestJS architecture with 21 modules:
+
+| Module | Purpose |
+|--------|---------|
+| **ProjectModule** | Project management |
+| **ThreadModule** | Discussion threads |
+| **DocModule** | Collaborative documents |
+| **ResourceModule** | Resources (uploaded/processed files) |
+| **ResourceTypeModule** | Resource type definitions |
+| **FileStorageModule** | File storage (SHA256 deduplication) |
+| **JobModule** | Async job system |
+| **JobProcessorModule** | Job processing pipeline |
+| **TaskScheduleModule** | Scheduled task execution |
+| **NotificationModule** | WebSocket notifications |
+| **CommentModule** | Comments on documents/resources |
+| **MarkModule** | Highlights/marks on content |
+| **ModelModule** | AI model interactions |
+| **ReferenceModule** | References and citations |
+| **SearchModule** | Global search |
+| **EntityTypeModule** | Entity type definitions (PERSON, ORG, etc.) |
+| **EntityModule** | Named entities |
+| **AuthorModule** | Author management |
+| **PendingEntityModule** | Entity confirmation workflow |
+
+### Job System
+
+The backend processes jobs asynchronously via a polling system (every 5 seconds) with CPU/memory monitoring (skips execution if >80%):
+
+| Processor | Job Type | Description |
+|-----------|----------|-------------|
+| DocumentExtractionProcessor | `document-extraction` | Extracts text and metadata from files |
+| DetectLanguageProcessor | `detect-language` | Detects content language |
+| TranslateProcessor | `translate` | Translates content |
+| EntityExtractionProcessor | `entity-extraction` | Extracts named entities |
+| IngestContentProcessor | `ingest-content` | Ingests processed content |
+| SummarizeProcessor | `summarize` | Generates summaries |
+| KeyPointsProcessor | `key-points` | Extracts key points |
+| KeywordsProcessor | `keywords` | Extracts keywords |
+| AskProcessor | `ask` | Question answering (RAG) |
+
+Job lifecycle: `pending` → `running` → `processed` → `completed` / `failed`
+
+### WebSocket Gateway
+
+Two main events emitted via Socket.io:
+- `notification` — Job and resource status updates
+- `askResponse` — Real-time RAG query responses
+
+## Migrations
+
+Migrations are managed with TypeORM CLI:
+
+```bash
+yarn migration:run        # Run pending migrations
+yarn migration:revert     # Revert last migration
+yarn migration:generate   # Generate migration from entities
+```
 
 ## Installation
 
-### With Docker
+### With Docker (recommended)
 
-1. Ensure Docker is installed on your system.
+From the repository root:
 
-2. Build the backend Docker image:
+```bash
+docker compose up backend
+```
 
-   ```bash
-   docker build -t documents-backend ./backend
-   ```
-
-3. Run the backend container:
-
-   ```bash
-   docker run -p 3000:3000 --env-file ./backend/.env documents-backend
-   ```
-
-   Make sure to provide any required environment variables and ensure PostgreSQL is running and accessible to the backend.
+The container automatically runs `yarn install`, migrations, and starts in debug mode.
 
 ### Local
 
-1. Install Node.js and Yarn if not already installed.
-2. Navigate to the backend directory:
+```bash
+cd backend
+yarn install
+yarn migration:run
+yarn start:dev
+```
 
-   ```bash
-   cd backend
-   ```
+## File Storage
 
-3. Install dependencies:
+Files are stored in `/app/documents_storage` with SHA256 hash-based deduplication. The directory structure uses the first 6 characters of the hash:
 
-   ```bash
-   yarn install
-   ```
-
-4. Start the development server:
-
-   ```bash
-   yarn start:dev
-   ```
-
-5. For testing, run:
-
-   ```bash
-   yarn test
-   ```
+```
+documents_storage/
+└── abc/
+    └── def/
+        └── abcdef1234...ext
+```
 
 ## License
 
-This project is licensed under the Apache License, Version 2.0. See the LICENSE file for details.
+Apache License, Version 2.0. See the LICENSE file for details.
