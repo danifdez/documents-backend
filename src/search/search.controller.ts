@@ -7,7 +7,7 @@ export class SearchController {
   constructor(private readonly searchService: SearchService) { }
 
   @Post('')
-  async search(@Body('term') term: string): Promise<SearchResultDto[]> {
-    return await this.searchService.globalSearch(term);
+  async search(@Body('term') term: string, @Body('projectId') projectId?: number): Promise<SearchResultDto[]> {
+    return await this.searchService.globalSearch(term, projectId);
   }
 }
