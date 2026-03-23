@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# ── Colors ──
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
+ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*"; }
+fail()  { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; exit 1; }
+
+# ── Check Node.js ──
+command -v node >/dev/null 2>&1 || fail "Node.js is not installed."
+command -v npm  >/dev/null 2>&1 || fail "npm is not installed."
+
+NODE_VERSION=$(node -v)
+info "Node.js $NODE_VERSION detected"
+
+# ── Install dependencies ──
+info "Installing npm dependencies..."
+npm install
+ok "Dependencies installed"
+
+# ── Run migrations (requires running PostgreSQL) ──
+if [ "${SKIP_MIGRATIONS:-}" = "1" ]; then
+  info "Skipping migrations (SKIP_MIGRATIONS=1)"
+else
+  info "Running database migrations..."
+  npm run migration:run
+  ok "Migrations complete"
+fi
+
+echo ""
+printf "${GREEN}============================================${NC}\n"
+printf "${GREEN}  Backend installation complete!${NC}\n"
+printf "${GREEN}============================================${NC}\n"
+echo ""
+echo "  Start (dev):   npm run start:dev"
+echo "  Start (prod):  npm run build && npm run start:prod"
+echo ""
