@@ -79,14 +79,24 @@ export class TranslateProcessor implements JobProcessor {
       throw new Error(errorMessage);
     }
 
-    // The job result contains translations for ONE language
-    // We need to handle multiple languages by getting the current language from the result
-    const currentTargetLanguage = targetLanguages[0]; // For now, process one language at a time
-
-    // Check if we need to translate to more languages
+    const currentTargetLanguage = targetLanguages[0];
     const remainingLanguages = targetLanguages.slice(1);
+    const isTranslatingToEnglish = currentTargetLanguage === 'en';
 
-    // Now create or update pending entities with translations included
+    const entityTypeMapping = {
+      'GPE': 'GEOPOLITICAL',
+      'LOC': 'LOCATION',
+      'NORP': 'NATIONALITY',
+      'PERSON': 'PERSON',
+      'ORG': 'ORGANIZATION',
+      'EVENT': 'EVENT',
+      'FAC': 'FACILITY',
+      'PRODUCT': 'PRODUCT',
+      'WORK_OF_ART': 'WORK_OF_ART',
+      'LANGUAGE': 'LANGUAGE',
+      'LAW': 'LAW',
+    };
+
     const concurrency = 5;
     const createOrUpdatePendingEntity = async (index: number) => {
       if (index >= entityDataByIndex.length) return null;
@@ -99,65 +109,77 @@ export class TranslateProcessor implements JobProcessor {
         return null;
       }
 
-      // Map the entity type (this mapping should be consistent with entity-extraction-processor)
-      const entityTypeMapping = {
-        'GPE': 'GEOPOLITICAL',
-        'LOC': 'LOCATION',
-        'NORP': 'NATIONALITY',
-        'PERSON': 'PERSON',
-        'ORG': 'ORGANIZATION',
-        'EVENT': 'EVENT',
-        'FAC': 'FACILITY',
-        'PRODUCT': 'PRODUCT',
-        'WORK_OF_ART': 'WORK_OF_ART',
-        'LANGUAGE': 'LANGUAGE',
-        'LAW': 'LAW',
-      };
-
       const mappedEntityType = entityTypeMapping[entityData.entityType] || null;
       const entityType = mappedEntityType
         ? await this.entityService['entityTypeService'].findByName(mappedEntityType)
         : null;
 
-      // Check if pending entity already exists for this resource and name
+      // Check if pending entity already exists for this resource
       const existingPendingEntities = await this.pendingEntityService.findByResourceId(resourceId);
-      const existingEntity = existingPendingEntities.find(e => e.name === entityData.word);
 
-      if (existingEntity) {
-        // Update existing pending entity with new translation
-        const updatedTranslations = {
-          ...(existingEntity.translations || {}),
-          [currentTargetLanguage]: translationResult.translation_text,
-        };
-        await this.pendingEntityService.update(existingEntity.id, {
-          translations: updatedTranslations,
-        });
-        this.logger.log(`Updated pending entity "${entityData.word}" with ${currentTargetLanguage} translation`);
-        return existingEntity;
-      } else {
-        // Build translations object for new entity
-        const translations = {
-          [currentTargetLanguage]: translationResult.translation_text,
-        };
+      if (isTranslatingToEnglish) {
+        // When translating to English: name = English translation, translations = { sourceLanguage: original }
+        const englishName = translationResult.translation_text;
+        const existingEntity = existingPendingEntities.find(e => e.name === entityData.word || e.name === englishName);
 
-        try {
-          const pendingEntity = await this.pendingEntityService.create({
-            resourceId,
-            name: entityData.word,
-            entityTypeId: entityType?.id,
-            translations,
+        if (existingEntity) {
+          const updatedTranslations = {
+            ...(existingEntity.translations || {}),
+            [sourceLanguage]: entityData.word,
+          };
+          await this.pendingEntityService.update(existingEntity.id, {
+            name: englishName,
+            translations: updatedTranslations,
           });
+          this.logger.log(`Updated pending entity to English name "${englishName}" (was "${entityData.word}")`);
+          return existingEntity;
+        } else {
+          try {
+            const pendingEntity = await this.pendingEntityService.create({
+              resourceId,
+              name: englishName,
+              entityTypeId: entityType?.id,
+              translations: { [sourceLanguage]: entityData.word },
+            });
+            this.logger.log(`Created pending entity "${englishName}" with ${sourceLanguage} translation "${entityData.word}"`);
+            return pendingEntity;
+          } catch (err) {
+            this.logger.error(`Failed to create pending entity for "${englishName}": ${err.message}`);
+            return null;
+          }
+        }
+      } else {
+        // When translating to other languages: name stays as-is, add translation
+        const existingEntity = existingPendingEntities.find(e => e.name === entityData.word);
 
-          this.logger.log(`Created pending entity "${entityData.word}" with ${currentTargetLanguage} translation`);
-          return pendingEntity;
-        } catch (err) {
-          this.logger.error(`Failed to create pending entity for "${entityData.word}": ${err.message}`);
-          return null;
+        if (existingEntity) {
+          const updatedTranslations = {
+            ...(existingEntity.translations || {}),
+            [currentTargetLanguage]: translationResult.translation_text,
+          };
+          await this.pendingEntityService.update(existingEntity.id, {
+            translations: updatedTranslations,
+          });
+          this.logger.log(`Updated pending entity "${entityData.word}" with ${currentTargetLanguage} translation`);
+          return existingEntity;
+        } else {
+          try {
+            const pendingEntity = await this.pendingEntityService.create({
+              resourceId,
+              name: entityData.word,
+              entityTypeId: entityType?.id,
+              translations: { [currentTargetLanguage]: translationResult.translation_text },
+            });
+            this.logger.log(`Created pending entity "${entityData.word}" with ${currentTargetLanguage} translation`);
+            return pendingEntity;
+          } catch (err) {
+            this.logger.error(`Failed to create pending entity for "${entityData.word}": ${err.message}`);
+            return null;
+          }
         }
       }
     };
 
-    // Process entities with concurrency control
     const indices = Array.from({ length: entityDataByIndex.length }, (_, i) => i);
     const pendingEntities = [];
 
@@ -167,7 +189,7 @@ export class TranslateProcessor implements JobProcessor {
       pendingEntities.push(...batchResults.filter(Boolean));
     }
 
-    // If there are more languages to translate, create a new translation job
+    // If there are more languages to translate, create a follow-up job
     if (remainingLanguages.length > 0) {
       const textsForTranslation = entityDataByIndex.map(entity => ({ text: entity.word }));
 
@@ -182,6 +204,9 @@ export class TranslateProcessor implements JobProcessor {
 
       this.logger.log(`Created follow-up translation job for remaining languages: ${remainingLanguages.join(', ')}`);
     }
+
+    // Update resource status to 'entities' so the UI shows the entities tab
+    await this.resourceService.update(resourceId, { status: 'entities' });
 
     return {
       success: true,
@@ -511,6 +536,16 @@ export class TranslateProcessor implements JobProcessor {
       await this.jobService.create('entity-extraction', JobPriority.NORMAL, {
         resourceId: resourceId,
         texts: extractedTexts,
+      });
+    }
+
+    // Ingest translated content into vector database
+    if (job.payload['triggerIngest']) {
+      const projectId = (resourceEntity?.project as any)?.id || null;
+      await this.jobService.create('ingest-content', JobPriority.NORMAL, {
+        resourceId,
+        projectId,
+        content: bodyContent,
       });
     }
 

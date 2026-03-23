@@ -6,6 +6,11 @@ import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobService } from 'src/job/job.service';
 import { JobEntity } from 'src/job/job.entity';
 
+const MEDIA_EXTENSIONS = new Set([
+  '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma', '.opus', '.aiff', '.aif',
+  '.mp4', '.m4v', '.mov', '.avi', '.mkv', '.webm', '.wmv',
+]);
+
 @Injectable()
 export class DocumentExtractionProcessor implements JobProcessor {
   private readonly logger = new Logger(DocumentExtractionProcessor.name);
@@ -39,13 +44,14 @@ export class DocumentExtractionProcessor implements JobProcessor {
     }
 
     const { title, author, publication_date, content, pages } = result;
+    const isMedia = MEDIA_EXTENSIONS.has(extension.toLowerCase());
 
     const updateData: any = {
       title,
       author,
       publicationDate: publication_date,
       content,
-      status: 'extracted',
+      status: isMedia ? 'confirmed_extraction' : 'extracted',
     };
 
     if (pages !== undefined) {

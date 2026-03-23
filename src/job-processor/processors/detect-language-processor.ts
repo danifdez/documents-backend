@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
-import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
 import { JobService } from 'src/job/job.service';
-import { extractTextFromHtml } from 'src/utils/text';
+import { JobPriority } from 'src/job/job-priority.enum';
 import { JobEntity } from 'src/job/job.entity';
+import { extractTextFromHtml } from 'src/utils/text';
 
 @Injectable()
 export class DetectLanguageProcessor implements JobProcessor {
@@ -14,7 +14,7 @@ export class DetectLanguageProcessor implements JobProcessor {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly jobService: JobService,
-  ) { }
+  ) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;
@@ -29,38 +29,46 @@ export class DetectLanguageProcessor implements JobProcessor {
       results[0].language === results[1].language
     ) {
       const detectedLanguage = results[0].language;
-
-      await this.resourceService.update(resourceId, {
-        language: detectedLanguage,
-      });
-
       const resource = await this.resourceService.findOne(resourceId);
       const content = await this.resourceService.getContentById(resourceId);
-      const extractedTexts = extractTextFromHtml(content);
+      const projectId = (resource?.project as any)?.id || null;
 
-      // TODO: Get default language from settings (hardcoded to 'en' for now)
-      const defaultLanguage = 'es';
-
-      // If detected language is the same as default language, go directly to entities
-      if (detectedLanguage === defaultLanguage) {
+      if (!content) {
         await this.resourceService.update(resourceId, {
-          status: 'entities',
+          language: detectedLanguage,
+          status: 'ready',
+        });
+        return;
+      }
+
+      if (detectedLanguage === 'en') {
+        // English: set workingContent = content and ingest immediately
+        await this.resourceService.update(resourceId, {
+          language: detectedLanguage,
+          workingContent: content,
+          status: 'ready',
         });
 
-        // Launch entity extraction job with texts array
-        await this.jobService.create('entity-extraction', JobPriority.NORMAL, {
-          resourceId: resourceId,
-          texts: extractedTexts,
+        await this.jobService.create('ingest-content', JobPriority.NORMAL, {
+          resourceId,
+          projectId,
+          content,
         });
       } else {
-        // If language is different, translate first
-        await this.resourceService.update(resourceId, { status: 'translating' });
+        // Non-English: translate content to English, save to workingContent, then ingest
+        await this.resourceService.update(resourceId, {
+          language: detectedLanguage,
+          status: 'ready',
+        });
 
+        const extractedTexts = extractTextFromHtml(content);
         await this.jobService.create('translate', JobPriority.NORMAL, {
-          resourceId: resourceId,
+          translationType: 'content',
+          resourceId,
           sourceLanguage: detectedLanguage,
-          targetLanguage: defaultLanguage,
-          saveTo: 'translatedContent',
+          targetLanguage: 'en',
+          saveTo: 'workingContent',
+          triggerIngest: true,
           texts: extractedTexts,
         });
       }

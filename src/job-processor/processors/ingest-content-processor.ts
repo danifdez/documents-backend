@@ -19,15 +19,33 @@ export class IngestContentProcessor implements JobProcessor {
   }
 
   async process(job: JobEntity): Promise<any> {
-    const resourceId = Number(job.payload['resourceId']) as number;
+    const sourceType = job.payload['sourceType'] || 'resource';
 
-    // Update resource status to 'ready'
-    await this.resourceService.update(resourceId, { status: 'ready' });
+    if (sourceType === 'resource') {
+      const resourceId = Number(job.payload['resourceId']);
+      await this.resourceService.update(resourceId, { status: 'ready' });
 
-    this.notificationGateway.sendNotification({
-      type: 'ingest-content',
-      message: `Document ingestion completed for resource with ID ${resourceId}. Resource is now ready.`,
-      resourceId,
-    });
+      this.notificationGateway.sendNotification({
+        type: 'ingest-content',
+        message: `Document ingestion completed for resource with ID ${resourceId}. Resource is now ready.`,
+        resourceId,
+      });
+    } else if (sourceType === 'doc') {
+      const docId = Number(job.payload['docId']);
+
+      this.notificationGateway.sendNotification({
+        type: 'ingest-content',
+        message: `Document ingestion completed for doc ${docId}.`,
+        docId,
+      });
+    } else if (sourceType === 'knowledge') {
+      const knowledgeEntryId = Number(job.payload['knowledgeEntryId']);
+
+      this.notificationGateway.sendNotification({
+        type: 'ingest-content',
+        message: `Knowledge base entry ${knowledgeEntryId} ingested into RAG.`,
+        knowledgeEntryId,
+      });
+    }
   }
 }

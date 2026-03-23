@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
 import { ResourceService } from 'src/resource/resource.service';
-import { EntityService } from 'src/entity/entity.service';
+import { EntityTypeService } from 'src/entity-type/entity-type.service';
 import { JobEntity } from 'src/job/job.entity';
 import { PendingEntityService } from 'src/pending-entity/pending-entity.service';
 import { JobService } from 'src/job/job.service';
@@ -35,10 +35,10 @@ export class EntityExtractionProcessor implements JobProcessor {
 
   constructor(
     private readonly resourceService: ResourceService,
-    private readonly entityService: EntityService,
+    private readonly entityTypeService: EntityTypeService,
     private readonly pendingEntityService: PendingEntityService,
     private readonly jobService: JobService,
-  ) { }
+  ) {}
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;
@@ -78,13 +78,9 @@ export class EntityExtractionProcessor implements JobProcessor {
       throw error;
     }
 
-    // Since entities are extracted from working_content (always English),
-    // we need to translate them to:
-    // 1. The original document language (resource.language) - for 'extracted' view
-    // 2. The target language (from settings, default 'es') - for 'translated' view
-    const sourceLanguage = 'en'; // Entities are always in English from working_content
-    const targetLanguage = 'es'; // TODO: Get from settings API
-    const documentLanguage = resource.language || 'en';
+    // Entities are extracted from the resource content in its original language
+    const sourceLanguage: string = resource.language || 'en';
+    const targetLanguage: string = 'es'; // TODO: Get from settings API
 
     // Build texts array for translation
     const textsForTranslation: Array<{ text: string }> = result.entities.map(entity => ({
@@ -99,32 +95,60 @@ export class EntityExtractionProcessor implements JobProcessor {
 
     // Determine which languages we need to translate to
     const languagesToTranslate = new Set<string>();
-    if (documentLanguage !== 'en') {
-      languagesToTranslate.add(documentLanguage);
+    // Translate to English if source is not English
+    if (sourceLanguage !== 'en') {
+      languagesToTranslate.add('en');
     }
-    // Always add target language if it's different from English and document language
-    if (targetLanguage !== documentLanguage) {
+    // Translate to target language if different from source and English
+    if (targetLanguage !== sourceLanguage && targetLanguage !== 'en') {
       languagesToTranslate.add(targetLanguage);
     }
 
-    // Create a single translation job that will translate to all needed languages
-    // and then create the pending entities
-    await this.jobService.create('translate', JobPriority.HIGH, {
-      translationType: 'entities-pending-batch',
-      sourceLanguage,
-      targetLanguages: Array.from(languagesToTranslate), // Multiple target languages
-      texts: textsForTranslation,
-      entityDataByIndex,
-      resourceId,
-    });
+    if (languagesToTranslate.size > 0) {
+      // Create translation job for entity names
+      await this.jobService.create('translate', JobPriority.HIGH, {
+        translationType: 'entities-pending-batch',
+        sourceLanguage,
+        targetLanguages: Array.from(languagesToTranslate),
+        texts: textsForTranslation,
+        entityDataByIndex,
+        resourceId,
+      });
 
-    this.logger.log(`Created translation job for ${result.entities.length} entities to languages: ${Array.from(languagesToTranslate).join(', ')}`);
+      this.logger.log(`Created translation job for ${result.entities.length} entities to languages: ${Array.from(languagesToTranslate).join(', ')}`);
+    } else {
+      // No translation needed, create pending entities directly
+      await this.createPendingEntitiesDirectly(resourceId, result.entities, sourceLanguage);
+      this.logger.log(`Created ${result.entities.length} pending entities directly (no translation needed)`);
+    }
 
     return {
       success: true,
       entitiesProcessed: result.entities.length,
-      pendingTranslation: true,
-      message: 'Entities will be created as pending after translation completes'
     };
+  }
+
+  private async createPendingEntitiesDirectly(
+    resourceId: number,
+    entities: Array<{ word: string; entity: string }>,
+    language: string,
+  ) {
+    for (const entity of entities) {
+      const mappedType = this.entityTypeMapping[entity.entity];
+      if (!mappedType) continue;
+
+      const entityType = await this.entityTypeService.findByName(mappedType);
+      if (!entityType) continue;
+
+      await this.pendingEntityService.create({
+        resourceId,
+        name: entity.word,
+        entityTypeId: entityType.id,
+        translations: { [language]: entity.word },
+        scope: 'document',
+      });
+    }
+
+    await this.resourceService.update(resourceId, { status: 'entities' });
   }
 }

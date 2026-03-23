@@ -16,8 +16,11 @@ export class AskProcessor implements JobProcessor {
 
   async process(job: JobEntity): Promise<any> {
     const response = job.result['response'] as string;
+    const requestId = job.payload['requestId'] as string | undefined;
+
     this.notificationGateway.sendAskResponse({
       response,
+      requestId,
     });
 
     return {
