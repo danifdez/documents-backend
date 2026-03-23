@@ -16,6 +16,8 @@ export const databaseProviders = [
       const pool = new Pool({ host, port, user, password, database });
 
       await pool.query('SELECT 1');
+      await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+      await pool.query('CREATE EXTENSION IF NOT EXISTS unaccent');
       return pool;
     },
   },

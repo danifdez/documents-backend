@@ -18,6 +18,19 @@ import { AuthorEntity } from '../author/author.entity';
 import { ResourceAuthorEntity } from '../author/resource-author.entity';
 import { PendingEntityEntity } from '../pending-entity/pending-entity.entity';
 import { EntityProjectEntity } from '../entity-project/entity-project.entity';
+import { CanvasEntity } from '../canvas/canvas.entity';
+import { DatasetEntity } from '../dataset/dataset.entity';
+import { DatasetRecordEntity } from '../dataset/dataset-record.entity';
+import { DatasetRelationEntity } from '../dataset/dataset-relation.entity';
+import { DatasetRecordLinkEntity } from '../dataset/dataset-record-link.entity';
+import { NoteEntity } from '../note/note.entity';
+import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
+import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
+import { TimelineEntity } from '../timeline/timeline.entity';
+import { BibliographyEntryEntity } from '../bibliography/bibliography-entry.entity';
+import { UserTaskEntity } from '../user-task/user-task.entity';
+import { WorkerEntity } from '../worker/worker.entity';
+import { UserEntity } from '../auth/user.entity';
 
 @Module({
   imports: [
@@ -43,6 +56,19 @@ import { EntityProjectEntity } from '../entity-project/entity-project.entity';
       ResourceAuthorEntity,
       PendingEntityEntity,
       EntityProjectEntity,
+      CanvasEntity,
+      DatasetEntity,
+      DatasetRecordEntity,
+      DatasetRelationEntity,
+      DatasetRecordLinkEntity,
+      NoteEntity,
+      CalendarEventEntity,
+      KnowledgeEntryEntity,
+      TimelineEntity,
+      BibliographyEntryEntity,
+      UserTaskEntity,
+      WorkerEntity,
+      UserEntity,
     ]),
   ],
   providers: [...databaseProviders],

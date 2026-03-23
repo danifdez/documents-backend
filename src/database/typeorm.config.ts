@@ -14,6 +14,19 @@ import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity'
 import { AuthorEntity } from '../author/author.entity';
 import { ResourceAuthorEntity } from '../author/resource-author.entity';
 import { PendingEntityEntity } from '../pending-entity/pending-entity.entity';
+import { CanvasEntity } from '../canvas/canvas.entity';
+import { DatasetEntity } from '../dataset/dataset.entity';
+import { DatasetRecordEntity } from '../dataset/dataset-record.entity';
+import { DatasetRelationEntity } from '../dataset/dataset-relation.entity';
+import { DatasetRecordLinkEntity } from '../dataset/dataset-record-link.entity';
+import { NoteEntity } from '../note/note.entity';
+import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
+import { TimelineEntity } from '../timeline/timeline.entity';
+import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
+import { BibliographyEntryEntity } from '../bibliography/bibliography-entry.entity';
+import { UserTaskEntity } from '../user-task/user-task.entity';
+import { WorkerEntity } from '../worker/worker.entity';
+import { UserEntity } from '../auth/user.entity';
 
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
@@ -38,6 +51,19 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       AuthorEntity,
       ResourceAuthorEntity,
       PendingEntityEntity,
+      CanvasEntity,
+      DatasetEntity,
+      DatasetRecordEntity,
+      DatasetRelationEntity,
+      DatasetRecordLinkEntity,
+      NoteEntity,
+      CalendarEventEntity,
+      TimelineEntity,
+      KnowledgeEntryEntity,
+      BibliographyEntryEntity,
+      UserTaskEntity,
+      WorkerEntity,
+      UserEntity,
     ],
     synchronize: false,
     logging: false,
