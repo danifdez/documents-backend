@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe, Query } from '@nestjs/common';
 import { AuthorService } from './author.service';
 import { AuthorEntity } from './author.entity';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('authors')
 export class AuthorController {
@@ -21,6 +23,7 @@ export class AuthorController {
     }
 
     @Post()
+    @RequirePermissions(Permission.WRITE)
     async create(@Body() author: Partial<AuthorEntity>): Promise<AuthorEntity> {
         if (author.name) {
             return await this.authorService.findOrCreate(author.name);
@@ -29,6 +32,7 @@ export class AuthorController {
     }
 
     @Patch(':id')
+    @RequirePermissions(Permission.WRITE)
     async update(
         @Param('id', ParseIntPipe) id: number,
         @Body() author: Partial<AuthorEntity>,
@@ -37,6 +41,7 @@ export class AuthorController {
     }
 
     @Delete(':id')
+    @RequirePermissions(Permission.DELETE)
     async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
         await this.authorService.remove(id);
     }
