@@ -5,6 +5,7 @@ import { FileStorageModule } from 'src/file-storage/file-storage.module';
 import { ResourceModule } from 'src/resource/resource.module';
 import { JobProcessorModule } from 'src/job-processor/job-processor.module';
 import { DatabaseModule } from 'src/database/database.module';
+import { WorkerModule } from 'src/worker/worker.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { DatabaseModule } from 'src/database/database.module';
     FileStorageModule,
     ResourceModule,
     JobProcessorModule,
+    WorkerModule,
   ],
   providers: [TaskScheduleService],
   exports: [TaskScheduleService],

@@ -5,6 +5,7 @@ import * as process from 'process';
 import { JobStatus } from 'src/job/job-status.enum';
 import { JobService } from 'src/job/job.service';
 import { JobProcessorFactory } from 'src/job-processor/job-processor.factory';
+import { WorkerService } from 'src/worker/worker.service';
 
 @Injectable()
 export class TaskScheduleService {
@@ -13,6 +14,7 @@ export class TaskScheduleService {
   constructor(
     private readonly jobService: JobService,
     private readonly jobProcessorFactory: JobProcessorFactory,
+    private readonly workerService: WorkerService,
   ) { }
 
   private getCPUAndMemoryUsage() {
@@ -78,6 +80,25 @@ export class TaskScheduleService {
         `Error processing job ${firstJob.id}: ${error.message}`,
       );
       await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
+    }
+  }
+
+  @Cron(CronExpression.EVERY_30_SECONDS, {
+    waitForCompletion: true,
+  })
+  async handleStaleRecovery() {
+    try {
+      const thresholdDate = new Date(Date.now() - 60 * 1000);
+      const requeued = await this.jobService.requeueStaleJobs(thresholdDate);
+      if (requeued > 0) {
+        this.logger.log(`Requeued ${requeued} stale job(s)`);
+      }
+      const offlined = await this.workerService.markStaleOffline(60);
+      if (offlined > 0) {
+        this.logger.log(`Marked ${offlined} worker(s) as offline`);
+      }
+    } catch (error) {
+      this.logger.error(`Error during stale recovery: ${error.message}`);
     }
   }
 
