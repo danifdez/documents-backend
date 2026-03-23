@@ -36,7 +36,7 @@ export class EntityEntity {
     @JoinColumn({ name: 'entity_type_id' })
     entityType: EntityTypeEntity;
 
-    @ManyToMany(() => ResourceEntity, { cascade: ['insert'] })
+    @ManyToMany(() => ResourceEntity, (resource) => resource.entities, { cascade: ['insert'] })
     resources: ResourceEntity[];
 
     @ManyToMany(() => ProjectEntity, { cascade: ['insert'] })

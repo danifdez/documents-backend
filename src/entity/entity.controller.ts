@@ -2,6 +2,8 @@ import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe, Query 
 import { EntityService } from './entity.service';
 import { EntityEntity } from './entity.entity';
 import { CreateEntityDto, UpdateEntityDto } from './dto/entity.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('entities')
 export class EntityController {
@@ -44,17 +46,24 @@ export class EntityController {
         return await this.entityService.findByResourceGroupedByScope(resourceId, searchTerm);
     }
 
+    @Get(':id/detailed')
+    async findOneDetailed(@Param('id', ParseIntPipe) id: number): Promise<any | null> {
+        return await this.entityService.findOneDetailed(id);
+    }
+
     @Get(':id')
     async findOne(@Param('id', ParseIntPipe) id: number): Promise<EntityEntity | null> {
         return await this.entityService.findOne(id);
     }
 
     @Post()
+    @RequirePermissions(Permission.WRITE)
     async create(@Body() createEntityDto: CreateEntityDto): Promise<EntityEntity> {
         return await this.entityService.create(createEntityDto);
     }
 
     @Patch(':id')
+    @RequirePermissions(Permission.WRITE)
     async update(
         @Param('id', ParseIntPipe) id: number,
         @Body() updateEntityDto: UpdateEntityDto,
@@ -63,11 +72,13 @@ export class EntityController {
     }
 
     @Delete(':id')
+    @RequirePermissions(Permission.DELETE)
     async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
         await this.entityService.remove(id);
     }
 
     @Post(':sourceId/merge/:targetId')
+    @RequirePermissions(Permission.WRITE)
     async merge(
         @Param('sourceId', ParseIntPipe) sourceId: number,
         @Param('targetId', ParseIntPipe) targetId: number,

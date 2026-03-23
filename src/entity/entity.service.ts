@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EntityEntity, EntityAlias, EntityTranslation } from './entity.entity';
 import { CreateEntityDto, UpdateEntityDto } from './dto/entity.dto';
 import { EntityTypeService } from '../entity-type/entity-type.service';
 import { ResourceService } from '../resource/resource.service';
+import { DEFAULT_SEARCH_LIMIT } from '../common/constants';
 
 @Injectable()
 export class EntityService {
@@ -27,6 +28,37 @@ export class EntityService {
             where: { id },
             relations: ['entityType', 'resources']
         });
+    }
+
+    async findOneDetailed(id: number): Promise<any | null> {
+        const entity = await this.repository.findOne({
+            where: { id },
+            relations: ['entityType', 'projects']
+        });
+
+        if (!entity) return null;
+
+        const resources = await this.repository.query(
+            `SELECT r.id, r.name, r.type, r.status,
+                    p.id as "projectId", p.name as "projectName"
+             FROM resource_entities re
+             JOIN resources r ON r.id = re.resource_id
+             LEFT JOIN projects p ON p.id = r."projectId"
+             WHERE re.entity_id = $1
+             ORDER BY r.name ASC`,
+            [id]
+        );
+
+        return {
+            ...entity,
+            resources: resources.map((r: any) => ({
+                id: r.id,
+                name: r.name,
+                type: r.type,
+                status: r.status,
+                project: r.projectId ? { id: r.projectId, name: r.projectName } : null,
+            })),
+        };
     }
 
     async findByName(name: string): Promise<EntityEntity | null> {
@@ -64,6 +96,22 @@ export class EntityService {
         return res || null;
     }
 
+    async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
+        if (!searchTerm || searchTerm.trim() === '') return [];
+        const like = `%${searchTerm}%`;
+        const qb = this.repository
+            .createQueryBuilder('e')
+            .select(['e.id', 'e.name', 'e.description'])
+            .addSelect('similarity(unaccent(e.name), unaccent(:s))', 'score')
+            .where('unaccent(e.name) ILIKE unaccent(:q) OR unaccent(e.description) ILIKE unaccent(:q)', { q: like })
+            .setParameter('s', searchTerm);
+        if (projectId) {
+            qb.innerJoin('entity_projects', 'ep', 'ep.entity_id = e.id')
+              .andWhere('ep.project_id = :projectId', { projectId });
+        }
+        return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
+    }
+
     async searchByName(searchTerm: string): Promise<EntityEntity[]> {
         if (!searchTerm || searchTerm.trim().length === 0) {
             return [];
@@ -91,7 +139,7 @@ export class EntityService {
                 searchTerm: `%${trimmedTerm}%`
             })
             .orderBy('entity.name', 'ASC')
-            .limit(20)
+            .limit(DEFAULT_SEARCH_LIMIT)
             .getMany();
 
         return results;
@@ -100,7 +148,7 @@ export class EntityService {
     async create(createEntityDto: CreateEntityDto): Promise<EntityEntity> {
         const entityType = await this.entityTypeService.findOne(createEntityDto.entityTypeId);
         if (!entityType) {
-            throw new Error(`EntityType with id ${createEntityDto.entityTypeId} not found`);
+            throw new NotFoundException(`EntityType with id ${createEntityDto.entityTypeId} not found`);
         }
 
         const entity = this.repository.create({
@@ -144,7 +192,7 @@ export class EntityService {
         if (updateEntityDto.entityTypeId && updateEntityDto.entityTypeId !== existingEntity.entityType.id) {
             const entityType = await this.entityTypeService.findOne(updateEntityDto.entityTypeId);
             if (!entityType) {
-                throw new Error(`EntityType with id ${updateEntityDto.entityTypeId} not found`);
+                throw new NotFoundException(`EntityType with id ${updateEntityDto.entityTypeId} not found`);
             }
             existingEntity.entityType = entityType;
         }
@@ -267,11 +315,11 @@ export class EntityService {
         });
 
         if (!sourceEntity) {
-            throw new Error(`Source entity with id ${sourceEntityId} not found`);
+            throw new NotFoundException(`Source entity with id ${sourceEntityId} not found`);
         }
 
         if (!targetEntity) {
-            throw new Error(`Target entity with id ${targetEntityId} not found`);
+            throw new NotFoundException(`Target entity with id ${targetEntityId} not found`);
         }
 
         // Merge aliases with locale information
@@ -389,7 +437,6 @@ export class EntityService {
         project: EntityEntity[];
         global: EntityEntity[];
     }> {
-        // Get resource with project relation
         const resource = await this.resourceService.findOne(resourceId);
         if (!resource) {
             return { document: [], project: [], global: [] };
@@ -397,14 +444,30 @@ export class EntityService {
 
         const projectId = resource.project?.id;
 
-        // Build base query
+        // Single query that classifies entities by scope using subqueries
+        // instead of N+1 individual queries per entity
         let query = this.repository.createQueryBuilder('entity')
             .leftJoinAndSelect('entity.entityType', 'entityType')
-            .leftJoin('resource_entities', 're', 're.entity_id = entity.id')
-            .leftJoin('resources', 'r', 'r.id = re.resource_id')
-            .leftJoin('projects', 'p', 'p.id = r.project_id');
+            .addSelect(`(
+                SELECT COUNT(*) FROM resource_entities re_doc
+                WHERE re_doc.entity_id = entity.id AND re_doc.resource_id = :resourceId
+            )`, 'in_document_count')
+            .setParameter('resourceId', resourceId);
 
-        // Add search filter if provided
+        if (projectId) {
+            query = query.addSelect(`(
+                SELECT COUNT(*) FROM resource_entities re_proj
+                JOIN resources r_proj ON r_proj.id = re_proj.resource_id
+                WHERE re_proj.entity_id = entity.id AND r_proj."projectId" = :projectId
+            )`, 'in_project_count')
+            .setParameter('projectId', projectId);
+        }
+
+        query = query.addSelect(`(
+            SELECT COUNT(*) FROM resource_entities re_any
+            WHERE re_any.entity_id = entity.id
+        )`, 'total_resource_count');
+
         if (searchTerm && searchTerm.trim().length > 0) {
             const trimmedTerm = searchTerm.trim();
             query = query.where(
@@ -415,53 +478,27 @@ export class EntityService {
             );
         }
 
-        // Get all entities
-        const allEntities = await query
+        const rawResults = await query
             .orderBy('entity.name', 'ASC')
-            .getMany();
+            .getRawAndEntities();
 
-        // Now categorize each entity based on its resource associations
         const documentEntities: EntityEntity[] = [];
         const projectEntities: EntityEntity[] = [];
         const globalEntities: EntityEntity[] = [];
 
-        for (const entity of allEntities) {
-            // Check if entity is associated with this specific resource (document scope)
-            const isInDocument = await this.repository.createQueryBuilder('entity')
-                .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
-                .where('entity.id = :entityId', { entityId: entity.id })
-                .andWhere('re.resource_id = :resourceId', { resourceId })
-                .getCount();
+        for (let i = 0; i < rawResults.entities.length; i++) {
+            const entity = rawResults.entities[i];
+            const raw = rawResults.raw[i];
 
-            if (isInDocument > 0) {
+            const inDocCount = parseInt(raw.in_document_count, 10) || 0;
+            const inProjectCount = projectId ? (parseInt(raw.in_project_count, 10) || 0) : 0;
+            const totalCount = parseInt(raw.total_resource_count, 10) || 0;
+
+            if (inDocCount > 0) {
                 documentEntities.push(entity);
-                continue;
-            }
-
-            // Check if entity is associated with resources from the same project (project scope)
-            if (projectId) {
-                const isInProject = await this.repository.createQueryBuilder('entity')
-                    .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
-                    .innerJoin('resources', 'r', 'r.id = re.resource_id')
-                    .innerJoin('projects', 'p', 'p.id = r.project_id')
-                    .where('entity.id = :entityId', { entityId: entity.id })
-                    .andWhere('p.id = :projectId', { projectId })
-                    .getCount();
-
-                if (isInProject > 0) {
-                    projectEntities.push(entity);
-                    continue;
-                }
-            }
-
-            // Check if entity has no resource associations (global scope)
-            const resourceCount = await this.repository.createQueryBuilder('entity')
-                .leftJoin('resource_entities', 're', 're.entity_id = entity.id')
-                .where('entity.id = :entityId', { entityId: entity.id })
-                .andWhere('re.resource_id IS NULL')
-                .getCount();
-
-            if (resourceCount > 0) {
+            } else if (projectId && inProjectCount > 0) {
+                projectEntities.push(entity);
+            } else if (totalCount === 0) {
                 globalEntities.push(entity);
             }
         }
@@ -469,7 +506,7 @@ export class EntityService {
         return {
             document: documentEntities,
             project: projectEntities,
-            global: globalEntities
+            global: globalEntities,
         };
     }
 
@@ -477,7 +514,7 @@ export class EntityService {
         // First try to find by name and type
         const entityType = await this.entityTypeService.findByName(entityTypeName);
         if (!entityType) {
-            throw new Error(`EntityType '${entityTypeName}' not found`);
+            throw new NotFoundException(`EntityType '${entityTypeName}' not found`);
         }
 
         let entity = await this.findByNameAndType(name, entityType.id);
