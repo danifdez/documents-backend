@@ -1,87 +1,80 @@
-# Documents backend
+# Documents Backend
 
-Central API for the intelligent document processing system. Orchestrates jobs, manages resources, and delivers real-time notifications to the frontend.
+> WARNING: This project is in ALPHA — features are experimental and may change without notice. Use at your own risk.
 
-## Tech Stack
+## Overview
 
-- **Framework**: NestJS (TypeScript, Node.js 22)
-- **Database**: PostgreSQL 17.6 with TypeORM
-- **Real-time**: Socket.io (WebSocket)
-- **Scheduling**: @nestjs/schedule
+The Documents Backend is the API server that powers the Documents platform — a system for uploading,
+organizing, and deeply analyzing documents with AI assistance. It sits between the user interface and
+the AI processing layer, coordinating everything from file uploads to intelligent analysis results,
+and keeping the interface updated in real time.
 
-## Architecture
+If you upload a PDF, the backend takes care of extracting its text, detecting the language, identifying
+people and organizations mentioned in it, generating a summary, and making it searchable — without you
+having to trigger each of those steps manually.
 
-The application follows a modular NestJS architecture with 21 modules:
+## Features
 
-| Module | Purpose |
-|--------|---------|
-| **ProjectModule** | Project management |
-| **ThreadModule** | Discussion threads |
-| **DocModule** | Collaborative documents |
-| **ResourceModule** | Resources (uploaded/processed files) |
-| **ResourceTypeModule** | Resource type definitions |
-| **FileStorageModule** | File storage (SHA256 deduplication) |
-| **JobModule** | Async job system |
-| **JobProcessorModule** | Job processing pipeline |
-| **TaskScheduleModule** | Scheduled task execution |
-| **NotificationModule** | WebSocket notifications |
-| **CommentModule** | Comments on documents/resources |
-| **MarkModule** | Highlights/marks on content |
-| **ModelModule** | AI model interactions |
-| **ReferenceModule** | References and citations |
-| **SearchModule** | Global search |
-| **EntityTypeModule** | Entity type definitions (PERSON, ORG, etc.) |
-| **EntityModule** | Named entities |
-| **AuthorModule** | Author management |
-| **PendingEntityModule** | Entity confirmation workflow |
+### Document management
 
-### Job System
+Upload files of any common format (PDF, Word, HTML, plain text, and more) and the backend stores them
+safely, avoiding duplicates automatically. Every document is organized inside a project, and you can
+attach marks, comments, and notes to specific parts.
 
-The backend processes jobs asynchronously via a polling system (every 5 seconds) with CPU/memory monitoring (skips execution if >80%):
+### Automated AI processing pipeline
 
-| Processor | Job Type | Description |
-|-----------|----------|-------------|
-| DocumentExtractionProcessor | `document-extraction` | Extracts text and metadata from files |
-| DetectLanguageProcessor | `detect-language` | Detects content language |
-| TranslateProcessor | `translate` | Translates content |
-| EntityExtractionProcessor | `entity-extraction` | Extracts named entities |
-| IngestContentProcessor | `ingest-content` | Ingests processed content |
-| SummarizeProcessor | `summarize` | Generates summaries |
-| KeyPointsProcessor | `key-points` | Extracts key points |
-| KeywordsProcessor | `keywords` | Extracts keywords |
-| AskProcessor | `ask` | Question answering (RAG) |
+When a document is uploaded, it enters a processing queue. The backend automatically extracts its text
+content, detects the language, translates it if needed, identifies named entities (people, organizations,
+locations), generates a summary, extracts keywords and key points, and finally makes the document ready
+for semantic search. All of this happens in the background without any manual steps.
 
-Job lifecycle: `pending` → `running` → `processed` → `completed` / `failed`
+### Real-time notifications
 
-### WebSocket Gateway
+As each processing step completes, the interface receives an instant notification via WebSocket so the
+user always sees the current state of their documents without needing to refresh.
 
-Two main events emitted via Socket.io:
-- `notification` — Job and resource status updates
-- `askResponse` — Real-time RAG query responses
+### Search
 
-## Migrations
+Full-text search across documents, marks, references, and the knowledge base, so you can find what you
+need across the entire system.
 
-Migrations are managed with TypeORM CLI:
+### Projects and organization
 
-```bash
-yarn migration:run        # Run pending migrations
-yarn migration:revert     # Revert last migration
-yarn migration:generate   # Generate migration from entities
-```
+Everything is organized into projects. Each project can have threads (workspaces for discussion and
+documents), canvases (visual boards), notes, calendar events, timelines, and task lists, giving teams
+a centralized space to work.
 
-## Installation
+### Collaboration
 
-### With Docker (recommended)
+Documents support threaded discussions and inline comments. Multiple people can annotate, mark passages,
+and discuss content within the same workspace.
 
-From the repository root:
+### Entities and knowledge base
 
-```bash
-docker compose up backend
-```
+Named entities (people, organizations, locations, etc.) extracted from documents are stored and linked
+across the project. You can confirm, merge, and manage them to build a shared knowledge graph. There is
+also a separate knowledge base for manual notes and reference material.
 
-The container automatically runs `yarn install`, migrations, and starts in debug mode.
+### Datasets
 
-### Local
+Structured data files (CSV) can be imported as datasets. The backend stores the records, computes
+descriptive statistics automatically, and allows querying the data directly.
+
+### Bibliography
+
+Bibliographic references can be imported (BibTeX) and managed per document or project, with full
+metadata support (title, authors, year, DOI, ISBN, abstract, and more).
+
+### Export
+
+Documents and their processed content can be exported in various formats for use outside the platform.
+
+### Authentication and access control
+
+The backend supports user accounts with role-based access (admin and user roles) and fine-grained
+permission controls. Authentication can be fully disabled for local or single-user deployments.
+
+## Quick start
 
 ```bash
 cd backend
@@ -90,17 +83,17 @@ yarn migration:run
 yarn start:dev
 ```
 
-## File Storage
+## Documentation
 
-Files are stored in `/app/documents_storage` with SHA256 hash-based deduplication. The directory structure uses the first 6 characters of the hash:
-
-```
-documents_storage/
-└── abc/
-    └── def/
-        └── abcdef1234...ext
-```
+| Document | Description |
+|----------|-------------|
+| [Getting Started](./docs/getting-started.md) | Installation, setup, and available scripts |
+| [Architecture](./docs/architecture.md) | System modules, data model, and request flow |
+| [Job System](./docs/job-system.md) | Async processing pipeline and job processors |
+| [File Storage](./docs/file-storage.md) | SHA256 content-addressed storage system |
+| [Configuration](./docs/configuration.md) | Environment variables and settings |
+| [Authentication](./docs/authentication.md) | Auth system, roles, and permissions |
 
 ## License
 
-Apache License, Version 2.0. See the LICENSE file for details.
+This project is licensed under the Apache License, Version 2.0. See the LICENSE file for details.
