@@ -11,10 +11,13 @@ export class ModelService {
     private readonly resourceService: ResourceService,
   ) { }
 
-  async ask(question: string): Promise<void> {
-    this.jobService.create('ask', JobPriority.HIGH, {
+  async ask(question: string, projectId?: number, requestId?: string): Promise<{ jobId: number }> {
+    const job = await this.jobService.create('ask', JobPriority.HIGH, {
       question,
+      projectId,
+      requestId,
     });
+    return { jobId: job.id };
   }
 
 

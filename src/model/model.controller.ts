@@ -1,16 +1,20 @@
 import { Controller, Post, Body } from '@nestjs/common';
 import { ModelService } from './model.service';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('model')
 export class ModelController {
   constructor(private readonly modelService: ModelService) { }
 
   @Post('ask')
-  async askQuestion(@Body() questionData: { question: string }): Promise<void> {
-    await this.modelService.ask(questionData.question);
+  @RequirePermissions(Permission.ASK)
+  async askQuestion(@Body() questionData: { question: string; projectId?: number; requestId?: string }): Promise<{ jobId: number }> {
+    return this.modelService.ask(questionData.question, questionData.projectId, questionData.requestId);
   }
 
   @Post('summarize')
+  @RequirePermissions(Permission.SUMMARIZE)
   async summarize(
     @Body()
     summarizeData: {
@@ -33,6 +37,7 @@ export class ModelController {
   }
 
   @Post('translate')
+  @RequirePermissions(Permission.TRANSLATE)
   async translate(
     @Body()
     translateData: {
@@ -47,6 +52,7 @@ export class ModelController {
   }
 
   @Post('extract-entities')
+  @RequirePermissions(Permission.ENTITY_EXTRACTION)
   async extractEntities(
     @Body()
     body: { resourceId: number },
@@ -55,6 +61,7 @@ export class ModelController {
   }
 
   @Post('key-points')
+  @RequirePermissions(Permission.KEY_POINTS)
   async keyPoints(
     @Body()
     body: { resourceId: number; targetLanguage?: string },
@@ -63,6 +70,7 @@ export class ModelController {
   }
 
   @Post('keywords')
+  @RequirePermissions(Permission.KEYWORDS)
   async keywords(
     @Body()
     body: { resourceId: number; targetLanguage?: string },
