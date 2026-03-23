@@ -1,6 +1,9 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { CommentService } from './comment.service';
 import { CommentEntity } from 'src/comment/comment.entity';
+import { CreateCommentDto, UpdateCommentDto } from './dto/comment.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('comments')
 export class CommentController {
@@ -28,30 +31,32 @@ export class CommentController {
   }
 
   @Post()
-  async create(@Body() body: any): Promise<CommentEntity> {
+  @RequirePermissions(Permission.WRITE)
+  async create(@Body() dto: CreateCommentDto): Promise<CommentEntity> {
     const commentData: Partial<CommentEntity> = {
-      content: body.content,
+      content: dto.content,
     };
 
-    // Support both doc and resource
-    if (body.doc) {
-      commentData.doc = { id: parseInt(body.doc) } as any;
-    } else if (body.resource) {
-      commentData.resource = { id: parseInt(body.resource) } as any;
+    if (dto.doc) {
+      commentData.doc = { id: dto.doc } as any;
+    } else if (dto.resource) {
+      commentData.resource = { id: dto.resource } as any;
     }
 
     return await this.commentService.create(commentData);
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.WRITE)
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() doc: Partial<CommentEntity>,
+    @Body() dto: UpdateCommentDto,
   ): Promise<CommentEntity | null> {
-    return await this.commentService.update(id, doc);
+    return await this.commentService.update(id, dto);
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.DELETE)
   async delete(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return await this.commentService.delete(id);
   }
