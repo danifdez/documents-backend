@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { DocController } from './doc.controller';
 import { DocService } from './doc.service';
+import { DocIngestService } from './doc-ingest.service';
 import { DatabaseModule } from '../database/database.module';
+import { JobModule } from '../job/job.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, JobModule],
   controllers: [DocController],
-  providers: [DocService],
+  providers: [DocService, DocIngestService],
   exports: [DocService],
 })
 export class DocModule { }

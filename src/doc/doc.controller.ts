@@ -1,10 +1,14 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { DocService } from './doc.service';
+import { DocIngestService } from './doc-ingest.service';
 import { DocEntity } from 'src/doc/doc.entity';
 
 @Controller('docs')
 export class DocController {
-  constructor(private readonly docService: DocService) { }
+  constructor(
+    private readonly docService: DocService,
+    private readonly docIngestService: DocIngestService,
+  ) { }
 
   @Get(':id')
   async getId(@Param('id', ParseIntPipe) id: number): Promise<DocEntity | null> {
@@ -40,7 +44,16 @@ export class DocController {
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number, @Body() doc: Partial<DocEntity>): Promise<DocEntity | null> {
-    return await this.docService.update(id, doc);
+    const updated = await this.docService.update(id, doc);
+
+    if (updated && doc.content !== undefined) {
+      const fullDoc = await this.docService.findOneWithProject(id);
+      if (fullDoc) {
+        this.docIngestService.scheduleIngest(id, fullDoc.project?.id, doc.content);
+      }
+    }
+
+    return updated;
   }
 
   @Delete(':id')

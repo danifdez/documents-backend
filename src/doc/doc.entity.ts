@@ -25,6 +25,9 @@ export class DocEntity {
   @Column({ type: 'text', nullable: true })
   content?: string;
 
+  @Column({ name: 'citation_format', default: 'apa' })
+  citationFormat: string;
+
   @OneToMany(() => CommentEntity, (comment) => comment.doc)
   comments: CommentEntity[];
 

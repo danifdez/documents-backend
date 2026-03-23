@@ -14,6 +14,13 @@ export class DocService {
     return await this.repository.findOneBy({ id });
   }
 
+  async findOneWithProject(id: number): Promise<DocEntity | null> {
+    return await this.repository.findOne({
+      where: { id },
+      relations: ['project'],
+    });
+  }
+
   async create(doc: Partial<DocEntity>): Promise<DocEntity> {
     const created = this.repository.create(doc);
     return await this.repository.save(created);
@@ -64,16 +71,18 @@ export class DocService {
     return { deleted: true };
   }
 
-  async globalSearch(searchTerm: string): Promise<DocEntity[]> {
+  async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
     if (!searchTerm || searchTerm.trim() === '') return [];
     const like = `%${searchTerm}%`;
-    return await this.repository
+    const qb = this.repository
       .createQueryBuilder('d')
       .select(['d.id', 'd.name', 'd.content'])
-      .where('d.name ILIKE :q OR d.content ILIKE :q', { q: like })
-      .orderBy('similarity(d.name, :s)', 'DESC')
-      .setParameter('s', searchTerm)
-      .limit(50)
-      .getRawMany();
+      .addSelect('similarity(unaccent(d.name), unaccent(:s))', 'score')
+      .where('unaccent(d.name) ILIKE unaccent(:q) OR unaccent(d.content) ILIKE unaccent(:q)', { q: like })
+      .setParameter('s', searchTerm);
+    if (projectId) {
+      qb.andWhere('d.projectId = :projectId', { projectId });
+    }
+    return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
   }
 }
