@@ -2,6 +2,11 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { DocEntity } from '../doc/doc.entity';
 import { ResourceEntity } from '../resource/resource.entity';
 import { ThreadEntity } from '../thread/thread.entity';
+import { DatasetEntity } from '../dataset/dataset.entity';
+import { NoteEntity } from '../note/note.entity';
+import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
+import { TimelineEntity } from '../timeline/timeline.entity';
+import { UserTaskEntity } from '../user-task/user-task.entity';
 
 @Entity({ name: 'projects' })
 export class ProjectEntity {
@@ -22,6 +27,21 @@ export class ProjectEntity {
 
   @OneToMany(() => ThreadEntity, (thread) => thread.project)
   threads: ThreadEntity[];
+
+  @OneToMany(() => DatasetEntity, (dataset) => dataset.project)
+  datasets: DatasetEntity[];
+
+  @OneToMany(() => NoteEntity, (note) => note.project)
+  notes: NoteEntity[];
+
+  @OneToMany(() => CalendarEventEntity, (event) => event.project)
+  calendarEvents: CalendarEventEntity[];
+
+  @OneToMany(() => TimelineEntity, (timeline) => timeline.project)
+  timelines: TimelineEntity[];
+
+  @OneToMany(() => UserTaskEntity, (task) => task.project)
+  userTasks: UserTaskEntity[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
