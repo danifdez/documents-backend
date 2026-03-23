@@ -29,4 +29,13 @@ export class JobEntity {
 
   @Column({ type: 'jsonb', nullable: true })
   result: any;
+
+  @Column({ name: 'claimed_by', type: 'uuid', nullable: true })
+  claimedBy: string | null;
+
+  @Column({ name: 'retry_count', type: 'integer', default: 0 })
+  retryCount: number;
+
+  @Column({ name: 'started_at', type: 'timestamp', nullable: true })
+  startedAt: Date | null;
 }

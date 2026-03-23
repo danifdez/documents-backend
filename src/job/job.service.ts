@@ -63,11 +63,65 @@ export class JobService {
     return this.updateStatus(id, JobStatus.FAILED);
   }
 
+  async createAndWaitForResult(type: string, priority: JobPriority, payload: object, timeoutMs: number = 10000): Promise<any | null> {
+    const job = await this.create(type, priority, payload);
+    const pollInterval = 200;
+    const maxAttempts = Math.ceil(timeoutMs / pollInterval);
+
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      const current = await this.repo.findOneBy({ id: job.id });
+      if (!current) return null;
+      if (current.status === JobStatus.COMPLETED || current.status === JobStatus.PROCESSED) {
+        await this.repo.delete({ id: job.id });
+        return current.result;
+      }
+      if (current.status === JobStatus.FAILED) {
+        await this.repo.delete({ id: job.id });
+        return null;
+      }
+    }
+
+    this.logger.warn(`Job ${job.id} timed out after ${timeoutMs}ms`);
+    await this.repo.delete({ id: job.id });
+    return null;
+  }
+
   async delete(id: number) {
     const job = await this.repo.findOneBy({ id });
     if (!job) return null;
     await this.repo.remove(job);
     return job;
+  }
+
+  async requeueStaleJobs(heartbeatThresholdDate: Date, maxRetries: number = 3): Promise<number> {
+    // Find jobs in 'processing' whose worker has a stale heartbeat
+    const staleJobs = await this.repo
+      .createQueryBuilder('job')
+      .innerJoin('workers', 'w', 'w.id = job.claimed_by')
+      .where('job.status = :status', { status: 'processing' })
+      .andWhere('w.last_heartbeat < :threshold', { threshold: heartbeatThresholdDate })
+      .getMany();
+
+    if (staleJobs.length === 0) return 0;
+
+    let requeued = 0;
+    for (const job of staleJobs) {
+      if (job.retryCount >= maxRetries) {
+        job.status = JobStatus.FAILED;
+        this.logger.warn(`Job ${job.id} exceeded max retries (${maxRetries}), marking as failed`);
+      } else {
+        job.status = JobStatus.PENDING;
+        job.claimedBy = null;
+        job.startedAt = null;
+        this.logger.warn(`Requeuing stale job ${job.id} (retry ${job.retryCount + 1}/${maxRetries})`);
+      }
+      job.retryCount += 1;
+      requeued++;
+    }
+
+    await this.repo.save(staleJobs);
+    return requeued;
   }
 
   async deleteExpiredJobs() {
