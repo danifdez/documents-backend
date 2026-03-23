@@ -2,21 +2,41 @@ import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, Upl
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { ResourceService } from './resource.service';
-import { FileStorageService } from '../file-storage/file-storage.service';
-import { JobService } from '../job/job.service';
-import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
-import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceEntity } from './resource.entity';
 import { AuthorService } from '../author/author.service';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
+import { UpdateResourceDto } from './dto/update-resource.dto';
+import { UploadResourceDto } from './dto/upload-resource.dto';
 
 @Controller('resources')
 export class ResourceController {
   constructor(
     private readonly resourceService: ResourceService,
-    private readonly fileStorageService: FileStorageService,
-    private readonly jobService: JobService,
     private readonly authorService: AuthorService,
   ) { }
+
+  @Get()
+  async findAll(): Promise<ResourceEntity[]> {
+    return await this.resourceService.findAllWithProjects();
+  }
+
+  @Get('pending')
+  async getPending(): Promise<ResourceEntity[]> {
+    return await this.resourceService.findPending();
+  }
+
+  @Patch(':id/assign')
+  async assignToProject(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('projectId', ParseIntPipe) projectId: number,
+  ): Promise<ResourceEntity> {
+    const resource = await this.resourceService.assignToProject(id, projectId);
+    if (!resource) {
+      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
+    }
+    return resource;
+  }
 
   @Get(':id')
   async findOne(
@@ -49,81 +69,22 @@ export class ResourceController {
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() resource: Partial<ResourceEntity>,
+    @Body() dto: UpdateResourceDto,
   ): Promise<ResourceEntity | null> {
-    return await this.resourceService.update(id, resource);
+    return await this.resourceService.update(id, dto);
   }
 
   @Post(':id/confirm')
   async confirmResource(
     @Param('id', ParseIntPipe) id: number,
   ): Promise<{ success: boolean; message: string }> {
-    const resource = await this.resourceService.findOne(id);
-
-    if (!resource) {
-      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
-    }
-
-    if (resource.status !== 'extracted') {
-      throw new HttpException('Resource is not in extracted state', HttpStatus.BAD_REQUEST);
-    }
-
-    await this.resourceService.update(id, { status: 'confirmed_extraction' });
-
-    const content = await this.resourceService.getContentById(id);
-    const samples = this.extractTextSamples(content);
-    await this.jobService.create('detect-language', JobPriority.NORMAL, {
-      resourceId: id,
-      samples,
-    });
-
-    return {
-      success: true,
-      message: 'Resource extraction confirmed and language detection job created',
-    };
-  }
-
-  private extractTextSamples(html: string): string[] {
-    try {
-      const fullText = html
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      const samples: string[] = [];
-
-      if (fullText.length <= 400) {
-        const midpoint = Math.floor(fullText.length / 2);
-        samples.push(fullText.substring(0, Math.min(200, midpoint)).trim());
-        samples.push(
-          fullText
-            .substring(
-              midpoint,
-              midpoint + Math.min(200, fullText.length - midpoint),
-            )
-            .trim(),
-        );
-      } else {
-        for (let i = 0; i < 2; i++) {
-          const maxStart = fullText.length - 200;
-          const start = Math.floor(Math.random() * maxStart);
-          const end = Math.min(start + 200, fullText.length);
-          samples.push(fullText.substring(start, end).trim());
-        }
-      }
-
-      return samples;
-    } catch (error) {
-      return [];
-    }
+    return await this.resourceService.confirmExtraction(id);
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.DELETE)
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    const resource = await this.resourceService.remove(id);
-    if (resource && resource.path) {
-      await this.fileStorageService.deleteFile(resource.path);
-    }
+    await this.resourceService.removeWithFile(id);
   }
 
   @Delete(':id/entities/:entityId')
@@ -162,79 +123,16 @@ export class ResourceController {
   }
 
   @Post('upload')
+  @RequirePermissions(Permission.UPLOAD)
   @UseInterceptors(FileInterceptor('file'))
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
-    @Body()
-    resourceData: Partial<ResourceEntity> & { projectId?: string },
+    @Body() resourceData: UploadResourceDto,
   ) {
     if (!file) {
       throw new HttpException('No file uploaded', HttpStatus.BAD_REQUEST);
     }
-
-    try {
-      const hash = await this.fileStorageService.calculateHash(file.buffer);
-
-      const existingResource = await this.resourceService.findByHash(hash);
-      if (existingResource) {
-        throw new AlreadyExistException('File', 'File with the same content already exists');
-      }
-
-      const result = await this.fileStorageService.storeFile(
-        hash,
-        file.buffer,
-        file.originalname,
-      );
-
-      const resourceToCreate: any = {
-        name: resourceData.name || file.originalname,
-        project: resourceData.projectId ? { id: Number(resourceData.projectId) } : null,
-        hash: hash,
-        mimeType: file.mimetype,
-        originalName: resourceData.originalName || file.originalname,
-        path: result.relativePath,
-        uploadDate: new Date(),
-        fileSize: file.size,
-      };
-
-      if (resourceData.type && resourceData.type === 'webpage') {
-        resourceToCreate.type = 51;
-      }
-
-      if (resourceData.url) {
-        resourceToCreate.url = resourceData.url;
-      }
-
-      if (resourceData.relatedTo) {
-        resourceToCreate.relatedTo = resourceData.relatedTo;
-      }
-
-      const resourceCreated = await this.resourceService.create(resourceToCreate);
-      if (!file.mimetype.startsWith('image/')) {
-        await this.jobService.create(
-          'document-extraction',
-          JobPriority.NORMAL,
-          {
-            hash: result.hash,
-            extension: result.extension,
-            resourceId: resourceCreated.id,
-          },
-        );
-      }
-
-      return {
-        success: true,
-      };
-    } catch (error) {
-      if (error instanceof AlreadyExistException) {
-        throw error;
-      }
-
-      throw new HttpException(
-        `${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return await this.resourceService.uploadAndProcess(file, resourceData);
   }
 
   @Get(':id/download')
@@ -242,85 +140,46 @@ export class ResourceController {
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ) {
-    const resource = await this.resourceService.findOne(id);
-
-    if (!resource || !resource.path) {
-      throw new HttpException('File not found', HttpStatus.NOT_FOUND);
-    }
-
-    const file = await this.fileStorageService.getFile(resource.path);
-
-    if (!file) {
-      throw new HttpException('File not found', HttpStatus.NOT_FOUND);
-    }
-
+    const { buffer, resource } = await this.resourceService.getFileBuffer(id);
+    const safeName = resource.originalName.replace(/[^\w.\-]/g, '_');
     res.setHeader('Content-Type', resource.mimeType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${resource.originalName}"`,
-    );
-    res.send(file);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(resource.originalName)}`);
+    res.send(buffer);
   }
 
   @Get(':id/view')
   async viewFile(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
-    const resource = await this.resourceService.findOne(id);
-
-    if (!resource || !resource.path) {
-      throw new HttpException('File not found', HttpStatus.NOT_FOUND);
-    }
-
-    const file = await this.fileStorageService.getFile(resource.path);
-
-    if (!file) {
-      throw new HttpException('File not found', HttpStatus.NOT_FOUND);
-    }
-
+    const { buffer, resource } = await this.resourceService.getFileBuffer(id);
     res.setHeader('Content-Type', resource.mimeType);
     res.setHeader('Content-Disposition', 'inline');
-    res.send(file);
+    res.send(buffer);
   }
 
   @Get(':id/content')
-  async getContent(
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    const resource = await this.resourceService.getContentById(id);
-
-    if (!resource) {
-      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
-    }
-
-    return {
-      content: resource ?? null,
-    };
-  }
-
-  @Get(':id/translated-content')
-  async getTranslatedContent(
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    const translated = await this.resourceService.getTranslatedContentById(id);
-
-    if (!translated) {
-      throw new HttpException('Translated content not found', HttpStatus.NOT_FOUND);
-    }
-
-    return {
-      translatedContent: translated,
-    };
-  }
-
-  @Get(':id/entities')
-  async getEntities(
-    @Param('id', ParseIntPipe) id: number,
-  ) {
+  async getContent(@Param('id', ParseIntPipe) id: number) {
     const exists = await this.resourceService.resourceExists(id);
     if (!exists) {
       throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
     }
+    const content = await this.resourceService.getContentById(id);
+    return { content: content ?? null };
+  }
 
-    const entities = await this.resourceService.getEntitiesByResourceId(id);
-    return entities;
+  @Get(':id/translated-content')
+  async getTranslatedContent(@Param('id', ParseIntPipe) id: number) {
+    const translated = await this.resourceService.getTranslatedContentById(id);
+    if (!translated) {
+      throw new HttpException('Translated content not found', HttpStatus.NOT_FOUND);
+    }
+    return { translatedContent: translated };
+  }
+
+  @Get(':id/entities')
+  async getEntities(@Param('id', ParseIntPipe) id: number) {
+    const exists = await this.resourceService.resourceExists(id);
+    if (!exists) {
+      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
+    }
+    return await this.resourceService.getEntitiesByResourceId(id);
   }
 }
