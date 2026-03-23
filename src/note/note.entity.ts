@@ -1,0 +1,23 @@
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import { ProjectEntity } from '../project/project.entity';
+
+@Entity({ name: 'notes' })
+export class NoteEntity {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  title: string;
+
+  @Column({ type: 'text', nullable: true })
+  content: string | null;
+
+  @ManyToOne(() => ProjectEntity, (project) => project.notes, { nullable: true })
+  project: ProjectEntity | null;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
+}
