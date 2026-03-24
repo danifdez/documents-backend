@@ -2,17 +2,37 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # ── Colors ──
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
+BOLD='\033[1m'
+DIM='\033[2m'
 
 info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
 ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*"; }
+warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 fail()  { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; exit 1; }
+
+ask() {
+  local prompt="$1" default="$2"
+  printf "  ${BOLD}%s${NC} ${DIM}[%s]${NC}: " "$prompt" "$default"
+  read -r REPLY
+  REPLY="${REPLY:-$default}"
+}
+
+# ── Load root .env defaults ──
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+fi
 
 # ── Check Node.js ──
 command -v node >/dev/null 2>&1 || fail "Node.js is not installed."
@@ -20,6 +40,64 @@ command -v npm  >/dev/null 2>&1 || fail "npm is not installed."
 
 NODE_VERSION=$(node -v)
 info "Node.js $NODE_VERSION detected"
+
+# ── Configure .env ──
+if [ -f ".env" ]; then
+  ok ".env already exists (skipping)"
+else
+  echo ""
+  printf "${BOLD}${CYAN}── Backend environment configuration ──${NC}\n"
+  printf "${DIM}  Press Enter to accept the default value shown in brackets.${NC}\n"
+  echo ""
+
+  ask "PostgreSQL host" "${POSTGRES_HOST:-localhost}";       PG_HOST="$REPLY"
+  ask "PostgreSQL port" "${POSTGRES_PORT:-5432}";            PG_PORT="$REPLY"
+  ask "PostgreSQL database" "${POSTGRES_DB:-documents}";     PG_DB="$REPLY"
+  ask "PostgreSQL user" "${POSTGRES_USER:-postgres}";        PG_USER="$REPLY"
+  ask "PostgreSQL password" "${POSTGRES_PASSWORD:-example}"; PG_PASS="$REPLY"
+  ask "Backend server port" "3000";                          PORT="$REPLY"
+  ask "CORS origin" "http://localhost:5173";                 CORS="$REPLY"
+  ask "Body size limit" "50mb";                              BODY="$REPLY"
+  ask "Documents storage directory" "../documents";          STORAGE="$REPLY"
+  ask "Enable authentication (true/false)" "false";          AUTH="$REPLY"
+  ask "JWT secret" "change-me-in-production";                JWT="$REPLY"
+  ask "JWT access token expiry" "15m";                       JWT_ACCESS="$REPLY"
+  ask "JWT refresh token expiry" "7d";                       JWT_REFRESH="$REPLY"
+  ask "Default admin username" "admin";                      ADMIN_USER="$REPLY"
+  ask "Default admin password" "admin";                      ADMIN_PASS="$REPLY"
+  ask "Enable offline support (true/false)" "false";         OFFLINE="$REPLY"
+  ask "Offline file size limit (bytes)" "10485760";          OFFLINE_LIMIT="$REPLY"
+
+  cat > ".env" <<EOF
+# Database
+POSTGRES_HOST=$PG_HOST
+POSTGRES_PORT=$PG_PORT
+POSTGRES_DB=$PG_DB
+POSTGRES_USER=$PG_USER
+POSTGRES_PASSWORD=$PG_PASS
+
+# Server
+PORT=$PORT
+CORS_ORIGIN=$CORS
+BODY_LIMIT=$BODY
+
+# File Storage
+DOCUMENTS_STORAGE_DIR=$STORAGE
+
+# Authentication (set AUTH_ENABLED=true for multi-user mode)
+AUTH_ENABLED=$AUTH
+JWT_SECRET=$JWT
+JWT_ACCESS_EXPIRY=$JWT_ACCESS
+JWT_REFRESH_EXPIRY=$JWT_REFRESH
+ADMIN_USERNAME=$ADMIN_USER
+ADMIN_PASSWORD=$ADMIN_PASS
+
+# Offline support (set OFFLINE_ENABLED=true to allow clients to cache content)
+OFFLINE_ENABLED=$OFFLINE
+OFFLINE_FILE_SIZE_LIMIT=$OFFLINE_LIMIT
+EOF
+  ok "Created .env"
+fi
 
 # ── Install dependencies ──
 info "Installing npm dependencies..."
