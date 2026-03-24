@@ -46,7 +46,11 @@ import { PermissionsGuard } from './auth/guards/permissions.guard';
       isGlobal: true,
       envFilePath: resolve(__dirname, '..', '..', '.env'),
     }),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 100,
+      skipIf: () => process.env.NODE_ENV === 'test',
+    }]),
     ScheduleModule.forRoot(),
     ProjectModule,
     ThreadModule,
