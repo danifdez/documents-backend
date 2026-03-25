@@ -194,9 +194,9 @@ export class DatasetController {
         if (!dataset) {
             throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
         }
-        const job = await this.jobService.create('dataset-stats', JobPriority.NORMAL, {
+        const operation = body.operation || 'summary';
+        const job = await this.jobService.create(operation, JobPriority.NORMAL, {
             datasetId: id,
-            operation: body.operation || 'summary',
             params: body.params || {},
         });
         return { jobId: job.id, message: 'Analysis started' };
@@ -209,9 +209,9 @@ export class DatasetController {
         if (!body.datasetIds || body.datasetIds.length === 0) {
             throw new HttpException('datasetIds required', HttpStatus.BAD_REQUEST);
         }
-        const job = await this.jobService.create('dataset-stats', JobPriority.NORMAL, {
+        const operation = body.operation || 'query';
+        const job = await this.jobService.create(operation, JobPriority.NORMAL, {
             datasetIds: body.datasetIds,
-            operation: body.operation || 'query',
             params: body.params || {},
         });
         return { jobId: job.id, message: 'Query analysis started' };

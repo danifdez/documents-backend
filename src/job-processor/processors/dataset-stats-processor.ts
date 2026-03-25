@@ -3,17 +3,29 @@ import { JobProcessor } from '../job-processor.interface';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobEntity } from 'src/job/job.entity';
 
+const DATASET_JOB_TYPES = new Set([
+  'distribution',
+  'correlation',
+  'correlation-matrix',
+  'group-by',
+  'time-series',
+  'outliers',
+  'pivot-table',
+  'summary',
+  'query',
+  'chart',
+]);
+
 @Injectable()
 export class DatasetStatsProcessor implements JobProcessor {
   private readonly logger = new Logger(DatasetStatsProcessor.name);
-  private readonly JOB_TYPE = 'dataset-stats';
 
   constructor(
     private readonly notificationGateway: NotificationGateway,
   ) { }
 
   canProcess(jobType: string): boolean {
-    return jobType === this.JOB_TYPE;
+    return DATASET_JOB_TYPES.has(jobType);
   }
 
   async process(job: JobEntity): Promise<any> {
@@ -25,7 +37,7 @@ export class DatasetStatsProcessor implements JobProcessor {
     }
 
     this.notificationGateway.sendNotification({
-      type: 'dataset-stats',
+      type: job.type,
       message: result?.error
         ? `Statistical analysis failed for dataset`
         : `Statistical analysis completed`,
