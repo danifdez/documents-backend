@@ -77,4 +77,44 @@ export class ModelController {
   ): Promise<void> {
     await this.modelService.keywords(body.resourceId, body.targetLanguage);
   }
+
+  @Post('image-generate')
+  @RequirePermissions(Permission.IMAGE_GENERATE)
+  async generateImage(
+    @Body()
+    body: {
+      prompt: string;
+      negativePrompt?: string;
+      width?: number;
+      height?: number;
+      steps?: number;
+      guidanceScale?: number;
+      seed?: number;
+      requestId?: string;
+      canvasId?: number;
+      projectId?: number;
+    },
+  ): Promise<{ jobId: number }> {
+    return this.modelService.generateImage(body);
+  }
+
+  @Post('image-edit')
+  @RequirePermissions(Permission.IMAGE_GENERATE)
+  async editImage(
+    @Body()
+    body: {
+      resourceId: number;
+      prompt: string;
+      negativePrompt?: string;
+      strength?: number;
+      steps?: number;
+      guidanceScale?: number;
+      seed?: number;
+      requestId?: string;
+      canvasId?: number;
+      projectId?: number;
+    },
+  ): Promise<{ jobId: number }> {
+    return this.modelService.editImage(body);
+  }
 }

@@ -42,7 +42,7 @@ directory and registers every class that implements the `JobProcessor` interface
 
 Each processor declares which job type it handles via `canProcess(jobType)`.
 
-The 11 built-in processors are:
+The 13 built-in processors are:
 
 | Processor | Handles job type | What it does |
 |-----------|-----------------|--------------|
@@ -57,6 +57,8 @@ The 11 built-in processors are:
 | `ask` | `ask` | Handles RAG question-answering; emits the answer to the frontend via WebSocket |
 | `dataset-stats` | `dataset-stats` | Computes and stores descriptive statistics for a dataset |
 | `delete-vectors` | `delete-vectors` | Removes vector embeddings from Qdrant when a resource is deleted |
+| `image-generate` | `image-generate` | Creates a resource from an AI-generated image and notifies the frontend via WebSocket |
+| `image-edit` | `image-edit` | Creates a resource from an AI-edited image and notifies the frontend via WebSocket |
 
 ### Full document processing pipeline
 

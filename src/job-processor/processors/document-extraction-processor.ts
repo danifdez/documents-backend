@@ -19,6 +19,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly notificationGateway: NotificationGateway,
+    private readonly jobService: JobService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -51,7 +52,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
       author,
       publicationDate: publication_date,
       content,
-      status: isMedia ? 'confirmed_extraction' : 'extracted',
+      status: isMedia ? 'transcribing' : 'extracted',
     };
 
     if (pages !== undefined) {
@@ -59,6 +60,14 @@ export class DocumentExtractionProcessor implements JobProcessor {
     }
 
     await this.resourceService.update(resourceId, updateData);
+
+    if (isMedia) {
+      await this.jobService.create('transcribe', JobPriority.BACKGROUND, {
+        hash,
+        extension,
+        resourceId,
+      });
+    }
 
     this.notificationGateway.sendNotification({
       type: 'document-extraction',

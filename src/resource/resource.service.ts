@@ -327,6 +327,41 @@ export class ResourceService {
     }
   }
 
+  async cleanupTempResources(maxAgeHours: number): Promise<number> {
+    const threshold = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+    const tempResources = await this.repo
+      .createQueryBuilder('r')
+      .where('r.status = :status', { status: 'temp' })
+      .andWhere('r.created_at < :threshold', { threshold })
+      .getMany();
+
+    for (const resource of tempResources) {
+      await this.removeWithFile(resource.id);
+    }
+    return tempResources.length;
+  }
+
+  async promoteTemp(id: number): Promise<ResourceEntity> {
+    const resource = await this.findOne(id);
+    if (!resource) {
+      throw new NotFoundException('Resource not found');
+    }
+    if (resource.status !== 'temp') {
+      return resource;
+    }
+
+    // Move file from temp/ to permanent hash-based path
+    if (resource.hash && resource.path) {
+      const extension = resource.path.substring(resource.path.lastIndexOf('.'));
+      const permanentRelative = this.fileStorageService.getRelativePath(resource.hash, extension);
+      await this.fileStorageService.moveFile(resource.path, permanentRelative);
+      resource.path = permanentRelative;
+    }
+
+    resource.status = 'ready';
+    return await this.repo.save(resource);
+  }
+
   private extractTextSamples(html: string): string[] {
     try {
       const fullText = html

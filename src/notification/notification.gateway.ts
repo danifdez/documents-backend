@@ -19,4 +19,12 @@ export class NotificationGateway {
   sendAskResponse(data: any) {
     this.server.emit('askResponse', data);
   }
+
+  sendImageGenerateResponse(data: any) {
+    this.server.emit('imageGenerateResponse', data);
+  }
+
+  sendImageEditResponse(data: any) {
+    this.server.emit('imageEditResponse', data);
+  }
 }

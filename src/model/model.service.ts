@@ -147,4 +147,77 @@ export class ModelService {
       targetLanguage: targetLanguage || resource.language || 'en',
     });
   }
+
+  async generateImage(params: {
+    prompt: string;
+    negativePrompt?: string;
+    width?: number;
+    height?: number;
+    steps?: number;
+    guidanceScale?: number;
+    seed?: number;
+    requestId?: string;
+    canvasId?: number;
+    projectId?: number;
+  }): Promise<{ jobId: number }> {
+    const job = await this.jobService.create('image-generate', JobPriority.NORMAL, {
+      prompt: params.prompt,
+      negativePrompt: params.negativePrompt,
+      width: params.width || 1024,
+      height: params.height || 1024,
+      steps: params.steps || 30,
+      guidanceScale: params.guidanceScale || 7.5,
+      seed: params.seed,
+      requestId: params.requestId,
+      canvasId: params.canvasId,
+      projectId: params.projectId,
+    });
+    return { jobId: job.id };
+  }
+
+  async editImage(params: {
+    resourceId: number;
+    prompt: string;
+    negativePrompt?: string;
+    strength?: number;
+    steps?: number;
+    guidanceScale?: number;
+    seed?: number;
+    requestId?: string;
+    canvasId?: number;
+    projectId?: number;
+  }): Promise<{ jobId: number }> {
+    const resource = await this.resourceService.findOne(params.resourceId);
+    if (!resource) {
+      throw new Error(`Resource with ID ${params.resourceId} not found`);
+    }
+    if (!resource.hash && !resource.path) {
+      throw new Error(`Resource with ID ${params.resourceId} has no file hash or path`);
+    }
+
+    // Determine file extension from path
+    let sourceExtension = '.png';
+    if (resource.path) {
+      const lastDot = resource.path.lastIndexOf('.');
+      if (lastDot !== -1) {
+        sourceExtension = resource.path.substring(lastDot);
+      }
+    }
+
+    const job = await this.jobService.create('image-edit', JobPriority.NORMAL, {
+      sourceHash: resource.hash,
+      sourcePath: resource.path,
+      sourceExtension,
+      prompt: params.prompt,
+      negativePrompt: params.negativePrompt,
+      strength: params.strength || 0.75,
+      steps: params.steps || 30,
+      guidanceScale: params.guidanceScale || 7.5,
+      seed: params.seed,
+      requestId: params.requestId,
+      canvasId: params.canvasId,
+      projectId: params.projectId,
+    });
+    return { jobId: job.id };
+  }
 }

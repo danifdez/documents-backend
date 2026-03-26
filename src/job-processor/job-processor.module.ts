@@ -16,6 +16,9 @@ import { SummarizeProcessor } from './processors/summarize-processor';
 import { KeyPointsProcessor } from './processors/key-points-processor';
 import { KeywordsProcessor } from './processors/keywords-processor';
 import { DatasetStatsProcessor } from './processors/dataset-stats-processor';
+import { TranscribeProcessor } from './processors/transcribe-processor';
+import { ImageGenerateProcessor } from './processors/image-generate-processor';
+import { ImageEditProcessor } from './processors/image-edit-processor';
 import { EntityModule } from 'src/entity/entity.module';
 import { EntityTypeModule } from 'src/entity-type/entity-type.module';
 import { DatabaseModule } from 'src/database/database.module';
@@ -46,6 +49,9 @@ import { PendingEntityModule } from 'src/pending-entity/pending-entity.module';
     KeywordsProcessor,
     AskProcessor,
     DatasetStatsProcessor,
+    TranscribeProcessor,
+    ImageGenerateProcessor,
+    ImageEditProcessor,
   ],
   exports: [JobProcessorFactory],
 })

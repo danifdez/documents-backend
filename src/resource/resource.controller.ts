@@ -1,6 +1,6 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Res, HttpException, HttpStatus, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Req, Res, HttpException, HttpStatus, ParseIntPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { ResourceService } from './resource.service';
 import { ResourceEntity } from './resource.entity';
 import { AuthorService } from '../author/author.service';
@@ -81,6 +81,11 @@ export class ResourceController {
     return await this.resourceService.confirmExtraction(id);
   }
 
+  @Post(':id/promote')
+  async promoteTemp(@Param('id', ParseIntPipe) id: number): Promise<ResourceEntity> {
+    return await this.resourceService.promoteTemp(id);
+  }
+
   @Delete(':id')
   @RequirePermissions(Permission.DELETE)
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
@@ -148,11 +153,32 @@ export class ResourceController {
   }
 
   @Get(':id/view')
-  async viewFile(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+  async viewFile(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     const { buffer, resource } = await this.resourceService.getFileBuffer(id);
+    const total = buffer.length;
+
     res.setHeader('Content-Type', resource.mimeType);
     res.setHeader('Content-Disposition', 'inline');
-    res.send(buffer);
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    const range = req.headers.range;
+    if (range) {
+      const match = range.match(/bytes=(\d*)-(\d*)/);
+      const start = match[1] ? parseInt(match[1], 10) : 0;
+      const end = match[2] ? parseInt(match[2], 10) : total - 1;
+
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+      res.setHeader('Content-Length', end - start + 1);
+      res.send(buffer.subarray(start, end + 1));
+    } else {
+      res.setHeader('Content-Length', total);
+      res.send(buffer);
+    }
   }
 
   @Get(':id/content')

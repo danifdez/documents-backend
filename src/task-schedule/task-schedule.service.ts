@@ -6,6 +6,7 @@ import { JobStatus } from 'src/job/job-status.enum';
 import { JobService } from 'src/job/job.service';
 import { JobProcessorFactory } from 'src/job-processor/job-processor.factory';
 import { WorkerService } from 'src/worker/worker.service';
+import { ResourceService } from 'src/resource/resource.service';
 
 @Injectable()
 export class TaskScheduleService {
@@ -15,6 +16,7 @@ export class TaskScheduleService {
     private readonly jobService: JobService,
     private readonly jobProcessorFactory: JobProcessorFactory,
     private readonly workerService: WorkerService,
+    private readonly resourceService: ResourceService,
   ) { }
 
   private getCPUAndMemoryUsage() {
@@ -116,6 +118,20 @@ export class TaskScheduleService {
       }
     } catch (error) {
       this.logger.error(`Error during cleanup of expired jobs: ${error.message}`);
+    }
+  }
+
+  @Cron(CronExpression.EVERY_HOUR, {
+    waitForCompletion: true,
+  })
+  async cleanupTempResources() {
+    try {
+      const deleted = await this.resourceService.cleanupTempResources(24);
+      if (deleted > 0) {
+        this.logger.log(`Cleaned up ${deleted} temp resource(s) older than 24h`);
+      }
+    } catch (error) {
+      this.logger.error(`Error cleaning up temp resources: ${error.message}`);
     }
   }
 }

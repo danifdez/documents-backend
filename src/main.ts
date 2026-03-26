@@ -31,7 +31,9 @@ async function bootstrap() {
   }
 
   // Security headers
-  app.use(helmet());
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }));
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 

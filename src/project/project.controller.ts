@@ -15,6 +15,11 @@ export class ProjectController {
     return await this.projectService.search(query);
   }
 
+  @Get(':id/stats')
+  async getStats(@Param('id', ParseIntPipe) id: number): Promise<Record<string, any>> {
+    return await this.projectService.getStats(id);
+  }
+
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number): Promise<ProjectEntity | null> {
     return await this.projectService.findOne(id);

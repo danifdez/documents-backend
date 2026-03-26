@@ -10,4 +10,5 @@ export enum Permission {
   EXPORT = 'export',
   WRITE = 'write',
   DELETE = 'delete',
+  IMAGE_GENERATE = 'image-generate',
 }

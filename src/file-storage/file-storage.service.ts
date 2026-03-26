@@ -88,6 +88,13 @@ export class FileStorageService {
     }
   }
 
+  async moveFile(fromRelative: string, toRelative: string): Promise<void> {
+    const fromPath = this.getFilePath(fromRelative);
+    const toPath = this.getFilePath(toRelative);
+    await this.ensureDirectoryExists(path.dirname(toPath));
+    await fs.move(fromPath, toPath, { overwrite: true });
+  }
+
   public calculateHash(buffer: Buffer): string {
     return crypto.createHash('sha256').update(buffer).digest('hex');
   }

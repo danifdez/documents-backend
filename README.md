@@ -26,7 +26,15 @@ attach marks, comments, and notes to specific parts.
 When a document is uploaded, it enters a processing queue. The backend automatically extracts its text
 content, detects the language, translates it if needed, identifies named entities (people, organizations,
 locations), generates a summary, extracts keywords and key points, and finally makes the document ready
-for semantic search. All of this happens in the background without any manual steps.
+for semantic search. For audio and video files, the system also transcribes speech to text using
+faster-whisper (Whisper AI model) before continuing with the rest of the pipeline. All of this happens
+in the background without any manual steps.
+
+### AI image generation
+
+Generate images from text descriptions and edit existing images using AI, directly from the canvas.
+Generated images are stored as project resources and can be reused across documents and canvases.
+Uses local open-source Stable Diffusion models — no external API required.
 
 ### Real-time notifications
 

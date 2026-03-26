@@ -62,6 +62,7 @@ Available permissions:
 | `export` | Data export |
 | `write` | Create and update operations |
 | `delete` | Delete operations |
+| `image-generate` | AI image generation and editing |
 
 ### User management
 
