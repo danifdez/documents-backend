@@ -68,6 +68,23 @@ else
   ask "Enable offline support (true/false)" "false";         OFFLINE="$REPLY"
   ask "Offline file size limit (bytes)" "10485760";          OFFLINE_LIMIT="$REPLY"
 
+  echo ""
+  printf "${BOLD}${CYAN}── Feature Flags ──${NC}\n"
+  printf "${DIM}  Enable or disable optional features. All enabled by default.${NC}\n"
+  echo ""
+  ask "Enable Entities (true/false)" "true";                 FEAT_ENTITIES="$REPLY"
+  ask "Enable Authors (true/false)" "true";                  FEAT_AUTHORS="$REPLY"
+  ask "Enable Canvas (true/false)" "true";                   FEAT_CANVAS="$REPLY"
+  ask "Enable Datasets (true/false)" "true";                 FEAT_DATASETS="$REPLY"
+  ask "Enable Notes (true/false)" "true";                    FEAT_NOTES="$REPLY"
+  ask "Enable Calendar (true/false)" "true";                 FEAT_CALENDAR="$REPLY"
+  ask "Enable Timelines (true/false)" "true";                FEAT_TIMELINES="$REPLY"
+  ask "Enable Knowledge Base (true/false)" "true";           FEAT_KB="$REPLY"
+  ask "Enable Bibliography (true/false)" "true";             FEAT_BIB="$REPLY"
+  ask "Enable Tasks (true/false)" "true";                    FEAT_TASKS="$REPLY"
+  ask "Enable AI / RAG (true/false)" "true";                 FEAT_RAG="$REPLY"
+  ask "Enable Relationships (true/false)" "true";            FEAT_RELATIONSHIPS="$REPLY"
+
   cat > ".env" <<EOF
 # Database
 POSTGRES_HOST=$PG_HOST
@@ -95,6 +112,20 @@ ADMIN_PASSWORD=$ADMIN_PASS
 # Offline support (set OFFLINE_ENABLED=true to allow clients to cache content)
 OFFLINE_ENABLED=$OFFLINE
 OFFLINE_FILE_SIZE_LIMIT=$OFFLINE_LIMIT
+
+# Feature Flags (set to false to disable a feature)
+FEATURE_ENTITIES=$FEAT_ENTITIES
+FEATURE_AUTHORS=$FEAT_AUTHORS
+FEATURE_CANVAS=$FEAT_CANVAS
+FEATURE_DATASETS=$FEAT_DATASETS
+FEATURE_NOTES=$FEAT_NOTES
+FEATURE_CALENDAR=$FEAT_CALENDAR
+FEATURE_TIMELINES=$FEAT_TIMELINES
+FEATURE_KNOWLEDGE_BASE=$FEAT_KB
+FEATURE_BIBLIOGRAPHY=$FEAT_BIB
+FEATURE_TASKS=$FEAT_TASKS
+FEATURE_RAG=$FEAT_RAG
+FEATURE_RELATIONSHIPS=$FEAT_RELATIONSHIPS
 EOF
   ok "Created .env"
 fi
@@ -104,14 +135,19 @@ info "Installing npm dependencies..."
 npm install
 ok "Dependencies installed"
 
-# ── Run migrations (requires running PostgreSQL) ──
+# ── Run base migrations (requires running PostgreSQL) ──
 if [ "${SKIP_MIGRATIONS:-}" = "1" ]; then
   info "Skipping migrations (SKIP_MIGRATIONS=1)"
 else
-  info "Running database migrations..."
+  info "Running base database migrations..."
   npm run migration:run
-  ok "Migrations complete"
+  ok "Base migrations complete"
 fi
+
+# ── Install enabled features ──
+info "Installing enabled features..."
+npm run feature:install
+ok "Feature installation complete"
 
 echo ""
 printf "${GREEN}============================================${NC}\n"

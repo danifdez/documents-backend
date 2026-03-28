@@ -13,7 +13,7 @@ import { WorkerModule } from 'src/worker/worker.module';
     JobModule,
     FileStorageModule,
     ResourceModule,
-    JobProcessorModule,
+    JobProcessorModule.register(),
     WorkerModule,
   ],
   providers: [TaskScheduleService],

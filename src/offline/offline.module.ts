@@ -11,21 +11,32 @@ import { MarkEntity } from '../mark/mark.entity';
 import { NoteEntity } from '../note/note.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { FileStorageModule } from '../file-storage/file-storage.module';
+import { readFeaturesFromEnv } from '../common/feature-flags';
 
-@Module({
-  imports: [
-    TypeOrmModule.forFeature([
+@Module({})
+export class OfflineModule {
+  static register() {
+    const features = readFeaturesFromEnv();
+
+    const entities: any[] = [
       ResourceEntity,
       DocEntity,
       ThreadEntity,
       CommentEntity,
       MarkEntity,
-      NoteEntity,
       ProjectEntity,
-    ]),
-    FileStorageModule,
-  ],
-  controllers: [OfflineController],
-  providers: [OfflineService, OfflineEnabledGuard],
-})
-export class OfflineModule {}
+    ];
+
+    if (features.notes) entities.push(NoteEntity);
+
+    return {
+      module: OfflineModule,
+      imports: [
+        TypeOrmModule.forFeature(entities),
+        FileStorageModule,
+      ],
+      controllers: [OfflineController],
+      providers: [OfflineService, OfflineEnabledGuard],
+    };
+  }
+}

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Req, Res, HttpException, HttpStatus, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Req, Res, HttpException, HttpStatus, ParseIntPipe, Optional } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
 import { ResourceService } from './resource.service';
@@ -13,7 +13,7 @@ import { UploadResourceDto } from './dto/upload-resource.dto';
 export class ResourceController {
   constructor(
     private readonly resourceService: ResourceService,
-    private readonly authorService: AuthorService,
+    @Optional() private readonly authorService?: AuthorService,
   ) { }
 
   @Get()
@@ -105,6 +105,9 @@ export class ResourceController {
     @Param('id', ParseIntPipe) resourceId: number,
     @Param('authorId', ParseIntPipe) authorId: number,
   ): Promise<void> {
+    if (!this.authorService) {
+      throw new HttpException('Authors feature is disabled', HttpStatus.NOT_FOUND);
+    }
     const author = await this.authorService.findOne(authorId);
     if (!author) {
       throw new HttpException('Author not found', HttpStatus.NOT_FOUND);

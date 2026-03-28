@@ -11,4 +11,5 @@ export enum Permission {
   WRITE = 'write',
   DELETE = 'delete',
   IMAGE_GENERATE = 'image-generate',
+  RELATIONSHIPS = 'relationships',
 }

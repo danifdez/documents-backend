@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { DocService } from 'src/doc/doc.service';
 import { ResourceService } from 'src/resource/resource.service';
 import { CanvasService } from 'src/canvas/canvas.service';
@@ -15,12 +15,12 @@ export class SearchService {
   constructor(
     private readonly docService: DocService,
     private readonly resourceService: ResourceService,
-    private readonly canvasService: CanvasService,
-    private readonly noteService: NoteService,
-    private readonly calendarEventService: CalendarEventService,
-    private readonly knowledgeEntryService: KnowledgeEntryService,
-    private readonly entityService: EntityService,
-    private readonly datasetService: DatasetService,
+    @Optional() private readonly canvasService?: CanvasService,
+    @Optional() private readonly noteService?: NoteService,
+    @Optional() private readonly calendarEventService?: CalendarEventService,
+    @Optional() private readonly knowledgeEntryService?: KnowledgeEntryService,
+    @Optional() private readonly entityService?: EntityService,
+    @Optional() private readonly datasetService?: DatasetService,
   ) { }
 
   private highlightTextInHtml(
@@ -73,24 +73,30 @@ export class SearchService {
   }
 
   private async searchInProject(searchTerm: string, projectId: number): Promise<SearchResultDto[]> {
-    const [docs, resources, canvases, notes, events, entities, datasets] = await Promise.all([
+    const promises: Promise<any[]>[] = [
       this.docService.globalSearch(searchTerm, projectId),
       this.resourceService.globalSearch(searchTerm, projectId),
-      this.canvasService.globalSearch(searchTerm, projectId),
-      this.noteService.globalSearch(searchTerm, projectId),
-      this.calendarEventService.globalSearch(searchTerm, projectId),
-      this.entityService.globalSearch(searchTerm, projectId),
-      this.datasetService.globalSearch(searchTerm, projectId),
-    ]);
+    ];
+    const keys = ['docs', 'resources'];
+
+    if (this.canvasService) { promises.push(this.canvasService.globalSearch(searchTerm, projectId)); keys.push('canvases'); }
+    if (this.noteService) { promises.push(this.noteService.globalSearch(searchTerm, projectId)); keys.push('notes'); }
+    if (this.calendarEventService) { promises.push(this.calendarEventService.globalSearch(searchTerm, projectId)); keys.push('events'); }
+    if (this.entityService) { promises.push(this.entityService.globalSearch(searchTerm, projectId)); keys.push('entities'); }
+    if (this.datasetService) { promises.push(this.datasetService.globalSearch(searchTerm, projectId)); keys.push('datasets'); }
+
+    const resolved = await Promise.all(promises);
+    const data: Record<string, any[]> = {};
+    keys.forEach((key, i) => { data[key] = resolved[i]; });
 
     const results: SearchResultDto[] = [
-      ...this.mapDocs(docs, searchTerm),
-      ...this.mapResources(resources, searchTerm),
-      ...this.mapCanvases(canvases, searchTerm),
-      ...this.mapNotes(notes, searchTerm),
-      ...this.mapEvents(events, searchTerm),
-      ...this.mapEntities(entities, searchTerm),
-      ...this.mapDatasets(datasets, searchTerm),
+      ...this.mapDocs(data.docs, searchTerm),
+      ...this.mapResources(data.resources, searchTerm),
+      ...(data.canvases ? this.mapCanvases(data.canvases, searchTerm) : []),
+      ...(data.notes ? this.mapNotes(data.notes, searchTerm) : []),
+      ...(data.events ? this.mapEvents(data.events, searchTerm) : []),
+      ...(data.entities ? this.mapEntities(data.entities, searchTerm) : []),
+      ...(data.datasets ? this.mapDatasets(data.datasets, searchTerm) : []),
     ];
 
     results.sort((a, b) => b.score - a.score);
@@ -98,20 +104,25 @@ export class SearchService {
   }
 
   private async searchGlobal(searchTerm: string): Promise<SearchResultDto[]> {
-    const [notes, events, knowledge, entities, datasets] = await Promise.all([
-      this.noteService.globalSearch(searchTerm),
-      this.calendarEventService.globalSearch(searchTerm),
-      this.knowledgeEntryService.globalSearch(searchTerm),
-      this.entityService.globalSearch(searchTerm),
-      this.datasetService.globalSearch(searchTerm),
-    ]);
+    const promises: Promise<any[]>[] = [];
+    const keys: string[] = [];
+
+    if (this.noteService) { promises.push(this.noteService.globalSearch(searchTerm)); keys.push('notes'); }
+    if (this.calendarEventService) { promises.push(this.calendarEventService.globalSearch(searchTerm)); keys.push('events'); }
+    if (this.knowledgeEntryService) { promises.push(this.knowledgeEntryService.globalSearch(searchTerm)); keys.push('knowledge'); }
+    if (this.entityService) { promises.push(this.entityService.globalSearch(searchTerm)); keys.push('entities'); }
+    if (this.datasetService) { promises.push(this.datasetService.globalSearch(searchTerm)); keys.push('datasets'); }
+
+    const resolved = await Promise.all(promises);
+    const data: Record<string, any[]> = {};
+    keys.forEach((key, i) => { data[key] = resolved[i]; });
 
     const results: SearchResultDto[] = [
-      ...this.mapNotes(notes, searchTerm),
-      ...this.mapEvents(events, searchTerm),
-      ...this.mapKnowledge(knowledge, searchTerm),
-      ...this.mapEntities(entities, searchTerm),
-      ...this.mapDatasets(datasets, searchTerm),
+      ...(data.notes ? this.mapNotes(data.notes, searchTerm) : []),
+      ...(data.events ? this.mapEvents(data.events, searchTerm) : []),
+      ...(data.knowledge ? this.mapKnowledge(data.knowledge, searchTerm) : []),
+      ...(data.entities ? this.mapEntities(data.entities, searchTerm) : []),
+      ...(data.datasets ? this.mapDatasets(data.datasets, searchTerm) : []),
     ];
 
     results.sort((a, b) => b.score - a.score);

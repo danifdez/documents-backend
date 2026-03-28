@@ -1,5 +1,5 @@
 import { resolve } from 'path';
-import { Module } from '@nestjs/common';
+import { DynamicModule, Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ReferenceModule } from './reference/reference.module';
@@ -32,64 +32,81 @@ import { TimelineModule } from './timeline/timeline.module';
 import { KnowledgeBaseModule } from './knowledge-base/knowledge-base.module';
 import { BibliographyModule } from './bibliography/bibliography.module';
 import { UserTaskModule } from './user-task/user-task.module';
+import { RelationshipModule } from './relationship/relationship.module';
 import { WorkerModule } from './worker/worker.module';
 import { AuthModule } from './auth/auth.module';
 import { OfflineModule } from './offline/offline.module';
+import { FeatureFlagModule } from './common/feature-flags.module';
+import { readFeaturesFromEnv } from './common/feature-flags';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConditionalAuthGuard } from './auth/guards/conditional-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 
-@Module({
-  imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: resolve(__dirname, '..', '..', '.env'),
-    }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100,
-      skipIf: () => process.env.NODE_ENV === 'test',
-    }]),
-    ScheduleModule.forRoot(),
-    ProjectModule,
-    ThreadModule,
-    DocModule,
-    ResourceModule,
-    ResourceTypeModule,
-    FileStorageModule,
-    JobModule,
-    JobProcessorModule,
-    TaskScheduleModule,
-    NotificationModule,
-    CommentModule,
-    MarkModule,
-    ModelModule,
-    ReferenceModule,
-    SearchModule,
-    EntityTypeModule,
-    EntityModule,
-    AuthorModule,
-    PendingEntityModule,
-    ExportModule,
-    CanvasModule,
-    DatasetModule,
-    NoteModule,
-    CalendarEventModule,
-    TimelineModule,
-    KnowledgeBaseModule,
-    BibliographyModule,
-    UserTaskModule,
-    WorkerModule,
-    AuthModule,
-    OfflineModule,
-  ],
-  controllers: [AppController],
-  providers: [
-    AppService,
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_GUARD, useClass: ConditionalAuthGuard },
-    { provide: APP_GUARD, useClass: PermissionsGuard },
-  ],
-})
-export class AppModule { }
+@Module({})
+export class AppModule {
+  static register(): DynamicModule {
+    const features = readFeaturesFromEnv();
+
+    const imports: any[] = [
+      // Infrastructure (always loaded)
+      ConfigModule.forRoot({
+        isGlobal: true,
+        envFilePath: resolve(__dirname, '..', '..', '.env'),
+      }),
+      ThrottlerModule.forRoot([{
+        ttl: 60000,
+        limit: 100,
+        skipIf: () => process.env.NODE_ENV === 'test',
+      }]),
+      ScheduleModule.forRoot(),
+      FeatureFlagModule,
+
+      // Core modules (always loaded)
+      ProjectModule,
+      ThreadModule,
+      DocModule,
+      ResourceModule,
+      ResourceTypeModule,
+      FileStorageModule,
+      JobModule,
+      JobProcessorModule.register(),
+      TaskScheduleModule,
+      NotificationModule,
+      CommentModule,
+      MarkModule,
+      ModelModule,
+      ReferenceModule,
+      SearchModule,
+      ExportModule,
+      WorkerModule,
+      AuthModule,
+      OfflineModule.register(),
+    ];
+
+    // Toggleable feature modules
+    if (features.entities) imports.push(EntityTypeModule, EntityModule, PendingEntityModule);
+    if (features.authors) imports.push(AuthorModule);
+    if (features.canvas) imports.push(CanvasModule);
+    if (features.datasets) imports.push(DatasetModule);
+    if (features.notes) imports.push(NoteModule);
+    if (features.calendar) imports.push(CalendarEventModule);
+    if (features.timelines) imports.push(TimelineModule);
+    if (features.knowledge_base) imports.push(KnowledgeBaseModule);
+    if (features.bibliography) imports.push(BibliographyModule);
+    if (features.tasks) imports.push(UserTaskModule);
+    if (features.relationships) imports.push(RelationshipModule);
+
+    return {
+      module: AppModule,
+      imports,
+      controllers: [AppController],
+      providers: [
+        AppService,
+        { provide: APP_GUARD, useClass: ThrottlerGuard },
+        { provide: APP_GUARD, useClass: ConditionalAuthGuard },
+        { provide: APP_GUARD, useClass: PermissionsGuard },
+      ],
+    };
+  }
+}

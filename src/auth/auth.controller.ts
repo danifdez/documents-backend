@@ -4,10 +4,14 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { FeatureFlagService } from '../common/feature-flags.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly featureFlagService: FeatureFlagService,
+  ) {}
 
   @Public()
   @Get('status')
@@ -15,6 +19,7 @@ export class AuthController {
     return {
       authEnabled: this.authService.isAuthEnabled(),
       offlineEnabled: this.authService.isOfflineEnabled(),
+      features: this.featureFlagService.getEnabledFeatures(),
     };
   }
 

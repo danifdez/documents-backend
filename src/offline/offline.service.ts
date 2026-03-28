@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -11,6 +11,7 @@ import { NoteEntity } from '../note/note.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { SyncChangeDto } from './dto/sync-change.dto';
+import { getRepositoryToken } from '@nestjs/typeorm';
 
 @Injectable()
 export class OfflineService {
@@ -23,7 +24,7 @@ export class OfflineService {
     @InjectRepository(ThreadEntity) private readonly threadRepo: Repository<ThreadEntity>,
     @InjectRepository(CommentEntity) private readonly commentRepo: Repository<CommentEntity>,
     @InjectRepository(MarkEntity) private readonly markRepo: Repository<MarkEntity>,
-    @InjectRepository(NoteEntity) private readonly noteRepo: Repository<NoteEntity>,
+    @Optional() @Inject(getRepositoryToken(NoteEntity)) private readonly noteRepo: Repository<NoteEntity> | null,
     @InjectRepository(ProjectEntity) private readonly projectRepo: Repository<ProjectEntity>,
     private readonly fileStorage: FileStorageService,
     private readonly configService: ConfigService,
@@ -129,7 +130,7 @@ export class OfflineService {
     const threads = await this.threadRepo.find({ where: { project: { id } } });
     const docs = await this.docRepo.find({ where: { project: { id } }, relations: ['resource'] });
     const resources = await this.resourceRepo.find({ where: { project: { id } }, relations: ['authors'] });
-    const notes = await this.noteRepo.find({ where: { project: { id } } });
+    const notes = this.noteRepo ? await this.noteRepo.find({ where: { project: { id } } }) : [];
 
     const docIds = docs.map((d) => d.id);
     const resourceIds = resources.map((r) => r.id);
@@ -248,9 +249,9 @@ export class OfflineService {
     const threads = await this.threadRepo.find({
       where: { project: { id: projectId }, updatedAt: MoreThan(sinceDate) },
     });
-    const notes = await this.noteRepo.find({
+    const notes = this.noteRepo ? await this.noteRepo.find({
       where: { project: { id: projectId }, updatedAt: MoreThan(sinceDate) },
-    });
+    }) : [];
 
     // Comments and marks don't have direct project relation, query via docs/resources
     const comments: CommentEntity[] = [];

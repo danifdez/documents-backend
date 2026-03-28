@@ -325,6 +325,15 @@ export class ResourceService {
     if (resource && resource.path) {
       await this.fileStorageService.deleteFile(resource.path);
     }
+    // Cleanup Neo4j relationships for this resource
+    try {
+      await this.jobService.create('relationship-modify', JobPriority.BACKGROUND, {
+        action: 'delete-by-resource',
+        resourceId: id,
+      });
+    } catch {
+      // Relationship cleanup is best-effort; don't fail the delete
+    }
   }
 
   async cleanupTempResources(maxAgeHours: number): Promise<number> {

@@ -429,6 +429,15 @@ export class EntityService {
         return targetEntity;
     }
 
+    async findByResourceId(resourceId: number): Promise<EntityEntity[]> {
+        return this.repository.createQueryBuilder('entity')
+            .leftJoinAndSelect('entity.entityType', 'entityType')
+            .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
+            .where('re.resource_id = :resourceId', { resourceId })
+            .orderBy('entity.name', 'ASC')
+            .getMany();
+    }
+
     async findByResourceGroupedByScope(
         resourceId: number,
         searchTerm?: string

@@ -4,6 +4,18 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JobEntity } from './job.entity';
 import { JobPriority } from './job-priority.enum';
+import { FeatureFlagService } from '../common/feature-flags.service';
+
+// Map job types to feature flags
+const JOB_FEATURE_MAP: Record<string, string> = {
+  'ingest-content': 'rag',
+  'search': 'rag',
+  'ask': 'rag',
+  'embedding': 'rag',
+  'entity-extraction': 'entities',
+  'image-generate': 'canvas',
+  'image-edit': 'canvas',
+};
 
 @Injectable()
 export class JobService {
@@ -12,9 +24,17 @@ export class JobService {
   constructor(
     @InjectRepository(JobEntity)
     private readonly repo: Repository<JobEntity>,
+    private readonly featureFlagService: FeatureFlagService,
   ) { }
 
   async create(type: string, priority: JobPriority, payload: object) {
+    // Skip job creation if the associated feature is disabled
+    const featureKey = JOB_FEATURE_MAP[type];
+    if (featureKey && !this.featureFlagService.isEnabled(featureKey as any)) {
+      this.logger.log(`Skipping job '${type}' — feature '${featureKey}' is disabled`);
+      return null;
+    }
+
     const job = this.repo.create({
       type,
       priority,

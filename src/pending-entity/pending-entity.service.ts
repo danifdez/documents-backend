@@ -6,6 +6,7 @@ import { EntityService } from '../entity/entity.service';
 import { ResourceService } from '../resource/resource.service';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
+import { readFeaturesFromEnv } from '../common/feature-flags';
 
 export interface CreatePendingEntityDto {
     resourceId: number;
@@ -276,6 +277,33 @@ export class PendingEntityService {
             projectId,
             content: workingContent || resource.content,
         });
+
+        // Trigger relationship extraction if feature enabled
+        const features = readFeaturesFromEnv();
+        if (features.relationships && confirmed > 0) {
+            try {
+                const allEntities = await this.entityService.findByResourceId(resourceId);
+                if (allEntities.length >= 2) {
+                    // Fetch content explicitly (findOne excludes large text fields)
+                    const relText = workingContent
+                        || await this.resourceService.getWorkingContentById(resourceId)
+                        || await this.resourceService.getContentById(resourceId)
+                        || '';
+                    await this.jobService.create('relationship-extraction', JobPriority.NORMAL, {
+                        resourceId,
+                        projectId,
+                        text: relText,
+                        entities: allEntities.map(e => ({
+                            id: e.id,
+                            name: e.name,
+                            type: e.entityType?.name || 'UNKNOWN',
+                        })),
+                    });
+                }
+            } catch (error) {
+                errors.push(`Failed to create relationship extraction job: ${error.message}`);
+            }
+        }
 
         return { confirmed, errors };
     }

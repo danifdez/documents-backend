@@ -27,4 +27,16 @@ export class NotificationGateway {
   sendImageEditResponse(data: any) {
     this.server.emit('imageEditResponse', data);
   }
+
+  sendRelationshipExtractionComplete(data: any) {
+    this.server.emit('relationshipExtractionComplete', data);
+  }
+
+  sendRelationshipQueryResponse(data: any) {
+    this.server.emit('relationshipQueryResponse', data);
+  }
+
+  sendRelationshipModifyResponse(data: any) {
+    this.server.emit('relationshipModifyResponse', data);
+  }
 }

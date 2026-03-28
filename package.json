@@ -22,7 +22,9 @@
     "migration:generate": "npm run typeorm migration:generate ./migrations/Init",
     "migration:run": "npm run typeorm migration:run",
     "migration:revert": "npm run typeorm migration:revert",
-    "seed:admin": "ts-node -r tsconfig-paths/register src/auth/seed-admin.ts"
+    "seed:admin": "ts-node -r tsconfig-paths/register src/auth/seed-admin.ts",
+    "feature:install": "ts-node -r tsconfig-paths/register src/cli/feature-install.ts",
+    "feature:uninstall": "ts-node -r tsconfig-paths/register src/cli/feature-uninstall.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.0",

@@ -7,7 +7,7 @@ import helmet from 'helmet';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule.register());
   const configService = app.get(ConfigService);
 
   // Security: warn about insecure defaults
