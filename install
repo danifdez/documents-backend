@@ -149,6 +149,19 @@ info "Installing enabled features..."
 npm run feature:install
 ok "Feature installation complete"
 
+# ── Seed admin user if authentication is enabled ──
+AUTH_ENABLED="${AUTH_ENABLED:-false}"
+if [ -f ".env" ]; then
+  AUTH_ENABLED=$(grep -E '^AUTH_ENABLED=' .env | cut -d= -f2 | tr -d '[:space:]')
+fi
+if [ "$AUTH_ENABLED" = "true" ]; then
+  info "Authentication enabled – seeding admin user..."
+  npm run seed:admin
+  ok "Admin user ready"
+else
+  info "Authentication disabled – skipping admin seed"
+fi
+
 echo ""
 printf "${GREEN}============================================${NC}\n"
 printf "${GREEN}  Backend installation complete!${NC}\n"

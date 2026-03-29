@@ -12,7 +12,7 @@ export class NoteService {
 
   async findAll(): Promise<NoteEntity[]> {
     return await this.repository.find({
-      relations: ['project'],
+      relations: ['project', 'thread'],
       order: { updatedAt: 'DESC' },
     });
   }
@@ -20,7 +20,7 @@ export class NoteService {
   async findOne(id: number): Promise<NoteEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['project'],
+      relations: ['project', 'thread'],
     });
   }
 
@@ -29,6 +29,16 @@ export class NoteService {
       .createQueryBuilder('n')
       .leftJoinAndSelect('n.project', 'project')
       .where('n.projectId = :projectId', { projectId })
+      .orderBy('n.updated_at', 'DESC')
+      .getMany();
+  }
+
+  async findByThread(threadId: number): Promise<NoteEntity[]> {
+    return await this.repository
+      .createQueryBuilder('n')
+      .leftJoinAndSelect('n.project', 'project')
+      .leftJoinAndSelect('n.thread', 'thread')
+      .where('n.threadId = :threadId', { threadId })
       .orderBy('n.updated_at', 'DESC')
       .getMany();
   }

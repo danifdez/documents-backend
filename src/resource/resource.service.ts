@@ -77,6 +77,21 @@ export class ResourceService {
     });
   }
 
+  async findByThread(threadId: number): Promise<ResourceEntity[]> {
+    return await this.repo.find({
+      select: ['id', 'name', 'title', 'mimeType', 'originalName', 'type', 'status', 'createdAt'],
+      where: { thread: { id: threadId } },
+      order: { createdAt: 'DESC' }
+    });
+  }
+
+  async assignToThread(resourceId: number, threadId: number): Promise<ResourceEntity | null> {
+    const resource = await this.repo.findOneBy({ id: resourceId });
+    if (!resource) return null;
+    resource.thread = { id: threadId } as any;
+    return await this.repo.save(resource);
+  }
+
   async findPending(): Promise<ResourceEntity[]> {
     return await this.repo.createQueryBuilder('resource')
       .select(['resource.id', 'resource.name', 'resource.title', 'resource.mimeType', 'resource.originalName', 'resource.type', 'resource.status', 'resource.createdAt'])
@@ -252,7 +267,7 @@ export class ResourceService {
 
   async uploadAndProcess(
     file: Express.Multer.File,
-    resourceData: Partial<ResourceEntity> & { projectId?: string },
+    resourceData: Partial<ResourceEntity> & { projectId?: string; threadId?: string },
   ): Promise<{ success: boolean }> {
     const hash = this.fileStorageService.calculateHash(file.buffer);
 
@@ -270,6 +285,7 @@ export class ResourceService {
     const resourceToCreate: any = {
       name: resourceData.name || file.originalname,
       project: resourceData.projectId ? { id: Number(resourceData.projectId) } : null,
+      thread: resourceData.threadId ? { id: Number(resourceData.threadId) } : null,
       hash: hash,
       mimeType: file.mimetype,
       originalName: resourceData.originalName || file.originalname,

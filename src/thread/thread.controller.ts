@@ -18,6 +18,11 @@ export class ThreadController {
     return await this.threadService.findByProject(projectId);
   }
 
+  @Get(':id/children')
+  async getChildren(@Param('id', ParseIntPipe) id: number): Promise<ThreadEntity[]> {
+    return await this.threadService.findByParent(id);
+  }
+
   @Post()
   async create(@Body() thread: Partial<ThreadEntity>): Promise<ThreadEntity> {
     return await this.threadService.create(thread);

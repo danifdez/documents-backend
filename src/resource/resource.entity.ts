@@ -1,4 +1,5 @@
 import { ProjectEntity } from '../project/project.entity';
+import { ThreadEntity } from '../thread/thread.entity';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -19,6 +20,9 @@ export class ResourceEntity {
 
   @ManyToOne(() => ProjectEntity, (project) => project.resources, { nullable: true })
   project: ProjectEntity | null;
+
+  @ManyToOne(() => ThreadEntity, { nullable: true })
+  thread: ThreadEntity | null;
 
   @Column()
   name: string;

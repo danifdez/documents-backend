@@ -16,8 +16,11 @@ export class ThreadEntity {
   @ManyToOne(() => ProjectEntity, (doc) => doc.threads, { nullable: true })
   project: ProjectEntity | null;
 
-  @Column({ nullable: true })
-  parent?: number;
+  @ManyToOne(() => ThreadEntity, (thread) => thread.children, { nullable: true })
+  parent: ThreadEntity | null;
+
+  @OneToMany(() => ThreadEntity, (thread) => thread.parent)
+  children: ThreadEntity[];
 
   @OneToMany(() => DocEntity, (doc) => doc.thread)
   docs: DocEntity[];

@@ -11,7 +11,10 @@ export class ThreadService {
   ) { }
 
   async findOne(id: number): Promise<ThreadEntity | null> {
-    return await this.repository.findOneBy({ id });
+    return await this.repository.findOne({
+      where: { id },
+      relations: ['parent', 'children'],
+    });
   }
 
   async create(thread: Partial<ThreadEntity>): Promise<ThreadEntity> {
@@ -22,6 +25,14 @@ export class ThreadService {
   async findByProject(projectId: number): Promise<ThreadEntity[]> {
     return await this.repository.find({
       where: { project: { id: projectId } },
+      relations: ['parent'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findByParent(parentId: number): Promise<ThreadEntity[]> {
+    return await this.repository.find({
+      where: { parent: { id: parentId } },
       order: { createdAt: 'DESC' },
     });
   }

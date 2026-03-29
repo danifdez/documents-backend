@@ -26,6 +26,11 @@ export class NoteController {
     return await this.noteService.findByProject(projectId);
   }
 
+  @Get('thread/:threadId')
+  async findByThread(@Param('threadId', ParseIntPipe) threadId: number): Promise<NoteEntity[]> {
+    return await this.noteService.findByThread(threadId);
+  }
+
   @Post()
   async create(@Body() note: Partial<NoteEntity>): Promise<NoteEntity> {
     return await this.noteService.create(note);

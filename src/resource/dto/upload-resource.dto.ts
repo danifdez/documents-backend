@@ -15,6 +15,10 @@ export class UploadResourceDto {
 
   @IsOptional()
   @IsString()
+  threadId?: string;
+
+  @IsOptional()
+  @IsString()
   type?: string;
 
   @IsOptional()

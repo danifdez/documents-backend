@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
+import { ThreadEntity } from '../thread/thread.entity';
 
 @Entity({ name: 'notes' })
 export class NoteEntity {
@@ -14,6 +15,9 @@ export class NoteEntity {
 
   @ManyToOne(() => ProjectEntity, (project) => project.notes, { nullable: true })
   project: ProjectEntity | null;
+
+  @ManyToOne(() => ThreadEntity, { nullable: true })
+  thread: ThreadEntity | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

@@ -52,6 +52,25 @@ export class ResourceController {
     return await this.resourceService.findByProject(projectId);
   }
 
+  @Get('thread/:threadId')
+  async getByThread(
+    @Param('threadId', ParseIntPipe) threadId: number,
+  ): Promise<ResourceEntity[]> {
+    return await this.resourceService.findByThread(threadId);
+  }
+
+  @Patch(':id/assign-thread')
+  async assignToThread(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('threadId', ParseIntPipe) threadId: number,
+  ): Promise<ResourceEntity> {
+    const resource = await this.resourceService.assignToThread(id, threadId);
+    if (!resource) {
+      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
+    }
+    return resource;
+  }
+
   @Get('entity/:entityId')
   async getByEntityId(
     @Param('entityId', ParseIntPipe) entityId: number,
