@@ -9,6 +9,13 @@ CREATE TABLE IF NOT EXISTS "timelines" (
   "projectId" INTEGER
 );
 
+ALTER TABLE "timelines" ADD COLUMN IF NOT EXISTS "epochs" JSONB;
+ALTER TABLE "timelines" ADD COLUMN IF NOT EXISTS "notes" TEXT;
+ALTER TABLE "timelines" ADD COLUMN IF NOT EXISTS "sync_dataset_id" INTEGER;
+ALTER TABLE "timelines" ADD COLUMN IF NOT EXISTS "sync_mapping" JSONB;
+ALTER TABLE "timelines" ADD COLUMN IF NOT EXISTS "layout_type" VARCHAR NOT NULL DEFAULT 'horizontal';
+ALTER TABLE "timelines" ADD COLUMN IF NOT EXISTS "axis_breaks" BOOLEAN NOT NULL DEFAULT false;
+
 DO $$ BEGIN
   ALTER TABLE "timelines" ADD CONSTRAINT "FK_timelines_project"
     FOREIGN KEY ("projectId") REFERENCES "projects"("id") ON DELETE SET NULL;

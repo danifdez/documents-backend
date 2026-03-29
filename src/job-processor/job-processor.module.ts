@@ -23,6 +23,7 @@ import { DatabaseModule } from '../database/database.module';
 import { RelationshipExtractionProcessor } from './processors/relationship-extraction-processor';
 import { RelationshipQueryProcessor } from './processors/relationship-query-processor';
 import { RelationshipModifyProcessor } from './processors/relationship-modify-processor';
+import { DeleteVectorsProcessor } from './processors/delete-vectors-processor';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Module({})
@@ -53,6 +54,7 @@ export class JobProcessorModule {
       TranscribeProcessor,
       ImageGenerateProcessor,
       ImageEditProcessor,
+      DeleteVectorsProcessor,
     ];
 
     if (features.entities) providers.push(EntityExtractionProcessor);
