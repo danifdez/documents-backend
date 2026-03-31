@@ -45,7 +45,7 @@ export class FileStorageService {
 
   async fileExists(hash: string, extension: string): Promise<boolean> {
     try {
-      return await fs.pathExists(this.getRelativePath(hash, extension));
+      return await fs.pathExists(this.getFullPath(hash, extension));
     } catch {
       return false;
     }
