@@ -7,7 +7,7 @@ import { ExportProjectsDto } from './dto/export.dto';
 
 @Controller('export')
 export class ExportController {
-  constructor(private readonly exportService: ExportService) {}
+  constructor(private readonly exportService: ExportService) { }
 
   @Get('projects')
   async getProjectsForExport() {

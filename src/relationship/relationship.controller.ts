@@ -14,7 +14,7 @@ import { CreateRelationshipDto, UpdateRelationshipDto, DeleteRelationshipDto } f
 
 @Controller('relationships')
 export class RelationshipController {
-  constructor(private readonly service: RelationshipService) {}
+  constructor(private readonly service: RelationshipService) { }
 
   @Get('resource/:resourceId')
   async queryByResource(
