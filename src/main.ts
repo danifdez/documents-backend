@@ -10,19 +10,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule.register());
   const configService = app.get(ConfigService);
 
-  // Security: warn about insecure defaults
+  // Security: warn if auth is disabled
   const authEnabled = configService.get('AUTH_ENABLED') === 'true';
-  const jwtSecret = configService.get('JWT_SECRET', '');
-  const insecureSecrets = ['change-me-in-production', 'default-dev-secret-change-me', ''];
-
-  if (authEnabled && insecureSecrets.includes(jwtSecret)) {
-    logger.error(
-      'AUTH_ENABLED is true but JWT_SECRET is not set or uses an insecure default. ' +
-      'Set a strong, unique JWT_SECRET before running in production!',
-    );
-    process.exit(1);
-  }
-
   if (!authEnabled) {
     logger.warn(
       'Authentication is DISABLED. All endpoints are publicly accessible. ' +
