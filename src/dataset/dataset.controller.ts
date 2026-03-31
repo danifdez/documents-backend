@@ -18,7 +18,7 @@ export class DatasetController {
     ) { }
 
     @Post('import')
-    @UseInterceptors(FileInterceptor('file'))
+    @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
     async importFromFile(
         @UploadedFile() file: Express.Multer.File,
         @Body() dto: ImportDatasetDto,
@@ -233,7 +233,7 @@ export class DatasetController {
     }
 
     @Post(':id/import')
-    @UseInterceptors(FileInterceptor('file'))
+    @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
     async importPreview(
         @Param('id', ParseIntPipe) id: number,
         @UploadedFile() file: Express.Multer.File,
@@ -246,7 +246,7 @@ export class DatasetController {
     }
 
     @Post(':id/import/confirm')
-    @UseInterceptors(FileInterceptor('file'))
+    @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
     async importConfirm(
         @Param('id', ParseIntPipe) id: number,
         @UploadedFile() file: Express.Multer.File,

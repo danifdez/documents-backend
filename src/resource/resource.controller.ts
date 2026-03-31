@@ -151,7 +151,7 @@ export class ResourceController {
 
   @Post('upload')
   @RequirePermissions(Permission.UPLOAD)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body() resourceData: UploadResourceDto,
