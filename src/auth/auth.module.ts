@@ -25,6 +25,6 @@ import { getJwtSecret } from './jwt-secret.helper';
   ],
   controllers: [AuthController, UsersController],
   providers: [AuthService, JwtStrategy],
-  exports: [AuthService],
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule { }
