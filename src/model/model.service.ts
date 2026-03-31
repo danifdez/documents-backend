@@ -45,7 +45,7 @@ export class ModelService {
       content = text;
     }
 
-    this.jobService.create('summarize', JobPriority.NORMAL, {
+    await this.jobService.create('summarize', JobPriority.NORMAL, {
       content: content,
       sourceLanguage: sourceLanguage,
       targetLanguage: targetLanguage,
@@ -73,7 +73,7 @@ export class ModelService {
     const sourceLanguage = resource.language || 'en';
     const extractedTexts = extractTextFromHtml(content);
 
-    this.jobService.create('translate', JobPriority.NORMAL, {
+    await this.jobService.create('translate', JobPriority.NORMAL, {
       resourceId: resourceId,
       sourceLanguage: sourceLanguage,
       targetLanguage: language,
@@ -95,7 +95,7 @@ export class ModelService {
     const extractedTexts = extractTextFromHtml(content);
 
     // Create job for entity extraction
-    this.jobService.create('entity-extraction', JobPriority.NORMAL, {
+    await this.jobService.create('entity-extraction', JobPriority.NORMAL, {
       resourceId: resourceId,
       from: 'content',
       texts: extractedTexts,
@@ -118,7 +118,7 @@ export class ModelService {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
 
-    this.jobService.create('key-point', JobPriority.NORMAL, {
+    await this.jobService.create('key-point', JobPriority.NORMAL, {
       resourceId: resourceId,
       content: content,
       targetLanguage: targetLanguage || resource.language || 'en',
@@ -141,7 +141,7 @@ export class ModelService {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
 
-    this.jobService.create('keywords', JobPriority.NORMAL, {
+    await this.jobService.create('keywords', JobPriority.NORMAL, {
       resourceId: resourceId,
       content: content,
       targetLanguage: targetLanguage || resource.language || 'en',
