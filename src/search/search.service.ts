@@ -35,7 +35,8 @@ export class SearchService {
     const $ = cheerio.load(fullContent);
     const textContent = $.text();
 
-    const regex = new RegExp(`(${searchTerm})`, 'gi');
+    const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
     const matches = [...textContent.matchAll(regex)];
 
     if (matches.length === 0) {
