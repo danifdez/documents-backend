@@ -1,5 +1,6 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
+import { randomBytes } from 'crypto';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 
@@ -18,7 +19,13 @@ async function seedAdmin() {
   await dataSource.initialize();
 
   const username = process.env.ADMIN_USERNAME ?? 'admin';
-  const password = process.env.ADMIN_PASSWORD ?? 'admin';
+
+  let password = process.env.ADMIN_PASSWORD;
+  let generated = false;
+  if (!password) {
+    password = randomBytes(24).toString('base64url');
+    generated = true;
+  }
 
   // Check if admin already exists
   const existing = await dataSource.query(
@@ -41,6 +48,10 @@ async function seedAdmin() {
   );
 
   console.log(`Admin user "${username}" created successfully`);
+  if (generated) {
+    console.log(`Generated password: ${password}`);
+    console.log('Set ADMIN_PASSWORD env var to use a fixed password next time.');
+  }
   await dataSource.destroy();
 }
 
