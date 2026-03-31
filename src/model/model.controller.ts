@@ -2,6 +2,10 @@ import { Controller, Post, Body } from '@nestjs/common';
 import { ModelService } from './model.service';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
+import {
+  AskQuestionDto, SummarizeDto, TranslateDto, ExtractEntitiesDto,
+  KeyPointsDto, KeywordsDto, GenerateImageDto, EditImageDto,
+} from './dto/model.dto';
 
 @Controller('model')
 export class ModelController {
@@ -9,22 +13,14 @@ export class ModelController {
 
   @Post('ask')
   @RequirePermissions(Permission.ASK)
-  async askQuestion(@Body() questionData: { question: string; projectId?: number; requestId?: string }): Promise<{ jobId: number }> {
+  async askQuestion(@Body() questionData: AskQuestionDto): Promise<{ jobId: number }> {
     return this.modelService.ask(questionData.question, questionData.projectId, questionData.requestId);
   }
 
   @Post('summarize')
   @RequirePermissions(Permission.SUMMARIZE)
   async summarize(
-    @Body()
-    summarizeData: {
-      targetLanguage: string;
-      resourceId?: number;
-      text?: string;
-      targetDocId?: number;
-      sourceLanguage?: string;
-      type?: string;
-    },
+    @Body() summarizeData: SummarizeDto,
   ): Promise<void> {
     await this.modelService.summarize(
       summarizeData.targetLanguage,
@@ -39,11 +35,7 @@ export class ModelController {
   @Post('translate')
   @RequirePermissions(Permission.TRANSLATE)
   async translate(
-    @Body()
-    translateData: {
-      targetLanguage: string;
-      resourceId: number;
-    },
+    @Body() translateData: TranslateDto,
   ): Promise<void> {
     await this.modelService.translate(
       translateData.resourceId,
@@ -54,8 +46,7 @@ export class ModelController {
   @Post('extract-entities')
   @RequirePermissions(Permission.ENTITY_EXTRACTION)
   async extractEntities(
-    @Body()
-    body: { resourceId: number },
+    @Body() body: ExtractEntitiesDto,
   ): Promise<void> {
     await this.modelService.extractEntities(body.resourceId);
   }
@@ -63,8 +54,7 @@ export class ModelController {
   @Post('key-points')
   @RequirePermissions(Permission.KEY_POINTS)
   async keyPoints(
-    @Body()
-    body: { resourceId: number; targetLanguage?: string },
+    @Body() body: KeyPointsDto,
   ): Promise<void> {
     await this.modelService.keyPoints(body.resourceId, body.targetLanguage);
   }
@@ -72,8 +62,7 @@ export class ModelController {
   @Post('keywords')
   @RequirePermissions(Permission.KEYWORDS)
   async keywords(
-    @Body()
-    body: { resourceId: number; targetLanguage?: string },
+    @Body() body: KeywordsDto,
   ): Promise<void> {
     await this.modelService.keywords(body.resourceId, body.targetLanguage);
   }
@@ -81,19 +70,7 @@ export class ModelController {
   @Post('image-generate')
   @RequirePermissions(Permission.IMAGE_GENERATE)
   async generateImage(
-    @Body()
-    body: {
-      prompt: string;
-      negativePrompt?: string;
-      width?: number;
-      height?: number;
-      steps?: number;
-      guidanceScale?: number;
-      seed?: number;
-      requestId?: string;
-      canvasId?: number;
-      projectId?: number;
-    },
+    @Body() body: GenerateImageDto,
   ): Promise<{ jobId: number }> {
     return this.modelService.generateImage(body);
   }
@@ -101,19 +78,7 @@ export class ModelController {
   @Post('image-edit')
   @RequirePermissions(Permission.IMAGE_GENERATE)
   async editImage(
-    @Body()
-    body: {
-      resourceId: number;
-      prompt: string;
-      negativePrompt?: string;
-      strength?: number;
-      steps?: number;
-      guidanceScale?: number;
-      seed?: number;
-      requestId?: string;
-      canvasId?: number;
-      projectId?: number;
-    },
+    @Body() body: EditImageDto,
   ): Promise<{ jobId: number }> {
     return this.modelService.editImage(body);
   }

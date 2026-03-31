@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { CanvasService } from './canvas.service';
 import { CanvasEntity } from './canvas.entity';
+import { CreateCanvasDto, UpdateCanvasDto } from './dto/canvas.dto';
 
 @Controller('canvases')
 export class CanvasController {
@@ -26,13 +27,13 @@ export class CanvasController {
   }
 
   @Post()
-  async create(@Body() canvas: Partial<CanvasEntity>): Promise<CanvasEntity> {
+  async create(@Body() canvas: CreateCanvasDto): Promise<CanvasEntity> {
     return await this.canvasService.create(canvas);
   }
 
   @Patch(':id')
   async update(
-    @Param('id', ParseIntPipe) id: number, @Body() canvas: Partial<CanvasEntity>): Promise<CanvasEntity | null> {
+    @Param('id', ParseIntPipe) id: number, @Body() canvas: UpdateCanvasDto): Promise<CanvasEntity | null> {
     return await this.canvasService.update(id, canvas);
   }
 

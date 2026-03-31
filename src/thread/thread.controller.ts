@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, ParseIntPipe } from '@nestjs/common';
 import { ThreadService } from './thread.service';
 import { ThreadEntity } from './thread.entity';
+import { CreateThreadDto } from './dto/thread.dto';
 
 @Controller('threads')
 export class ThreadController {
@@ -24,7 +25,7 @@ export class ThreadController {
   }
 
   @Post()
-  async create(@Body() thread: Partial<ThreadEntity>): Promise<ThreadEntity> {
+  async create(@Body() thread: CreateThreadDto): Promise<ThreadEntity> {
     return await this.threadService.create(thread);
   }
 }

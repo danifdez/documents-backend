@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { NoteService } from './note.service';
 import { NoteEntity } from './note.entity';
+import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
 
 @Controller('notes')
 export class NoteController {
@@ -32,14 +33,14 @@ export class NoteController {
   }
 
   @Post()
-  async create(@Body() note: Partial<NoteEntity>): Promise<NoteEntity> {
+  async create(@Body() note: CreateNoteDto): Promise<NoteEntity> {
     return await this.noteService.create(note);
   }
 
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: Partial<NoteEntity>,
+    @Body() data: UpdateNoteDto,
   ): Promise<NoteEntity | null> {
     return await this.noteService.update(id, data);
   }

@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Query } from '@nestjs/common';
 import { CalendarEventService } from './calendar-event.service';
 import { CalendarEventEntity } from './calendar-event.entity';
+import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
 
 @Controller('calendar-events')
 export class CalendarEventController {
@@ -35,14 +36,14 @@ export class CalendarEventController {
   }
 
   @Post()
-  async create(@Body() event: Partial<CalendarEventEntity>): Promise<CalendarEventEntity> {
+  async create(@Body() event: CreateCalendarEventDto): Promise<CalendarEventEntity> {
     return await this.calendarEventService.create(event);
   }
 
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: Partial<CalendarEventEntity>,
+    @Body() data: UpdateCalendarEventDto,
   ): Promise<CalendarEventEntity | null> {
     return await this.calendarEventService.update(id, data);
   }

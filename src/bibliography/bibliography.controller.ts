@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Query,
 import { Response } from 'express';
 import { BibliographyService } from './bibliography.service';
 import { BibliographyEntryEntity } from './bibliography-entry.entity';
+import { CreateBibliographyEntryDto, UpdateBibliographyEntryDto } from './dto/bibliography-entry.dto';
 
 @Controller('bibliography')
 export class BibliographyController {
@@ -44,7 +45,7 @@ export class BibliographyController {
   }
 
   @Post()
-  async create(@Body() data: Partial<BibliographyEntryEntity>): Promise<BibliographyEntryEntity> {
+  async create(@Body() data: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
     return await this.bibliographyService.create(data);
   }
 
@@ -80,7 +81,7 @@ export class BibliographyController {
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: Partial<BibliographyEntryEntity>,
+    @Body() data: UpdateBibliographyEntryDto,
   ): Promise<BibliographyEntryEntity | null> {
     return await this.bibliographyService.update(id, data);
   }

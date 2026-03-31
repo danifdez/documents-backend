@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe, Query } from '@nestjs/common';
 import { AuthorService } from './author.service';
 import { AuthorEntity } from './author.entity';
+import { CreateAuthorDto, UpdateAuthorDto } from './dto/author.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 
@@ -24,18 +25,15 @@ export class AuthorController {
 
     @Post()
     @RequirePermissions(Permission.WRITE)
-    async create(@Body() author: Partial<AuthorEntity>): Promise<AuthorEntity> {
-        if (author.name) {
-            return await this.authorService.findOrCreate(author.name);
-        }
-        return await this.authorService.create(author);
+    async create(@Body() author: CreateAuthorDto): Promise<AuthorEntity> {
+        return await this.authorService.findOrCreate(author.name);
     }
 
     @Patch(':id')
     @RequirePermissions(Permission.WRITE)
     async update(
         @Param('id', ParseIntPipe) id: number,
-        @Body() author: Partial<AuthorEntity>,
+        @Body() author: UpdateAuthorDto,
     ): Promise<AuthorEntity | null> {
         return await this.authorService.update(id, author);
     }

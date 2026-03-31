@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe } from '@nestjs/common';
 import { ResourceTypeService } from './resource-type.service';
 import { ResourceTypeEntity } from './resource-type.entity';
+import { CreateResourceTypeDto, UpdateResourceTypeDto } from './dto/resource-type.dto';
 
 @Controller('resource-types')
 export class ResourceTypeController {
@@ -12,14 +13,14 @@ export class ResourceTypeController {
   }
 
   @Post()
-  async create(@Body() resourceType: ResourceTypeEntity): Promise<ResourceTypeEntity | any> {
+  async create(@Body() resourceType: CreateResourceTypeDto): Promise<ResourceTypeEntity | any> {
     return await this.resourceTypeService.create(resourceType);
   }
 
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() resourceType: Partial<ResourceTypeEntity>,
+    @Body() resourceType: UpdateResourceTypeDto,
   ): Promise<ResourceTypeEntity | any | null> {
     return await this.resourceTypeService.update(id, resourceType);
   }

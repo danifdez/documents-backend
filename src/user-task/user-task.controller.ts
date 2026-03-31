@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { UserTaskService } from './user-task.service';
 import { UserTaskEntity } from './user-task.entity';
+import { CreateUserTaskDto, UpdateUserTaskDto } from './dto/user-task.dto';
 
 @Controller('user-tasks')
 export class UserTaskController {
@@ -27,14 +28,14 @@ export class UserTaskController {
   }
 
   @Post()
-  async create(@Body() task: Partial<UserTaskEntity>): Promise<UserTaskEntity> {
+  async create(@Body() task: CreateUserTaskDto): Promise<UserTaskEntity> {
     return await this.userTaskService.create(task);
   }
 
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: Partial<UserTaskEntity>,
+    @Body() data: UpdateUserTaskDto,
   ): Promise<UserTaskEntity | null> {
     return await this.userTaskService.update(id, data);
   }

@@ -10,6 +10,7 @@ import {
   ParseIntPipe,
 } from '@nestjs/common';
 import { RelationshipService } from './relationship.service';
+import { CreateRelationshipDto, UpdateRelationshipDto, DeleteRelationshipDto } from './dto/relationship.dto';
 
 @Controller('relationships')
 export class RelationshipController {
@@ -37,44 +38,21 @@ export class RelationshipController {
 
   @Post()
   async createRelationship(
-    @Body()
-    dto: {
-      subjectId: number;
-      predicate: string;
-      objectId: number;
-      resourceId: number;
-      projectId?: number;
-      requestId?: string;
-    },
+    @Body() dto: CreateRelationshipDto,
   ): Promise<{ jobId: number }> {
     return this.service.createRelationship(dto);
   }
 
   @Put()
   async updateRelationship(
-    @Body()
-    dto: {
-      subjectId: number;
-      predicate: string;
-      objectId: number;
-      newPredicate: string;
-      resourceId: number;
-      requestId?: string;
-    },
+    @Body() dto: UpdateRelationshipDto,
   ): Promise<{ jobId: number }> {
     return this.service.updateRelationship(dto);
   }
 
   @Delete()
   async deleteRelationship(
-    @Body()
-    dto: {
-      subjectId: number;
-      predicate: string;
-      objectId: number;
-      resourceId: number;
-      requestId?: string;
-    },
+    @Body() dto: DeleteRelationshipDto,
   ): Promise<{ jobId: number }> {
     return this.service.deleteRelationship(dto);
   }

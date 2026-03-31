@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
 import { TimelineService } from './timeline.service';
 import { TimelineEntity } from './timeline.entity';
+import { CreateTimelineDto, UpdateTimelineDto } from './dto/timeline.dto';
 
 @Controller('timelines')
 export class TimelineController {
@@ -17,14 +18,14 @@ export class TimelineController {
   }
 
   @Post()
-  async create(@Body() data: Partial<TimelineEntity>): Promise<TimelineEntity> {
+  async create(@Body() data: CreateTimelineDto): Promise<TimelineEntity> {
     return await this.timelineService.create(data);
   }
 
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: Partial<TimelineEntity>,
+    @Body() data: UpdateTimelineDto,
   ): Promise<TimelineEntity | null> {
     return await this.timelineService.update(id, data);
   }

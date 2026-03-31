@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { ExportService } from './export.service';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
+import { ExportProjectsDto } from './dto/export.dto';
 
 @Controller('export')
 export class ExportController {
@@ -16,13 +17,7 @@ export class ExportController {
   @Post()
   @RequirePermissions(Permission.EXPORT)
   async exportProjects(
-    @Body()
-    body: {
-      projectIds?: number[];
-      includeOriginalFiles?: boolean;
-      includeMetadata?: boolean;
-      includeContent?: boolean;
-    },
+    @Body() body: ExportProjectsDto,
     @Res() res: Response,
   ) {
     try {

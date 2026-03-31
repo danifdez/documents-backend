@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Delete, Patch, Query, ParseIntPipe } from '@nestjs/common';
 import { ProjectService } from './project.service';
 import { ProjectEntity } from './project.entity';
+import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 
@@ -32,14 +33,14 @@ export class ProjectController {
 
   @Post()
   @RequirePermissions(Permission.PROJECTS)
-  async create(@Body() project: Partial<ProjectEntity>): Promise<ProjectEntity> {
+  async create(@Body() project: CreateProjectDto): Promise<ProjectEntity> {
     return await this.projectService.create(project);
   }
 
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() project: Partial<ProjectEntity>,
+    @Body() project: UpdateProjectDto,
   ): Promise<ProjectEntity | null> {
     return await this.projectService.update(id, project);
   }
