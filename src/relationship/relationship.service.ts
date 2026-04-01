@@ -13,6 +13,14 @@ export class RelationshipService {
     private readonly entityService: EntityService,
   ) {}
 
+  async queryAll(requestId?: string): Promise<{ jobId: number }> {
+    const job = await this.jobService.create('relationship-query', JobPriority.HIGH, {
+      query_type: 'all',
+      requestId,
+    });
+    return { jobId: job.id };
+  }
+
   async queryByResource(
     resourceId: number,
     requestId?: string,

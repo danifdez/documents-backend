@@ -16,6 +16,13 @@ import { CreateRelationshipDto, UpdateRelationshipDto, DeleteRelationshipDto } f
 export class RelationshipController {
   constructor(private readonly service: RelationshipService) { }
 
+  @Get('all')
+  async queryAll(
+    @Query('requestId') requestId?: string,
+  ): Promise<{ jobId: number }> {
+    return this.service.queryAll(requestId);
+  }
+
   @Get('resource/:resourceId')
   async queryByResource(
     @Param('resourceId', ParseIntPipe) resourceId: number,
