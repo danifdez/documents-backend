@@ -11,11 +11,12 @@ export class ModelService {
     private readonly resourceService: ResourceService,
   ) { }
 
-  async ask(question: string, projectId?: number, requestId?: string): Promise<{ jobId: number }> {
+  async ask(question: string, projectId?: number, requestId?: string, context?: string): Promise<{ jobId: number }> {
     const job = await this.jobService.create('ask', JobPriority.HIGH, {
       question,
       projectId,
       requestId,
+      context,
     });
     return { jobId: job.id };
   }
@@ -146,6 +147,16 @@ export class ModelService {
       content: content,
       targetLanguage: targetLanguage || resource.language || 'en',
     });
+  }
+
+  async semanticSearch(query: string, projectId?: number, requestId?: string, limit?: number): Promise<{ jobId: number }> {
+    const job = await this.jobService.create('search', JobPriority.HIGH, {
+      query,
+      projectId,
+      requestId,
+      limit: limit || 10,
+    });
+    return { jobId: job.id };
   }
 
   async generateImage(params: {

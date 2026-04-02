@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, MaxLength, Min, Max } from 'class-validator';
 
 export class AskQuestionDto {
     @IsString()
@@ -13,6 +13,11 @@ export class AskQuestionDto {
     @IsString()
     @IsOptional()
     requestId?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(500000)
+    context?: string;
 }
 
 export class SummarizeDto {
@@ -163,4 +168,25 @@ export class EditImageDto {
     @IsNumber()
     @IsOptional()
     projectId?: number;
+}
+
+export class SemanticSearchDto {
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(10000)
+    query: string;
+
+    @IsNumber()
+    @IsOptional()
+    projectId?: number;
+
+    @IsString()
+    @IsOptional()
+    requestId?: string;
+
+    @IsNumber()
+    @IsOptional()
+    @Min(1)
+    @Max(20)
+    limit?: number;
 }

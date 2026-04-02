@@ -21,7 +21,11 @@ export class KnowledgeEntryService {
     }
 
     async findOne(id: number): Promise<KnowledgeEntryEntity | null> {
-        return await this.repository.findOneBy({ id });
+        return await this.repository.findOne({ where: { id }, relations: ['entity', 'entity.entityType'] });
+    }
+
+    async findByEntityId(entityId: number): Promise<KnowledgeEntryEntity | null> {
+        return await this.repository.findOne({ where: { entityId }, relations: ['entity', 'entity.entityType'] });
     }
 
     async search(searchTerm: string): Promise<KnowledgeEntryEntity[]> {

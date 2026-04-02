@@ -4,7 +4,7 @@ import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 import {
   AskQuestionDto, SummarizeDto, TranslateDto, ExtractEntitiesDto,
-  KeyPointsDto, KeywordsDto, GenerateImageDto, EditImageDto,
+  KeyPointsDto, KeywordsDto, GenerateImageDto, EditImageDto, SemanticSearchDto,
 } from './dto/model.dto';
 
 @Controller('model')
@@ -14,7 +14,7 @@ export class ModelController {
   @Post('ask')
   @RequirePermissions(Permission.ASK)
   async askQuestion(@Body() questionData: AskQuestionDto): Promise<{ jobId: number }> {
-    return this.modelService.ask(questionData.question, questionData.projectId, questionData.requestId);
+    return this.modelService.ask(questionData.question, questionData.projectId, questionData.requestId, questionData.context);
   }
 
   @Post('summarize')
@@ -81,5 +81,11 @@ export class ModelController {
     @Body() body: EditImageDto,
   ): Promise<{ jobId: number }> {
     return this.modelService.editImage(body);
+  }
+
+  @Post('semantic-search')
+  @RequirePermissions(Permission.ASK)
+  async semanticSearch(@Body() body: SemanticSearchDto): Promise<{ jobId: number }> {
+    return this.modelService.semanticSearch(body.query, body.projectId, body.requestId, body.limit);
   }
 }

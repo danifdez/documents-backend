@@ -24,6 +24,7 @@ import { RelationshipExtractionProcessor } from './processors/relationship-extra
 import { RelationshipQueryProcessor } from './processors/relationship-query-processor';
 import { RelationshipModifyProcessor } from './processors/relationship-modify-processor';
 import { DeleteVectorsProcessor } from './processors/delete-vectors-processor';
+import { SearchProcessor } from './processors/search-processor';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Module({})
@@ -55,6 +56,7 @@ export class JobProcessorModule {
       ImageGenerateProcessor,
       ImageEditProcessor,
       DeleteVectorsProcessor,
+      SearchProcessor,
     ];
 
     if (features.entities) providers.push(EntityExtractionProcessor);

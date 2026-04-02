@@ -38,16 +38,22 @@ export class EntityService {
 
         if (!entity) return null;
 
-        const resources = await this.repository.query(
-            `SELECT r.id, r.name, r.type, r.status,
-                    p.id as "projectId", p.name as "projectName"
-             FROM resource_entities re
-             JOIN resources r ON r.id = re.resource_id
-             LEFT JOIN projects p ON p.id = r."projectId"
-             WHERE re.entity_id = $1
-             ORDER BY r.name ASC`,
-            [id]
-        );
+        const [resources, knowledgeEntries] = await Promise.all([
+            this.repository.query(
+                `SELECT r.id, r.name, r.type, r.status,
+                        p.id as "projectId", p.name as "projectName"
+                 FROM resource_entities re
+                 JOIN resources r ON r.id = re.resource_id
+                 LEFT JOIN projects p ON p.id = r."projectId"
+                 WHERE re.entity_id = $1
+                 ORDER BY r.name ASC`,
+                [id]
+            ),
+            this.repository.query(
+                `SELECT id, title, summary FROM knowledge_entries WHERE entity_id = $1 ORDER BY updated_at DESC`,
+                [id]
+            ),
+        ]);
 
         return {
             ...entity,
@@ -57,6 +63,11 @@ export class EntityService {
                 type: r.type,
                 status: r.status,
                 project: r.projectId ? { id: r.projectId, name: r.projectName } : null,
+            })),
+            knowledgeEntries: knowledgeEntries.map((k: any) => ({
+                id: k.id,
+                title: k.title,
+                summary: k.summary,
             })),
         };
     }

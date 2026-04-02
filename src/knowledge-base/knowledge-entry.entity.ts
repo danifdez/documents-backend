@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { EntityEntity } from '../entity/entity.entity';
 
 @Entity({ name: 'knowledge_entries' })
 export class KnowledgeEntryEntity {
@@ -16,6 +17,16 @@ export class KnowledgeEntryEntity {
 
     @Column({ type: 'jsonb', nullable: true })
     tags: string[] | null;
+
+    @Column({ name: 'is_definition', default: false })
+    isDefinition: boolean;
+
+    @Column({ name: 'entity_id', nullable: true })
+    entityId: number | null;
+
+    @ManyToOne(() => EntityEntity, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'entity_id' })
+    entity: EntityEntity | null;
 
     @CreateDateColumn({ name: 'created_at' })
     createdAt: Date;

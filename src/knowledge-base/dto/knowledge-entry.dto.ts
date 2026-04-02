@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsBoolean, IsNumber, MaxLength } from 'class-validator';
 
 export class CreateKnowledgeEntryDto {
     @IsString()
@@ -19,6 +19,14 @@ export class CreateKnowledgeEntryDto {
     @IsOptional()
     @IsString({ each: true })
     tags?: string[];
+
+    @IsBoolean()
+    @IsOptional()
+    isDefinition?: boolean;
+
+    @IsNumber()
+    @IsOptional()
+    entityId?: number | null;
 }
 
 export class UpdateKnowledgeEntryDto {
@@ -40,4 +48,12 @@ export class UpdateKnowledgeEntryDto {
     @IsOptional()
     @IsString({ each: true })
     tags?: string[];
+
+    @IsBoolean()
+    @IsOptional()
+    isDefinition?: boolean;
+
+    @IsNumber()
+    @IsOptional()
+    entityId?: number | null;
 }

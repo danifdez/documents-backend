@@ -15,6 +15,11 @@ export class KnowledgeEntryController {
         return await this.service.findAll();
     }
 
+    @Get('by-entity/:entityId')
+    async findByEntityId(@Param('entityId', ParseIntPipe) entityId: number): Promise<KnowledgeEntryEntity | null> {
+        return await this.service.findByEntityId(entityId);
+    }
+
     @Get(':id')
     async findOne(@Param('id', ParseIntPipe) id: number): Promise<KnowledgeEntryEntity | null> {
         return await this.service.findOne(id);

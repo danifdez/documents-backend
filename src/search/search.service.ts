@@ -1,4 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { DocService } from 'src/doc/doc.service';
 import { ResourceService } from 'src/resource/resource.service';
 import { CanvasService } from 'src/canvas/canvas.service';
@@ -9,10 +11,13 @@ import { EntityService } from 'src/entity/entity.service';
 import { DatasetService } from 'src/dataset/dataset.service';
 import * as cheerio from 'cheerio';
 import { SearchResultDto } from './dto/search-result.dto';
+import { PageEntityMatch } from './dto/page-entities.dto';
+import { PageBlockResult } from './dto/page-blocks.dto';
 
 @Injectable()
 export class SearchService {
   constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly docService: DocService,
     private readonly resourceService: ResourceService,
     @Optional() private readonly canvasService?: CanvasService,
@@ -218,5 +223,221 @@ export class SearchService {
       highlightedName: this.highlightTextInHtml(r.d_name, searchTerm, 50),
       highlightedContent: this.highlightTextInHtml(r.d_description, searchTerm, 100),
     }));
+  }
+
+  async matchEntitiesInText(text: string, projectId?: number): Promise<PageEntityMatch[]> {
+    if (!text || text.trim().length === 0) {
+      return [];
+    }
+
+    const normalizedText = text.slice(0, 10000);
+
+    // Fetch all entities (scoped to project if provided, plus globals)
+    let query = `
+      SELECT e.id, e.name, e.description, e.aliases, e.translations,
+             et.name as entity_type_name
+      FROM entities e
+      LEFT JOIN entity_types et ON et.id = e.entity_type_id
+    `;
+    const params: any[] = [];
+
+    if (projectId) {
+      query += `
+        WHERE (
+          EXISTS (SELECT 1 FROM entity_projects ep WHERE ep.entity_id = e.id AND ep.project_id = $1)
+          OR e.global = true
+        )
+      `;
+      params.push(projectId);
+    }
+
+    let entities: any[];
+    try {
+      entities = await this.dataSource.query(query, params);
+    } catch {
+      return [];
+    }
+
+    const matches: PageEntityMatch[] = [];
+    const seenIds = new Set<number>();
+
+    for (const entity of entities) {
+      // Collect all terms to match for this entity
+      const terms: string[] = [];
+
+      if (entity.name && entity.name.length >= 3) {
+        terms.push(entity.name);
+      }
+
+      // Aliases
+      if (entity.aliases && Array.isArray(entity.aliases)) {
+        for (const alias of entity.aliases) {
+          if (alias.value && alias.value.length >= 3) {
+            terms.push(alias.value);
+          }
+        }
+      }
+
+      // Translations
+      if (entity.translations && typeof entity.translations === 'object') {
+        for (const value of Object.values(entity.translations)) {
+          if (typeof value === 'string' && value.length >= 3) {
+            terms.push(value);
+          }
+        }
+      }
+
+      // Check which terms appear in the text using Unicode-aware boundary matching
+      // \b doesn't work with accented chars (é, ñ, etc.), so we use lookaround with
+      // a character class that covers word chars + Unicode letters
+      const matchedTerms: string[] = [];
+      for (const term of terms) {
+        const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Use case-insensitive indexOf first (fast path), then verify boundaries
+        const lowerText = normalizedText.toLowerCase();
+        const lowerTerm = term.toLowerCase();
+        let searchFrom = 0;
+        while (searchFrom < lowerText.length) {
+          const idx = lowerText.indexOf(lowerTerm, searchFrom);
+          if (idx === -1) break;
+
+          // Check that the character before and after is not a letter/digit (word boundary)
+          const charBefore = idx > 0 ? lowerText[idx - 1] : ' ';
+          const charAfter = idx + lowerTerm.length < lowerText.length ? lowerText[idx + lowerTerm.length] : ' ';
+          const isWordChar = (c: string) => /[\p{L}\p{N}_]/u.test(c);
+
+          if (!isWordChar(charBefore) && !isWordChar(charAfter)) {
+            matchedTerms.push(term);
+            break;
+          }
+          searchFrom = idx + 1;
+        }
+      }
+
+      if (matchedTerms.length > 0 && !seenIds.has(entity.id)) {
+        seenIds.add(entity.id);
+        matches.push({
+          id: entity.id,
+          name: entity.name,
+          type: entity.entity_type_name || 'Unknown',
+          description: entity.description,
+          matchedTerms: [...new Set(matchedTerms)],
+        });
+      }
+    }
+
+    return matches;
+  }
+
+  /**
+   * Extract meaningful keywords from a block of text.
+   * Filters out common stopwords and short words, returns the most distinctive terms.
+   */
+  private extractKeywords(text: string, maxKeywords = 5): string[] {
+    const stopwords = new Set([
+      // Spanish
+      'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'al',
+      'en', 'con', 'por', 'para', 'que', 'es', 'son', 'fue', 'ser', 'está',
+      'como', 'más', 'pero', 'sus', 'este', 'esta', 'estos', 'estas', 'ese',
+      'esa', 'esos', 'esas', 'hay', 'ya', 'también', 'muy', 'entre', 'sobre',
+      'sin', 'hasta', 'desde', 'donde', 'todo', 'todos', 'toda', 'todas',
+      'otro', 'otra', 'otros', 'otras', 'cada', 'según', 'han', 'tiene',
+      'puede', 'cuando', 'cual', 'será', 'sido', 'siendo', 'había', 'tiene',
+      'nos', 'les', 'así', 'quien', 'parte', 'después', 'bien', 'solo',
+      'hace', 'hoy', 'ahora', 'aquí', 'durante', 'siempre', 'mismo', 'misma',
+      // English
+      'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
+      'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'will',
+      'with', 'this', 'that', 'from', 'they', 'were', 'what', 'when', 'your',
+      'said', 'each', 'which', 'their', 'time', 'will', 'way', 'about',
+      'many', 'then', 'them', 'some', 'would', 'make', 'like', 'into',
+      'could', 'other', 'than', 'its', 'also', 'after', 'new', 'just',
+      'more', 'these', 'two', 'may', 'first', 'being', 'any', 'through',
+      'most', 'how', 'where', 'between', 'does', 'did', 'get',
+    ]);
+
+    // Split text into words, filter and score them
+    const words = text
+      .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 3 && !stopwords.has(w.toLowerCase()))
+      .map(w => w.replace(/^['-]+|['-]+$/g, ''));
+
+    // Count frequency - more frequent = more important
+    const freq = new Map<string, number>();
+    for (const w of words) {
+      const lower = w.toLowerCase();
+      freq.set(lower, (freq.get(lower) || 0) + 1);
+    }
+
+    // Prefer longer, less common words (likely proper nouns, technical terms)
+    // Also prefer capitalized words (proper nouns)
+    const scored = [...freq.entries()].map(([word, count]) => {
+      let score = count;
+      if (word.length >= 6) score += 2;
+      if (word.length >= 10) score += 2;
+      // Check if any occurrence was capitalized (proper noun)
+      const original = words.find(w => w.toLowerCase() === word);
+      if (original && original[0] === original[0].toUpperCase() && original[0] !== original[0].toLowerCase()) {
+        score += 3;
+      }
+      return { word, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, maxKeywords).map(s => s.word);
+  }
+
+  async searchBlocks(blocks: { blockId: string; text: string }[], projectId?: number): Promise<PageBlockResult[]> {
+    if (!blocks || blocks.length === 0) return [];
+
+    // Limit to 20 blocks to avoid overloading
+    const limitedBlocks = blocks.slice(0, 20);
+
+    const results = await Promise.all(
+      limitedBlocks.map(async (block) => {
+        const text = block.text.slice(0, 500).trim();
+        if (!text || text.length < 20) {
+          return { blockId: block.blockId, results: [] };
+        }
+
+        // Extract keywords instead of using full sentences
+        const keywords = this.extractKeywords(text, 4);
+        if (keywords.length === 0) {
+          return { blockId: block.blockId, results: [] };
+        }
+
+        // Search each keyword individually and merge results
+        const allResults: SearchResultDto[] = [];
+        const seenIds = new Set<string>();
+        const MIN_SCORE = 0.3;
+
+        for (const keyword of keywords) {
+          try {
+            const searchResults = await this.globalSearch(keyword, projectId);
+            for (const r of searchResults) {
+              if (r.score < MIN_SCORE) continue;
+              const key = `${r.collection}-${r.id}`;
+              if (!seenIds.has(key)) {
+                seenIds.add(key);
+                allResults.push(r);
+              }
+            }
+          } catch {
+            // Skip failed searches
+          }
+        }
+
+        // Sort by score and take top 3
+        allResults.sort((a, b) => b.score - a.score);
+        return {
+          blockId: block.blockId,
+          results: allResults.slice(0, 3),
+        };
+      })
+    );
+
+    // Filter out blocks with no results
+    return results.filter(r => r.results.length > 0);
   }
 }

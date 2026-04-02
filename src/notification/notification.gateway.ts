@@ -72,4 +72,8 @@ export class NotificationGateway implements OnGatewayConnection {
   sendRelationshipModifyResponse(data: any) {
     this.server.emit('relationshipModifyResponse', data);
   }
+
+  sendSearchResponse(data: any) {
+    this.server.emit('searchResponse', data);
+  }
 }
