@@ -10,6 +10,7 @@ export const FEATURE_DIR_MAP: Record<string, string> = {
   authors: 'authors',
   canvas: 'canvas',
   datasets: 'datasets',
+  data_sources: 'data-sources',
   notes: 'notes',
   calendar: 'calendar',
   timelines: 'timelines',
