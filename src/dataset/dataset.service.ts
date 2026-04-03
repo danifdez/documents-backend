@@ -5,7 +5,8 @@ import { DatasetEntity, DatasetField } from './dataset.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
 import { DatasetRelationEntity } from './dataset-relation.entity';
 import { DatasetRecordLinkEntity } from './dataset-record-link.entity';
-import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto } from './dto/dataset.dto';
+import { DatasetChartEntity } from './dataset-chart.entity';
+import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto } from './dto/dataset.dto';
 
 @Injectable()
 export class DatasetService {
@@ -18,6 +19,8 @@ export class DatasetService {
         private readonly relationRepository: Repository<DatasetRelationEntity>,
         @InjectRepository(DatasetRecordLinkEntity)
         private readonly linkRepository: Repository<DatasetRecordLinkEntity>,
+        @InjectRepository(DatasetChartEntity)
+        private readonly chartRepository: Repository<DatasetChartEntity>,
     ) { }
 
     async findAllDatasets(projectId?: number): Promise<any[]> {
@@ -98,7 +101,6 @@ export class DatasetService {
         const oldSchema = dataset.schema;
         const newKeys = new Set(newSchema.map(f => f.key));
         const oldFieldMap = new Map(oldSchema.map(f => [f.key, f]));
-        const newFieldMap = new Map(newSchema.map(f => [f.key, f]));
 
         const removedFields: { key: string; name: string; affectedRecords: number }[] = [];
         const typeChanges: { key: string; name: string; oldType: string; newType: string; incompatibleRecords: number }[] = [];
@@ -526,6 +528,81 @@ export class DatasetService {
         }
 
         return clean;
+    }
+
+    async bulkDeleteRecords(datasetId: number, recordIds: number[]): Promise<{ deleted: number }> {
+        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
+        if (!dataset) {
+            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
+        }
+
+        if (!recordIds.length) return { deleted: 0 };
+
+        const result = await this.recordRepository.createQueryBuilder()
+            .delete()
+            .where('dataset_id = :datasetId', { datasetId })
+            .andWhere('id IN (:...ids)', { ids: recordIds })
+            .execute();
+
+        return { deleted: result.affected || 0 };
+    }
+
+    async findAllRecords(datasetId: number): Promise<DatasetRecordEntity[]> {
+        return await this.recordRepository.find({
+            where: { dataset: { id: datasetId } },
+            order: { createdAt: 'DESC' },
+        });
+    }
+
+    // ── Chart CRUD ──
+
+    async findCharts(datasetId: number): Promise<DatasetChartEntity[]> {
+        return await this.chartRepository.find({
+            where: { dataset: { id: datasetId } },
+            order: { updatedAt: 'DESC' },
+        });
+    }
+
+    async findOneChart(chartId: number): Promise<DatasetChartEntity | null> {
+        return await this.chartRepository.findOne({
+            where: { id: chartId },
+            relations: ['dataset'],
+        });
+    }
+
+    async createChart(datasetId: number, dto: CreateDatasetChartDto): Promise<DatasetChartEntity> {
+        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
+        if (!dataset) {
+            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
+        }
+
+        const chart = this.chartRepository.create({
+            dataset: { id: datasetId } as any,
+            name: dto.name,
+            config: dto.config,
+        });
+
+        return await this.chartRepository.save(chart);
+    }
+
+    async updateChart(chartId: number, dto: UpdateDatasetChartDto): Promise<DatasetChartEntity> {
+        const chart = await this.chartRepository.findOne({ where: { id: chartId } });
+        if (!chart) {
+            throw new NotFoundException(`Chart with id ${chartId} not found`);
+        }
+
+        if (dto.name !== undefined) chart.name = dto.name;
+        if (dto.config !== undefined) chart.config = dto.config;
+
+        return await this.chartRepository.save(chart);
+    }
+
+    async removeChart(chartId: number): Promise<void> {
+        const chart = await this.chartRepository.findOne({ where: { id: chartId } });
+        if (!chart) {
+            throw new NotFoundException(`Chart with id ${chartId} not found`);
+        }
+        await this.chartRepository.delete({ id: chartId });
     }
 
     async bulkCreateRecords(datasetId: number, records: Record<string, any>[]): Promise<{ imported: number; errors: { row: number; messages: string[] }[] }> {

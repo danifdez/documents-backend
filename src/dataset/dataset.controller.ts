@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe, Query, UseInterceptors, UploadedFile, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe, Query, UseInterceptors, UploadedFile, HttpException, HttpStatus, Res, Header } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DatasetService } from './dataset.service';
 import { DatasetQueryService, RecordFilter } from './dataset-query.service';
 import { DatasetCsvService } from './dataset-csv.service';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
-import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CsvImportMappingDto } from './dto/dataset.dto';
+import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CsvImportMappingDto, BulkDeleteRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto } from './dto/dataset.dto';
 import { ImportDatasetDto, ImportConfirmDto } from './dto/import-dataset.dto';
 
 @Controller('datasets')
@@ -292,6 +293,65 @@ export class DatasetController {
         @Param('linkId', ParseIntPipe) linkId: number,
     ) {
         return await this.datasetService.unlinkRecords(relationId, linkId);
+    }
+
+    // ── Export CSV ──
+
+    @Get(':id/export')
+    async exportCsv(
+        @Param('id', ParseIntPipe) id: number,
+        @Res() res: Response,
+    ) {
+        const dataset = await this.datasetService.findOneDataset(id);
+        if (!dataset) {
+            throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
+        }
+
+        const records = await this.datasetService.findAllRecords(id);
+        const csv = this.csvService.exportRecordsCsv(dataset.schema, records);
+
+        const filename = dataset.name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.csv';
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(csv);
+    }
+
+    // ── Bulk Delete Records ──
+
+    @Delete(':id/records/bulk')
+    async bulkDeleteRecords(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: BulkDeleteRecordsDto,
+    ) {
+        return await this.datasetService.bulkDeleteRecords(id, dto.recordIds);
+    }
+
+    // ── Saved Charts CRUD ──
+
+    @Get(':id/charts')
+    async findCharts(@Param('id', ParseIntPipe) id: number) {
+        return await this.datasetService.findCharts(id);
+    }
+
+    @Post(':id/charts')
+    async createChart(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: CreateDatasetChartDto,
+    ) {
+        return await this.datasetService.createChart(id, dto);
+    }
+
+    @Patch('charts/:chartId')
+    async updateChart(
+        @Param('chartId', ParseIntPipe) chartId: number,
+        @Body() dto: UpdateDatasetChartDto,
+    ) {
+        return await this.datasetService.updateChart(chartId, dto);
+    }
+
+    @Delete('charts/:chartId')
+    async removeChart(@Param('chartId', ParseIntPipe) chartId: number) {
+        return await this.datasetService.removeChart(chartId);
     }
 
     private parseFilters(query: Record<string, any>): RecordFilter[] {

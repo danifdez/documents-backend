@@ -135,3 +135,29 @@ export class CsvColumnMappingDto {
     @IsNotEmpty()
     fieldKey: string;
 }
+
+export class BulkDeleteRecordsDto {
+    @IsArray()
+    @IsNumber({}, { each: true })
+    recordIds: number[];
+}
+
+export class CreateDatasetChartDto {
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(200)
+    name: string;
+
+    @IsNotEmpty()
+    config: Record<string, any>;
+}
+
+export class UpdateDatasetChartDto {
+    @IsString()
+    @IsOptional()
+    @MaxLength(200)
+    name?: string;
+
+    @IsOptional()
+    config?: Record<string, any>;
+}

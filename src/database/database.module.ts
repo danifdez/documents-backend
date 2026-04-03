@@ -23,6 +23,7 @@ import { DatasetEntity } from '../dataset/dataset.entity';
 import { DatasetRecordEntity } from '../dataset/dataset-record.entity';
 import { DatasetRelationEntity } from '../dataset/dataset-relation.entity';
 import { DatasetRecordLinkEntity } from '../dataset/dataset-record-link.entity';
+import { DatasetChartEntity } from '../dataset/dataset-chart.entity';
 import { NoteEntity } from '../note/note.entity';
 import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
 import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
@@ -61,6 +62,7 @@ import { UserEntity } from '../auth/user.entity';
       DatasetRecordEntity,
       DatasetRelationEntity,
       DatasetRecordLinkEntity,
+      DatasetChartEntity,
       NoteEntity,
       CalendarEventEntity,
       KnowledgeEntryEntity,

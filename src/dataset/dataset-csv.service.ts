@@ -86,6 +86,24 @@ export class DatasetCsvService {
         };
     }
 
+    exportRecordsCsv(schema: { key: string; name: string }[], records: { data: Record<string, any> }[]): string {
+        const escapeCsv = (val: any): string => {
+            if (val === null || val === undefined) return '';
+            const str = String(val);
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+        };
+
+        const header = schema.map(f => escapeCsv(f.name)).join(',');
+        const rows = records.map(r =>
+            schema.map(f => escapeCsv(r.data[f.key])).join(',')
+        );
+
+        return [header, ...rows].join('\n');
+    }
+
     parseAndMap(buffer: Buffer, mappings: CsvColumnMapping[], skipFirstRow: boolean = true): Record<string, any>[] {
         const content = buffer.toString('utf-8');
         const allRows: string[][] = parse(content, {

@@ -87,3 +87,21 @@ DO $$ BEGIN
     UNIQUE ("relation_id", "source_record_id", "target_record_id");
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- ── Dataset Charts (saved chart configurations) ──
+CREATE TABLE IF NOT EXISTS "dataset_charts" (
+  "id" SERIAL PRIMARY KEY,
+  "dataset_id" integer NOT NULL,
+  "name" varchar NOT NULL,
+  "config" jsonb DEFAULT '{}',
+  "created_at" TIMESTAMP NOT NULL DEFAULT now(),
+  "updated_at" TIMESTAMP NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+  ALTER TABLE "dataset_charts" ADD CONSTRAINT "FK_dataset_charts_dataset"
+    FOREIGN KEY ("dataset_id") REFERENCES "datasets"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "IDX_dataset_charts_dataset_id" ON "dataset_charts" ("dataset_id");
