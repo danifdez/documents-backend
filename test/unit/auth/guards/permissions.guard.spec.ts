@@ -30,21 +30,15 @@ describe('PermissionsGuard', () => {
     expect(guard.canActivate(mockContext())).toBe(true);
   });
 
-  it('should allow admin regardless of permissions', () => {
-    configService.get.mockReturnValue('true');
-    reflector.getAllAndOverride.mockReturnValue(['upload']);
-    expect(guard.canActivate(mockContext({ role: 'admin', permissions: {} }))).toBe(true);
-  });
-
   it('should allow if user has required permissions', () => {
     configService.get.mockReturnValue('true');
     reflector.getAllAndOverride.mockReturnValue(['upload']);
-    expect(guard.canActivate(mockContext({ role: 'user', permissions: { upload: true } }))).toBe(true);
+    expect(guard.canActivate(mockContext({ permissions: { upload: true } }))).toBe(true);
   });
 
   it('should throw ForbiddenException if user lacks permissions', () => {
     configService.get.mockReturnValue('true');
     reflector.getAllAndOverride.mockReturnValue(['upload']);
-    expect(() => guard.canActivate(mockContext({ role: 'user', permissions: {} }))).toThrow(ForbiddenException);
+    expect(() => guard.canActivate(mockContext({ permissions: {} }))).toThrow(ForbiddenException);
   });
 });

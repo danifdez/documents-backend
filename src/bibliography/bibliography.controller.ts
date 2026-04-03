@@ -3,6 +3,8 @@ import { Response } from 'express';
 import { BibliographyService } from './bibliography.service';
 import { BibliographyEntryEntity } from './bibliography-entry.entity';
 import { CreateBibliographyEntryDto, UpdateBibliographyEntryDto } from './dto/bibliography-entry.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('bibliography')
 export class BibliographyController {
@@ -45,11 +47,13 @@ export class BibliographyController {
   }
 
   @Post()
+  @RequirePermissions(Permission.BIBLIOGRAPHY)
   async create(@Body() data: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
     return await this.bibliographyService.create(data);
   }
 
   @Post('import/resource/:resourceId')
+  @RequirePermissions(Permission.BIBLIOGRAPHY)
   async importFromResource(
     @Param('resourceId', ParseIntPipe) resourceId: number,
     @Body('projectId') projectId?: number,
@@ -58,6 +62,7 @@ export class BibliographyController {
   }
 
   @Post('import/bibtex')
+  @RequirePermissions(Permission.BIBLIOGRAPHY)
   async importBibTeX(
     @Body('bibtex') bibtex: string,
     @Body('projectId') projectId?: number,
@@ -66,11 +71,13 @@ export class BibliographyController {
   }
 
   @Patch(':id/make-global')
+  @RequirePermissions(Permission.BIBLIOGRAPHY)
   async makeGlobal(@Param('id', ParseIntPipe) id: number): Promise<BibliographyEntryEntity | null> {
     return await this.bibliographyService.makeGlobal(id);
   }
 
   @Patch(':id/assign-project')
+  @RequirePermissions(Permission.BIBLIOGRAPHY)
   async assignProject(
     @Param('id', ParseIntPipe) id: number,
     @Body('projectId', ParseIntPipe) projectId: number,
@@ -79,6 +86,7 @@ export class BibliographyController {
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.BIBLIOGRAPHY)
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() data: UpdateBibliographyEntryDto,
@@ -87,6 +95,7 @@ export class BibliographyController {
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.BIBLIOGRAPHY)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.bibliographyService.remove(id);
   }

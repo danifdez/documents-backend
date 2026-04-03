@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { RelationshipService } from './relationship.service';
 import { CreateRelationshipDto, UpdateRelationshipDto, DeleteRelationshipDto } from './dto/relationship.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('relationships')
 export class RelationshipController {
@@ -44,6 +46,7 @@ export class RelationshipController {
   }
 
   @Post()
+  @RequirePermissions(Permission.RELATIONSHIPS)
   async createRelationship(
     @Body() dto: CreateRelationshipDto,
   ): Promise<{ jobId: number }> {
@@ -51,6 +54,7 @@ export class RelationshipController {
   }
 
   @Put()
+  @RequirePermissions(Permission.RELATIONSHIPS)
   async updateRelationship(
     @Body() dto: UpdateRelationshipDto,
   ): Promise<{ jobId: number }> {
@@ -58,6 +62,7 @@ export class RelationshipController {
   }
 
   @Delete()
+  @RequirePermissions(Permission.RELATIONSHIPS)
   async deleteRelationship(
     @Body() dto: DeleteRelationshipDto,
   ): Promise<{ jobId: number }> {
@@ -65,6 +70,7 @@ export class RelationshipController {
   }
 
   @Post('resource/:resourceId/extract')
+  @RequirePermissions(Permission.RELATIONSHIPS)
   async extractRelationships(
     @Param('resourceId', ParseIntPipe) resourceId: number,
   ): Promise<{ jobId: number }> {

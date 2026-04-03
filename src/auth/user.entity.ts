@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { PermissionGroupEntity } from './permission-group.entity';
 
 @Entity({ name: 'users' })
 export class UserEntity {
@@ -14,11 +15,15 @@ export class UserEntity {
   @Column({ name: 'display_name', length: 200, nullable: true })
   displayName: string | null;
 
-  @Column({ length: 20, default: 'user' })
-  role: string;
-
   @Column({ type: 'jsonb', default: {} })
   permissions: Record<string, boolean>;
+
+  @Column({ name: 'group_id', nullable: true })
+  groupId: number | null;
+
+  @ManyToOne(() => PermissionGroupEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'group_id' })
+  group: PermissionGroupEntity | null;
 
   @Column({ default: true })
   active: boolean;

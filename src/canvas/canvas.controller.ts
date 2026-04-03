@@ -2,6 +2,8 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from 
 import { CanvasService } from './canvas.service';
 import { CanvasEntity } from './canvas.entity';
 import { CreateCanvasDto, UpdateCanvasDto } from './dto/canvas.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('canvases')
 export class CanvasController {
@@ -27,17 +29,20 @@ export class CanvasController {
   }
 
   @Post()
+  @RequirePermissions(Permission.CANVAS)
   async create(@Body() canvas: CreateCanvasDto): Promise<CanvasEntity> {
     return await this.canvasService.create(canvas);
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.CANVAS)
   async update(
     @Param('id', ParseIntPipe) id: number, @Body() canvas: UpdateCanvasDto): Promise<CanvasEntity | null> {
     return await this.canvasService.update(id, canvas);
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.CANVAS)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.canvasService.remove(id);
   }

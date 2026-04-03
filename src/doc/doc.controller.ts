@@ -3,6 +3,8 @@ import { DocService } from './doc.service';
 import { DocIngestService } from './doc-ingest.service';
 import { DocEntity } from 'src/doc/doc.entity';
 import { CreateDocDto, UpdateDocDto } from './dto/doc.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('docs')
 export class DocController {
@@ -38,11 +40,13 @@ export class DocController {
   }
 
   @Post()
+  @RequirePermissions(Permission.DOCUMENTS)
   async create(@Body() doc: CreateDocDto): Promise<DocEntity> {
     return await this.docService.create(doc);
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.DOCUMENTS)
   async update(
     @Param('id', ParseIntPipe) id: number, @Body() doc: UpdateDocDto): Promise<DocEntity | null> {
     const updated = await this.docService.update(id, doc);
@@ -58,6 +62,7 @@ export class DocController {
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.DOCUMENTS)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.docService.remove(id);
   }

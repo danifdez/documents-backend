@@ -1,14 +1,12 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, ParseIntPipe, NotFoundException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, ParseIntPipe, NotFoundException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Roles } from './decorators/roles.decorator';
-import { UserRole } from './user-role.enum';
-import { RolesGuard } from './guards/roles.guard';
+import { RequirePermissions } from './decorators/permissions.decorator';
+import { Permission } from './permission.enum';
 
 @Controller('users')
-@Roles(UserRole.ADMIN)
-@UseGuards(RolesGuard)
+@RequirePermissions(Permission.USER_MANAGEMENT)
 export class UsersController {
   constructor(private readonly authService: AuthService) {}
 

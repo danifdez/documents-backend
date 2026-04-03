@@ -1,5 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsObject, IsBoolean } from 'class-validator';
-import { UserRole } from '../user-role.enum';
+import { IsString, IsOptional, IsObject, IsBoolean, IsInt } from 'class-validator';
 
 export class UpdateUserDto {
   @IsString()
@@ -10,10 +9,6 @@ export class UpdateUserDto {
   @IsOptional()
   password?: string;
 
-  @IsEnum(UserRole)
-  @IsOptional()
-  role?: UserRole;
-
   @IsObject()
   @IsOptional()
   permissions?: Record<string, boolean>;
@@ -21,4 +16,8 @@ export class UpdateUserDto {
   @IsBoolean()
   @IsOptional()
   active?: boolean;
+
+  @IsInt()
+  @IsOptional()
+  groupId?: number | null;
 }

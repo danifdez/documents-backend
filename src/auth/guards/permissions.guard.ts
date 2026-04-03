@@ -2,7 +2,6 @@ import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
-import { UserRole } from '../user-role.enum';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -24,9 +23,6 @@ export class PermissionsGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
     if (!user) return true; // No user means public endpoint handled by auth guard
-
-    // Admin bypasses all permission checks
-    if (user.role === UserRole.ADMIN) return true;
 
     const userPermissions = user.permissions || {};
     const hasAll = requiredPermissions.every((perm) => userPermissions[perm] === true);

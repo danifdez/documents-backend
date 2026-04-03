@@ -28,6 +28,7 @@ import { BibliographyEntryEntity } from '../bibliography/bibliography-entry.enti
 import { UserTaskEntity } from '../user-task/user-task.entity';
 import { WorkerEntity } from '../worker/worker.entity';
 import { UserEntity } from '../auth/user.entity';
+import { PermissionGroupEntity } from '../auth/permission-group.entity';
 
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
@@ -66,6 +67,7 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       UserTaskEntity,
       WorkerEntity,
       UserEntity,
+      PermissionGroupEntity,
     ],
     synchronize: false,
     logging: false,

@@ -2,6 +2,8 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Query 
 import { CalendarEventService } from './calendar-event.service';
 import { CalendarEventEntity } from './calendar-event.entity';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('calendar-events')
 export class CalendarEventController {
@@ -36,11 +38,13 @@ export class CalendarEventController {
   }
 
   @Post()
+  @RequirePermissions(Permission.CALENDAR)
   async create(@Body() event: CreateCalendarEventDto): Promise<CalendarEventEntity> {
     return await this.calendarEventService.create(event);
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.CALENDAR)
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() data: UpdateCalendarEventDto,
@@ -49,6 +53,7 @@ export class CalendarEventController {
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.CALENDAR)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.calendarEventService.remove(id);
   }

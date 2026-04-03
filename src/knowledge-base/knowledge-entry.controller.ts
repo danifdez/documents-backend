@@ -2,6 +2,8 @@ import { Controller, Get, Post, Body, Param, Delete, Patch, ParseIntPipe, Query 
 import { KnowledgeEntryService } from './knowledge-entry.service';
 import { KnowledgeEntryEntity } from './knowledge-entry.entity';
 import { CreateKnowledgeEntryDto, UpdateKnowledgeEntryDto } from './dto/knowledge-entry.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('knowledge-entries')
 export class KnowledgeEntryController {
@@ -26,11 +28,13 @@ export class KnowledgeEntryController {
     }
 
     @Post()
+    @RequirePermissions(Permission.KNOWLEDGE_BASE)
     async create(@Body() dto: CreateKnowledgeEntryDto): Promise<KnowledgeEntryEntity> {
         return await this.service.create(dto);
     }
 
     @Patch(':id')
+    @RequirePermissions(Permission.KNOWLEDGE_BASE)
     async update(
         @Param('id', ParseIntPipe) id: number,
         @Body() dto: UpdateKnowledgeEntryDto,
@@ -39,6 +43,7 @@ export class KnowledgeEntryController {
     }
 
     @Delete(':id')
+    @RequirePermissions(Permission.KNOWLEDGE_BASE)
     async remove(@Param('id', ParseIntPipe) id: number): Promise<{ deleted: boolean }> {
         return await this.service.remove(id);
     }

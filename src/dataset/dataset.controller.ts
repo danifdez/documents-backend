@@ -8,6 +8,8 @@ import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
 import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CsvImportMappingDto, BulkDeleteRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto } from './dto/dataset.dto';
 import { ImportDatasetDto, ImportConfirmDto } from './dto/import-dataset.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('datasets')
 export class DatasetController {
@@ -19,6 +21,7 @@ export class DatasetController {
     ) { }
 
     @Post('import')
+    @RequirePermissions(Permission.DATASETS)
     @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
     async importFromFile(
         @UploadedFile() file: Express.Multer.File,
@@ -52,6 +55,7 @@ export class DatasetController {
     }
 
     @Post('from-table')
+    @RequirePermissions(Permission.DATASETS)
     async createFromTable(@Body() body: { name: string; headers: string[]; rows: string[][]; projectId?: number }) {
         if (!body.headers?.length) {
             throw new HttpException('No headers provided', HttpStatus.BAD_REQUEST);
@@ -85,21 +89,25 @@ export class DatasetController {
     }
 
     @Post()
+    @RequirePermissions(Permission.DATASETS)
     async create(@Body() dto: CreateDatasetDto) {
         return await this.datasetService.createDataset(dto);
     }
 
     @Patch(':id')
+    @RequirePermissions(Permission.DATASETS)
     async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDatasetDto) {
         return await this.datasetService.updateDataset(id, dto);
     }
 
     @Post(':id/analyze-schema')
+    @RequirePermissions(Permission.DATASETS)
     async analyzeSchemaChange(@Param('id', ParseIntPipe) id: number, @Body() body: { schema: any[] }) {
         return await this.datasetService.analyzeSchemaChange(id, body.schema);
     }
 
     @Delete(':id')
+    @RequirePermissions(Permission.DATASETS)
     async remove(@Param('id', ParseIntPipe) id: number) {
         return await this.datasetService.removeDataset(id);
     }
@@ -144,11 +152,13 @@ export class DatasetController {
     }
 
     @Post(':id/records')
+    @RequirePermissions(Permission.DATASETS)
     async createRecord(@Param('id', ParseIntPipe) id: number, @Body() dto: CreateDatasetRecordDto) {
         return await this.datasetService.createRecord(id, dto);
     }
 
     @Patch(':id/records/:recordId')
+    @RequirePermissions(Permission.DATASETS)
     async updateRecord(
         @Param('id', ParseIntPipe) id: number,
         @Param('recordId', ParseIntPipe) recordId: number,
@@ -158,6 +168,7 @@ export class DatasetController {
     }
 
     @Delete(':id/records/:recordId')
+    @RequirePermissions(Permission.DATASETS)
     async removeRecord(
         @Param('id', ParseIntPipe) id: number,
         @Param('recordId', ParseIntPipe) recordId: number,
@@ -234,6 +245,7 @@ export class DatasetController {
     }
 
     @Post(':id/import')
+    @RequirePermissions(Permission.DATASETS)
     @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
     async importPreview(
         @Param('id', ParseIntPipe) id: number,
@@ -247,6 +259,7 @@ export class DatasetController {
     }
 
     @Post(':id/import/confirm')
+    @RequirePermissions(Permission.DATASETS)
     @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
     async importConfirm(
         @Param('id', ParseIntPipe) id: number,
@@ -270,16 +283,19 @@ export class DatasetController {
     }
 
     @Post('relations')
+    @RequirePermissions(Permission.DATASETS)
     async createRelation(@Body() dto: CreateDatasetRelationDto) {
         return await this.datasetService.createRelation(dto);
     }
 
     @Delete('relations/:relationId')
+    @RequirePermissions(Permission.DATASETS)
     async removeRelation(@Param('relationId', ParseIntPipe) relationId: number) {
         return await this.datasetService.removeRelation(relationId);
     }
 
     @Post('relations/:relationId/links')
+    @RequirePermissions(Permission.DATASETS)
     async linkRecords(
         @Param('relationId', ParseIntPipe) relationId: number,
         @Body() dto: LinkRecordsDto,
@@ -288,6 +304,7 @@ export class DatasetController {
     }
 
     @Delete('relations/:relationId/links/:linkId')
+    @RequirePermissions(Permission.DATASETS)
     async unlinkRecords(
         @Param('relationId', ParseIntPipe) relationId: number,
         @Param('linkId', ParseIntPipe) linkId: number,
@@ -319,6 +336,7 @@ export class DatasetController {
     // ── Bulk Delete Records ──
 
     @Delete(':id/records/bulk')
+    @RequirePermissions(Permission.DATASETS)
     async bulkDeleteRecords(
         @Param('id', ParseIntPipe) id: number,
         @Body() dto: BulkDeleteRecordsDto,
@@ -334,6 +352,7 @@ export class DatasetController {
     }
 
     @Post(':id/charts')
+    @RequirePermissions(Permission.DATASETS)
     async createChart(
         @Param('id', ParseIntPipe) id: number,
         @Body() dto: CreateDatasetChartDto,
@@ -342,6 +361,7 @@ export class DatasetController {
     }
 
     @Patch('charts/:chartId')
+    @RequirePermissions(Permission.DATASETS)
     async updateChart(
         @Param('chartId', ParseIntPipe) chartId: number,
         @Body() dto: UpdateDatasetChartDto,
@@ -350,6 +370,7 @@ export class DatasetController {
     }
 
     @Delete('charts/:chartId')
+    @RequirePermissions(Permission.DATASETS)
     async removeChart(@Param('chartId', ParseIntPipe) chartId: number) {
         return await this.datasetService.removeChart(chartId);
     }
