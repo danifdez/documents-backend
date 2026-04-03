@@ -14,6 +14,7 @@ export const FEATURE_FLAGS = [
   'tasks',
   'rag',
   'relationships',
+  'data_sources',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];

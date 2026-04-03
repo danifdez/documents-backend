@@ -29,6 +29,8 @@ import { UserTaskEntity } from '../user-task/user-task.entity';
 import { WorkerEntity } from '../worker/worker.entity';
 import { UserEntity } from '../auth/user.entity';
 import { PermissionGroupEntity } from '../auth/permission-group.entity';
+import { DataSourceEntity } from '../data-source/data-source.entity';
+import { DataSourceSyncLogEntity } from '../data-source/data-source-sync-log.entity';
 
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
@@ -68,6 +70,8 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       WorkerEntity,
       UserEntity,
       PermissionGroupEntity,
+      DataSourceEntity,
+      DataSourceSyncLogEntity,
     ],
     synchronize: false,
     logging: false,

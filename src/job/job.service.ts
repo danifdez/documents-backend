@@ -15,6 +15,7 @@ const JOB_FEATURE_MAP: Record<string, string> = {
   'entity-extraction': 'entities',
   'image-generate': 'canvas',
   'image-edit': 'canvas',
+  'data-source-sync': 'data_sources',
 };
 
 @Injectable()

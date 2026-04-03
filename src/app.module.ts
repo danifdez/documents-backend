@@ -33,6 +33,7 @@ import { KnowledgeBaseModule } from './knowledge-base/knowledge-base.module';
 import { BibliographyModule } from './bibliography/bibliography.module';
 import { UserTaskModule } from './user-task/user-task.module';
 import { RelationshipModule } from './relationship/relationship.module';
+import { DataSourceModule } from './data-source/data-source.module';
 import { WorkerModule } from './worker/worker.module';
 import { AuthModule } from './auth/auth.module';
 import { OfflineModule } from './offline/offline.module';
@@ -96,6 +97,7 @@ export class AppModule {
     if (features.bibliography) imports.push(BibliographyModule);
     if (features.tasks) imports.push(UserTaskModule);
     if (features.relationships) imports.push(RelationshipModule);
+    if (features.data_sources && features.datasets) imports.push(DataSourceModule);
 
     return {
       module: AppModule,

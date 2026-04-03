@@ -16,6 +16,7 @@ import { SummarizeProcessor } from './processors/summarize-processor';
 import { KeyPointsProcessor } from './processors/key-points-processor';
 import { KeywordsProcessor } from './processors/keywords-processor';
 import { DatasetStatsProcessor } from './processors/dataset-stats-processor';
+import { DataSourceSyncProcessor } from './processors/data-source-sync-processor';
 import { TranscribeProcessor } from './processors/transcribe-processor';
 import { ImageGenerateProcessor } from './processors/image-generate-processor';
 import { ImageEditProcessor } from './processors/image-edit-processor';
@@ -61,6 +62,11 @@ export class JobProcessorModule {
 
     if (features.entities) providers.push(EntityExtractionProcessor);
     if (features.datasets) providers.push(DatasetStatsProcessor);
+    if (features.data_sources) {
+      const { DataSourceModule } = require('../data-source/data-source.module');
+      featureImports.push(DataSourceModule);
+      providers.push(DataSourceSyncProcessor);
+    }
     if (features.relationships) providers.push(
       RelationshipExtractionProcessor,
       RelationshipQueryProcessor,
