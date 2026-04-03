@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { NoteEntity } from './note.entity';
+import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
 
 @Injectable()
 export class NoteService {
@@ -50,12 +51,21 @@ export class NoteService {
     });
   }
 
-  async create(note: Partial<NoteEntity>): Promise<NoteEntity> {
-    const created = this.repository.create(note);
+  async create(dto: CreateNoteDto): Promise<NoteEntity> {
+    const data: Partial<NoteEntity> = { title: dto.title };
+    if (dto.content !== undefined) data.content = dto.content;
+    if (dto.projectId) data.project = { id: dto.projectId } as any;
+    if (dto.threadId) data.thread = { id: dto.threadId } as any;
+    const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 
-  async update(id: number, data: Partial<NoteEntity>): Promise<NoteEntity | null> {
+  async update(id: number, dto: UpdateNoteDto): Promise<NoteEntity | null> {
+    const data: Partial<NoteEntity> = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.content !== undefined) data.content = dto.content;
+    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
+    if (dto.threadId !== undefined) data.thread = dto.threadId ? { id: dto.threadId } as any : null;
     const note = await this.repository.preload({ id, ...data });
     if (!note) return null;
     return await this.repository.save(note);

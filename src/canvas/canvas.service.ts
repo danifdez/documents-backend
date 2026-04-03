@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CanvasEntity } from './canvas.entity';
+import { CreateCanvasDto, UpdateCanvasDto } from './dto/canvas.dto';
 
 @Injectable()
 export class CanvasService {
@@ -14,11 +15,16 @@ export class CanvasService {
     return await this.repository.findOneBy({ id });
   }
 
-  async create(canvas: Partial<CanvasEntity>): Promise<CanvasEntity> {
-    if (canvas.canvasData) {
-      canvas.content = this.extractTextFromCanvas(canvas.canvasData);
+  async create(dto: CreateCanvasDto): Promise<CanvasEntity> {
+    const data: Partial<CanvasEntity> = { name: dto.name };
+    if (dto.canvasData !== undefined) data.canvasData = dto.canvasData;
+    if (dto.content !== undefined) data.content = dto.content;
+    if (dto.projectId) data.project = { id: dto.projectId } as any;
+    if (dto.threadId) data.thread = { id: dto.threadId } as any;
+    if (data.canvasData) {
+      data.content = this.extractTextFromCanvas(data.canvasData);
     }
-    const created = this.repository.create(canvas);
+    const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 
@@ -38,14 +44,17 @@ export class CanvasService {
       .getMany();
   }
 
-  async update(
-    id: number,
-    canvasData: Partial<CanvasEntity>,
-  ): Promise<CanvasEntity | null> {
-    if (canvasData.canvasData) {
-      canvasData.content = this.extractTextFromCanvas(canvasData.canvasData);
+  async update(id: number, dto: UpdateCanvasDto): Promise<CanvasEntity | null> {
+    const data: Partial<CanvasEntity> = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.canvasData !== undefined) data.canvasData = dto.canvasData;
+    if (dto.content !== undefined) data.content = dto.content;
+    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
+    if (dto.threadId !== undefined) data.thread = dto.threadId ? { id: dto.threadId } as any : null;
+    if (data.canvasData) {
+      data.content = this.extractTextFromCanvas(data.canvasData);
     }
-    const canvas = await this.repository.preload({ id, ...canvasData });
+    const canvas = await this.repository.preload({ id, ...data });
     if (!canvas) return null;
     return await this.repository.save(canvas);
   }

@@ -39,17 +39,17 @@ export class CalendarEventController {
 
   @Post()
   @RequirePermissions(Permission.CALENDAR)
-  async create(@Body() event: CreateCalendarEventDto): Promise<CalendarEventEntity> {
-    return await this.calendarEventService.create(event);
+  async create(@Body() dto: CreateCalendarEventDto): Promise<CalendarEventEntity> {
+    return await this.calendarEventService.create(dto);
   }
 
   @Patch(':id')
   @RequirePermissions(Permission.CALENDAR)
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: UpdateCalendarEventDto,
+    @Body() dto: UpdateCalendarEventDto,
   ): Promise<CalendarEventEntity | null> {
-    return await this.calendarEventService.update(id, data);
+    return await this.calendarEventService.update(id, dto);
   }
 
   @Delete(':id')

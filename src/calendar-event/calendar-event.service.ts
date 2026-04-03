@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CalendarEventEntity } from './calendar-event.entity';
+import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
 
 @Injectable()
 export class CalendarEventService {
@@ -46,12 +47,26 @@ export class CalendarEventService {
     return await qb.orderBy('e.start_date', 'ASC').getMany();
   }
 
-  async create(event: Partial<CalendarEventEntity>): Promise<CalendarEventEntity> {
-    const created = this.repository.create(event);
+  async create(dto: CreateCalendarEventDto): Promise<CalendarEventEntity> {
+    const data: Partial<CalendarEventEntity> = { title: dto.title, startDate: dto.startDate };
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.endDate !== undefined) data.endDate = dto.endDate;
+    if (dto.color !== undefined) data.color = dto.color;
+    if (dto.allDay !== undefined) data.allDay = dto.allDay;
+    if (dto.projectId) data.project = { id: dto.projectId } as any;
+    const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 
-  async update(id: number, data: Partial<CalendarEventEntity>): Promise<CalendarEventEntity | null> {
+  async update(id: number, dto: UpdateCalendarEventDto): Promise<CalendarEventEntity | null> {
+    const data: Partial<CalendarEventEntity> = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.startDate !== undefined) data.startDate = dto.startDate;
+    if (dto.endDate !== undefined) data.endDate = dto.endDate;
+    if (dto.color !== undefined) data.color = dto.color;
+    if (dto.allDay !== undefined) data.allDay = dto.allDay;
+    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
     const event = await this.repository.preload({ id, ...data });
     if (!event) return null;
     return await this.repository.save(event);

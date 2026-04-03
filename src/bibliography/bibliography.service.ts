@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { BibliographyEntryEntity, BibliographyCreator } from './bibliography-entry.entity';
 import { ResourceEntity } from '../resource/resource.entity';
+import { CreateBibliographyEntryDto, UpdateBibliographyEntryDto } from './dto/bibliography-entry.dto';
 
 // Maps item types ↔ BibTeX entry types
 const ITEM_TYPE_TO_BIBTEX: Record<string, string> = {
@@ -86,12 +87,20 @@ export class BibliographyService {
       .getMany();
   }
 
-  async create(data: Partial<BibliographyEntryEntity>): Promise<BibliographyEntryEntity> {
+  async create(dto: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
+    const { projectId, sourceResourceId, ...rest } = dto;
+    const data: Partial<BibliographyEntryEntity> = { ...rest as any };
+    if (projectId) data.project = { id: projectId } as any;
+    if (sourceResourceId) data.sourceResource = { id: sourceResourceId } as any;
     const entry = this.repository.create(data);
     return await this.repository.save(entry);
   }
 
-  async update(id: number, data: Partial<BibliographyEntryEntity>): Promise<BibliographyEntryEntity | null> {
+  async update(id: number, dto: UpdateBibliographyEntryDto): Promise<BibliographyEntryEntity | null> {
+    const { projectId, sourceResourceId, ...rest } = dto;
+    const data: Partial<BibliographyEntryEntity> = { ...rest as any };
+    if (projectId !== undefined) data.project = projectId ? { id: projectId } as any : null;
+    if (sourceResourceId !== undefined) data.sourceResource = sourceResourceId ? { id: sourceResourceId } as any : null;
     const entry = await this.repository.preload({ id, ...data });
     if (!entry) return null;
     return await this.repository.save(entry);

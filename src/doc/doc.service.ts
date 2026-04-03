@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DocEntity } from './doc.entity';
+import { CreateDocDto, UpdateDocDto } from './dto/doc.dto';
 
 @Injectable()
 export class DocService {
@@ -21,8 +22,14 @@ export class DocService {
     });
   }
 
-  async create(doc: Partial<DocEntity>): Promise<DocEntity> {
-    const created = this.repository.create(doc);
+  async create(dto: CreateDocDto): Promise<DocEntity> {
+    const data: Partial<DocEntity> = { name: dto.name };
+    if (dto.content !== undefined) data.content = dto.content;
+    if (dto.citationFormat !== undefined) data.citationFormat = dto.citationFormat;
+    if (dto.projectId) data.project = { id: dto.projectId } as any;
+    if (dto.threadId) data.thread = { id: dto.threadId } as any;
+    if (dto.resourceId) data.resource = { id: dto.resourceId } as any;
+    const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 
@@ -52,11 +59,15 @@ export class DocService {
     });
   }
 
-  async update(
-    id: number,
-    docData: Partial<DocEntity>,
-  ): Promise<DocEntity | null> {
-    const doc = await this.repository.preload({ id, ...docData });
+  async update(id: number, dto: UpdateDocDto): Promise<DocEntity | null> {
+    const data: Partial<DocEntity> = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.content !== undefined) data.content = dto.content;
+    if (dto.citationFormat !== undefined) data.citationFormat = dto.citationFormat;
+    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
+    if (dto.threadId !== undefined) data.thread = dto.threadId ? { id: dto.threadId } as any : null;
+    if (dto.resourceId !== undefined) data.resource = dto.resourceId ? { id: dto.resourceId } as any : null;
+    const doc = await this.repository.preload({ id, ...data });
     if (!doc) return null;
     return await this.repository.save(doc);
   }

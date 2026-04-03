@@ -31,17 +31,17 @@ export class UserTaskController {
 
   @Post()
   @RequirePermissions(Permission.TASKS)
-  async create(@Body() task: CreateUserTaskDto): Promise<UserTaskEntity> {
-    return await this.userTaskService.create(task);
+  async create(@Body() dto: CreateUserTaskDto): Promise<UserTaskEntity> {
+    return await this.userTaskService.create(dto);
   }
 
   @Patch(':id')
   @RequirePermissions(Permission.TASKS)
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: UpdateUserTaskDto,
+    @Body() dto: UpdateUserTaskDto,
   ): Promise<UserTaskEntity | null> {
-    return await this.userTaskService.update(id, data);
+    return await this.userTaskService.update(id, dto);
   }
 
   @Delete(':id')

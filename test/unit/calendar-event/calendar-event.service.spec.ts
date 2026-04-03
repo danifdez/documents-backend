@@ -37,7 +37,7 @@ describe('CalendarEventService', () => {
     const e = buildCalendarEvent();
     repo.create.mockReturnValue(e);
     repo.save.mockResolvedValue(e);
-    expect(await service.create({ title: 'Test' })).toEqual(e);
+    expect(await service.create({ title: 'Test', startDate: new Date() })).toEqual(e);
   });
 
   it('should remove event', async () => {

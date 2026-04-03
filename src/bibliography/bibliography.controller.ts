@@ -48,8 +48,8 @@ export class BibliographyController {
 
   @Post()
   @RequirePermissions(Permission.BIBLIOGRAPHY)
-  async create(@Body() data: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
-    return await this.bibliographyService.create(data);
+  async create(@Body() dto: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
+    return await this.bibliographyService.create(dto);
   }
 
   @Post('import/resource/:resourceId')
@@ -89,9 +89,9 @@ export class BibliographyController {
   @RequirePermissions(Permission.BIBLIOGRAPHY)
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: UpdateBibliographyEntryDto,
+    @Body() dto: UpdateBibliographyEntryDto,
   ): Promise<BibliographyEntryEntity | null> {
-    return await this.bibliographyService.update(id, data);
+    return await this.bibliographyService.update(id, dto);
   }
 
   @Delete(':id')

@@ -25,7 +25,7 @@ export class ThreadController {
   }
 
   @Post()
-  async create(@Body() thread: CreateThreadDto): Promise<ThreadEntity> {
-    return await this.threadService.create(thread);
+  async create(@Body() dto: CreateThreadDto): Promise<ThreadEntity> {
+    return await this.threadService.create(dto);
   }
 }

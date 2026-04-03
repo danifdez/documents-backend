@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { UserTaskEntity } from './user-task.entity';
+import { CreateUserTaskDto, UpdateUserTaskDto } from './dto/user-task.dto';
 
 @Injectable()
 export class UserTaskService {
@@ -40,12 +41,21 @@ export class UserTaskService {
     });
   }
 
-  async create(task: Partial<UserTaskEntity>): Promise<UserTaskEntity> {
-    const created = this.repository.create(task);
+  async create(dto: CreateUserTaskDto): Promise<UserTaskEntity> {
+    const data: Partial<UserTaskEntity> = { title: dto.title };
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.projectId) data.project = { id: dto.projectId } as any;
+    const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 
-  async update(id: number, data: Partial<UserTaskEntity>): Promise<UserTaskEntity | null> {
+  async update(id: number, dto: UpdateUserTaskDto): Promise<UserTaskEntity | null> {
+    const data: Partial<UserTaskEntity> = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
     const task = await this.repository.preload({ id, ...data });
     if (!task) return null;
     return await this.repository.save(task);

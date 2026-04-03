@@ -36,17 +36,17 @@ export class NoteController {
 
   @Post()
   @RequirePermissions(Permission.NOTES)
-  async create(@Body() note: CreateNoteDto): Promise<NoteEntity> {
-    return await this.noteService.create(note);
+  async create(@Body() dto: CreateNoteDto): Promise<NoteEntity> {
+    return await this.noteService.create(dto);
   }
 
   @Patch(':id')
   @RequirePermissions(Permission.NOTES)
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: UpdateNoteDto,
+    @Body() dto: UpdateNoteDto,
   ): Promise<NoteEntity | null> {
-    return await this.noteService.update(id, data);
+    return await this.noteService.update(id, dto);
   }
 
   @Delete(':id')

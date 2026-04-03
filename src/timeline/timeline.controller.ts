@@ -21,17 +21,17 @@ export class TimelineController {
 
   @Post()
   @RequirePermissions(Permission.TIMELINES)
-  async create(@Body() data: CreateTimelineDto): Promise<TimelineEntity> {
-    return await this.timelineService.create(data);
+  async create(@Body() dto: CreateTimelineDto): Promise<TimelineEntity> {
+    return await this.timelineService.create(dto);
   }
 
   @Patch(':id')
   @RequirePermissions(Permission.TIMELINES)
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: UpdateTimelineDto,
+    @Body() dto: UpdateTimelineDto,
   ): Promise<TimelineEntity | null> {
-    return await this.timelineService.update(id, data);
+    return await this.timelineService.update(id, dto);
   }
 
   @Delete(':id')

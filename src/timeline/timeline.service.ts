@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TimelineEntity } from './timeline.entity';
+import { CreateTimelineDto, UpdateTimelineDto } from './dto/timeline.dto';
 
 @Injectable()
 export class TimelineService {
@@ -26,12 +27,31 @@ export class TimelineService {
       .getMany();
   }
 
-  async create(data: Partial<TimelineEntity>): Promise<TimelineEntity> {
+  async create(dto: CreateTimelineDto): Promise<TimelineEntity> {
+    const data: Partial<TimelineEntity> = { name: dto.name };
+    if (dto.timelineData !== undefined) data.timelineData = dto.timelineData;
+    if (dto.epochs !== undefined) data.epochs = dto.epochs;
+    if (dto.notes !== undefined) data.notes = dto.notes;
+    if (dto.syncDatasetId !== undefined) data.syncDatasetId = dto.syncDatasetId;
+    if (dto.syncMapping !== undefined) data.syncMapping = dto.syncMapping;
+    if (dto.layoutType !== undefined) data.layoutType = dto.layoutType;
+    if (dto.axisBreaks !== undefined) data.axisBreaks = dto.axisBreaks;
+    if (dto.projectId) data.project = { id: dto.projectId } as any;
     const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 
-  async update(id: number, data: Partial<TimelineEntity>): Promise<TimelineEntity | null> {
+  async update(id: number, dto: UpdateTimelineDto): Promise<TimelineEntity | null> {
+    const data: Partial<TimelineEntity> = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.timelineData !== undefined) data.timelineData = dto.timelineData;
+    if (dto.epochs !== undefined) data.epochs = dto.epochs;
+    if (dto.notes !== undefined) data.notes = dto.notes;
+    if (dto.syncDatasetId !== undefined) data.syncDatasetId = dto.syncDatasetId;
+    if (dto.syncMapping !== undefined) data.syncMapping = dto.syncMapping;
+    if (dto.layoutType !== undefined) data.layoutType = dto.layoutType;
+    if (dto.axisBreaks !== undefined) data.axisBreaks = dto.axisBreaks;
+    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
     const timeline = await this.repository.preload({ id, ...data });
     if (!timeline) return null;
     return await this.repository.save(timeline);

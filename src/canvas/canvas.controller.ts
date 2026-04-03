@@ -30,15 +30,15 @@ export class CanvasController {
 
   @Post()
   @RequirePermissions(Permission.CANVAS)
-  async create(@Body() canvas: CreateCanvasDto): Promise<CanvasEntity> {
-    return await this.canvasService.create(canvas);
+  async create(@Body() dto: CreateCanvasDto): Promise<CanvasEntity> {
+    return await this.canvasService.create(dto);
   }
 
   @Patch(':id')
   @RequirePermissions(Permission.CANVAS)
   async update(
-    @Param('id', ParseIntPipe) id: number, @Body() canvas: UpdateCanvasDto): Promise<CanvasEntity | null> {
-    return await this.canvasService.update(id, canvas);
+    @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCanvasDto): Promise<CanvasEntity | null> {
+    return await this.canvasService.update(id, dto);
   }
 
   @Delete(':id')

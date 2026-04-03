@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ThreadEntity } from './thread.entity';
+import { CreateThreadDto } from './dto/thread.dto';
 
 @Injectable()
 export class ThreadService {
@@ -17,8 +18,12 @@ export class ThreadService {
     });
   }
 
-  async create(thread: Partial<ThreadEntity>): Promise<ThreadEntity> {
-    const created = this.repository.create(thread);
+  async create(dto: CreateThreadDto): Promise<ThreadEntity> {
+    const data: Partial<ThreadEntity> = { name: dto.name };
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.projectId) data.project = { id: dto.projectId } as any;
+    if (dto.parentId) data.parent = { id: dto.parentId } as any;
+    const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 

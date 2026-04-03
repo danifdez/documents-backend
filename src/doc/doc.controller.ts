@@ -41,20 +41,20 @@ export class DocController {
 
   @Post()
   @RequirePermissions(Permission.DOCUMENTS)
-  async create(@Body() doc: CreateDocDto): Promise<DocEntity> {
-    return await this.docService.create(doc);
+  async create(@Body() dto: CreateDocDto): Promise<DocEntity> {
+    return await this.docService.create(dto);
   }
 
   @Patch(':id')
   @RequirePermissions(Permission.DOCUMENTS)
   async update(
-    @Param('id', ParseIntPipe) id: number, @Body() doc: UpdateDocDto): Promise<DocEntity | null> {
-    const updated = await this.docService.update(id, doc);
+    @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDocDto): Promise<DocEntity | null> {
+    const updated = await this.docService.update(id, dto);
 
-    if (updated && doc.content !== undefined) {
+    if (updated && dto.content !== undefined) {
       const fullDoc = await this.docService.findOneWithProject(id);
       if (fullDoc) {
-        this.docIngestService.scheduleIngest(id, fullDoc.project?.id, doc.content);
+        this.docIngestService.scheduleIngest(id, fullDoc.project?.id, dto.content);
       }
     }
 
