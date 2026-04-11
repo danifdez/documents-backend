@@ -17,4 +17,8 @@ export class ExportProjectsDto {
     @IsBoolean()
     @IsOptional()
     includeContent?: boolean;
+
+    @IsBoolean()
+    @IsOptional()
+    convertToDocx?: boolean;
 }

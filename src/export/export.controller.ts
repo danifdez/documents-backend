@@ -26,6 +26,7 @@ export class ExportController {
         includeOriginalFiles = true,
         includeMetadata = true,
         includeContent = true,
+        convertToDocx = false,
       } = body;
 
       const { stream, filename } = await this.exportService.createExportArchive(
@@ -33,6 +34,7 @@ export class ExportController {
         includeOriginalFiles,
         includeMetadata,
         includeContent,
+        convertToDocx,
       );
 
       res.setHeader('Content-Type', 'application/zip');
