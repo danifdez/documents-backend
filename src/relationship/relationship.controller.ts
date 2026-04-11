@@ -45,6 +45,15 @@ export class RelationshipController {
     return this.service.queryByProject(projectId, resourceIds, requestId);
   }
 
+  @Get('neighborhood')
+  async queryNeighborhood(
+    @Query('names') namesStr: string,
+    @Query('requestId') requestId?: string,
+  ): Promise<{ jobId: number }> {
+    const entityNames = namesStr ? namesStr.split(',').map(n => n.trim()).filter(Boolean) : [];
+    return this.service.queryNeighborhood(entityNames, requestId);
+  }
+
   @Post()
   @RequirePermissions(Permission.RELATIONSHIPS)
   async createRelationship(
@@ -75,5 +84,13 @@ export class RelationshipController {
     @Param('resourceId', ParseIntPipe) resourceId: number,
   ): Promise<{ jobId: number }> {
     return this.service.extractRelationships(resourceId);
+  }
+
+  @Post('project/:projectId/extract')
+  @RequirePermissions(Permission.RELATIONSHIPS)
+  async extractRelationshipsForProject(
+    @Param('projectId', ParseIntPipe) projectId: number,
+  ): Promise<{ jobIds: number[] }> {
+    return this.service.extractRelationshipsForProject(projectId);
   }
 }

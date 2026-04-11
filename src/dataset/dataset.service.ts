@@ -26,6 +26,7 @@ export class DatasetService {
     async findAllDatasets(projectId?: number): Promise<any[]> {
         const qb = this.datasetRepository.createQueryBuilder('dataset')
             .leftJoinAndSelect('dataset.project', 'project')
+            .leftJoinAndSelect('dataset.dataSources', 'dataSource')
             .loadRelationCountAndMap('dataset.recordCount', 'dataset.records');
 
         if (projectId) {
@@ -54,7 +55,7 @@ export class DatasetService {
     async findOneDataset(id: number): Promise<DatasetEntity | null> {
         return await this.datasetRepository.findOne({
             where: { id },
-            relations: ['project'],
+            relations: ['project', 'dataSources'],
         });
     }
 

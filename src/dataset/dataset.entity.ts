@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
+import { DataSourceEntity } from '../data-source/data-source.entity';
 
 export interface DatasetField {
     key: string;
@@ -33,6 +34,9 @@ export class DatasetEntity {
 
     @OneToMany(() => DatasetRecordEntity, (record) => record.dataset)
     records: DatasetRecordEntity[];
+
+    @OneToMany(() => DataSourceEntity, (ds) => ds.dataset)
+    dataSources: DataSourceEntity[];
 
     @CreateDateColumn({ name: 'created_at' })
     createdAt: Date;

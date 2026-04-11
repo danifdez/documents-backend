@@ -46,7 +46,7 @@ export class DataSourceEntity {
     @Column({ type: 'int', nullable: true, name: 'last_sync_record_count' })
     lastSyncRecordCount: number | null;
 
-    @ManyToOne(() => DatasetEntity, { nullable: true, onDelete: 'SET NULL' })
+    @ManyToOne(() => DatasetEntity, (dataset) => dataset.dataSources, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'dataset_id' })
     dataset: DatasetEntity | null;
 

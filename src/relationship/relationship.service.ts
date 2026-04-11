@@ -33,6 +33,18 @@ export class RelationshipService {
     return { jobId: job.id };
   }
 
+  async queryNeighborhood(
+    entityNames: string[],
+    requestId?: string,
+  ): Promise<{ jobId: number }> {
+    const job = await this.jobService.create('relationship-query', JobPriority.HIGH, {
+      query_type: 'neighborhood',
+      entityNames,
+      requestId,
+    });
+    return { jobId: job.id };
+  }
+
   async queryByProject(
     projectId: number,
     resourceIds?: number[],
@@ -103,6 +115,22 @@ export class RelationshipService {
       requestId: dto.requestId,
     });
     return { jobId: job.id };
+  }
+
+  async extractRelationshipsForProject(projectId: number): Promise<{ jobIds: number[] }> {
+    const resources = await this.resourceService.findByProject(projectId);
+    const jobIds: number[] = [];
+
+    for (const resource of resources) {
+      try {
+        const result = await this.extractRelationships(resource.id);
+        jobIds.push(result.jobId);
+      } catch {
+        // Skip resources without content or entities
+      }
+    }
+
+    return { jobIds };
   }
 
   async extractRelationships(resourceId: number): Promise<{ jobId: number }> {
