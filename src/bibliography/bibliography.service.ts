@@ -87,6 +87,17 @@ export class BibliographyService {
       .getMany();
   }
 
+  async search(query: string): Promise<BibliographyEntryEntity[]> {
+    if (!query || !query.trim()) return [];
+    const like = `%${query}%`;
+    return await this.repository
+      .createQueryBuilder('b')
+      .where('b.title ILIKE :q OR b.citeKey ILIKE :q OR b.creators::text ILIKE :q', { q: like })
+      .orderBy('b.updated_at', 'DESC')
+      .limit(15)
+      .getMany();
+  }
+
   async create(dto: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
     const { projectId, sourceResourceId, ...rest } = dto;
     const data: Partial<BibliographyEntryEntity> = { ...rest as any };

@@ -11,7 +11,10 @@ export class MarkService {
   ) { }
 
   async findOne(id: number): Promise<MarkEntity | null> {
-    return await this.repository.findOneBy({ id });
+    return await this.repository.findOne({
+      where: { id },
+      relations: ['doc', 'resource'],
+    });
   }
 
   async create(mark: Partial<MarkEntity>): Promise<MarkEntity> {
