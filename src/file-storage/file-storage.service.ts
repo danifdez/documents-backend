@@ -7,12 +7,17 @@ import * as crypto from 'crypto';
 @Injectable()
 export class FileStorageService {
   private readonly baseStoragePath: string;
+  private readonly archiveStoragePath: string;
 
   constructor(private readonly configService: ConfigService) {
     this.baseStoragePath = path.resolve(
       this.configService.get('DOCUMENTS_STORAGE_DIR') || path.join(__dirname, '..', '..', '..', 'documents'),
     );
+    this.archiveStoragePath = path.resolve(
+      this.configService.get('DOCUMENTS_ARCHIVE_DIR') || path.join(this.baseStoragePath, '..', 'documents-archive'),
+    );
     this.ensureDirectoryExists(this.baseStoragePath);
+    this.ensureDirectoryExists(this.archiveStoragePath);
   }
 
   async storeFile(
@@ -93,6 +98,49 @@ export class FileStorageService {
     const toPath = this.getFilePath(toRelative);
     await this.ensureDirectoryExists(path.dirname(toPath));
     await fs.move(fromPath, toPath, { overwrite: true });
+  }
+
+  getArchiveFilePath(relativePath: string): string {
+    return path.join(this.archiveStoragePath, relativePath);
+  }
+
+  async getFileFromArchive(relativePath: string): Promise<Buffer | null> {
+    try {
+      return await fs.readFile(this.getArchiveFilePath(relativePath));
+    } catch {
+      return null;
+    }
+  }
+
+  async archivedFileExists(relativePath: string): Promise<boolean> {
+    try {
+      return await fs.pathExists(this.getArchiveFilePath(relativePath));
+    } catch {
+      return false;
+    }
+  }
+
+  async moveToArchive(relativePath: string): Promise<void> {
+    const fromPath = this.getFilePath(relativePath);
+    const toPath = this.getArchiveFilePath(relativePath);
+    await this.ensureDirectoryExists(path.dirname(toPath));
+    await fs.move(fromPath, toPath, { overwrite: true });
+  }
+
+  async moveFromArchive(relativePath: string): Promise<void> {
+    const fromPath = this.getArchiveFilePath(relativePath);
+    const toPath = this.getFilePath(relativePath);
+    await this.ensureDirectoryExists(path.dirname(toPath));
+    await fs.move(fromPath, toPath, { overwrite: true });
+  }
+
+  async deleteFromArchive(relativePath: string): Promise<boolean> {
+    try {
+      await fs.unlink(this.getArchiveFilePath(relativePath));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   public calculateHash(buffer: Buffer): string {

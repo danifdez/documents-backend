@@ -13,6 +13,9 @@ export class ThreadEntity {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  @Column({ length: 16, default: 'active' })
+  status: string;
+
   @ManyToOne(() => ProjectEntity, (doc) => doc.threads, { nullable: true })
   project: ProjectEntity | null;
 

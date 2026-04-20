@@ -23,7 +23,7 @@ export class ResourceService {
 
   async findOne(id: number): Promise<ResourceEntity | null> {
     return await this.repo.findOne({
-      select: ['id', 'name', 'title', 'path', 'project', 'summary', 'keyPoints', 'keywords', 'originalName', 'publicationDate', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'status', 'createdAt', 'updatedAt'],
+      select: ['id', 'name', 'title', 'path', 'project', 'summary', 'keyPoints', 'keywords', 'originalName', 'publicationDate', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
       where: { id },
       relations: ['project'],
     });
@@ -131,9 +131,32 @@ export class ResourceService {
   }
 
   async update(id: number, resource: Partial<any>): Promise<ResourceEntity | null> {
+    let anchorChanged = false;
+    let newAnchor: string | null = null;
+    if (Object.prototype.hasOwnProperty.call(resource, 'publicationDate')) {
+      const before = await this.repo.findOne({ select: ['id', 'publicationDate'], where: { id } });
+      const oldAnchor = before?.publicationDate ? String(before.publicationDate).slice(0, 10) : null;
+      newAnchor = resource.publicationDate ? String(resource.publicationDate).slice(0, 10) : null;
+      anchorChanged = oldAnchor !== newAnchor;
+    }
+
     const existing = await this.repo.preload({ id, ...resource });
     if (!existing) return null;
-    return await this.repo.save(existing);
+    const saved = await this.repo.save(existing);
+
+    if (anchorChanged) {
+      const content = await this.getContentById(id);
+      if (content) {
+        await this.jobService.create('date-extraction', JobPriority.NORMAL, {
+          resourceId: id,
+          text: content,
+          language: saved.language || 'en',
+          anchorDate: newAnchor,
+        });
+      }
+    }
+
+    return saved;
   }
 
   async remove(id: number): Promise<ResourceEntity | null> {
@@ -328,7 +351,9 @@ export class ResourceService {
       throw new NotFoundException('File not found');
     }
 
-    const buffer = await this.fileStorageService.getFile(resource.path);
+    const buffer = resource.archivedAt
+      ? await this.fileStorageService.getFileFromArchive(resource.path)
+      : await this.fileStorageService.getFile(resource.path);
     if (!buffer) {
       throw new NotFoundException('File not found');
     }

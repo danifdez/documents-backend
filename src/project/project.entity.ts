@@ -19,6 +19,9 @@ export class ProjectEntity {
   @Column({ nullable: true })
   description?: string;
 
+  @Column({ length: 16, default: 'active' })
+  status: string;
+
   @OneToMany(() => DocEntity, (doc) => doc.project)
   docs: DocEntity[];
 

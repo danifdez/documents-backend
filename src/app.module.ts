@@ -29,6 +29,7 @@ import { DatasetModule } from './dataset/dataset.module';
 import { NoteModule } from './note/note.module';
 import { CalendarEventModule } from './calendar-event/calendar-event.module';
 import { TimelineModule } from './timeline/timeline.module';
+import { ResourceDateModule } from './resource-date/resource-date.module';
 import { KnowledgeBaseModule } from './knowledge-base/knowledge-base.module';
 import { BibliographyModule } from './bibliography/bibliography.module';
 import { UserTaskModule } from './user-task/user-task.module';
@@ -37,6 +38,7 @@ import { DataSourceModule } from './data-source/data-source.module';
 import { WorkerModule } from './worker/worker.module';
 import { AuthModule } from './auth/auth.module';
 import { OfflineModule } from './offline/offline.module';
+import { ArchiveModule } from './archive/archive.module';
 import { FeatureFlagModule } from './common/feature-flags.module';
 import { readFeaturesFromEnv } from './common/feature-flags';
 import { APP_GUARD } from '@nestjs/core';
@@ -83,6 +85,7 @@ export class AppModule {
       WorkerModule,
       AuthModule,
       OfflineModule.register(),
+      ArchiveModule,
     ];
 
     // Toggleable feature modules
@@ -92,7 +95,7 @@ export class AppModule {
     if (features.datasets) imports.push(DatasetModule);
     if (features.notes) imports.push(NoteModule);
     if (features.calendar) imports.push(CalendarEventModule);
-    if (features.timelines) imports.push(TimelineModule);
+    if (features.timelines) imports.push(TimelineModule, ResourceDateModule);
     if (features.knowledge_base) imports.push(KnowledgeBaseModule);
     if (features.bibliography) imports.push(BibliographyModule);
     if (features.tasks) imports.push(UserTaskModule);

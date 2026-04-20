@@ -19,6 +19,9 @@ export class NoteEntity {
   @ManyToOne(() => ThreadEntity, { nullable: true })
   thread: ThreadEntity | null;
 
+  @Column({ length: 16, default: 'active' })
+  status: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

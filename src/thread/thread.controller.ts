@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { ThreadService } from './thread.service';
 import { ThreadEntity } from './thread.entity';
 import { CreateThreadDto } from './dto/thread.dto';
@@ -15,13 +15,17 @@ export class ThreadController {
   @Get('by-project/:projectId')
   async getAll(
     @Param('projectId', ParseIntPipe) projectId: number,
+    @Query('includeArchived') includeArchived?: string,
   ): Promise<ThreadEntity[]> {
-    return await this.threadService.findByProject(projectId);
+    return await this.threadService.findByProject(projectId, includeArchived === 'true');
   }
 
   @Get(':id/children')
-  async getChildren(@Param('id', ParseIntPipe) id: number): Promise<ThreadEntity[]> {
-    return await this.threadService.findByParent(id);
+  async getChildren(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('includeArchived') includeArchived?: string,
+  ): Promise<ThreadEntity[]> {
+    return await this.threadService.findByParent(id, includeArchived === 'true');
   }
 
   @Post()

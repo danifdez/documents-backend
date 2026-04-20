@@ -1,6 +1,8 @@
-import { Controller, Post, Get, Patch, Body, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, UnauthorizedException, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { AvatarService } from './avatar.service';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Public } from './decorators/public.decorator';
@@ -12,6 +14,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly featureFlagService: FeatureFlagService,
+    private readonly avatarService: AvatarService,
   ) {}
 
   @Public()
@@ -53,5 +56,19 @@ export class AuthController {
       throw new UnauthorizedException('User not found');
     }
     return updated;
+  }
+
+  @Post('me/avatar')
+  @UseInterceptors(FileInterceptor('avatar', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async uploadAvatar(@CurrentUser() user: any, @UploadedFile() file: Express.Multer.File) {
+    const result = await this.avatarService.uploadAvatar(user.userId, file);
+    const updated = await this.authService.findUserById(user.userId);
+    return { ...updated, avatarPath: result.avatarPath };
+  }
+
+  @Delete('me/avatar')
+  async deleteMyAvatar(@CurrentUser() user: any) {
+    await this.avatarService.deleteAvatar(user.userId);
+    return { success: true };
   }
 }

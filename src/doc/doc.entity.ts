@@ -28,6 +28,9 @@ export class DocEntity {
   @Column({ name: 'citation_format', default: 'apa' })
   citationFormat: string;
 
+  @Column({ length: 16, default: 'active' })
+  status: string;
+
   @OneToMany(() => CommentEntity, (comment) => comment.doc)
   comments: CommentEntity[];
 

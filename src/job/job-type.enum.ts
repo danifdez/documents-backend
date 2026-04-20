@@ -3,6 +3,7 @@ export enum JobType {
     SUMMARIZE = 'summarize',
     TRANSLATE = 'translate',
     ENTITY_EXTRACTION = 'entity-extraction',
+    DATE_EXTRACTION = 'date-extraction',
     KEY_POINT = 'key-point',
     KEYWORDS = 'keywords',
     IMAGE_GENERATE = 'image-generate',

@@ -26,6 +26,7 @@ import { RelationshipQueryProcessor } from './processors/relationship-query-proc
 import { RelationshipModifyProcessor } from './processors/relationship-modify-processor';
 import { DeleteVectorsProcessor } from './processors/delete-vectors-processor';
 import { SearchProcessor } from './processors/search-processor';
+import { DateExtractionProcessor } from './processors/date-extraction-processor';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Module({})
@@ -61,6 +62,11 @@ export class JobProcessorModule {
     ];
 
     if (features.entities) providers.push(EntityExtractionProcessor);
+    if (features.timelines) {
+      const { ResourceDateModule } = require('../resource-date/resource-date.module');
+      featureImports.push(ResourceDateModule);
+      providers.push(DateExtractionProcessor);
+    }
     if (features.datasets) providers.push(DatasetStatsProcessor);
     if (features.data_sources) {
       const { DataSourceModule } = require('../data-source/data-source.module');

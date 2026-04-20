@@ -20,16 +20,19 @@ export class ProjectService {
     return this.repository.save(created);
   }
 
-  async findAll(): Promise<ProjectEntity[]> {
-    return await this.repository.find({ order: { createdAt: 'DESC' } });
+  async findAll(includeArchived = false): Promise<ProjectEntity[]> {
+    const where = includeArchived ? {} : { status: 'active' };
+    return await this.repository.find({ where, order: { createdAt: 'DESC' } });
   }
 
-  async search(query: string): Promise<ProjectEntity[]> {
-    if (!query || !query.trim()) return this.findAll();
+  async search(query: string, includeArchived = false): Promise<ProjectEntity[]> {
+    if (!query || !query.trim()) return this.findAll(includeArchived);
     const like = `%${query}%`;
-    return await this.repository
+    const qb = this.repository
       .createQueryBuilder('p')
-      .where('p.name ILIKE :q OR p.description ILIKE :q', { q: like })
+      .where('(p.name ILIKE :q OR p.description ILIKE :q)', { q: like });
+    if (!includeArchived) qb.andWhere(`p.status = 'active'`);
+    return await qb
       .orderBy('similarity(p.name, :s)', 'DESC')
       .setParameter('s', query)
       .getMany();

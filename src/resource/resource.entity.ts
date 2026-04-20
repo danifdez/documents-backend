@@ -104,6 +104,9 @@ export class ResourceEntity {
   @Column({ name: 'status', default: 'extracting' })
   status: string;
 
+  @Column({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date | null;
+
   @ManyToMany(() => EntityEntity, (entity) => entity.resources)
   @JoinTable({
     name: 'resource_entities',

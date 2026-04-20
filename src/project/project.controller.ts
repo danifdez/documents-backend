@@ -12,8 +12,11 @@ export class ProjectController {
   ) { }
 
   @Get('search')
-  async search(@Query('q') query: string): Promise<ProjectEntity[]> {
-    return await this.projectService.search(query);
+  async search(
+    @Query('q') query: string,
+    @Query('includeArchived') includeArchived?: string,
+  ): Promise<ProjectEntity[]> {
+    return await this.projectService.search(query, includeArchived === 'true');
   }
 
   @Get(':id/stats')
@@ -27,8 +30,8 @@ export class ProjectController {
   }
 
   @Get()
-  async getAll(): Promise<ProjectEntity[]> {
-    return await this.projectService.findAll();
+  async getAll(@Query('includeArchived') includeArchived?: string): Promise<ProjectEntity[]> {
+    return await this.projectService.findAll(includeArchived === 'true');
   }
 
   @Post()

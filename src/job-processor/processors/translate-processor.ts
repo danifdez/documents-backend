@@ -537,6 +537,16 @@ export class TranslateProcessor implements JobProcessor {
         resourceId: resourceId,
         texts: extractedTexts,
       });
+
+      const anchorDate = resourceEntity.publicationDate
+        ? String(resourceEntity.publicationDate).slice(0, 10)
+        : null;
+      await this.jobService.create('date-extraction', JobPriority.NORMAL, {
+        resourceId,
+        text: resourceContent || '',
+        language: resourceEntity.language || 'en',
+        anchorDate,
+      });
     }
 
     // Ingest translated content into vector database

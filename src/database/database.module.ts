@@ -28,6 +28,7 @@ import { NoteEntity } from '../note/note.entity';
 import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
 import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
 import { TimelineEntity } from '../timeline/timeline.entity';
+import { ResourceDateEntity } from '../resource-date/resource-date.entity';
 import { BibliographyEntryEntity } from '../bibliography/bibliography-entry.entity';
 import { UserTaskEntity } from '../user-task/user-task.entity';
 import { WorkerEntity } from '../worker/worker.entity';
@@ -70,6 +71,7 @@ import { DataSourceSyncLogEntity } from '../data-source/data-source-sync-log.ent
       CalendarEventEntity,
       KnowledgeEntryEntity,
       TimelineEntity,
+      ResourceDateEntity,
       BibliographyEntryEntity,
       UserTaskEntity,
       WorkerEntity,

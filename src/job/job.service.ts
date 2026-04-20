@@ -13,6 +13,7 @@ const JOB_FEATURE_MAP: Record<string, string> = {
   'ask': 'rag',
   'embedding': 'rag',
   'entity-extraction': 'entities',
+  'date-extraction': 'timelines',
   'image-generate': 'canvas',
   'image-edit': 'canvas',
   'data-source-sync': 'data_sources',

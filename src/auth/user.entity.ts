@@ -15,6 +15,9 @@ export class UserEntity {
   @Column({ name: 'display_name', length: 200, nullable: true })
   displayName: string | null;
 
+  @Column({ name: 'avatar_path', length: 500, nullable: true })
+  avatarPath: string | null;
+
   @Column({ type: 'jsonb', default: {} })
   permissions: Record<string, boolean>;
 

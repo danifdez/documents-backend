@@ -5,6 +5,7 @@ import { KnowledgeEntryEntity } from './knowledge-entry.entity';
 import { CreateKnowledgeEntryDto, UpdateKnowledgeEntryDto } from './dto/knowledge-entry.dto';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
+import { sourceIdForKnowledge } from '../vector/vector-source-id.util';
 
 @Injectable()
 export class KnowledgeEntryService {
@@ -102,7 +103,7 @@ export class KnowledgeEntryService {
     private async scheduleDeleteVectors(entryId: number) {
         try {
             await this.jobService.create('delete-vectors', JobPriority.BACKGROUND, {
-                sourceId: `knowledge_${entryId}`,
+                sourceId: sourceIdForKnowledge(entryId),
             });
             this.logger.log(`Scheduled vector deletion for knowledge entry ${entryId}`);
         } catch (error) {

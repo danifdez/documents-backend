@@ -27,17 +27,21 @@ export class ThreadService {
     return await this.repository.save(created);
   }
 
-  async findByProject(projectId: number): Promise<ThreadEntity[]> {
+  async findByProject(projectId: number, includeArchived = false): Promise<ThreadEntity[]> {
+    const where: any = { project: { id: projectId } };
+    if (!includeArchived) where.status = 'active';
     return await this.repository.find({
-      where: { project: { id: projectId } },
+      where,
       relations: ['parent'],
       order: { createdAt: 'DESC' },
     });
   }
 
-  async findByParent(parentId: number): Promise<ThreadEntity[]> {
+  async findByParent(parentId: number, includeArchived = false): Promise<ThreadEntity[]> {
+    const where: any = { parent: { id: parentId } };
+    if (!includeArchived) where.status = 'active';
     return await this.repository.find({
-      where: { parent: { id: parentId } },
+      where,
       order: { createdAt: 'DESC' },
     });
   }
