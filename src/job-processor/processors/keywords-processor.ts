@@ -20,7 +20,17 @@ export class KeywordsProcessor implements JobProcessor {
 
     async process(job: JobEntity): Promise<any> {
         const resourceId = job.payload['resourceId'] ? Number(job.payload['resourceId']) : null;
-        const result = job.result as { keywords: string[] };
+        const result = job.result as { keywords?: string[]; error?: string };
+
+        if (result?.error) {
+            this.logger.warn(`Keywords job ${job.id} returned error: ${result.error}`);
+            this.notificationGateway.sendNotification({
+                type: 'keywords',
+                message: `Keywords extraction failed: ${result.error}`,
+                resourceId: resourceId ?? undefined,
+            });
+            return { success: false, message: result.error };
+        }
 
         if (resourceId && result && Array.isArray(result.keywords)) {
             try {

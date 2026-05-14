@@ -18,10 +18,16 @@ export class DateExtractionProcessor implements JobProcessor {
   async process(job: JobEntity): Promise<any> {
     const resourceId = Number(job.payload['resourceId']);
     const anchorDate = (job.payload['anchorDate'] as string | null) ?? null;
-    const result = job.result as { dates?: ResourceDatePayload[] };
+    const result = job.result as { dates?: ResourceDatePayload[]; error?: string };
 
     if (!resourceId || isNaN(resourceId)) {
       throw new Error(`Invalid resourceId in date-extraction job: ${resourceId}`);
+    }
+    if (result?.error) {
+      this.logger.warn(
+        `date-extraction job ${job.id} returned error: ${result.error}`,
+      );
+      return { success: false, resourceId, message: result.error };
     }
     if (!result || !Array.isArray(result.dates)) {
       throw new Error(`Invalid job result for date-extraction on resource ${resourceId}`);

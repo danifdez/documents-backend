@@ -46,13 +46,23 @@ export class EntityExtractionProcessor implements JobProcessor {
 
   async process(job: JobEntity): Promise<any> {
     const resourceId = Number(job.payload['resourceId']) as number;
-    const result = job.result as { entities: Array<{ word: string; entity: string }> };
+    const result = job.result as {
+      entities?: Array<{ word: string; entity: string }>;
+      error?: string;
+    };
 
     // Validate resourceId
     if (!resourceId || isNaN(resourceId)) {
       const errorMessage = `Invalid resource ID: ${resourceId}`;
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
+    }
+
+    if (result?.error) {
+      this.logger.warn(
+        `entity-extraction job ${job.id} returned error: ${result.error}`,
+      );
+      return { success: false, message: result.error };
     }
 
     // Get the resource and validate it exists. Avoid double DB calls (resourceExists + findOne).

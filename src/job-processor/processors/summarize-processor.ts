@@ -23,7 +23,20 @@ export class SummarizeProcessor implements JobProcessor {
   async process(job: JobEntity): Promise<any> {
     const resourceId = job.payload['resourceId'] ? Number(job.payload['resourceId']) : null;
     const targetDocId = job.payload['targetDocId'] ? Number(job.payload['targetDocId']) : null;
-    const result = job.result as { response: string };
+    const result = job.result as { response?: string; error?: string };
+
+    if (result?.error) {
+      this.logger.warn(`Summarization job ${job.id} returned error: ${result.error}`);
+      this.notificationGateway.sendNotification({
+        type: 'summarization',
+        message: `Document summarization failed: ${result.error}`,
+        resourceId: resourceId ?? undefined,
+        docId: targetDocId ?? undefined,
+      });
+      return { success: false, message: result.error };
+    }
+
+    const summary = result?.response ?? '';
 
     // If a targetDocId is provided, append the summary to the workspace document content
     if (targetDocId) {
@@ -31,7 +44,7 @@ export class SummarizeProcessor implements JobProcessor {
         const doc = await this.docService.findOne(targetDocId);
         if (doc) {
           const existing = doc.content || '';
-          const appended = existing + '\n\n' + result.response;
+          const appended = existing + '\n\n' + summary;
           await this.docService.update(targetDocId, { content: appended });
 
           this.notificationGateway.sendNotification({
@@ -47,7 +60,7 @@ export class SummarizeProcessor implements JobProcessor {
     } else {
       if (resourceId) {
         await this.resourceService.update(resourceId, {
-          summary: result.response,
+          summary,
         });
       }
 

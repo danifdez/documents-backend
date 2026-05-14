@@ -95,12 +95,21 @@ export class ModelService {
 
     const extractedTexts = extractTextFromHtml(content);
 
-    // Create job for entity extraction
-    await this.jobService.create('entity-extraction', JobPriority.NORMAL, {
-      resourceId: resourceId,
-      from: 'content',
-      texts: extractedTexts,
-    });
+    // Create job for entity extraction. When AGENT_ENTITY_EXTRACTION=true,
+    // the worker routes the job through the agent loop instead of the
+    // one-shot spaCy handler.
+    const agentEnabled = process.env.AGENT_ENTITY_EXTRACTION === 'true';
+    const agentMaxSteps = parseInt(process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6', 10);
+    await this.jobService.create(
+      'entity-extraction',
+      JobPriority.NORMAL,
+      {
+        resourceId: resourceId,
+        from: 'content',
+        texts: extractedTexts,
+      },
+      agentEnabled ? { maxSteps: agentMaxSteps, kind: 'agent' } : undefined,
+    );
   }
 
   async keyPoints(resourceId: number, targetLanguage?: string): Promise<void> {
@@ -215,20 +224,27 @@ export class ModelService {
       }
     }
 
-    const job = await this.jobService.create('image-edit', JobPriority.NORMAL, {
-      sourceHash: resource.hash,
-      sourcePath: resource.path,
-      sourceExtension,
-      prompt: params.prompt,
-      negativePrompt: params.negativePrompt,
-      strength: params.strength || 0.75,
-      steps: params.steps || 30,
-      guidanceScale: params.guidanceScale || 7.5,
-      seed: params.seed,
-      requestId: params.requestId,
-      canvasId: params.canvasId,
-      projectId: params.projectId,
-    });
+    const { buffer: sourceBuffer } = await this.resourceService.getFileBuffer(params.resourceId);
+
+    const job = await this.jobService.create(
+      'image-edit',
+      JobPriority.NORMAL,
+      {
+        sourceHash: resource.hash,
+        sourceExtension,
+        prompt: params.prompt,
+        negativePrompt: params.negativePrompt,
+        strength: params.strength || 0.75,
+        steps: params.steps || 30,
+        guidanceScale: params.guidanceScale || 7.5,
+        seed: params.seed,
+        requestId: params.requestId,
+        canvasId: params.canvasId,
+        projectId: params.projectId,
+      },
+      undefined,
+      sourceBuffer,
+    );
     return { jobId: job.id };
   }
 }

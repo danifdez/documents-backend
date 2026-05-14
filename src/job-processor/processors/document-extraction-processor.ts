@@ -5,6 +5,7 @@ import { ResourceService } from 'src/resource/resource.service';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobService } from 'src/job/job.service';
 import { JobEntity } from 'src/job/job.entity';
+import { FileStorageService } from 'src/file-storage/file-storage.service';
 
 const MEDIA_EXTENSIONS = new Set([
   '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma', '.opus', '.aiff', '.aif',
@@ -20,6 +21,7 @@ export class DocumentExtractionProcessor implements JobProcessor {
     private readonly resourceService: ResourceService,
     private readonly notificationGateway: NotificationGateway,
     private readonly jobService: JobService,
+    private readonly fileStorageService: FileStorageService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -62,11 +64,22 @@ export class DocumentExtractionProcessor implements JobProcessor {
     await this.resourceService.update(resourceId, updateData);
 
     if (isMedia) {
-      await this.jobService.create('transcribe', JobPriority.BACKGROUND, {
-        hash,
-        extension,
-        resourceId,
-      });
+      const relativePath = this.fileStorageService.getRelativePath(hash, extension);
+      const buffer = await this.fileStorageService.getFile(relativePath);
+      if (!buffer) {
+        throw new Error(`Audio file not found for transcribe: ${relativePath}`);
+      }
+      await this.jobService.create(
+        'transcribe',
+        JobPriority.BACKGROUND,
+        {
+          hash,
+          extension,
+          resourceId,
+        },
+        undefined,
+        buffer,
+      );
     }
 
     this.notificationGateway.sendNotification({

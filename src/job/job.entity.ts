@@ -38,4 +38,25 @@ export class JobEntity {
 
   @Column({ name: 'started_at', type: 'timestamp', nullable: true })
   startedAt: Date | null;
+
+  @Column({ name: 'agent_iteration', type: 'integer', default: 0 })
+  agentIteration: number;
+
+  @Column({ name: 'agent_max_steps', type: 'integer', default: 1 })
+  agentMaxSteps: number;
+
+  @Column({ name: 'agent_state', type: 'jsonb', nullable: true })
+  agentState: any;
+
+  @Column({ name: 'parent_job_id', type: 'integer', nullable: true })
+  parentJobId: number | null;
+
+  @Column({ name: 'agent_kind', type: 'varchar', nullable: true })
+  agentKind: string | null;
+
+  @Column({ name: 'input_blob', type: 'bytea', nullable: true })
+  inputBlob: Buffer | null;
+
+  @Column({ name: 'result_blob', type: 'bytea', nullable: true })
+  resultBlob: Buffer | null;
 }

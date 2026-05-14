@@ -15,8 +15,20 @@ export class RelationshipExtractionProcessor implements JobProcessor {
   }
 
   async process(job: JobEntity): Promise<any> {
-    const relationships = job.result['relationships'] || [];
+    const result = (job.result || {}) as { relationships?: unknown[]; error?: string };
+    const relationships = Array.isArray(result.relationships) ? result.relationships : [];
     const resourceId = job.payload['resourceId'] as number | undefined;
+
+    if (result.error) {
+      this.logger.warn(
+        `Relationship extraction job ${job.id} returned error: ${result.error}`,
+      );
+      this.notificationGateway.sendRelationshipExtractionComplete({
+        resourceId,
+        relationships,
+      });
+      return { success: false, message: result.error, relationshipsExtracted: relationships.length };
+    }
 
     this.logger.log(
       `Relationship extraction complete for resource ${resourceId}: ${relationships.length} relationships found`,

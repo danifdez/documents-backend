@@ -29,7 +29,13 @@ export class JobService {
     private readonly featureFlagService: FeatureFlagService,
   ) { }
 
-  async create(type: string, priority: JobPriority, payload: object) {
+  async create(
+    type: string,
+    priority: JobPriority,
+    payload: object,
+    agent?: { maxSteps: number; kind?: string },
+    inputBlob?: Buffer | null,
+  ) {
     // Skip job creation if the associated feature is disabled
     const featureKey = JOB_FEATURE_MAP[type];
     if (featureKey && !this.featureFlagService.isEnabled(featureKey as any)) {
@@ -42,6 +48,9 @@ export class JobService {
       priority,
       payload,
       status: JobStatus.PENDING,
+      agentMaxSteps: agent?.maxSteps ?? 1,
+      agentKind: agent?.kind ?? null,
+      inputBlob: inputBlob ?? null,
     });
     return this.repo.save(job);
   }

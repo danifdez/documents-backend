@@ -58,10 +58,11 @@ export class DetectLanguageProcessor implements JobProcessor {
         const anchorDate = resource?.publicationDate
           ? String(resource.publicationDate).slice(0, 10)
           : null;
+        const englishContent = await this.resourceService.getEnglishContentById(resourceId);
         await this.jobService.create('date-extraction', JobPriority.NORMAL, {
           resourceId,
-          text: content,
-          language: detectedLanguage,
+          text: englishContent || content,
+          language: 'en',
           anchorDate,
         });
       } else {

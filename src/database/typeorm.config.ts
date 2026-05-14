@@ -14,6 +14,7 @@ import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity'
 import { AuthorEntity } from '../author/author.entity';
 import { ResourceAuthorEntity } from '../author/resource-author.entity';
 import { PendingEntityEntity } from '../pending-entity/pending-entity.entity';
+import { EntityProjectEntity } from '../entity-project/entity-project.entity';
 import { CanvasEntity } from '../canvas/canvas.entity';
 import { DatasetEntity } from '../dataset/dataset.entity';
 import { DatasetRecordEntity } from '../dataset/dataset-record.entity';
@@ -23,6 +24,7 @@ import { DatasetChartEntity } from '../dataset/dataset-chart.entity';
 import { NoteEntity } from '../note/note.entity';
 import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
 import { TimelineEntity } from '../timeline/timeline.entity';
+import { ResourceDateEntity } from '../resource-date/resource-date.entity';
 import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
 import { BibliographyEntryEntity } from '../bibliography/bibliography-entry.entity';
 import { UserTaskEntity } from '../user-task/user-task.entity';
@@ -55,6 +57,7 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       AuthorEntity,
       ResourceAuthorEntity,
       PendingEntityEntity,
+      EntityProjectEntity,
       CanvasEntity,
       DatasetEntity,
       DatasetRecordEntity,
@@ -64,6 +67,7 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       NoteEntity,
       CalendarEventEntity,
       TimelineEntity,
+      ResourceDateEntity,
       KnowledgeEntryEntity,
       BibliographyEntryEntity,
       UserTaskEntity,

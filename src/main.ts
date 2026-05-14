@@ -19,15 +19,23 @@ async function bootstrap() {
     );
   }
 
+  const corsOrigin = configService.get('CORS_ORIGIN', 'http://localhost:5173');
+
   // Security headers
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'frame-ancestors': ["'self'", corsOrigin],
+      },
+    },
   }));
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   app.enableCors({
-    origin: configService.get('CORS_ORIGIN', 'http://localhost:5173'),
+    origin: corsOrigin,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });

@@ -3,6 +3,7 @@ import { JobProcessor } from '../job-processor.interface';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { ResourceService } from 'src/resource/resource.service';
 import { JobEntity } from 'src/job/job.entity';
+import { FileStorageService } from 'src/file-storage/file-storage.service';
 
 @Injectable()
 export class ImageEditProcessor implements JobProcessor {
@@ -12,6 +13,7 @@ export class ImageEditProcessor implements JobProcessor {
   constructor(
     private readonly notificationGateway: NotificationGateway,
     private readonly resourceService: ResourceService,
+    private readonly fileStorageService: FileStorageService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -21,7 +23,6 @@ export class ImageEditProcessor implements JobProcessor {
   async process(job: JobEntity): Promise<any> {
     const result = job.result as {
       hash: string;
-      relativePath: string;
       extension: string;
       width: number;
       height: number;
@@ -35,6 +36,15 @@ export class ImageEditProcessor implements JobProcessor {
     if (!result || !result.hash) {
       throw new Error('Job result missing required image data');
     }
+    if (!job.resultBlob) {
+      throw new Error('Job result_blob missing — cannot persist edited image');
+    }
+
+    const stored = await this.fileStorageService.storeTempFile(
+      result.hash,
+      Buffer.isBuffer(job.resultBlob) ? job.resultBlob : Buffer.from(job.resultBlob as any),
+      result.extension || '.png',
+    );
 
     const promptLabel = result.prompt?.length > 50
       ? result.prompt.substring(0, 50) + '...'
@@ -44,7 +54,7 @@ export class ImageEditProcessor implements JobProcessor {
     const resource = await this.resourceService.create({
       name: `AI Edit: ${promptLabel}`,
       hash: result.hash,
-      path: result.relativePath,
+      path: stored.relativePath,
       mimeType: 'image/png',
       type: 'image',
       status: 'temp',

@@ -25,7 +25,7 @@ export class ResourceService {
     return await this.repo.findOne({
       select: ['id', 'name', 'title', 'path', 'project', 'summary', 'keyPoints', 'keywords', 'originalName', 'publicationDate', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
       where: { id },
-      relations: ['project'],
+      relations: ['project', 'authors'],
     });
   }
 
@@ -51,6 +51,15 @@ export class ResourceService {
       where: { id },
     });
     return resource?.workingContent ?? null;
+  }
+
+  async getEnglishContentById(id: number): Promise<string | null> {
+    const resource = await this.repo.findOne({
+      select: ['content', 'workingContent'],
+      where: { id },
+    });
+    if (!resource) return null;
+    return resource.workingContent ?? resource.content ?? null;
   }
 
   async create(resource: Partial<ResourceEntity>): Promise<ResourceEntity> {
@@ -145,12 +154,12 @@ export class ResourceService {
     const saved = await this.repo.save(existing);
 
     if (anchorChanged) {
-      const content = await this.getContentById(id);
+      const content = await this.getEnglishContentById(id);
       if (content) {
         await this.jobService.create('date-extraction', JobPriority.NORMAL, {
           resourceId: id,
           text: content,
-          language: saved.language || 'en',
+          language: 'en',
           anchorDate: newAnchor,
         });
       }
@@ -339,6 +348,8 @@ export class ResourceService {
           extension: result.extension,
           resourceId: resourceCreated.id,
         },
+        undefined,
+        file.buffer,
       );
     }
 

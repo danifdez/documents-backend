@@ -20,7 +20,17 @@ export class KeyPointsProcessor implements JobProcessor {
 
   async process(job: JobEntity): Promise<any> {
     const resourceId = job.payload['resourceId'] ? Number(job.payload['resourceId']) : null;
-    const result = job.result as { key_points: string[] };
+    const result = job.result as { key_points?: string[]; error?: string };
+
+    if (result?.error) {
+      this.logger.warn(`Key-points job ${job.id} returned error: ${result.error}`);
+      this.notificationGateway.sendNotification({
+        type: 'key-points',
+        message: `Key points extraction failed: ${result.error}`,
+        resourceId: resourceId ?? undefined,
+      });
+      return { success: false, message: result.error };
+    }
 
     if (resourceId && result && Array.isArray(result.key_points)) {
       try {

@@ -533,18 +533,26 @@ export class TranslateProcessor implements JobProcessor {
 
       const extractedTexts = extractTextFromHtml(resourceContent || '');
 
-      await this.jobService.create('entity-extraction', JobPriority.NORMAL, {
-        resourceId: resourceId,
-        texts: extractedTexts,
-      });
+      const agentEnabled = process.env.AGENT_ENTITY_EXTRACTION === 'true';
+      const agentMaxSteps = parseInt(process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6', 10);
+      await this.jobService.create(
+        'entity-extraction',
+        JobPriority.NORMAL,
+        {
+          resourceId: resourceId,
+          texts: extractedTexts,
+        },
+        agentEnabled ? { maxSteps: agentMaxSteps, kind: 'agent' } : undefined,
+      );
 
       const anchorDate = resourceEntity.publicationDate
         ? String(resourceEntity.publicationDate).slice(0, 10)
         : null;
+      const englishContent = await this.resourceService.getEnglishContentById(resourceId);
       await this.jobService.create('date-extraction', JobPriority.NORMAL, {
         resourceId,
-        text: resourceContent || '',
-        language: resourceEntity.language || 'en',
+        text: englishContent || '',
+        language: 'en',
         anchorDate,
       });
     }
