@@ -27,6 +27,9 @@ import { RelationshipModifyProcessor } from './processors/relationship-modify-pr
 import { DeleteVectorsProcessor } from './processors/delete-vectors-processor';
 import { SearchProcessor } from './processors/search-processor';
 import { DateExtractionProcessor } from './processors/date-extraction-processor';
+import { AssistantChatProcessor } from './processors/assistant-chat-processor';
+import { AssistantModule } from '../assistant/assistant.module';
+import { AssistantMemoryModule } from '../assistant-memory/assistant-memory.module';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Module({})
@@ -78,6 +81,10 @@ export class JobProcessorModule {
       RelationshipQueryProcessor,
       RelationshipModifyProcessor,
     );
+    if (features.assistants) {
+      featureImports.push(AssistantModule, AssistantMemoryModule);
+      providers.push(AssistantChatProcessor);
+    }
 
     return {
       module: JobProcessorModule,

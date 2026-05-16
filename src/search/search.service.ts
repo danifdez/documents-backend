@@ -9,6 +9,7 @@ import { CalendarEventService } from 'src/calendar-event/calendar-event.service'
 import { KnowledgeEntryService } from 'src/knowledge-base/knowledge-entry.service';
 import { EntityService } from 'src/entity/entity.service';
 import { DatasetService } from 'src/dataset/dataset.service';
+import { ProjectService } from 'src/project/project.service';
 import * as cheerio from 'cheerio';
 import { SearchResultDto } from './dto/search-result.dto';
 import { PageEntityMatch } from './dto/page-entities.dto';
@@ -26,6 +27,7 @@ export class SearchService {
     @Optional() private readonly knowledgeEntryService?: KnowledgeEntryService,
     @Optional() private readonly entityService?: EntityService,
     @Optional() private readonly datasetService?: DatasetService,
+    @Optional() private readonly projectService?: ProjectService,
   ) { }
 
   private highlightTextInHtml(
@@ -110,10 +112,20 @@ export class SearchService {
   }
 
   private async searchGlobal(searchTerm: string): Promise<SearchResultDto[]> {
-    const promises: Promise<any[]>[] = [];
-    const keys: string[] = [];
+    const promises: Promise<any[]>[] = [
+      // Always-on (required services): docs, resources, projects. The legacy
+      // shape of globalSearch only looked at the optional services below, so
+      // resources/docs/projects were invisible to the global UI — and to the
+      // assistant tool. Including them here aligns "global" with what users
+      // expect.
+      this.docService.globalSearch(searchTerm),
+      this.resourceService.globalSearch(searchTerm),
+    ];
+    const keys: string[] = ['docs', 'resources'];
 
+    if (this.projectService) { promises.push(this.searchProjects(searchTerm)); keys.push('projects'); }
     if (this.noteService) { promises.push(this.noteService.globalSearch(searchTerm)); keys.push('notes'); }
+    if (this.canvasService) { promises.push(this.canvasService.globalSearch(searchTerm)); keys.push('canvases'); }
     if (this.calendarEventService) { promises.push(this.calendarEventService.globalSearch(searchTerm)); keys.push('events'); }
     if (this.knowledgeEntryService) { promises.push(this.knowledgeEntryService.globalSearch(searchTerm)); keys.push('knowledge'); }
     if (this.entityService) { promises.push(this.entityService.globalSearch(searchTerm)); keys.push('entities'); }
@@ -124,7 +136,11 @@ export class SearchService {
     keys.forEach((key, i) => { data[key] = resolved[i]; });
 
     const results: SearchResultDto[] = [
+      ...this.mapDocs(data.docs, searchTerm),
+      ...this.mapResources(data.resources, searchTerm),
+      ...(data.projects ? this.mapProjects(data.projects, searchTerm) : []),
       ...(data.notes ? this.mapNotes(data.notes, searchTerm) : []),
+      ...(data.canvases ? this.mapCanvases(data.canvases, searchTerm) : []),
       ...(data.events ? this.mapEvents(data.events, searchTerm) : []),
       ...(data.knowledge ? this.mapKnowledge(data.knowledge, searchTerm) : []),
       ...(data.entities ? this.mapEntities(data.entities, searchTerm) : []),
@@ -133,6 +149,25 @@ export class SearchService {
 
     results.sort((a, b) => b.score - a.score);
     return results;
+  }
+
+  /** Project search returns ProjectEntity[]; wrap to the raw shape mapProjects
+   * expects (id/name/description). */
+  private async searchProjects(searchTerm: string): Promise<any[]> {
+    if (!this.projectService || !searchTerm?.trim()) return [];
+    const projects = await this.projectService.search(searchTerm);
+    return projects.map((p) => ({ id: p.id, name: p.name, description: p.description }));
+  }
+
+  private mapProjects(raw: any[], searchTerm: string): SearchResultDto[] {
+    if (!raw) return [];
+    return raw.map((r) => ({
+      id: r.id,
+      name: r.name,
+      score: 0.6,
+      collection: 'docs' as const,
+      highlightedName: this.highlightTextInHtml(r.name || '', searchTerm),
+    }));
   }
 
   private mapDocs(raw: any[], searchTerm: string): SearchResultDto[] {

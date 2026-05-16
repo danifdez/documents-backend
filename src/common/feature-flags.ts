@@ -15,6 +15,7 @@ export const FEATURE_FLAGS = [
   'rag',
   'relationships',
   'data_sources',
+  'assistants',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];

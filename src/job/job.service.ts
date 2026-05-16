@@ -17,6 +17,7 @@ const JOB_FEATURE_MAP: Record<string, string> = {
   'image-generate': 'canvas',
   'image-edit': 'canvas',
   'data-source-sync': 'data_sources',
+  'assistant-chat': 'assistants',
 };
 
 @Injectable()

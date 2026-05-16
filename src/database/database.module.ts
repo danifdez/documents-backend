@@ -36,6 +36,9 @@ import { UserEntity } from '../auth/user.entity';
 import { PermissionGroupEntity } from '../auth/permission-group.entity';
 import { DataSourceEntity } from '../data-source/data-source.entity';
 import { DataSourceSyncLogEntity } from '../data-source/data-source-sync-log.entity';
+import { AssistantEntity } from '../assistant/assistant.entity';
+import { AssistantMessageEntity } from '../assistant/assistant-message.entity';
+import { MemoryEntryEntity } from '../assistant-memory/memory-entry.entity';
 
 @Module({
   imports: [
@@ -79,6 +82,9 @@ import { DataSourceSyncLogEntity } from '../data-source/data-source-sync-log.ent
       PermissionGroupEntity,
       DataSourceEntity,
       DataSourceSyncLogEntity,
+      AssistantEntity,
+      AssistantMessageEntity,
+      MemoryEntryEntity,
     ]),
   ],
   providers: [...databaseProviders],

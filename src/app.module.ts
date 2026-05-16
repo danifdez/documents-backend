@@ -14,6 +14,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TaskScheduleModule } from './task-schedule/task-schedule.module';
 import { JobProcessorModule } from './job-processor/job-processor.module';
 import { NotificationModule } from './notification/notification.module';
+import { VoiceModule } from './voice/voice.module';
 import { ConfigModule } from '@nestjs/config';
 import { CommentModule } from './comment/comment.module';
 import { MarkModule } from './mark/mark.module';
@@ -40,6 +41,8 @@ import { AuthModule } from './auth/auth.module';
 import { OfflineModule } from './offline/offline.module';
 import { ArchiveModule } from './archive/archive.module';
 import { FeatureFlagModule } from './common/feature-flags.module';
+import { AssistantModule } from './assistant/assistant.module';
+import { AssistantMemoryModule } from './assistant-memory/assistant-memory.module';
 import { readFeaturesFromEnv } from './common/feature-flags';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -76,6 +79,7 @@ export class AppModule {
       JobProcessorModule.register(),
       TaskScheduleModule,
       NotificationModule,
+      VoiceModule,
       CommentModule,
       MarkModule,
       ModelModule,
@@ -101,6 +105,7 @@ export class AppModule {
     if (features.tasks) imports.push(UserTaskModule);
     if (features.relationships) imports.push(RelationshipModule);
     if (features.data_sources && features.datasets) imports.push(DataSourceModule);
+    if (features.assistants) imports.push(AssistantModule, AssistantMemoryModule);
 
     return {
       module: AppModule,
