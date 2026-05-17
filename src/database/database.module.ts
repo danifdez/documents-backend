@@ -39,6 +39,7 @@ import { DataSourceSyncLogEntity } from '../data-source/data-source-sync-log.ent
 import { AssistantEntity } from '../assistant/assistant.entity';
 import { AssistantMessageEntity } from '../assistant/assistant-message.entity';
 import { MemoryEntryEntity } from '../assistant-memory/memory-entry.entity';
+import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { MemoryEntryEntity } from '../assistant-memory/memory-entry.entity';
       AssistantEntity,
       AssistantMessageEntity,
       MemoryEntryEntity,
+      IndexedFileEntity,
     ]),
   ],
   providers: [...databaseProviders],

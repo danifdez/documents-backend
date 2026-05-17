@@ -36,6 +36,7 @@ import { DataSourceSyncLogEntity } from '../data-source/data-source-sync-log.ent
 import { AssistantEntity } from '../assistant/assistant.entity';
 import { AssistantMessageEntity } from '../assistant/assistant-message.entity';
 import { MemoryEntryEntity } from '../assistant-memory/memory-entry.entity';
+import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
 
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
@@ -82,6 +83,7 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       AssistantEntity,
       AssistantMessageEntity,
       MemoryEntryEntity,
+      IndexedFileEntity,
     ],
     synchronize: false,
     logging: false,

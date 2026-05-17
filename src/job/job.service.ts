@@ -18,6 +18,10 @@ const JOB_FEATURE_MAP: Record<string, string> = {
   'image-edit': 'canvas',
   'data-source-sync': 'data_sources',
   'assistant-chat': 'assistants',
+  'indexed-file-extraction': 'assistants',
+  'indexed-file-ingest': 'assistants',
+  'indexed-file-search': 'assistants',
+  'indexed-file-delete-vectors': 'assistants',
 };
 
 @Injectable()

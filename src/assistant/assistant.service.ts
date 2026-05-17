@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject, forwardRef, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AssistantEntity } from './assistant.entity';
@@ -7,6 +7,8 @@ import { CreateAssistantDto, UpdateAssistantDto } from './dto/assistant.dto';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
 import { AssistantMemoryService } from '../assistant-memory/assistant-memory.service';
+import { IndexedFileService } from '../indexed-file/indexed-file.service';
+import { validateFolderScope, folderScopeReasonToMessage } from './folder-scope.validator';
 
 export const DEFAULT_SYSTEM_PROMPT = [
   'You are the user\'s personal assistant in this workspace.',
@@ -26,6 +28,8 @@ export class AssistantService implements OnApplicationBootstrap {
     private readonly messageRepo: Repository<AssistantMessageEntity>,
     private readonly jobService: JobService,
     private readonly memoryService: AssistantMemoryService,
+    @Inject(forwardRef(() => IndexedFileService))
+    private readonly indexedFileService: IndexedFileService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -45,7 +49,7 @@ export class AssistantService implements OnApplicationBootstrap {
         icon: '◇',
         isSystem: true,
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
-        sub: 'Your personal assistant · full workspace · memory',
+        sub: 'Your personal assistant',
       });
       personal = await this.assistantRepo.save(personal);
     }
@@ -64,10 +68,11 @@ export class AssistantService implements OnApplicationBootstrap {
   }
 
   async create(dto: CreateAssistantDto): Promise<AssistantEntity> {
+    const folderScope = await this.resolveFolderScope(dto.folderScope);
     const created = this.assistantRepo.create({
       name: dto.name,
       systemPrompt: dto.systemPrompt ?? null,
-      folderScope: dto.folderScope ?? null,
+      folderScope,
       icon: dto.icon ?? null,
       sub: dto.sub ?? null,
       pinned: dto.pinned ?? false,
@@ -78,13 +83,30 @@ export class AssistantService implements OnApplicationBootstrap {
 
   async update(id: number, dto: UpdateAssistantDto): Promise<AssistantEntity> {
     const a = await this.findOne(id);
+    const previousFolderScope = a.folderScope;
     if (dto.name !== undefined) a.name = dto.name;
     if (dto.systemPrompt !== undefined) a.systemPrompt = dto.systemPrompt;
-    if (dto.folderScope !== undefined) a.folderScope = dto.folderScope;
+    if (dto.folderScope !== undefined) a.folderScope = await this.resolveFolderScope(dto.folderScope);
     if (dto.icon !== undefined) a.icon = dto.icon;
     if (dto.sub !== undefined) a.sub = dto.sub;
     if (dto.pinned !== undefined) a.pinned = dto.pinned;
-    return this.assistantRepo.save(a);
+    const saved = await this.assistantRepo.save(a);
+    if (dto.folderScope !== undefined && previousFolderScope !== saved.folderScope) {
+      try {
+        await this.indexedFileService.clearAllForAssistant(saved.id);
+      } catch (e: any) {
+        this.logger.error(`Failed to clear indexed files for assistant ${saved.id}: ${e?.message ?? e}`);
+      }
+    }
+    return saved;
+  }
+
+  private async resolveFolderScope(input: string | null | undefined): Promise<string | null> {
+    if (input === undefined || input === null || input === '') return null;
+    const result = await validateFolderScope(input);
+    if (result.ok === true) return (result as { ok: true; absolutePath: string }).absolutePath;
+    const reason = (result as { ok: false; reason: any }).reason;
+    throw new BadRequestException(folderScopeReasonToMessage(reason));
   }
 
   async remove(id: number): Promise<void> {
@@ -172,6 +194,28 @@ export class AssistantService implements OnApplicationBootstrap {
         event,
       }),
     );
+  }
+
+  async updateEventStatus(
+    assistantId: number,
+    messageId: number,
+    status: 'done' | 'cancelled',
+    summary?: string,
+  ): Promise<AssistantMessageEntity> {
+    const msg = await this.messageRepo.findOne({
+      where: { id: messageId, assistantId },
+    });
+    if (!msg) throw new NotFoundException(`Event message ${messageId} not found`);
+    if (msg.role !== 'event' || !msg.event) {
+      throw new NotFoundException(`Message ${messageId} is not an event`);
+    }
+    const ev = msg.event as any;
+    if (ev.kind === 'tool_executed' && ev.tool) {
+      ev.tool.status = status;
+      if (summary !== undefined) ev.tool.summary = summary;
+    }
+    msg.event = ev;
+    return this.messageRepo.save(msg);
   }
 
   async recordAssistantReply(

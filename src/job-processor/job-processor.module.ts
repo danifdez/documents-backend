@@ -28,8 +28,11 @@ import { DeleteVectorsProcessor } from './processors/delete-vectors-processor';
 import { SearchProcessor } from './processors/search-processor';
 import { DateExtractionProcessor } from './processors/date-extraction-processor';
 import { AssistantChatProcessor } from './processors/assistant-chat-processor';
+import { IndexedFileExtractionProcessor } from './processors/indexed-file-extraction-processor';
+import { IndexedFileIngestProcessor } from './processors/indexed-file-ingest-processor';
 import { AssistantModule } from '../assistant/assistant.module';
 import { AssistantMemoryModule } from '../assistant-memory/assistant-memory.module';
+import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Module({})
@@ -82,8 +85,12 @@ export class JobProcessorModule {
       RelationshipModifyProcessor,
     );
     if (features.assistants) {
-      featureImports.push(AssistantModule, AssistantMemoryModule);
-      providers.push(AssistantChatProcessor);
+      featureImports.push(AssistantModule, AssistantMemoryModule, IndexedFileModule);
+      providers.push(
+        AssistantChatProcessor,
+        IndexedFileExtractionProcessor,
+        IndexedFileIngestProcessor,
+      );
     }
 
     return {

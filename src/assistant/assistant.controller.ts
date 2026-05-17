@@ -94,14 +94,21 @@ export class AssistantController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: {
       jobId: number;
-      status: 'running' | 'done';
+      status: 'running' | 'done' | 'pending_confirmation';
       tool: {
         name: string;
         args?: string;
         summary?: string;
         // Optional: set on `done` events that created something deletable
-        // (e.g. note, task). The frontend uses this to show a Borrar button.
-        entity?: { kind: 'note' | 'task'; id: number; title?: string };
+        // (e.g. note, task). The frontend uses this to show a Delete button.
+        entity?: { kind: 'note' | 'task' | 'indexedFile'; id: number; title?: string };
+        // Optional: set on `pending_confirmation` events. The frontend reads
+        // `kind` to dispatch the right confirm-handler (folder_delete, etc.)
+        // and passes back `payload` to the action endpoint.
+        kind?: string;
+        payload?: Record<string, any>;
+        confirmLabel?: string;
+        cancelLabel?: string;
       };
     },
   ): Promise<void> {
@@ -123,6 +130,12 @@ export class AssistantController {
         title: body.tool.entity.title || '',
       };
     }
+    if (body.status === 'pending_confirmation') {
+      toolPayload.kind = body.tool.kind || '';
+      toolPayload.payload = body.tool.payload || {};
+      toolPayload.confirmLabel = body.tool.confirmLabel || 'Confirm';
+      toolPayload.cancelLabel = body.tool.cancelLabel || 'Cancel';
+    }
     const eventMessage = await this.service.recordEvent(
       id,
       content,
@@ -133,5 +146,15 @@ export class AssistantController {
       jobId: body.jobId,
       eventMessage,
     });
+  }
+
+  @Patch(':id/messages/:messageId/event-status')
+  async patchEventStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('messageId', ParseIntPipe) messageId: number,
+    @Body() body: { status: 'done' | 'cancelled'; summary?: string },
+  ): Promise<{ ok: boolean }> {
+    await this.service.updateEventStatus(id, messageId, body.status, body.summary);
+    return { ok: true };
   }
 }
