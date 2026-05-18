@@ -93,7 +93,7 @@ export class AssistantService implements OnApplicationBootstrap {
     const saved = await this.assistantRepo.save(a);
     if (dto.folderScope !== undefined && previousFolderScope !== saved.folderScope) {
       try {
-        await this.indexedFileService.clearAllForAssistant(saved.id);
+        await this.indexedFileService.clearAllForOwner('main-assistant', saved.id);
       } catch (e: any) {
         this.logger.error(`Failed to clear indexed files for assistant ${saved.id}: ${e?.message ?? e}`);
       }
@@ -112,7 +112,7 @@ export class AssistantService implements OnApplicationBootstrap {
   async remove(id: number): Promise<void> {
     const a = await this.findOne(id);
     if (a.isSystem) {
-      throw new ForbiddenException('Cannot delete the system assistant');
+      throw new ForbiddenException('The personal assistant cannot be deleted.');
     }
     await this.assistantRepo.remove(a);
   }
@@ -168,6 +168,9 @@ export class AssistantService implements OnApplicationBootstrap {
 
     // Create job for the worker
     const job = await this.jobService.create('assistant-chat', JobPriority.HIGH, {
+      kind: 'assistant',
+      ownerType: 'main-assistant',
+      ownerId: assistantId,
       assistantId,
       assistantName: assistant.name,
       assistantSystem: assistant.isSystem,

@@ -11,8 +11,9 @@ import { Repository } from 'typeorm';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { IndexedFileEntity } from './indexed-file.entity';
+import { IndexedFileEntity, IndexedFileOwnerType } from './indexed-file.entity';
 import { AssistantEntity } from '../assistant/assistant.entity';
+import { AgentEntity } from '../agent/agent.entity';
 import { JobEntity } from '../job/job.entity';
 import { JobStatus } from '../job/job-status.enum';
 import { JobService } from '../job/job.service';
@@ -46,47 +47,65 @@ export type ReadWithSyncResult =
   | { ok: false; error: 'not_ready'; filename: string; indexedFileId: number; retryAfterSeconds: number }
   | { ok: false; error: 'not_extractable'; filename: string; indexedFileId: number; mimeType: string };
 
+export interface OwnerRef {
+  ownerType: IndexedFileOwnerType;
+  ownerId: number;
+}
+
 @Injectable()
 export class IndexedFileService {
   private readonly logger = new Logger(IndexedFileService.name);
-  private readonly scanLocks = new Map<number, Promise<ScanFolderResult>>();
+  // Scan locks keyed by `${ownerType}:${ownerId}` so concurrent reconcile calls
+  // for the same owner coalesce, but different owners run in parallel.
+  private readonly scanLocks = new Map<string, Promise<ScanFolderResult>>();
 
   constructor(
     @InjectRepository(IndexedFileEntity)
     private readonly repository: Repository<IndexedFileEntity>,
     @InjectRepository(AssistantEntity)
     private readonly assistantRepository: Repository<AssistantEntity>,
+    @InjectRepository(AgentEntity)
+    private readonly agentRepository: Repository<AgentEntity>,
     private readonly jobService: JobService,
   ) {}
 
-  async findByAssistant(assistantId: number): Promise<IndexedFileEntity[]> {
+  async findByOwner(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+  ): Promise<IndexedFileEntity[]> {
     return await this.repository.find({
-      where: { assistantId },
+      where: { ownerType, ownerId },
       order: { updatedAt: 'DESC' },
     });
   }
 
-  async getById(id: number, assistantId?: number): Promise<IndexedFileEntity> {
+  async getById(
+    id: number,
+    owner?: OwnerRef,
+  ): Promise<IndexedFileEntity> {
     const file = await this.repository.findOne({ where: { id } });
     if (!file) throw new NotFoundException(`IndexedFile ${id} not found`);
-    if (assistantId !== undefined && file.assistantId !== assistantId) {
+    if (owner !== undefined && (file.ownerType !== owner.ownerType || file.ownerId !== owner.ownerId)) {
       throw new NotFoundException(`IndexedFile ${id} not found`);
     }
     return file;
   }
 
   async getByFilename(
-    assistantId: number,
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
     filename: string,
   ): Promise<IndexedFileEntity | null> {
-    return await this.repository.findOne({ where: { assistantId, filename } });
+    return await this.repository.findOne({
+      where: { ownerType, ownerId, filename },
+    });
   }
 
   async readContent(
     id: number,
-    assistantId?: number,
+    owner?: OwnerRef,
   ): Promise<{ content: Buffer; mimeType: string; size: number; mtime: Date }> {
-    const file = await this.getById(id, assistantId);
+    const file = await this.getById(id, owner);
     try {
       const buffer = await fs.readFile(file.filePath);
       const stat = await fs.stat(file.filePath);
@@ -102,17 +121,18 @@ export class IndexedFileService {
   }
 
   async writeFile(
-    assistantId: number,
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
     filename: string,
     content: Buffer | string,
     opts: { overwrite: boolean },
   ): Promise<IndexedFileEntity> {
-    const folderScope = await this.getFolderScope(assistantId);
+    const folderScope = await this.getFolderScope(ownerType, ownerId);
     const safeFilename = sanitizeFilename(filename);
     const absolutePath = await resolveSafePath(folderScope, safeFilename);
 
     const existsOnDisk = await this.pathExists(absolutePath);
-    const existingRow = await this.getByFilename(assistantId, safeFilename);
+    const existingRow = await this.getByFilename(ownerType, ownerId, safeFilename);
 
     if ((existsOnDisk || existingRow) && !opts.overwrite) {
       throw new ConflictException('file_exists');
@@ -141,7 +161,8 @@ export class IndexedFileService {
     const mimeType = detectMimeType(safeFilename);
 
     const row = existingRow ?? this.repository.create({
-      assistantId,
+      ownerType,
+      ownerId,
       filename: safeFilename,
       filePath: absolutePath,
       mimeType,
@@ -149,7 +170,8 @@ export class IndexedFileService {
       mtime,
       checksum,
     });
-    row.assistantId = assistantId;
+    row.ownerType = ownerType;
+    row.ownerId = ownerId;
     row.filename = safeFilename;
     row.filePath = absolutePath;
     row.mimeType = mimeType;
@@ -188,10 +210,10 @@ export class IndexedFileService {
     }
   }
 
-  async deleteFile(id: number, assistantId?: number): Promise<void> {
+  async deleteFile(id: number, owner?: OwnerRef): Promise<void> {
     const file = await this.repository.findOne({ where: { id } });
     if (!file) return;
-    if (assistantId !== undefined && file.assistantId !== assistantId) {
+    if (owner !== undefined && (file.ownerType !== owner.ownerType || file.ownerId !== owner.ownerId)) {
       throw new NotFoundException(`IndexedFile ${id} not found`);
     }
 
@@ -206,25 +228,49 @@ export class IndexedFileService {
     void this.enqueueVectorCleanup({ sourceId: sourceIdForIndexedFile(file.id) });
   }
 
-  async deleteByFilename(assistantId: number, filename: string): Promise<void> {
+  async deleteByFilename(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+    filename: string,
+  ): Promise<void> {
     const safe = sanitizeFilename(filename);
-    const file = await this.getByFilename(assistantId, safe);
+    const file = await this.getByFilename(ownerType, ownerId, safe);
     if (!file) return;
-    await this.deleteFile(file.id, assistantId);
+    await this.deleteFile(file.id, { ownerType, ownerId });
   }
 
-  async clearAllForAssistant(assistantId: number): Promise<void> {
-    await this.repository.delete({ assistantId });
-    void this.enqueueVectorCleanup({ assistantId });
+  /**
+   * Remove all IndexedFile rows owned by (ownerType, ownerId) and their
+   * vectors. Does NOT touch the disk — the files are the user's. Used when
+   * the owner is deleted (agent expiration / explicit DELETE) or when the
+   * owner's folderScope changes.
+   */
+  async clearAllForOwner(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+  ): Promise<void> {
+    const rows = await this.repository.find({
+      where: { ownerType, ownerId },
+      select: ['id'],
+    });
+    if (rows.length === 0) return;
+    await this.repository.delete({ ownerType, ownerId });
+    for (const row of rows) {
+      void this.enqueueVectorCleanup({ sourceId: sourceIdForIndexedFile(row.id) });
+    }
   }
 
-  async hasFolderConfigured(assistantId: number): Promise<boolean> {
-    const assistant = await this.assistantRepository.findOne({ where: { id: assistantId } });
-    return !!assistant?.folderScope;
+  async hasFolderConfigured(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+  ): Promise<boolean> {
+    const scope = await this.resolveFolderScope(ownerType, ownerId);
+    return !!scope;
   }
 
   async search(
-    assistantId: number,
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
     query: string,
     limit = 10,
     timeoutMs = 4000,
@@ -237,7 +283,7 @@ export class IndexedFileService {
       job = await this.jobService.create(
         'indexed-file-search',
         JobPriority.HIGH,
-        { assistantId, query: q, limit },
+        { ownerType, ownerId, query: q, limit },
       );
     } catch (e: any) {
       this.logger.warn(`folder search: failed to enqueue job: ${e?.message ?? e}`);
@@ -267,7 +313,8 @@ export class IndexedFileService {
   private async enqueueVectorCleanup(args: {
     sourceId?: string;
     indexedFileId?: number;
-    assistantId?: number;
+    ownerType?: IndexedFileOwnerType;
+    ownerId?: number;
   }): Promise<void> {
     try {
       await this.jobService.create(
@@ -281,25 +328,26 @@ export class IndexedFileService {
   }
 
   async readWithSync(
-    assistantId: number,
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
     ref: { indexedFileId?: number; filename?: string },
   ): Promise<ReadWithSyncResult> {
     let row: IndexedFileEntity | null = null;
 
     if (typeof ref.indexedFileId === 'number') {
       row = await this.repository.findOne({ where: { id: ref.indexedFileId } });
-      if (!row || row.assistantId !== assistantId) {
+      if (!row || row.ownerType !== ownerType || row.ownerId !== ownerId) {
         return { ok: false, error: 'not_found' };
       }
     } else if (ref.filename) {
       const requested = ref.filename;
       const exact = await this.repository.findOne({
-        where: { assistantId, filename: requested },
+        where: { ownerType, ownerId, filename: requested },
       });
       if (exact) {
         row = exact;
       } else {
-        const all = await this.repository.find({ where: { assistantId } });
+        const all = await this.repository.find({ where: { ownerType, ownerId } });
         const base = path.basename(requested);
         const matches = all.filter((r) => path.basename(r.filename) === base);
         if (matches.length === 1) {
@@ -314,7 +362,7 @@ export class IndexedFileService {
             })),
           };
         } else {
-          const onDisk = await this.tryAdoptFromDisk(assistantId, requested);
+          const onDisk = await this.tryAdoptFromDisk(ownerType, ownerId, requested);
           if (!onDisk) return { ok: false, error: 'not_found', filename: requested };
           row = onDisk;
         }
@@ -418,10 +466,11 @@ export class IndexedFileService {
   }
 
   private async tryAdoptFromDisk(
-    assistantId: number,
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
     requested: string,
   ): Promise<IndexedFileEntity | null> {
-    const folderScope = await this.getFolderScope(assistantId);
+    const folderScope = await this.getFolderScope(ownerType, ownerId);
     let safeFilename: string;
     let absolute: string;
     try {
@@ -437,7 +486,8 @@ export class IndexedFileService {
     const stat = await fs.stat(absolute);
     const checksum = crypto.createHash('sha256').update(buffer).digest('hex');
     const created = this.repository.create({
-      assistantId,
+      ownerType,
+      ownerId,
       filename: safeFilename,
       filePath: absolute,
       mimeType: detectMimeType(safeFilename),
@@ -452,22 +502,26 @@ export class IndexedFileService {
     return saved;
   }
 
-  async scanFolder(assistantId: number): Promise<ScanFolderResult> {
-    const existing = this.scanLocks.get(assistantId);
+  async scanFolder(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+  ): Promise<ScanFolderResult> {
+    const key = `${ownerType}:${ownerId}`;
+    const existing = this.scanLocks.get(key);
     if (existing) return await existing;
-    const promise = this.doScanFolder(assistantId).finally(() => {
-      this.scanLocks.delete(assistantId);
+    const promise = this.doScanFolder(ownerType, ownerId).finally(() => {
+      this.scanLocks.delete(key);
     });
-    this.scanLocks.set(assistantId, promise);
+    this.scanLocks.set(key, promise);
     return await promise;
   }
 
-  private async doScanFolder(assistantId: number): Promise<ScanFolderResult> {
-    const assistant = await this.assistantRepository.findOne({ where: { id: assistantId } });
-    if (!assistant) throw new NotFoundException(`Assistant ${assistantId} not found`);
-    if (!assistant.folderScope) return { status: 'no_folder' };
-
-    const folderScope = assistant.folderScope;
+  private async doScanFolder(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+  ): Promise<ScanFolderResult> {
+    const folderScope = await this.resolveFolderScope(ownerType, ownerId);
+    if (!folderScope) return { status: 'no_folder' };
 
     let entries: any[];
     try {
@@ -478,7 +532,7 @@ export class IndexedFileService {
     } catch (err: any) {
       if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
         this.logger.warn(
-          `[indexed-file] folder missing for assistant=${assistantId} path=${folderScope}`,
+          `[indexed-file] folder missing for owner=${ownerType}:${ownerId} path=${folderScope}`,
         );
         return { status: 'folder_missing', folderScope };
       }
@@ -515,7 +569,7 @@ export class IndexedFileService {
       }
     }
 
-    const indexed = await this.repository.find({ where: { assistantId } });
+    const indexed = await this.repository.find({ where: { ownerType, ownerId } });
     const indexedByName = new Map(indexed.map((row) => [row.filename, row]));
 
     let added = 0;
@@ -529,7 +583,8 @@ export class IndexedFileService {
         if (buffer === null) continue;
         const checksum = crypto.createHash('sha256').update(buffer).digest('hex');
         const created = this.repository.create({
-          assistantId,
+          ownerType,
+          ownerId,
           filename,
           filePath: item.filePath,
           mimeType: detectMimeType(filename),
@@ -576,7 +631,7 @@ export class IndexedFileService {
     }
 
     this.logger.log(
-      `[indexed-file] reconcile assistant=${assistantId} added=${added} updated=${updated} removed=${removed}`,
+      `[indexed-file] reconcile owner=${ownerType}:${ownerId} added=${added} updated=${updated} removed=${removed}`,
     );
     return { status: 'done', added, updated, removed };
   }
@@ -593,15 +648,37 @@ export class IndexedFileService {
     }
   }
 
-  private async getFolderScope(assistantId: number): Promise<string> {
-    const assistant = await this.assistantRepository.findOne({
-      where: { id: assistantId },
-    });
-    if (!assistant) throw new NotFoundException(`Assistant ${assistantId} not found`);
-    if (!assistant.folderScope) {
-      throw new ConflictException('no_folder_configured');
+  /**
+   * Resolve the folderScope of an owner. Returns null if the owner exists but
+   * has no folder configured. Throws NotFoundException if the owner doesn't
+   * exist.
+   */
+  private async resolveFolderScope(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+  ): Promise<string | null> {
+    if (ownerType === 'main-assistant') {
+      const assistant = await this.assistantRepository.findOne({
+        where: { id: ownerId },
+      });
+      if (!assistant) throw new NotFoundException(`Assistant ${ownerId} not found`);
+      return assistant.folderScope ?? null;
     }
-    return assistant.folderScope;
+    if (ownerType === 'agent') {
+      const agent = await this.agentRepository.findOne({ where: { id: ownerId } });
+      if (!agent) throw new NotFoundException(`Agent ${ownerId} not found`);
+      return agent.folderScope ?? null;
+    }
+    throw new NotFoundException(`Unknown owner type: ${ownerType}`);
+  }
+
+  private async getFolderScope(
+    ownerType: IndexedFileOwnerType,
+    ownerId: number,
+  ): Promise<string> {
+    const scope = await this.resolveFolderScope(ownerType, ownerId);
+    if (!scope) throw new ConflictException('no_folder_configured');
+    return scope;
   }
 
   private async pathExists(p: string): Promise<boolean> {

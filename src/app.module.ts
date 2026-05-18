@@ -44,6 +44,7 @@ import { FeatureFlagModule } from './common/feature-flags.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { AssistantMemoryModule } from './assistant-memory/assistant-memory.module';
 import { IndexedFileModule } from './indexed-file/indexed-file.module';
+import { AgentModule } from './agent/agent.module';
 import { readFeaturesFromEnv } from './common/feature-flags';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -106,7 +107,7 @@ export class AppModule {
     if (features.tasks) imports.push(UserTaskModule);
     if (features.relationships) imports.push(RelationshipModule);
     if (features.data_sources && features.datasets) imports.push(DataSourceModule);
-    if (features.assistants) imports.push(AssistantModule, AssistantMemoryModule, IndexedFileModule);
+    if (features.assistants) imports.push(AssistantModule, AssistantMemoryModule, IndexedFileModule, AgentModule);
 
     return {
       module: AppModule,

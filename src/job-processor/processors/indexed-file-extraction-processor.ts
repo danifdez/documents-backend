@@ -58,7 +58,8 @@ export class IndexedFileExtractionProcessor implements JobProcessor {
         JobPriority.NORMAL,
         {
           indexedFileId: file.id,
-          assistantId: file.assistantId,
+          ownerType: file.ownerType,
+          ownerId: file.ownerId,
           content: text,
           filename: file.filename,
           checksum: file.checksum,

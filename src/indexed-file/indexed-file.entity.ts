@@ -4,27 +4,25 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-  ManyToOne,
-  JoinColumn,
   Index,
   Unique,
 } from 'typeorm';
-import { AssistantEntity } from '../assistant/assistant.entity';
+
+export type IndexedFileOwnerType = 'main-assistant' | 'agent';
 
 @Entity({ name: 'indexed_files' })
-@Unique('UQ_indexed_files_assistant_filename', ['assistantId', 'filename'])
+@Unique('UQ_indexed_files_owner_filename', ['ownerType', 'ownerId', 'filename'])
 @Unique('UQ_indexed_files_file_path', ['filePath'])
 export class IndexedFileEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Index('IDX_indexed_files_assistant_id')
-  @Column({ name: 'assistant_id' })
-  assistantId: number;
+  @Index('IDX_indexed_files_owner')
+  @Column({ name: 'owner_type', length: 20 })
+  ownerType: IndexedFileOwnerType;
 
-  @ManyToOne(() => AssistantEntity, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'assistant_id' })
-  assistant: AssistantEntity;
+  @Column({ name: 'owner_id' })
+  ownerId: number;
 
   @Column({ length: 500 })
   filename: string;

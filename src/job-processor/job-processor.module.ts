@@ -33,6 +33,7 @@ import { IndexedFileIngestProcessor } from './processors/indexed-file-ingest-pro
 import { AssistantModule } from '../assistant/assistant.module';
 import { AssistantMemoryModule } from '../assistant-memory/assistant-memory.module';
 import { IndexedFileModule } from '../indexed-file/indexed-file.module';
+import { AgentModule } from '../agent/agent.module';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Module({})
@@ -85,7 +86,7 @@ export class JobProcessorModule {
       RelationshipModifyProcessor,
     );
     if (features.assistants) {
-      featureImports.push(AssistantModule, AssistantMemoryModule, IndexedFileModule);
+      featureImports.push(AssistantModule, AssistantMemoryModule, IndexedFileModule, AgentModule);
       providers.push(
         AssistantChatProcessor,
         IndexedFileExtractionProcessor,

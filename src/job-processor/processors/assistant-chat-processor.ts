@@ -5,6 +5,8 @@ import { JobEntity } from 'src/job/job.entity';
 import { AssistantService } from 'src/assistant/assistant.service';
 import { AssistantMemoryService } from 'src/assistant-memory/assistant-memory.service';
 import { MemoryEntryType } from 'src/assistant-memory/memory-entry.entity';
+import { AgentService } from 'src/agent/agent.service';
+import { toAgentMessageDto } from 'src/agent/dto/agent.dto';
 
 const VALID_MEMORY_TYPES: MemoryEntryType[] = [
   'fact', 'event', 'instruction',
@@ -19,6 +21,7 @@ export class AssistantChatProcessor implements JobProcessor {
     private readonly notificationGateway: NotificationGateway,
     private readonly assistantService: AssistantService,
     private readonly memoryService: AssistantMemoryService,
+    private readonly agentService: AgentService,
   ) {}
 
   canProcess(jobType: string): boolean {
@@ -26,6 +29,14 @@ export class AssistantChatProcessor implements JobProcessor {
   }
 
   async process(job: JobEntity): Promise<any> {
+    const kind = (job.payload?.['kind'] as string | undefined) ?? 'assistant';
+    if (kind === 'agent') {
+      return this.processAgent(job);
+    }
+    return this.processAssistant(job);
+  }
+
+  private async processAssistant(job: JobEntity): Promise<any> {
     const assistantId = job.payload?.['assistantId'] as number | undefined;
     if (!assistantId) {
       this.logger.error(`Job ${job.id} missing assistantId in payload`);
@@ -36,13 +47,7 @@ export class AssistantChatProcessor implements JobProcessor {
     const reply = (result['reply'] as string | undefined) ?? '';
     const error = (result['error'] as string | undefined) ?? null;
 
-    // Persist any side-effect events (tool executed, memory saved/forgotten,
-    // …) BEFORE the assistant reply, so the UI renders them in causal order.
     const eventMessages: any[] = [];
-
-    // Tool events are emitted LIVE by the worker via POST /tool-event during
-    // execution (so the UI shows "Buscando…" the moment the tool runs), so we
-    // do NOT re-emit them here. The worker no longer returns `toolEvents`.
 
     const memoryAction = result['memoryAction'];
     if (memoryAction && typeof memoryAction === 'object') {
@@ -68,7 +73,6 @@ export class AssistantChatProcessor implements JobProcessor {
         } else if (action === 'forget') {
           const forgetId = Number(memoryAction['forget_id']);
           if (Number.isInteger(forgetId)) {
-            // Capture metadata BEFORE deletion so the event card can still show it.
             const entry = await this.memoryService.findOwned(assistantId, forgetId);
             if (entry) {
               await this.memoryService.remove(assistantId, forgetId);
@@ -101,6 +105,35 @@ export class AssistantChatProcessor implements JobProcessor {
       jobId: job.id,
       eventMessages,
       message,
+    });
+
+    return { success: true };
+  }
+
+  private async processAgent(job: JobEntity): Promise<any> {
+    const agentId =
+      (job.payload?.['agentId'] as number | undefined)
+      ?? (job.payload?.['ownerId'] as number | undefined);
+    if (!agentId) {
+      this.logger.error(`Job ${job.id} missing agentId in payload`);
+      return { success: false };
+    }
+
+    const result = job.result || {};
+    const reply = (result['reply'] as string | undefined) ?? '';
+    const error = (result['error'] as string | undefined) ?? null;
+
+    const message = await this.agentService.recordAgentReply(
+      agentId,
+      reply,
+      job.id,
+      error,
+    );
+
+    this.notificationGateway.sendAgentResponse({
+      agentId,
+      jobId: job.id,
+      message: toAgentMessageDto(message),
     });
 
     return { success: true };
