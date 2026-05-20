@@ -100,4 +100,24 @@ export class NotificationGateway implements OnGatewayConnection {
   sendSearchResponse(data: any) {
     this.server.emit('searchResponse', data);
   }
+
+  sendCalendarAlarm(data: {
+    eventId: number;
+    occurrenceStart: string;
+    title: string;
+    alarmLabel: string | null;
+  }) {
+    this.server.emit('calendar:alarm', data);
+  }
+
+  sendCalendarMissed(data: {
+    items: Array<{
+      eventId: number;
+      occurrenceStart: string;
+      title: string;
+      alarmLabel: string | null;
+    }>;
+  }) {
+    this.server.emit('calendar:missed', data);
+  }
 }

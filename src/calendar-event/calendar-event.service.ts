@@ -3,12 +3,29 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CalendarEventEntity } from './calendar-event.entity';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
+import { CalendarEventExpansionService, OccurrenceDescriptor } from './calendar-event-expansion.service';
+
+export interface CalendarEventOccurrence {
+  id: number;
+  title: string;
+  description: string | null;
+  startDate: Date;
+  endDate: Date | null;
+  occurrenceStart: Date;
+  occurrenceEnd: Date | null;
+  color: string;
+  allDay: boolean;
+  recurrenceRule: string | null;
+  alarm: CalendarEventEntity['alarm'];
+  project: CalendarEventEntity['project'];
+}
 
 @Injectable()
 export class CalendarEventService {
   constructor(
     @InjectRepository(CalendarEventEntity)
     private readonly repository: Repository<CalendarEventEntity>,
+    private readonly expansion: CalendarEventExpansionService,
   ) { }
 
   async findAll(): Promise<CalendarEventEntity[]> {
@@ -34,17 +51,54 @@ export class CalendarEventService {
       .getMany();
   }
 
-  async findByDateRange(start: string, end: string, projectId?: number): Promise<CalendarEventEntity[]> {
+  async findByDateRange(
+    start: string,
+    end: string,
+    projectId?: number,
+    tz?: string,
+  ): Promise<CalendarEventOccurrence[]> {
     const qb = this.repository
       .createQueryBuilder('e')
       .leftJoinAndSelect('e.project', 'project')
-      .where('e.start_date <= :end AND (e.end_date >= :start OR e.end_date IS NULL)', { start, end });
+      .where(
+        '(e.recurrence_rule IS NULL AND e.start_date <= :end AND (e.end_date >= :start OR e.end_date IS NULL))' +
+          ' OR (e.recurrence_rule IS NOT NULL AND e.start_date <= :end)',
+        { start, end },
+      );
 
     if (projectId) {
       qb.andWhere('e.projectId = :projectId', { projectId });
     }
 
-    return await qb.orderBy('e.start_date', 'ASC').getMany();
+    const events = await qb.orderBy('e.start_date', 'ASC').getMany();
+    const rangeStart = new Date(start);
+    const rangeEnd = new Date(end);
+    const out: CalendarEventOccurrence[] = [];
+    for (const event of events) {
+      const occurrences = this.expansion.expand(event, rangeStart, rangeEnd, tz);
+      for (const o of occurrences) {
+        out.push(this.toOccurrence(event, o));
+      }
+    }
+    out.sort((a, b) => a.occurrenceStart.getTime() - b.occurrenceStart.getTime());
+    return out;
+  }
+
+  private toOccurrence(event: CalendarEventEntity, o: OccurrenceDescriptor): CalendarEventOccurrence {
+    return {
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      occurrenceStart: o.occurrenceStart,
+      occurrenceEnd: o.occurrenceEnd,
+      color: event.color,
+      allDay: event.allDay,
+      recurrenceRule: event.recurrenceRule,
+      alarm: event.alarm,
+      project: event.project,
+    };
   }
 
   async create(dto: CreateCalendarEventDto): Promise<CalendarEventEntity> {
@@ -53,6 +107,8 @@ export class CalendarEventService {
     if (dto.endDate !== undefined) data.endDate = dto.endDate;
     if (dto.color !== undefined) data.color = dto.color;
     if (dto.allDay !== undefined) data.allDay = dto.allDay;
+    if (dto.recurrenceRule !== undefined) data.recurrenceRule = dto.recurrenceRule;
+    if (dto.alarm !== undefined) data.alarm = dto.alarm;
     if (dto.projectId) data.project = { id: dto.projectId } as any;
     const created = this.repository.create(data);
     return await this.repository.save(created);
@@ -66,6 +122,8 @@ export class CalendarEventService {
     if (dto.endDate !== undefined) data.endDate = dto.endDate;
     if (dto.color !== undefined) data.color = dto.color;
     if (dto.allDay !== undefined) data.allDay = dto.allDay;
+    if (dto.recurrenceRule !== undefined) data.recurrenceRule = dto.recurrenceRule;
+    if (dto.alarm !== undefined) data.alarm = dto.alarm;
     if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
     const event = await this.repository.preload({ id, ...data });
     if (!event) return null;

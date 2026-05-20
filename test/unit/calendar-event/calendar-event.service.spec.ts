@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { CalendarEventService } from '../../../src/calendar-event/calendar-event.service';
 import { CalendarEventEntity } from '../../../src/calendar-event/calendar-event.entity';
+import { CalendarEventExpansionService } from '../../../src/calendar-event/calendar-event-expansion.service';
 import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildCalendarEvent } from '../../factories';
 
@@ -12,7 +13,11 @@ describe('CalendarEventService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CalendarEventService, { provide: getRepositoryToken(CalendarEventEntity), useValue: repo }],
+      providers: [
+        CalendarEventService,
+        { provide: getRepositoryToken(CalendarEventEntity), useValue: repo },
+        { provide: CalendarEventExpansionService, useValue: { expand: () => [] } },
+      ],
     }).compile();
     service = module.get(CalendarEventService);
   });

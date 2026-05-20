@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Query } from '@nestjs/common';
-import { CalendarEventService } from './calendar-event.service';
+import { CalendarEventService, CalendarEventOccurrence } from './calendar-event.service';
 import { CalendarEventEntity } from './calendar-event.entity';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -19,11 +19,13 @@ export class CalendarEventController {
     @Query('start') start: string,
     @Query('end') end: string,
     @Query('projectId') projectId?: string,
-  ): Promise<CalendarEventEntity[]> {
+    @Query('tz') tz?: string,
+  ): Promise<CalendarEventOccurrence[]> {
     return await this.calendarEventService.findByDateRange(
       start,
       end,
       projectId ? parseInt(projectId, 10) : undefined,
+      tz,
     );
   }
 

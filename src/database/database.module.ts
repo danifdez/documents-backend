@@ -42,6 +42,7 @@ import { MemoryEntryEntity } from '../assistant-memory/memory-entry.entity';
 import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentMessageEntity } from '../agent/agent-message.entity';
+import { AppStateEntity } from '../app-state/app-state.entity';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { AgentMessageEntity } from '../agent/agent-message.entity';
       IndexedFileEntity,
       AgentEntity,
       AgentMessageEntity,
+      AppStateEntity,
     ]),
   ],
   providers: [...databaseProviders],

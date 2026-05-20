@@ -45,6 +45,7 @@ import { AssistantModule } from './assistant/assistant.module';
 import { AssistantMemoryModule } from './assistant-memory/assistant-memory.module';
 import { IndexedFileModule } from './indexed-file/indexed-file.module';
 import { AgentModule } from './agent/agent.module';
+import { AppStateModule } from './app-state/app-state.module';
 import { readFeaturesFromEnv } from './common/feature-flags';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -69,6 +70,7 @@ export class AppModule {
       }]),
       ScheduleModule.forRoot(),
       FeatureFlagModule,
+      AppStateModule,
 
       // Core modules (always loaded)
       ProjectModule,

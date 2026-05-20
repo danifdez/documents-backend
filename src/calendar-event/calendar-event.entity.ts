@@ -1,6 +1,11 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
 
+export interface AlarmDescriptor {
+  offsetMinutes: number;
+  label?: string;
+}
+
 @Entity({ name: 'calendar_events' })
 export class CalendarEventEntity {
   @PrimaryGeneratedColumn()
@@ -23,6 +28,12 @@ export class CalendarEventEntity {
 
   @Column({ default: false, name: 'all_day' })
   allDay: boolean;
+
+  @Column({ type: 'text', name: 'recurrence_rule', nullable: true })
+  recurrenceRule: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  alarm: AlarmDescriptor | null;
 
   @ManyToOne(() => ProjectEntity, (project) => project.calendarEvents, { nullable: true })
   project: ProjectEntity | null;
