@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS "datasets" (
     "updated_at" TIMESTAMP NOT NULL DEFAULT now()
 );
 
--- Re-entry guards for installs predating cambio-10 extraction extensions
+-- Re-entry guards for installs
 DO $$ BEGIN
   ALTER TABLE "datasets" ADD COLUMN "source_mode" varchar(32) NOT NULL DEFAULT 'manual';
 EXCEPTION WHEN duplicate_column THEN NULL;

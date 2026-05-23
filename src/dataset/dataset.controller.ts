@@ -110,8 +110,6 @@ export class DatasetController {
         return await this.datasetService.analyzeSchemaChange(id, body.schema);
     }
 
-    // ── Tabular extraction (cambio-10) ──
-
     @Post(':id/extract')
     @RequirePermissions(Permission.DATASETS)
     async extractAll(@Param('id', ParseIntPipe) id: number) {

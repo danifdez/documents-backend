@@ -2,7 +2,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
  * Drop legacy "helpers" rows from `assistants` — they were AssistantEntity with
- * isSystem=false in the previous model. From Cambio #6 onwards, those are
+ * isSystem=false in the previous model. Those are
  * Agent entities living in the `agents` table. No real data to preserve
  * (memory: "documents-dev nunca se ha usado en real").
  *

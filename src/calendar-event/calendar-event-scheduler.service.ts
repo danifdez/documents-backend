@@ -1,5 +1,5 @@
 // Despite the name, this service dispatches BOTH calendar event alarms and
-// user-task reminders (see Cambio #7). Both domains share the same tick and
+// user-task reminders. Both domains share the same tick and
 // the same `calendar.last_scheduler_tick_at` key in `app_state` so the rolling
 // window stays consistent between them. Rename only if a third domain joins.
 import { Injectable, Logger } from '@nestjs/common';
