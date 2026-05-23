@@ -23,6 +23,7 @@ import { DatasetRecordLinkEntity } from '../dataset/dataset-record-link.entity';
 import { DatasetChartEntity } from '../dataset/dataset-chart.entity';
 import { NoteEntity } from '../note/note.entity';
 import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
+import { EventOccurrenceCompletionEntity } from '../calendar-event/event-occurrence-completion.entity';
 import { TimelineEntity } from '../timeline/timeline.entity';
 import { ResourceDateEntity } from '../resource-date/resource-date.entity';
 import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
@@ -39,6 +40,7 @@ import { MemoryEntryEntity } from '../assistant-memory/memory-entry.entity';
 import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentMessageEntity } from '../agent/agent-message.entity';
+import { AppStateEntity } from '../app-state/app-state.entity';
 
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
@@ -72,6 +74,7 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       DatasetChartEntity,
       NoteEntity,
       CalendarEventEntity,
+      EventOccurrenceCompletionEntity,
       TimelineEntity,
       ResourceDateEntity,
       KnowledgeEntryEntity,
@@ -88,6 +91,7 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       IndexedFileEntity,
       AgentEntity,
       AgentMessageEntity,
+      AppStateEntity,
     ],
     synchronize: false,
     logging: false,

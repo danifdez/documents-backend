@@ -70,6 +70,10 @@ export class CreateCalendarEventDto {
     @Type(() => AlarmDescriptorDto)
     alarm?: AlarmDescriptorDto | null;
 
+    @IsBoolean()
+    @IsOptional()
+    trackCompletion?: boolean;
+
     @IsNumber()
     @IsOptional()
     projectId?: number;
@@ -114,6 +118,10 @@ export class UpdateCalendarEventDto {
     @ValidateNested()
     @Type(() => AlarmDescriptorDto)
     alarm?: AlarmDescriptorDto | null;
+
+    @IsBoolean()
+    @IsOptional()
+    trackCompletion?: boolean;
 
     @IsNumber()
     @IsOptional()

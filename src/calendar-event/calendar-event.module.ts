@@ -3,6 +3,7 @@ import { CalendarEventController } from './calendar-event.controller';
 import { CalendarEventService } from './calendar-event.service';
 import { CalendarEventExpansionService } from './calendar-event-expansion.service';
 import { CalendarEventSchedulerService } from './calendar-event-scheduler.service';
+import { EventOccurrenceCompletionService } from './event-occurrence-completion.service';
 import { DatabaseModule } from '../database/database.module';
 import { AppStateModule } from '../app-state/app-state.module';
 import { NotificationModule } from '../notification/notification.module';
@@ -14,6 +15,7 @@ import { NotificationModule } from '../notification/notification.module';
     CalendarEventService,
     CalendarEventExpansionService,
     CalendarEventSchedulerService,
+    EventOccurrenceCompletionService,
   ],
   exports: [CalendarEventService, CalendarEventExpansionService],
 })

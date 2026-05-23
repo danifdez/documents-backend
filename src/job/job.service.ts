@@ -22,6 +22,9 @@ const JOB_FEATURE_MAP: Record<string, string> = {
   'indexed-file-ingest': 'assistants',
   'indexed-file-search': 'assistants',
   'indexed-file-delete-vectors': 'assistants',
+  'memory-ingest': 'assistants',
+  'memory-search': 'assistants',
+  'memory-delete-vectors': 'assistants',
 };
 
 @Injectable()

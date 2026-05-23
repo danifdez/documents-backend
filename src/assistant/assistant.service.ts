@@ -150,14 +150,19 @@ export class AssistantService implements OnApplicationBootstrap {
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
 
-    // Retrieve recent memory entries to inject as context for the worker.
+    // Retrieve memory entries by relevance to the user's current message.
     // Only the system assistant has memory; for ayudantes this returns [].
-    const memoryEntries = await this.memoryService.recentForInjection(assistantId, 25);
+    const memoryEntries = await this.memoryService.relevantForInjection(
+      assistantId,
+      content,
+      8,
+    );
     const memorySnippets = memoryEntries.map((m) => ({
       id: m.id,
       name: m.name,
       type: m.type,
       body: m.body,
+      relevance: m.relevance,
     }));
 
     // Memory extraction runs on every turn for the personal assistant — the

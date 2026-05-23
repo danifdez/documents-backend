@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DatasetEntity, DatasetField } from './dataset.entity';
+import { DatasetEntity, DatasetField, DatasetSourceMode } from './dataset.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
 import { DatasetRelationEntity } from './dataset-relation.entity';
 import { DatasetRecordLinkEntity } from './dataset-record-link.entity';
@@ -60,10 +60,16 @@ export class DatasetService {
     }
 
     async createDataset(dto: CreateDatasetDto): Promise<DatasetEntity> {
+        const sourceMode: DatasetSourceMode = dto.sourceMode ?? 'manual';
+        const sourceConfig = this.normalizeSourceConfig(sourceMode, dto.sourceConfig);
+        this.validateSourceConfig(sourceMode, sourceConfig, dto.projectId);
+
         const dataset = this.datasetRepository.create({
             name: dto.name,
             description: dto.description || null,
             schema: dto.schema as DatasetField[],
+            sourceMode,
+            sourceConfig,
         });
 
         if (dto.projectId) {
@@ -74,7 +80,10 @@ export class DatasetService {
     }
 
     async updateDataset(id: number, dto: UpdateDatasetDto): Promise<DatasetEntity> {
-        const dataset = await this.datasetRepository.findOne({ where: { id } });
+        const dataset = await this.datasetRepository.findOne({
+            where: { id },
+            relations: ['project'],
+        });
         if (!dataset) {
             throw new NotFoundException(`Dataset with id ${id} not found`);
         }
@@ -86,7 +95,60 @@ export class DatasetService {
             dataset.project = dto.projectId ? { id: dto.projectId } as any : null;
         }
 
+        if (dto.sourceMode !== undefined || dto.sourceConfig !== undefined) {
+            const nextMode: DatasetSourceMode = dto.sourceMode ?? dataset.sourceMode;
+            const rawConfig = dto.sourceConfig !== undefined ? dto.sourceConfig : dataset.sourceConfig;
+            const nextConfig = this.normalizeSourceConfig(nextMode, rawConfig);
+            const projectIdForValidation = dto.projectId !== undefined ? dto.projectId : dataset.project?.id ?? null;
+            this.validateSourceConfig(nextMode, nextConfig, projectIdForValidation);
+            dataset.sourceMode = nextMode;
+            dataset.sourceConfig = nextConfig;
+        }
+
         return await this.datasetRepository.save(dataset);
+    }
+
+    private normalizeSourceConfig(
+        mode: DatasetSourceMode,
+        raw: Record<string, any> | undefined,
+    ): Record<string, any> {
+        if (mode === 'manual') return {};
+        if (!raw || typeof raw !== 'object') return {};
+        return raw;
+    }
+
+    private validateSourceConfig(
+        mode: DatasetSourceMode,
+        config: Record<string, any>,
+        projectId: number | null | undefined,
+    ): void {
+        if (mode === 'project_resources') {
+            if (!projectId) {
+                throw new BadRequestException(
+                    "sourceMode 'project_resources' requires the dataset to have a projectId",
+                );
+            }
+            if (config.resourceTypeFilter !== undefined) {
+                if (
+                    !Array.isArray(config.resourceTypeFilter) ||
+                    !config.resourceTypeFilter.every((t: any) => typeof t === 'string')
+                ) {
+                    throw new BadRequestException(
+                        "sourceConfig.resourceTypeFilter must be an array of strings",
+                    );
+                }
+            }
+            return;
+        }
+
+        if (mode === 'resource_selection') {
+            const ids = config.resourceIds;
+            if (!Array.isArray(ids) || ids.length === 0 || !ids.every((n: any) => typeof n === 'number' && Number.isFinite(n))) {
+                throw new BadRequestException(
+                    "sourceMode 'resource_selection' requires sourceConfig.resourceIds to be a non-empty number[]",
+                );
+            }
+        }
     }
 
     async analyzeSchemaChange(id: number, newSchema: DatasetField[]): Promise<{
@@ -222,6 +284,10 @@ export class DatasetService {
                 imported.push(this.recordRepository.create({
                     dataset: { id: savedDataset.id } as any,
                     data: this.cleanRecordData(schema, records[i]),
+                    cellMetadata: {},
+                    sourceResourceId: null,
+                    extractionStatus: 'extracted',
+                    extractionError: null,
                 }));
             }
         }
@@ -304,6 +370,10 @@ export class DatasetService {
         const record = this.recordRepository.create({
             dataset: { id: datasetId } as any,
             data: cleanData,
+            cellMetadata: {},
+            sourceResourceId: null,
+            extractionStatus: 'extracted',
+            extractionError: null,
         });
 
         return await this.recordRepository.save(record);
@@ -327,7 +397,27 @@ export class DatasetService {
             throw new BadRequestException(errors);
         }
 
-        record.data = this.cleanRecordData(dataset.schema, dto.data);
+        const previousData = record.data || {};
+        const newData = this.cleanRecordData(dataset.schema, dto.data);
+
+        // Per-cell `editedByUser`: if a cell value actually changes AND already had
+        // an anchor (came from extraction), mark the anchor as user-edited so a
+        // later re-extract preserves the manual correction. Cells without a prior
+        // anchor stay anchor-less — the flag is only meaningful with an anchor.
+        const cellMetadata = { ...(record.cellMetadata || {}) };
+        for (const field of dataset.schema) {
+            const key = field.key;
+            if (!(key in dto.data)) continue;
+            const oldValue = previousData[key];
+            const newValue = newData[key];
+            if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
+            const existingAnchor = cellMetadata[key];
+            if (!existingAnchor) continue;
+            cellMetadata[key] = { ...existingAnchor, editedByUser: true };
+        }
+
+        record.data = newData;
+        record.cellMetadata = cellMetadata;
         return await this.recordRepository.save(record);
     }
 
@@ -623,6 +713,10 @@ export class DatasetService {
                 imported.push(this.recordRepository.create({
                     dataset: { id: datasetId } as any,
                     data: this.cleanRecordData(dataset.schema, records[i]),
+                    cellMetadata: {},
+                    sourceResourceId: null,
+                    extractionStatus: 'extracted',
+                    extractionError: null,
                 }));
             }
         }

@@ -1,17 +1,30 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { MemoryEntryEntity } from './memory-entry.entity';
 import { AssistantEntity } from '../assistant/assistant.entity';
 import { CreateMemoryEntryDto, UpdateMemoryEntryDto } from './dto/memory.dto';
+import { JobService } from '../job/job.service';
+import { JobPriority } from '../job/job-priority.enum';
+import { JobStatus } from '../job/job-status.enum';
+import { JobEntity } from '../job/job.entity';
+
+export type MemoryRelevance = 'high' | 'medium' | 'recent';
+
+export type MemoryEntryWithRelevance = MemoryEntryEntity & {
+  relevance: MemoryRelevance;
+};
 
 @Injectable()
 export class AssistantMemoryService {
+  private readonly logger = new Logger(AssistantMemoryService.name);
+
   constructor(
     @InjectRepository(MemoryEntryEntity)
     private readonly memoryRepo: Repository<MemoryEntryEntity>,
     @InjectRepository(AssistantEntity)
     private readonly assistantRepo: Repository<AssistantEntity>,
+    private readonly jobService: JobService,
   ) {}
 
   private async ensureCanHaveMemory(assistantId: number): Promise<AssistantEntity> {
@@ -23,6 +36,46 @@ export class AssistantMemoryService {
     return a;
   }
 
+  private async enqueueIngest(entry: MemoryEntryEntity): Promise<void> {
+    try {
+      await this.jobService.create('memory-ingest', JobPriority.BACKGROUND, {
+        memoryId: entry.id,
+        assistantId: entry.assistantId,
+        name: entry.name,
+        type: entry.type,
+        body: entry.body,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `memory-ingest enqueue failed for memory ${entry.id}: ${e?.message ?? e}`,
+      );
+    }
+  }
+
+  private async enqueueDeleteOne(memoryId: number): Promise<void> {
+    try {
+      await this.jobService.create('memory-delete-vectors', JobPriority.BACKGROUND, {
+        memoryId,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `memory-delete-vectors (single) enqueue failed for memory ${memoryId}: ${e?.message ?? e}`,
+      );
+    }
+  }
+
+  private async enqueueDeleteByAssistant(assistantId: number): Promise<void> {
+    try {
+      await this.jobService.create('memory-delete-vectors', JobPriority.BACKGROUND, {
+        assistantId,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `memory-delete-vectors (bulk) enqueue failed for assistant ${assistantId}: ${e?.message ?? e}`,
+      );
+    }
+  }
+
   async list(assistantId: number): Promise<MemoryEntryEntity[]> {
     await this.ensureCanHaveMemory(assistantId);
     return this.memoryRepo.find({
@@ -32,9 +85,10 @@ export class AssistantMemoryService {
   }
 
   /**
-   * Returns the N most recent entries — used by the chat pipeline to inject
-   * memory into the worker payload. Returns [] if the assistant doesn't have
-   * memory (instead of throwing) so callers can use it unconditionally.
+   * Returns the N most recent entries — used as a fallback (trivial query,
+   * worker unavailable) and as the "recent" block of `relevantForInjection`.
+   * Returns [] if the assistant doesn't have memory (instead of throwing) so
+   * callers can use it unconditionally.
    */
   async recentForInjection(assistantId: number, limit = 25): Promise<MemoryEntryEntity[]> {
     const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
@@ -46,6 +100,107 @@ export class AssistantMemoryService {
     });
   }
 
+  private async runMemorySearch(
+    assistantId: number,
+    query: string,
+    limit: number,
+    timeoutMs = 3000,
+  ): Promise<Array<{ memoryId: number; score: number }>> {
+    let job;
+    try {
+      job = await this.jobService.create('memory-search', JobPriority.HIGH, {
+        assistantId,
+        query,
+        limit,
+      });
+    } catch (e: any) {
+      this.logger.warn(`memory-search enqueue failed: ${e?.message ?? e}`);
+      return [];
+    }
+    if (!job) return [];
+
+    const start = Date.now();
+    const poll = 100;
+    while (Date.now() - start < timeoutMs) {
+      const current = (await this.jobService.findOne(job.id)) as JobEntity | null;
+      if (!current) return [];
+      if (current.status === JobStatus.COMPLETED) {
+        const r = current.result as
+          | { results?: Array<{ memoryId: number; score: number }> }
+          | null;
+        return Array.isArray(r?.results) ? r!.results : [];
+      }
+      if (current.status === JobStatus.FAILED) {
+        this.logger.warn(`memory-search job ${job.id} failed`);
+        return [];
+      }
+      await new Promise((resolve) => setTimeout(resolve, poll));
+    }
+    this.logger.warn(`memory-search job ${job.id} timed out`);
+    return [];
+  }
+
+  /**
+   * Returns memories likely to be relevant to the user's current message,
+   * mixed with the most recent ones. Each entry carries a `relevance` tag so
+   * the worker prompt can prioritise high-similarity hits for actions like
+   * `replace`.
+   *
+   * Falls back to `recentForInjection` when the query is empty, too short
+   * (<8 chars after trim) or when the semantic search yields nothing — so
+   * trivial messages (greetings, very short questions) do not pull memories
+   * by spurious similarity.
+   */
+  async relevantForInjection(
+    assistantId: number,
+    query: string,
+    limit = 8,
+  ): Promise<MemoryEntryWithRelevance[]> {
+    const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
+    if (!a || !a.isSystem) return [];
+
+    const cleanQuery = (query ?? '').trim();
+    const recentLimit = 5;
+    const cap = 12;
+
+    if (cleanQuery.length < 8) {
+      const recents = await this.recentForInjection(assistantId, recentLimit);
+      return recents.map((m) =>
+        Object.assign(m, { relevance: 'recent' as const }),
+      );
+    }
+
+    const hits = await this.runMemorySearch(assistantId, cleanQuery, limit);
+    const recents = await this.recentForInjection(assistantId, recentLimit);
+
+    const semanticIds = hits.map((h) => h.memoryId);
+    const semanticEntities = semanticIds.length
+      ? await this.memoryRepo.find({
+          where: { id: In(semanticIds), assistantId },
+        })
+      : [];
+    const byId = new Map(semanticEntities.map((e) => [e.id, e]));
+
+    const semanticEntries: MemoryEntryWithRelevance[] = [];
+    for (const h of hits) {
+      const e = byId.get(h.memoryId);
+      if (!e) continue;
+      const relevance: 'high' | 'medium' = h.score > 0.85 ? 'high' : 'medium';
+      semanticEntries.push(Object.assign(e, { relevance }));
+    }
+
+    const seen = new Set<number>(semanticEntries.map((e) => e.id));
+    const merged: MemoryEntryWithRelevance[] = [...semanticEntries];
+    for (const r of recents) {
+      if (seen.has(r.id)) continue;
+      merged.push(Object.assign(r, { relevance: 'recent' as const }));
+      seen.add(r.id);
+      if (merged.length >= cap) break;
+    }
+
+    return merged.slice(0, cap);
+  }
+
   async create(assistantId: number, dto: CreateMemoryEntryDto): Promise<MemoryEntryEntity> {
     await this.ensureCanHaveMemory(assistantId);
     const created = this.memoryRepo.create({
@@ -55,7 +210,9 @@ export class AssistantMemoryService {
       body: dto.body.trim(),
       source: 'manual',
     });
-    return this.memoryRepo.save(created);
+    const saved = await this.memoryRepo.save(created);
+    void this.enqueueIngest(saved);
+    return saved;
   }
 
   async update(assistantId: number, id: number, dto: UpdateMemoryEntryDto): Promise<MemoryEntryEntity> {
@@ -65,7 +222,9 @@ export class AssistantMemoryService {
     if (dto.name !== undefined) entry.name = dto.name.trim();
     if (dto.type !== undefined) entry.type = dto.type;
     if (dto.body !== undefined) entry.body = dto.body.trim();
-    return this.memoryRepo.save(entry);
+    const saved = await this.memoryRepo.save(entry);
+    void this.enqueueIngest(saved);
+    return saved;
   }
 
   /**
@@ -82,11 +241,13 @@ export class AssistantMemoryService {
     const entry = await this.memoryRepo.findOne({ where: { id, assistantId } });
     if (!entry) throw new NotFoundException(`Memory entry ${id} not found`);
     await this.memoryRepo.remove(entry);
+    void this.enqueueDeleteOne(id);
   }
 
   async clear(assistantId: number): Promise<{ deleted: number }> {
     await this.ensureCanHaveMemory(assistantId);
     const res = await this.memoryRepo.delete({ assistantId });
+    void this.enqueueDeleteByAssistant(assistantId);
     return { deleted: res.affected ?? 0 };
   }
 }

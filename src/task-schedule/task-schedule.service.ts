@@ -67,8 +67,10 @@ export class TaskScheduleService {
       const processor = this.jobProcessorFactory.getProcessor(firstJob.type);
 
       if (!processor) {
-        this.logger.error(`No processor found for job type: ${firstJob.type}`);
-        await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
+        // The Python worker already processed the job (it set status=processed
+        // and wrote `result`). No backend post-processing is needed for this
+        // job type, so finalize it as completed instead of marking it failed.
+        await this.jobService.markAsCompleted((firstJob as any).id?.toString?.() || String((firstJob as any).id));
         return;
       }
 

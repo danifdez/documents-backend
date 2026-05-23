@@ -86,6 +86,15 @@ export class ResourceService {
     });
   }
 
+  async findByIds(ids: number[]): Promise<Pick<ResourceEntity, 'id' | 'name' | 'title' | 'mimeType'>[]> {
+    if (!ids.length) return [];
+    return await this.repo
+      .createQueryBuilder('resource')
+      .select(['resource.id', 'resource.name', 'resource.title', 'resource.mimeType'])
+      .whereInIds(ids)
+      .getMany();
+  }
+
   async findByThread(threadId: number): Promise<ResourceEntity[]> {
     return await this.repo.find({
       select: ['id', 'name', 'title', 'mimeType', 'originalName', 'type', 'status', 'createdAt'],

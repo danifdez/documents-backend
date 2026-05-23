@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
 import { NotificationGateway } from 'src/notification/notification.gateway';
 import { JobEntity } from 'src/job/job.entity';
+import { JobService } from 'src/job/job.service';
+import { JobPriority } from 'src/job/job-priority.enum';
+import { JobStatus } from 'src/job/job-status.enum';
 import { AssistantService } from 'src/assistant/assistant.service';
 import { AssistantMemoryService } from 'src/assistant-memory/assistant-memory.service';
 import { MemoryEntryType } from 'src/assistant-memory/memory-entry.entity';
@@ -16,13 +19,65 @@ const VALID_MEMORY_TYPES: MemoryEntryType[] = [
 export class AssistantChatProcessor implements JobProcessor {
   private readonly logger = new Logger(AssistantChatProcessor.name);
   private readonly JOB_TYPE = 'assistant-chat';
+  private readonly DEDUP_THRESHOLD: number;
 
   constructor(
     private readonly notificationGateway: NotificationGateway,
     private readonly assistantService: AssistantService,
     private readonly memoryService: AssistantMemoryService,
     private readonly agentService: AgentService,
-  ) {}
+    private readonly jobService: JobService,
+  ) {
+    const raw = process.env.MEMORY_DEDUP_THRESHOLD ?? '0.92';
+    const parsed = parseFloat(raw);
+    if (!Number.isFinite(parsed)) {
+      this.logger.warn(
+        `Invalid MEMORY_DEDUP_THRESHOLD=${raw}; falling back to 0.92`,
+      );
+      this.DEDUP_THRESHOLD = 0.92;
+    } else {
+      this.DEDUP_THRESHOLD = parsed;
+    }
+  }
+
+  private async findDedupCandidate(
+    assistantId: number,
+    body: string,
+    timeoutMs = 2000,
+  ): Promise<{ memoryId: number; score: number } | null> {
+    const q = (body ?? '').trim();
+    if (!q) return null;
+    let job;
+    try {
+      job = await this.jobService.create('memory-search', JobPriority.HIGH, {
+        assistantId,
+        query: q,
+        limit: 1,
+      });
+    } catch (e: any) {
+      this.logger.warn(`dedup search enqueue failed: ${e?.message ?? e}`);
+      return null;
+    }
+    if (!job) return null;
+
+    const start = Date.now();
+    const poll = 100;
+    while (Date.now() - start < timeoutMs) {
+      const current = (await this.jobService.findOne(job.id)) as JobEntity | null;
+      if (!current) return null;
+      if (current.status === JobStatus.COMPLETED) {
+        const r = current.result as
+          | { results?: Array<{ memoryId: number; score: number }> }
+          | null;
+        const top = r?.results?.[0];
+        return top && Number.isFinite(top.score) ? top : null;
+      }
+      if (current.status === JobStatus.FAILED) return null;
+      await new Promise((resolve) => setTimeout(resolve, poll));
+    }
+    this.logger.warn(`dedup search job ${job.id} timed out`);
+    return null;
+  }
 
   canProcess(jobType: string): boolean {
     return jobType === this.JOB_TYPE;
@@ -62,13 +117,68 @@ export class AssistantChatProcessor implements JobProcessor {
             ? rawType
             : 'fact') as MemoryEntryType;
           if (name && body) {
-            const entry = await this.memoryService.create(assistantId, { name, type, body });
-            const eventMsg = await this.assistantService.recordEvent(
-              assistantId,
-              `Memory saved: ${entry.name}`,
-              { kind: 'memory_saved', entry },
-            );
-            eventMessages.push(eventMsg);
+            const candidate = await this.findDedupCandidate(assistantId, body);
+            if (candidate && candidate.score >= this.DEDUP_THRESHOLD) {
+              try {
+                const entry = await this.memoryService.update(
+                  assistantId,
+                  candidate.memoryId,
+                  { name, type, body },
+                );
+                const eventMsg = await this.assistantService.recordEvent(
+                  assistantId,
+                  `Memory updated: ${entry.name}`,
+                  {
+                    kind: 'memory_replaced',
+                    entry,
+                    previousId: candidate.memoryId,
+                    via: 'auto_dedup',
+                    score: candidate.score,
+                  },
+                );
+                eventMessages.push(eventMsg);
+              } catch (e: any) {
+                this.logger.warn(
+                  `Job ${job.id} auto-dedup replace failed for memory ${candidate.memoryId}: ${e?.message ?? e}`,
+                );
+              }
+            } else {
+              const entry = await this.memoryService.create(assistantId, { name, type, body });
+              const eventMsg = await this.assistantService.recordEvent(
+                assistantId,
+                `Memory saved: ${entry.name}`,
+                { kind: 'memory_saved', entry },
+              );
+              eventMessages.push(eventMsg);
+            }
+          }
+        } else if (action === 'replace') {
+          const replaceId = Number(memoryAction['replace_id']);
+          const save = memoryAction['save'] as Record<string, any> | undefined;
+          const name = String(save?.['name'] ?? '').trim();
+          const body = String(save?.['body'] ?? '').trim();
+          const rawType = String(save?.['type'] ?? 'fact').trim().toLowerCase();
+          const type = (VALID_MEMORY_TYPES.includes(rawType as MemoryEntryType)
+            ? rawType
+            : 'fact') as MemoryEntryType;
+          if (Number.isInteger(replaceId) && name && body) {
+            try {
+              const entry = await this.memoryService.update(assistantId, replaceId, {
+                name,
+                type,
+                body,
+              });
+              const eventMsg = await this.assistantService.recordEvent(
+                assistantId,
+                `Memory updated: ${entry.name}`,
+                { kind: 'memory_replaced', entry, previousId: replaceId, via: 'llm' },
+              );
+              eventMessages.push(eventMsg);
+            } catch (e: any) {
+              this.logger.warn(
+                `Job ${job.id} replace failed for memory ${replaceId}: ${e?.message ?? e}`,
+              );
+            }
           }
         } else if (action === 'forget') {
           const forgetId = Number(memoryAction['forget_id']);

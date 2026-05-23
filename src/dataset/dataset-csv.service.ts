@@ -86,22 +86,58 @@ export class DatasetCsvService {
         };
     }
 
-    exportRecordsCsv(schema: { key: string; name: string }[], records: { data: Record<string, any> }[]): string {
+    exportRecordsCsv(
+        schema: { key: string; name: string }[],
+        records: { data: Record<string, any>; cellMetadata?: Record<string, any> | null }[],
+        options: { includeAnchors?: boolean; resourceTitleResolver?: (id: number) => string } = {},
+    ): string {
         const escapeCsv = (val: any): string => {
             if (val === null || val === undefined) return '';
             const str = String(val);
-            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
                 return `"${str.replace(/"/g, '""')}"`;
             }
             return str;
         };
 
-        const header = schema.map(f => escapeCsv(f.name)).join(',');
-        const rows = records.map(r =>
-            schema.map(f => escapeCsv(r.data[f.key])).join(',')
-        );
+        if (!options.includeAnchors) {
+            const header = schema.map(f => escapeCsv(f.name)).join(',');
+            const rows = records.map(r =>
+                schema.map(f => escapeCsv(r.data[f.key])).join(',')
+            );
+            return [header, ...rows].join('\n');
+        }
 
-        return [header, ...rows].join('\n');
+        const resolver = options.resourceTitleResolver ?? (() => '');
+
+        // Headers interleaved: value column, then its three auxiliaries.
+        const headers: string[] = [];
+        for (const f of schema) {
+            headers.push(escapeCsv(f.name));
+            headers.push(escapeCsv(`${f.key}_source`));
+            headers.push(escapeCsv(`${f.key}_page`));
+            headers.push(escapeCsv(`${f.key}_quote`));
+        }
+
+        const rows = records.map((r) => {
+            const cells: string[] = [];
+            for (const f of schema) {
+                const anchor = r.cellMetadata?.[f.key] || null;
+                cells.push(escapeCsv(r.data[f.key]));
+                if (anchor && anchor.sourceResourceId != null) {
+                    cells.push(escapeCsv(resolver(anchor.sourceResourceId) || ''));
+                    cells.push(escapeCsv(anchor.page ?? ''));
+                    cells.push(escapeCsv(anchor.quote ?? ''));
+                } else {
+                    cells.push('');
+                    cells.push('');
+                    cells.push('');
+                }
+            }
+            return cells.join(',');
+        });
+
+        return [headers.join(','), ...rows].join('\n');
     }
 
     parseAndMap(buffer: Buffer, mappings: CsvColumnMapping[], skipFirstRow: boolean = true): Record<string, any>[] {

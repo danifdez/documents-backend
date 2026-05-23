@@ -106,6 +106,7 @@ export class NotificationGateway implements OnGatewayConnection {
     occurrenceStart: string;
     title: string;
     alarmLabel: string | null;
+    trackCompletion: boolean;
   }) {
     this.server.emit('calendar:alarm', data);
   }
@@ -116,8 +117,19 @@ export class NotificationGateway implements OnGatewayConnection {
       occurrenceStart: string;
       title: string;
       alarmLabel: string | null;
+      trackCompletion: boolean;
     }>;
   }) {
     this.server.emit('calendar:missed', data);
+  }
+
+  sendTaskReminder(data: { taskId: number; title: string; reminderAt: string }) {
+    this.server.emit('task:reminder', data);
+  }
+
+  sendTaskMissed(data: {
+    items: Array<{ taskId: number; title: string; reminderAt: string }>;
+  }) {
+    this.server.emit('task:missed', data);
   }
 }

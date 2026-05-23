@@ -1,13 +1,29 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+  Query,
+  HttpCode,
+  BadRequestException,
+} from '@nestjs/common';
 import { CalendarEventService, CalendarEventOccurrence } from './calendar-event.service';
 import { CalendarEventEntity } from './calendar-event.entity';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
+import { EventOccurrenceCompletionService } from './event-occurrence-completion.service';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 
 @Controller('calendar-events')
 export class CalendarEventController {
-  constructor(private readonly calendarEventService: CalendarEventService) { }
+  constructor(
+    private readonly calendarEventService: CalendarEventService,
+    private readonly completion: EventOccurrenceCompletionService,
+  ) { }
 
   @Get()
   async findAll(): Promise<CalendarEventEntity[]> {
@@ -58,5 +74,36 @@ export class CalendarEventController {
   @RequirePermissions(Permission.CALENDAR)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.calendarEventService.remove(id);
+  }
+
+  @Post(':id/occurrences/:date/complete')
+  @HttpCode(204)
+  @RequirePermissions(Permission.CALENDAR)
+  async markOccurrenceDone(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('date') date: string,
+  ): Promise<void> {
+    const occurrenceDate = this.parseOccurrenceDate(date);
+    await this.completion.markDone(id, occurrenceDate);
+  }
+
+  @Delete(':id/occurrences/:date/complete')
+  @HttpCode(204)
+  @RequirePermissions(Permission.CALENDAR)
+  async unmarkOccurrenceDone(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('date') date: string,
+  ): Promise<void> {
+    const occurrenceDate = this.parseOccurrenceDate(date);
+    await this.completion.unmarkDone(id, occurrenceDate);
+  }
+
+  private parseOccurrenceDate(raw: string): Date {
+    const decoded = decodeURIComponent(raw);
+    const d = new Date(decoded);
+    if (isNaN(d.getTime())) {
+      throw new BadRequestException({ error: 'invalid_occurrence_date' });
+    }
+    return d;
   }
 }

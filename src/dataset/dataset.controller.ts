@@ -4,9 +4,11 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { DatasetService } from './dataset.service';
 import { DatasetQueryService, RecordFilter } from './dataset-query.service';
 import { DatasetCsvService } from './dataset-csv.service';
+import { DatasetExtractionService } from './dataset-extraction.service';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
-import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CsvImportMappingDto, BulkDeleteRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto } from './dto/dataset.dto';
+import { ResourceService } from '../resource/resource.service';
+import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CsvImportMappingDto, BulkDeleteRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto, ReExtractRowDto, ReExtractCellDto } from './dto/dataset.dto';
 import { ImportDatasetDto, ImportConfirmDto } from './dto/import-dataset.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
@@ -17,6 +19,8 @@ export class DatasetController {
         private readonly datasetService: DatasetService,
         private readonly queryService: DatasetQueryService,
         private readonly csvService: DatasetCsvService,
+        private readonly extractionService: DatasetExtractionService,
+        private readonly resourceService: ResourceService,
         private readonly jobService: JobService,
     ) { }
 
@@ -104,6 +108,69 @@ export class DatasetController {
     @RequirePermissions(Permission.DATASETS)
     async analyzeSchemaChange(@Param('id', ParseIntPipe) id: number, @Body() body: { schema: any[] }) {
         return await this.datasetService.analyzeSchemaChange(id, body.schema);
+    }
+
+    // ── Tabular extraction (cambio-10) ──
+
+    @Post(':id/extract')
+    @RequirePermissions(Permission.DATASETS)
+    async extractAll(@Param('id', ParseIntPipe) id: number) {
+        return await this.extractionService.extractAll(id);
+    }
+
+    @Post(':id/records/:recordId/re-extract')
+    @RequirePermissions(Permission.DATASETS)
+    async reExtractRow(
+        @Param('id', ParseIntPipe) id: number,
+        @Param('recordId', ParseIntPipe) recordId: number,
+        @Body() dto: ReExtractRowDto,
+    ) {
+        return await this.extractionService.extractRow(id, recordId, dto.columnsToExtract);
+    }
+
+    @Post(':id/records/:recordId/cells/:fieldKey/re-extract')
+    @RequirePermissions(Permission.DATASETS)
+    async reExtractCell(
+        @Param('id', ParseIntPipe) id: number,
+        @Param('recordId', ParseIntPipe) recordId: number,
+        @Param('fieldKey') fieldKey: string,
+        @Body() dto: ReExtractCellDto,
+    ) {
+        return await this.extractionService.extractCell(id, recordId, fieldKey, { force: dto.force });
+    }
+
+    @Post('propose-columns')
+    @RequirePermissions(Permission.DATASETS)
+    async proposeColumns(@Body() body: { resourceIds: number[]; projectId?: number }) {
+        if (!body?.resourceIds || !Array.isArray(body.resourceIds) || body.resourceIds.length === 0) {
+            throw new HttpException('resourceIds is required and must be non-empty', HttpStatus.BAD_REQUEST);
+        }
+        // Pull excerpts (max 3 resources, first ~2000 chars each) — backend
+        // does the IO so the worker stays a pure LLM call.
+        const slice = body.resourceIds.slice(0, 3);
+        const excerpts = [] as Array<{ id: number; title: string; excerpt: string }>;
+        for (const rid of slice) {
+            const meta = await this.resourceService.findOne(rid);
+            if (!meta) continue;
+            const content = await this.resourceService.getContentById(rid);
+            const text = (content ?? '').slice(0, 2000);
+            excerpts.push({ id: rid, title: meta.title || meta.name || `resource ${rid}`, excerpt: text });
+        }
+        if (excerpts.length === 0 || excerpts.every((e) => !e.excerpt.trim())) {
+            throw new HttpException('no readable content in any of the given resources', HttpStatus.BAD_REQUEST);
+        }
+        const job = await this.jobService.create('dataset.propose-columns', JobPriority.NORMAL, {
+            projectId: body.projectId ?? null,
+            resources: excerpts,
+        });
+        return { jobId: job?.id ?? null };
+    }
+
+    @Get('propose-columns/:jobId')
+    async getProposeColumnsResult(@Param('jobId', ParseIntPipe) jobId: number) {
+        const job = await this.jobService.findOne(jobId);
+        if (!job) throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
+        return { status: job.status, result: job.result };
     }
 
     @Delete(':id')
@@ -317,6 +384,7 @@ export class DatasetController {
     @Get(':id/export')
     async exportCsv(
         @Param('id', ParseIntPipe) id: number,
+        @Query('include_anchors') includeAnchorsQuery: string | undefined,
         @Res() res: Response,
     ) {
         const dataset = await this.datasetService.findOneDataset(id);
@@ -325,7 +393,31 @@ export class DatasetController {
         }
 
         const records = await this.datasetService.findAllRecords(id);
-        const csv = this.csvService.exportRecordsCsv(dataset.schema, records);
+        const includeAnchors = includeAnchorsQuery === 'true' || includeAnchorsQuery === '1';
+
+        let resolver: ((rid: number) => string) | undefined;
+        if (includeAnchors) {
+            const ids = new Set<number>();
+            for (const r of records) {
+                const meta = (r as any).cellMetadata as Record<string, any> | null;
+                if (!meta) continue;
+                for (const key of Object.keys(meta)) {
+                    const sid = meta[key]?.sourceResourceId;
+                    if (typeof sid === 'number') ids.add(sid);
+                }
+            }
+            const resources = await this.resourceService.findByIds([...ids]);
+            const map = new Map<number, string>();
+            for (const r of resources) {
+                map.set(r.id, r.title || r.name || `Resource ${r.id}`);
+            }
+            resolver = (rid: number) => map.get(rid) || '';
+        }
+
+        const csv = this.csvService.exportRecordsCsv(dataset.schema, records, {
+            includeAnchors,
+            resourceTitleResolver: resolver,
+        });
 
         const filename = dataset.name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.csv';
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');

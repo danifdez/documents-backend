@@ -16,6 +16,7 @@ function makeEvent(overrides: Partial<CalendarEventEntity>): CalendarEventEntity
     allDay: false,
     recurrenceRule: null,
     alarm: null,
+    trackCompletion: false,
     project: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -26,8 +27,30 @@ function makeEvent(overrides: Partial<CalendarEventEntity>): CalendarEventEntity
 function buildSvc({
   events = [],
   previousTick = null,
-}: { events?: CalendarEventEntity[]; previousTick?: Date | null } = {}) {
+  completions = [],
+  tasks = [],
+}: {
+  events?: CalendarEventEntity[];
+  previousTick?: Date | null;
+  completions?: Array<{ eventId: number; occurrenceDate: Date }>;
+  tasks?: Array<{ id: number; title: string; reminderAt: Date | null; status: 'pending' | 'completed' }>;
+} = {}) {
   const repo = { find: jest.fn().mockResolvedValue(events) };
+  const completionRepo = {
+    createQueryBuilder: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue(completions),
+    }),
+  };
+  const taskRepo = {
+    createQueryBuilder: jest.fn().mockReturnValue({
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(tasks),
+    }),
+  };
   const appState = {
     getTimestamp: jest.fn().mockResolvedValue(previousTick),
     setTimestamp: jest.fn().mockResolvedValue(undefined),
@@ -35,15 +58,19 @@ function buildSvc({
   const gateway = {
     sendCalendarAlarm: jest.fn(),
     sendCalendarMissed: jest.fn(),
+    sendTaskReminder: jest.fn(),
+    sendTaskMissed: jest.fn(),
   };
   const expansion = new CalendarEventExpansionService();
   const svc = new CalendarEventSchedulerService(
     repo as any,
+    completionRepo as any,
+    taskRepo as any,
     expansion,
     appState as any,
     gateway as any,
   );
-  return { svc, repo, appState, gateway };
+  return { svc, repo, completionRepo, taskRepo, appState, gateway };
 }
 
 describe('CalendarEventSchedulerService', () => {

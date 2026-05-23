@@ -8,6 +8,7 @@ export interface OccurrenceDescriptor {
   occurrenceStart: Date;
   occurrenceEnd: Date | null;
   alarmTriggerAt: Date | null;
+  completed: boolean;
 }
 
 @Injectable()
@@ -17,6 +18,7 @@ export class CalendarEventExpansionService {
     rangeStart: Date,
     rangeEnd: Date,
     tz?: string,
+    completedOccurrences?: Set<string>,
   ): OccurrenceDescriptor[] {
     if (rangeEnd < rangeStart) return [];
     const durationMs = event.endDate
@@ -30,6 +32,7 @@ export class CalendarEventExpansionService {
       occurrenceStart: start,
       occurrenceEnd: durationMs !== null ? new Date(start.getTime() + durationMs) : null,
       alarmTriggerAt: offsetMs !== null ? new Date(start.getTime() + offsetMs) : null,
+      completed: completedOccurrences?.has(start.toISOString()) ?? false,
     });
 
     if (!event.recurrenceRule) {

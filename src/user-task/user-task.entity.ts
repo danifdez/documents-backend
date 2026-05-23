@@ -15,6 +15,9 @@ export class UserTaskEntity {
   @Column({ type: 'varchar', default: 'pending' })
   status: 'pending' | 'completed';
 
+  @Column({ type: 'timestamptz', name: 'reminder_at', nullable: true })
+  reminderAt: Date | null;
+
   @ManyToOne(() => ProjectEntity, (project) => project.userTasks, { nullable: true })
   project: ProjectEntity | null;
 

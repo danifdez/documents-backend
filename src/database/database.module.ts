@@ -26,6 +26,7 @@ import { DatasetRecordLinkEntity } from '../dataset/dataset-record-link.entity';
 import { DatasetChartEntity } from '../dataset/dataset-chart.entity';
 import { NoteEntity } from '../note/note.entity';
 import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
+import { EventOccurrenceCompletionEntity } from '../calendar-event/event-occurrence-completion.entity';
 import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
 import { TimelineEntity } from '../timeline/timeline.entity';
 import { ResourceDateEntity } from '../resource-date/resource-date.entity';
@@ -76,6 +77,7 @@ import { AppStateEntity } from '../app-state/app-state.entity';
       DatasetChartEntity,
       NoteEntity,
       CalendarEventEntity,
+      EventOccurrenceCompletionEntity,
       KnowledgeEntryEntity,
       TimelineEntity,
       ResourceDateEntity,

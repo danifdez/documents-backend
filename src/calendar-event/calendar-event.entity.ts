@@ -35,6 +35,9 @@ export class CalendarEventEntity {
   @Column({ type: 'jsonb', nullable: true })
   alarm: AlarmDescriptor | null;
 
+  @Column({ type: 'boolean', default: false, name: 'track_completion' })
+  trackCompletion: boolean;
+
   @ManyToOne(() => ProjectEntity, (project) => project.calendarEvents, { nullable: true })
   project: ProjectEntity | null;
 

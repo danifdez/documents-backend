@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsBoolean, IsIn, ValidateNested, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsBoolean, IsIn, IsObject, ValidateNested, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class DatasetFieldDto {
@@ -10,6 +10,10 @@ export class DatasetFieldDto {
     @IsNotEmpty()
     @MaxLength(200)
     name: string;
+
+    @IsString()
+    @IsOptional()
+    description?: string;
 
     @IsString()
     @IsIn(['text', 'number', 'boolean', 'date', 'datetime', 'time', 'select'])
@@ -54,6 +58,14 @@ export class CreateDatasetDto {
     @ValidateNested({ each: true })
     @Type(() => DatasetFieldDto)
     schema: DatasetFieldDto[];
+
+    @IsOptional()
+    @IsIn(['manual', 'project_resources', 'resource_selection'])
+    sourceMode?: 'manual' | 'project_resources' | 'resource_selection';
+
+    @IsOptional()
+    @IsObject()
+    sourceConfig?: Record<string, any>;
 }
 
 export class UpdateDatasetDto {
@@ -75,6 +87,14 @@ export class UpdateDatasetDto {
     @ValidateNested({ each: true })
     @Type(() => DatasetFieldDto)
     schema?: DatasetFieldDto[];
+
+    @IsOptional()
+    @IsIn(['manual', 'project_resources', 'resource_selection'])
+    sourceMode?: 'manual' | 'project_resources' | 'resource_selection';
+
+    @IsOptional()
+    @IsObject()
+    sourceConfig?: Record<string, any>;
 }
 
 export class CreateDatasetRecordDto {
@@ -140,6 +160,19 @@ export class BulkDeleteRecordsDto {
     @IsArray()
     @IsNumber({}, { each: true })
     recordIds: number[];
+}
+
+export class ReExtractRowDto {
+    @IsArray()
+    @IsOptional()
+    @IsString({ each: true })
+    columnsToExtract?: string[];
+}
+
+export class ReExtractCellDto {
+    @IsOptional()
+    @IsBoolean()
+    force?: boolean;
 }
 
 export class CreateDatasetChartDto {

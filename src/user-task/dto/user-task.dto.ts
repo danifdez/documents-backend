@@ -1,4 +1,13 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, IsIn, MaxLength } from 'class-validator';
+import {
+    IsString,
+    IsNotEmpty,
+    IsOptional,
+    IsNumber,
+    IsIn,
+    IsDateString,
+    MaxLength,
+    ValidateIf,
+} from 'class-validator';
 
 export class CreateUserTaskDto {
     @IsString()
@@ -14,6 +23,11 @@ export class CreateUserTaskDto {
     @IsOptional()
     @IsIn(['pending', 'completed'])
     status?: 'pending' | 'completed';
+
+    @IsOptional()
+    @ValidateIf((_, v) => v !== null)
+    @IsDateString()
+    reminderAt?: string | null;
 
     @IsNumber()
     @IsOptional()
@@ -34,6 +48,11 @@ export class UpdateUserTaskDto {
     @IsOptional()
     @IsIn(['pending', 'completed'])
     status?: 'pending' | 'completed';
+
+    @IsOptional()
+    @ValidateIf((_, v) => v !== null)
+    @IsDateString()
+    reminderAt?: string | null;
 
     @IsNumber()
     @IsOptional()

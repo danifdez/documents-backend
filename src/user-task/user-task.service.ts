@@ -45,6 +45,9 @@ export class UserTaskService {
     const data: Partial<UserTaskEntity> = { title: dto.title };
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.status !== undefined) data.status = dto.status;
+    if (dto.reminderAt !== undefined) {
+      data.reminderAt = dto.reminderAt ? new Date(dto.reminderAt) : null;
+    }
     if (dto.projectId) data.project = { id: dto.projectId } as any;
     const created = this.repository.create(data);
     return await this.repository.save(created);
@@ -56,6 +59,17 @@ export class UserTaskService {
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
+
+    // reminderAt precedence:
+    //   1) status='completed' clears it (a closed task has no live reminder).
+    //   2) explicit reminderAt in the DTO wins (null clears, value sets).
+    //   3) otherwise leave the previous value untouched.
+    if (dto.status === 'completed') {
+      data.reminderAt = null;
+    } else if (dto.reminderAt !== undefined) {
+      data.reminderAt = dto.reminderAt ? new Date(dto.reminderAt) : null;
+    }
+
     const task = await this.repository.preload({ id, ...data });
     if (!task) return null;
     return await this.repository.save(task);
