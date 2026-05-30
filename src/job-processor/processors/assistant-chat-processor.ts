@@ -12,7 +12,7 @@ import { AgentService } from 'src/agent/agent.service';
 import { toAgentMessageDto } from 'src/agent/dto/agent.dto';
 
 const VALID_MEMORY_TYPES: MemoryEntryType[] = [
-  'fact', 'event', 'instruction',
+  'fact', 'episode', 'instruction',
 ];
 
 @Injectable()

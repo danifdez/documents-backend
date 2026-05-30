@@ -1,7 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { AssistantEntity } from '../assistant/assistant.entity';
 
-export type MemoryEntryType = 'fact' | 'event' | 'instruction';
+export type MemoryEntryType = 'fact' | 'episode' | 'instruction';
 export type MemoryEntrySource = 'manual' | 'detected' | 'imported';
 
 @Entity({ name: 'assistant_memory_entries' })

@@ -1,6 +1,6 @@
 import { IsString, IsNotEmpty, IsOptional, MaxLength, IsIn } from 'class-validator';
 
-const MEMORY_TYPES = ['fact', 'event', 'instruction'] as const;
+const MEMORY_TYPES = ['fact', 'episode', 'instruction'] as const;
 
 export class CreateMemoryEntryDto {
   @IsString()
