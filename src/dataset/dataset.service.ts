@@ -7,6 +7,7 @@ import { DatasetRelationEntity } from './dataset-relation.entity';
 import { DatasetRecordLinkEntity } from './dataset-record-link.entity';
 import { DatasetChartEntity } from './dataset-chart.entity';
 import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto } from './dto/dataset.dto';
+import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class DatasetService {
@@ -38,18 +39,13 @@ export class DatasetService {
     }
 
     async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-        if (!searchTerm || searchTerm.trim() === '') return [];
-        const like = `%${searchTerm}%`;
-        const qb = this.datasetRepository
-            .createQueryBuilder('d')
-            .select(['d.id', 'd.name', 'd.description'])
-            .addSelect('similarity(unaccent(d.name), unaccent(:s))', 'score')
-            .where('unaccent(d.name) ILIKE unaccent(:q) OR unaccent(d.description) ILIKE unaccent(:q)', { q: like })
-            .setParameter('s', searchTerm);
-        if (projectId) {
-            qb.andWhere('d.project_id = :projectId', { projectId });
-        }
-        return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
+        return await globalSimilaritySearch(this.datasetRepository, searchTerm, projectId, {
+            alias: 'd',
+            select: ['d.id', 'd.name', 'd.description'],
+            scoreColumn: 'd.name',
+            searchColumns: ['d.name', 'd.description'],
+            projectIdColumn: 'd.project_id',
+        });
     }
 
     async findOneDataset(id: number): Promise<DatasetEntity | null> {

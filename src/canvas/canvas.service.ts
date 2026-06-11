@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CanvasEntity } from './canvas.entity';
 import { CreateCanvasDto, UpdateCanvasDto } from './dto/canvas.dto';
+import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class CanvasService {
@@ -70,18 +71,18 @@ export class CanvasService {
   }
 
   async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-    if (!searchTerm || searchTerm.trim() === '') return [];
-    const like = `%${searchTerm}%`;
-    const qb = this.repository
-      .createQueryBuilder('c')
-      .select(['c.id', 'c.name', 'c.content'])
-      .addSelect('similarity(unaccent(c.name), unaccent(:s))', 'score')
-      .where('unaccent(c.name) ILIKE unaccent(:q) OR unaccent(c.content) ILIKE unaccent(:q)', { q: like })
-      .setParameter('s', searchTerm);
-    if (projectId) {
-      qb.andWhere('c.projectId = :projectId', { projectId });
-    }
-    return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
+    return await globalSimilaritySearch(
+      this.repository,
+      searchTerm,
+      projectId,
+      {
+        alias: 'c',
+        select: ['c.id', 'c.name', 'c.content'],
+        scoreColumn: 'c.name',
+        searchColumns: ['c.name', 'c.content'],
+        projectIdColumn: 'c.projectId',
+      },
+    );
   }
 
   private extractTextFromCanvas(canvasData: object): string {

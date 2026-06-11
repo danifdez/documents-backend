@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DocEntity } from './doc.entity';
 import { CreateDocDto, UpdateDocDto } from './dto/doc.dto';
+import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class DocService {
@@ -83,17 +84,17 @@ export class DocService {
   }
 
   async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-    if (!searchTerm || searchTerm.trim() === '') return [];
-    const like = `%${searchTerm}%`;
-    const qb = this.repository
-      .createQueryBuilder('d')
-      .select(['d.id', 'd.name', 'd.content'])
-      .addSelect('similarity(unaccent(d.name), unaccent(:s))', 'score')
-      .where('unaccent(d.name) ILIKE unaccent(:q) OR unaccent(d.content) ILIKE unaccent(:q)', { q: like })
-      .setParameter('s', searchTerm);
-    if (projectId) {
-      qb.andWhere('d.projectId = :projectId', { projectId });
-    }
-    return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
+    return await globalSimilaritySearch(
+      this.repository,
+      searchTerm,
+      projectId,
+      {
+        alias: 'd',
+        select: ['d.id', 'd.name', 'd.content'],
+        scoreColumn: 'd.name',
+        searchColumns: ['d.name', 'd.content'],
+        projectIdColumn: 'd.projectId',
+      },
+    );
   }
 }

@@ -8,7 +8,8 @@ import { FileStorageService } from '../file-storage/file-storage.service';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
 import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
-import { DEFAULT_PAGE_SIZE, RESOURCE_TYPE_WEBPAGE } from '../common/constants';
+import { RESOURCE_TYPE_WEBPAGE } from '../common/constants';
+import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class ResourceService {
@@ -185,16 +186,13 @@ export class ResourceService {
   }
 
   async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-    if (!searchTerm || !searchTerm.trim()) return [];
-    const qb = this.repo.createQueryBuilder('r')
-      .select(['r.id', 'r.name', 'r.title', 'r.content', 'r.translatedContent'])
-      .addSelect('similarity(unaccent(r.content), unaccent(:s))', 'score')
-      .where('unaccent(r.content) ILIKE unaccent(:q) OR unaccent(r.name) ILIKE unaccent(:q) OR unaccent(r.translated_content) ILIKE unaccent(:q)', { q: `%${searchTerm}%` })
-      .setParameter('s', searchTerm);
-    if (projectId) {
-      qb.andWhere('r.projectId = :projectId', { projectId });
-    }
-    return await qb.orderBy('score', 'DESC').limit(DEFAULT_PAGE_SIZE).getRawMany();
+    return await globalSimilaritySearch(this.repo, searchTerm, projectId, {
+      alias: 'r',
+      select: ['r.id', 'r.name', 'r.title', 'r.content', 'r.translatedContent'],
+      scoreColumn: 'r.content',
+      searchColumns: ['r.content', 'r.name', 'r.translated_content'],
+      projectIdColumn: 'r.projectId',
+    });
   }
 
   async clearResourceEntities(resourceId: number): Promise<void> {

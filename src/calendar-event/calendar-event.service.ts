@@ -5,6 +5,7 @@ import { CalendarEventEntity } from './calendar-event.entity';
 import { EventOccurrenceCompletionEntity } from './event-occurrence-completion.entity';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
 import { CalendarEventExpansionService, OccurrenceDescriptor } from './calendar-event-expansion.service';
+import { globalSimilaritySearch } from '../common/global-search';
 
 export interface CalendarEventOccurrence {
   id: number;
@@ -178,18 +179,18 @@ export class CalendarEventService {
   }
 
   async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-    if (!searchTerm || searchTerm.trim() === '') return [];
-    const like = `%${searchTerm}%`;
-    const qb = this.repository
-      .createQueryBuilder('e')
-      .select(['e.id', 'e.title', 'e.description'])
-      .addSelect('similarity(unaccent(e.title), unaccent(:s))', 'score')
-      .where('unaccent(e.title) ILIKE unaccent(:q) OR unaccent(e.description) ILIKE unaccent(:q)', { q: like })
-      .setParameter('s', searchTerm);
-    if (projectId) {
-      qb.andWhere('e.projectId = :projectId', { projectId });
-    }
-    return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
+    return await globalSimilaritySearch(
+      this.repository,
+      searchTerm,
+      projectId,
+      {
+        alias: 'e',
+        select: ['e.id', 'e.title', 'e.description'],
+        scoreColumn: 'e.title',
+        searchColumns: ['e.title', 'e.description'],
+        projectIdColumn: 'e.projectId',
+      },
+    );
   }
 
   async remove(id: number): Promise<{ deleted: boolean }> {

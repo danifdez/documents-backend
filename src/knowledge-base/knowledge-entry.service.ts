@@ -6,6 +6,7 @@ import { CreateKnowledgeEntryDto, UpdateKnowledgeEntryDto } from './dto/knowledg
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
 import { sourceIdForKnowledge } from '../vector/vector-source-id.util';
+import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class KnowledgeEntryService {
@@ -41,17 +42,12 @@ export class KnowledgeEntryService {
     }
 
     async globalSearch(searchTerm: string): Promise<any[]> {
-        if (!searchTerm || searchTerm.trim() === '') return [];
-        const like = `%${searchTerm}%`;
-        return await this.repository
-            .createQueryBuilder('k')
-            .select(['k.id', 'k.title', 'k.content', 'k.summary'])
-            .addSelect('similarity(unaccent(k.title), unaccent(:s))', 'score')
-            .where('unaccent(k.title) ILIKE unaccent(:q) OR unaccent(k.content) ILIKE unaccent(:q) OR unaccent(k.summary) ILIKE unaccent(:q)', { q: like })
-            .setParameter('s', searchTerm)
-            .orderBy('score', 'DESC')
-            .limit(50)
-            .getRawMany();
+        return await globalSimilaritySearch(this.repository, searchTerm, undefined, {
+            alias: 'k',
+            select: ['k.id', 'k.title', 'k.content', 'k.summary'],
+            scoreColumn: 'k.title',
+            searchColumns: ['k.title', 'k.content', 'k.summary'],
+        });
     }
 
     async create(dto: CreateKnowledgeEntryDto): Promise<KnowledgeEntryEntity> {

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { NoteEntity } from './note.entity';
 import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
+import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class NoteService {
@@ -72,20 +73,24 @@ export class NoteService {
   }
 
   async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-    if (!searchTerm || searchTerm.trim() === '') return [];
-    const like = `%${searchTerm}%`;
-    const qb = this.repository
-      .createQueryBuilder('n')
-      .select(['n.id', 'n.title', 'n.content'])
-      .addSelect('similarity(unaccent(n.title), unaccent(:s))', 'score')
-      .where('unaccent(n.title) ILIKE unaccent(:q) OR unaccent(n.content) ILIKE unaccent(:q)', { q: like })
-      .setParameter('s', searchTerm);
-    if (projectId) {
-      qb.andWhere('n.projectId = :projectId', { projectId });
-    } else {
-      qb.andWhere('n.projectId IS NULL');
-    }
-    return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
+    return await globalSimilaritySearch(
+      this.repository,
+      searchTerm,
+      projectId,
+      {
+        alias: 'n',
+        select: ['n.id', 'n.title', 'n.content'],
+        scoreColumn: 'n.title',
+        searchColumns: ['n.title', 'n.content'],
+        applyProjectFilter: (qb, projectId) => {
+          if (projectId) {
+            qb.andWhere('n.projectId = :projectId', { projectId });
+          } else {
+            qb.andWhere('n.projectId IS NULL');
+          }
+        },
+      },
+    );
   }
 
   async remove(id: number): Promise<{ deleted: boolean }> {

@@ -6,6 +6,7 @@ import { CreateEntityDto, UpdateEntityDto } from './dto/entity.dto';
 import { EntityTypeService } from '../entity-type/entity-type.service';
 import { ResourceService } from '../resource/resource.service';
 import { DEFAULT_SEARCH_LIMIT } from '../common/constants';
+import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class EntityService {
@@ -108,19 +109,18 @@ export class EntityService {
     }
 
     async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-        if (!searchTerm || searchTerm.trim() === '') return [];
-        const like = `%${searchTerm}%`;
-        const qb = this.repository
-            .createQueryBuilder('e')
-            .select(['e.id', 'e.name', 'e.description'])
-            .addSelect('similarity(unaccent(e.name), unaccent(:s))', 'score')
-            .where('unaccent(e.name) ILIKE unaccent(:q) OR unaccent(e.description) ILIKE unaccent(:q)', { q: like })
-            .setParameter('s', searchTerm);
-        if (projectId) {
-            qb.innerJoin('entity_projects', 'ep', 'ep.entity_id = e.id')
-              .andWhere('ep.project_id = :projectId', { projectId });
-        }
-        return await qb.orderBy('score', 'DESC').limit(50).getRawMany();
+        return await globalSimilaritySearch(this.repository, searchTerm, projectId, {
+            alias: 'e',
+            select: ['e.id', 'e.name', 'e.description'],
+            scoreColumn: 'e.name',
+            searchColumns: ['e.name', 'e.description'],
+            applyProjectFilter: (qb, projectId) => {
+                if (projectId) {
+                    qb.innerJoin('entity_projects', 'ep', 'ep.entity_id = e.id')
+                      .andWhere('ep.project_id = :projectId', { projectId });
+                }
+            },
+        });
     }
 
     async searchByName(searchTerm: string): Promise<EntityEntity[]> {
