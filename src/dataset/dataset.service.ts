@@ -269,6 +269,15 @@ export class DatasetService {
         }
         const savedDataset = await this.datasetRepository.save(dataset);
 
+        const result = await this.importValidatedRecords(savedDataset.id, schema, records);
+        return { dataset: savedDataset, ...result };
+    }
+
+    private async importValidatedRecords(
+        datasetId: number,
+        schema: DatasetField[],
+        records: Record<string, any>[],
+    ): Promise<{ imported: number; errors: { row: number; messages: string[] }[] }> {
         const imported: DatasetRecordEntity[] = [];
         const errors: { row: number; messages: string[] }[] = [];
 
@@ -278,7 +287,7 @@ export class DatasetService {
                 errors.push({ row: i + 1, messages: validationErrors });
             } else {
                 imported.push(this.recordRepository.create({
-                    dataset: { id: savedDataset.id } as any,
+                    dataset: { id: datasetId } as any,
                     data: this.cleanRecordData(schema, records[i]),
                     cellMetadata: {},
                     sourceResourceId: null,
@@ -292,7 +301,7 @@ export class DatasetService {
             await this.recordRepository.save(imported, { chunk: 100 });
         }
 
-        return { dataset: savedDataset, imported: imported.length, errors };
+        return { imported: imported.length, errors };
     }
 
     async resolveLinkedRecords(datasetId: number, values: (string | number)[], lookupField?: string): Promise<Record<string, Record<string, any>>> {
@@ -698,29 +707,6 @@ export class DatasetService {
             throw new NotFoundException(`Dataset with id ${datasetId} not found`);
         }
 
-        const imported: DatasetRecordEntity[] = [];
-        const errors: { row: number; messages: string[] }[] = [];
-
-        for (let i = 0; i < records.length; i++) {
-            const validationErrors = this.validateRecordData(dataset.schema, records[i]);
-            if (validationErrors.length > 0) {
-                errors.push({ row: i + 1, messages: validationErrors });
-            } else {
-                imported.push(this.recordRepository.create({
-                    dataset: { id: datasetId } as any,
-                    data: this.cleanRecordData(dataset.schema, records[i]),
-                    cellMetadata: {},
-                    sourceResourceId: null,
-                    extractionStatus: 'extracted',
-                    extractionError: null,
-                }));
-            }
-        }
-
-        if (imported.length > 0) {
-            await this.recordRepository.save(imported, { chunk: 100 });
-        }
-
-        return { imported: imported.length, errors };
+        return await this.importValidatedRecords(datasetId, dataset.schema, records);
     }
 }
