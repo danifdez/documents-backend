@@ -16,6 +16,7 @@ export const FEATURE_FLAGS = [
   'relationships',
   'data_sources',
   'assistants',
+  'images',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];

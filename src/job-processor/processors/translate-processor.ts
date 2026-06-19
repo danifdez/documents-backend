@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { JobProcessor } from '../job-processor.interface';
 import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
@@ -18,8 +18,12 @@ export class TranslateProcessor implements JobProcessor {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly jobService: JobService,
-    private readonly entityService: EntityService,
-    private readonly pendingEntityService: PendingEntityService,
+    // Entity services come from feature-gated modules. When the `entities`
+    // feature is off they aren't in the DI graph, so they're optional — content
+    // translation (the core path) still works without them. Entity-translation
+    // job types are only ever created when the feature is on.
+    @Optional() private readonly entityService: EntityService,
+    @Optional() private readonly pendingEntityService: PendingEntityService,
   ) { }
 
   canProcess(jobType: string): boolean {
@@ -28,6 +32,11 @@ export class TranslateProcessor implements JobProcessor {
 
   async process(job: JobEntity): Promise<any> {
     const translationType = job.payload['translationType'];
+
+    const entityTranslationTypes = ['entities-pending-batch', 'entity-retranslate', 'entities-batch', 'entity'];
+    if (entityTranslationTypes.includes(translationType) && (!this.entityService || !this.pendingEntityService)) {
+      throw new Error(`Translation type "${translationType}" requires the entities feature, which is disabled`);
+    }
 
     // Handle batch entity translations for pending entities (before creation)
     if (translationType === 'entities-pending-batch') {
