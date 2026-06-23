@@ -45,7 +45,7 @@ import { AppStateEntity } from '../app-state/app-state.entity';
 export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
   return {
     type: 'postgres',
-    host: String(configService.get('POSTGRES_HOST') ?? 'database'),
+    host: String(configService.get('POSTGRES_HOST') ?? '127.0.0.1'),
     port: Number(configService.get('POSTGRES_PORT') ?? 5432),
     username: String(configService.get('POSTGRES_USER') ?? 'postgres'),
     password: String(configService.get('POSTGRES_PASSWORD') ?? ''),

@@ -7,7 +7,7 @@ export const databaseProviders = [
     inject: [ConfigService],
     useFactory: async (configService: ConfigService): Promise<Pool> => {
       // Coerce all env values to strings to avoid pg errors when values are non-string
-      const host = String(configService.get('POSTGRES_HOST') ?? 'database');
+      const host = String(configService.get('POSTGRES_HOST') ?? '127.0.0.1');
       const port = Number(configService.get('POSTGRES_PORT') ?? 5432);
       const user = String(configService.get('POSTGRES_USER') ?? 'postgres');
       const password = String(configService.get('POSTGRES_PASSWORD') ?? '');
