@@ -100,11 +100,6 @@ export class ResourceController {
     return await this.resourceService.confirmExtraction(id);
   }
 
-  @Post(':id/promote')
-  async promoteTemp(@Param('id', ParseIntPipe) id: number): Promise<ResourceEntity> {
-    return await this.resourceService.promoteTemp(id);
-  }
-
   @Delete(':id')
   @RequirePermissions(Permission.DELETE)
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {

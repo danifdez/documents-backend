@@ -6,8 +6,6 @@ export enum JobType {
     DATE_EXTRACTION = 'date-extraction',
     KEY_POINT = 'key-point',
     KEYWORDS = 'keywords',
-    IMAGE_GENERATE = 'image-generate',
-    IMAGE_EDIT = 'image-edit',
     INGEST_CONTENT = 'ingest-content',
     DELETE_VECTORS = 'delete-vectors',
     SEARCH = 'search',

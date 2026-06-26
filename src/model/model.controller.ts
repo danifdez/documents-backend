@@ -4,7 +4,7 @@ import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 import {
   AskQuestionDto, SummarizeDto, TranslateDto, ExtractEntitiesDto,
-  KeyPointsDto, KeywordsDto, GenerateImageDto, EditImageDto, SemanticSearchDto,
+  KeyPointsDto, KeywordsDto, SemanticSearchDto,
 } from './dto/model.dto';
 
 @Controller('model')
@@ -65,22 +65,6 @@ export class ModelController {
     @Body() body: KeywordsDto,
   ): Promise<void> {
     await this.modelService.keywords(body.resourceId, body.targetLanguage);
-  }
-
-  @Post('image-generate')
-  @RequirePermissions(Permission.IMAGE_GENERATE)
-  async generateImage(
-    @Body() body: GenerateImageDto,
-  ): Promise<{ jobId: number }> {
-    return this.modelService.generateImage(body);
-  }
-
-  @Post('image-edit')
-  @RequirePermissions(Permission.IMAGE_GENERATE)
-  async editImage(
-    @Body() body: EditImageDto,
-  ): Promise<{ jobId: number }> {
-    return this.modelService.editImage(body);
   }
 
   @Post('semantic-search')

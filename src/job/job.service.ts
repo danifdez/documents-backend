@@ -14,8 +14,6 @@ const JOB_FEATURE_MAP: Record<string, string> = {
   'embedding': 'rag',
   'entity-extraction': 'entities',
   'date-extraction': 'timelines',
-  'image-generate': 'canvas',
-  'image-edit': 'canvas',
   'data-source-sync': 'data_sources',
   'assistant-chat': 'assistants',
   'indexed-file-extraction': 'assistants',

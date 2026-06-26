@@ -6,7 +6,6 @@ export enum Permission {
   ENTITY_EXTRACTION = 'entity-extraction',
   KEY_POINTS = 'key-points',
   KEYWORDS = 'keywords',
-  IMAGE_GENERATE = 'image-generate',
 
   // Core data management
   PROJECTS = 'projects',

@@ -48,28 +48,6 @@ export class FileStorageService {
     };
   }
 
-  async storeTempFile(
-    hash: string,
-    file: Buffer,
-    extension: string,
-  ): Promise<{
-    hash: string;
-    relativePath: string;
-    extension: string;
-  }> {
-    const tempDir = path.join(this.baseStoragePath, 'temp');
-    await this.ensureDirectoryExists(tempDir);
-
-    const relativePath = path.join('temp', `${hash}${extension}`);
-    await fs.writeFile(path.join(this.baseStoragePath, relativePath), file);
-
-    return {
-      hash,
-      relativePath,
-      extension,
-    };
-  }
-
   async fileExists(hash: string, extension: string): Promise<boolean> {
     try {
       return await fs.pathExists(this.getFullPath(hash, extension));
@@ -113,13 +91,6 @@ export class FileStorageService {
     } catch {
       return false;
     }
-  }
-
-  async moveFile(fromRelative: string, toRelative: string): Promise<void> {
-    const fromPath = this.getFilePath(fromRelative);
-    const toPath = this.getFilePath(toRelative);
-    await this.ensureDirectoryExists(path.dirname(toPath));
-    await fs.move(fromPath, toPath, { overwrite: true });
   }
 
   getArchiveFilePath(relativePath: string): string {

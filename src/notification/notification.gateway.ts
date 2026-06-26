@@ -77,14 +77,6 @@ export class NotificationGateway implements OnGatewayConnection {
     this.server.emit('agentToolEvent', data);
   }
 
-  sendImageGenerateResponse(data: any) {
-    this.server.emit('imageGenerateResponse', data);
-  }
-
-  sendImageEditResponse(data: any) {
-    this.server.emit('imageEditResponse', data);
-  }
-
   sendRelationshipExtractionComplete(data: any) {
     this.server.emit('relationshipExtractionComplete', data);
   }

@@ -30,12 +30,6 @@ for semantic search. For audio and video files, the system also transcribes spee
 faster-whisper (Whisper AI model) before continuing with the rest of the pipeline. All of this happens
 in the background without any manual steps.
 
-### AI image generation
-
-Generate images from text descriptions and edit existing images using AI, directly from the canvas.
-Generated images are stored as project resources and can be reused across documents and canvases.
-Uses local open-source Stable Diffusion models — no external API required.
-
 ### Real-time notifications
 
 As each processing step completes, the interface receives an instant notification via WebSocket so the

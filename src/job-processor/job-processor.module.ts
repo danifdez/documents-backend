@@ -20,8 +20,6 @@ import { DatasetExtractionProcessor } from './processors/dataset-extraction-proc
 import { DatasetModule } from '../dataset/dataset.module';
 import { DataSourceSyncProcessor } from './processors/data-source-sync-processor';
 import { TranscribeProcessor } from './processors/transcribe-processor';
-import { ImageGenerateProcessor } from './processors/image-generate-processor';
-import { ImageEditProcessor } from './processors/image-edit-processor';
 import { DatabaseModule } from '../database/database.module';
 import { RelationshipExtractionProcessor } from './processors/relationship-extraction-processor';
 import { RelationshipQueryProcessor } from './processors/relationship-query-processor';
@@ -64,8 +62,6 @@ export class JobProcessorModule {
       KeywordsProcessor,
       AskProcessor,
       TranscribeProcessor,
-      ImageGenerateProcessor,
-      ImageEditProcessor,
       DeleteVectorsProcessor,
       SearchProcessor,
     ];

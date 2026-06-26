@@ -13,7 +13,6 @@ const ALL_PERMISSIONS: Record<string, boolean> = {
   'entity-extraction': true,
   'key-points': true,
   'keywords': true,
-  'image-generate': true,
   'projects': true,
   'documents': true,
   'upload': true,
