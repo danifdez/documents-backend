@@ -8,21 +8,9 @@ import { FeatureFlagService } from '../common/feature-flags.service';
 
 // Map job types to feature flags
 const JOB_FEATURE_MAP: Record<string, string> = {
-  'ingest-content': 'rag',
-  'search': 'rag',
-  'ask': 'rag',
-  'embedding': 'rag',
-  'entity-extraction': 'entities',
+  'entity-extraction': 'relationships',
   'date-extraction': 'timelines',
-  'data-source-sync': 'data_sources',
-  'assistant-chat': 'assistants',
-  'indexed-file-extraction': 'assistants',
-  'indexed-file-ingest': 'assistants',
-  'indexed-file-search': 'assistants',
-  'indexed-file-delete-vectors': 'assistants',
-  'memory-ingest': 'assistants',
-  'memory-search': 'assistants',
-  'memory-delete-vectors': 'assistants',
+  'data-source-sync': 'datasets',
 };
 
 @Injectable()

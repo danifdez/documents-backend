@@ -2,8 +2,6 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from 
 import { UserTaskService } from './user-task.service';
 import { UserTaskEntity } from './user-task.entity';
 import { CreateUserTaskDto, UpdateUserTaskDto } from './dto/user-task.dto';
-import { RequirePermissions } from '../auth/decorators/permissions.decorator';
-import { Permission } from '../auth/permission.enum';
 
 @Controller('user-tasks')
 export class UserTaskController {
@@ -30,13 +28,11 @@ export class UserTaskController {
   }
 
   @Post()
-  @RequirePermissions(Permission.TASKS)
   async create(@Body() dto: CreateUserTaskDto): Promise<UserTaskEntity> {
     return await this.userTaskService.create(dto);
   }
 
   @Patch(':id')
-  @RequirePermissions(Permission.TASKS)
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateUserTaskDto,
@@ -45,7 +41,6 @@ export class UserTaskController {
   }
 
   @Delete(':id')
-  @RequirePermissions(Permission.TASKS)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.userTaskService.remove(id);
   }

@@ -2,20 +2,12 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 
 export const FEATURE_FLAGS = [
-  'entities',
-  'authors',
   'canvas',
   'datasets',
-  'notes',
-  'calendar',
   'timelines',
   'knowledge_base',
   'bibliography',
-  'tasks',
-  'rag',
   'relationships',
-  'data_sources',
-  'assistants',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];

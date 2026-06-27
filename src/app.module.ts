@@ -94,22 +94,25 @@ export class AppModule {
       AuthModule,
       OfflineModule.register(),
       ArchiveModule,
+
+      // Base modules (always loaded)
+      NoteModule,
+      CalendarEventModule,
+      UserTaskModule,
+      AssistantModule,
+      AssistantMemoryModule,
+      IndexedFileModule,
+      AgentModule,
+      AuthorModule,
     ];
 
     // Toggleable feature modules
-    if (features.entities) imports.push(EntityTypeModule, EntityModule, PendingEntityModule);
-    if (features.authors) imports.push(AuthorModule);
     if (features.canvas) imports.push(CanvasModule);
-    if (features.datasets) imports.push(DatasetModule);
-    if (features.notes) imports.push(NoteModule);
-    if (features.calendar) imports.push(CalendarEventModule);
+    if (features.datasets) imports.push(DatasetModule, DataSourceModule);
     if (features.timelines) imports.push(TimelineModule, ResourceDateModule);
     if (features.knowledge_base) imports.push(KnowledgeBaseModule);
     if (features.bibliography) imports.push(BibliographyModule);
-    if (features.tasks) imports.push(UserTaskModule);
-    if (features.relationships) imports.push(RelationshipModule);
-    if (features.data_sources && features.datasets) imports.push(DataSourceModule);
-    if (features.assistants) imports.push(AssistantModule, AssistantMemoryModule, IndexedFileModule, AgentModule);
+    if (features.relationships) imports.push(EntityTypeModule, EntityModule, PendingEntityModule, RelationshipModule);
 
     return {
       module: AppModule,

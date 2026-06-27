@@ -16,10 +16,19 @@ export class CreateResourceTypes1757668140004 implements MigrationInterface {
     }
 
     private async seedResourceTypes(queryRunner: QueryRunner): Promise<void> {
-        const csvPath = path.join(__dirname, '..', 'data', 'resource-type.csv');
-        let resolvedPath = csvPath;
-        if (!fs.existsSync(resolvedPath)) {
-            resolvedPath = path.join(process.cwd(), 'backend', 'data', 'resource-type.csv');
+        // Resolve the seed CSV independently of the current working directory:
+        // migrations now run on backend boot (compiled, from any CWD), not only
+        // via the TypeORM CLI. __dirname is backend/migrations under ts-node and
+        // backend/dist/migrations once compiled.
+        const candidates = [
+            path.join(__dirname, '..', 'data', 'resource-type.csv'),       // ts-node: backend/data
+            path.join(__dirname, '..', '..', 'data', 'resource-type.csv'), // compiled: backend/data
+            path.join(process.cwd(), 'data', 'resource-type.csv'),         // CWD = backend
+            path.join(process.cwd(), 'backend', 'data', 'resource-type.csv'), // CWD = repo root
+        ];
+        const resolvedPath = candidates.find((p) => fs.existsSync(p));
+        if (!resolvedPath) {
+            throw new Error(`resource-type.csv not found (looked in: ${candidates.join(', ')})`);
         }
 
         const content = fs.readFileSync(resolvedPath, 'utf8');

@@ -8,17 +8,5 @@ export class ExportProjectsDto {
 
     @IsBoolean()
     @IsOptional()
-    includeOriginalFiles?: boolean;
-
-    @IsBoolean()
-    @IsOptional()
-    includeMetadata?: boolean;
-
-    @IsBoolean()
-    @IsOptional()
-    includeContent?: boolean;
-
-    @IsBoolean()
-    @IsOptional()
     convertToDocx?: boolean;
 }

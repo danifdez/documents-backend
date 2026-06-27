@@ -31,9 +31,6 @@ export class ExportService {
 
   async createExportArchive(
     projectIds: number[],
-    includeOriginalFiles: boolean,
-    includeMetadata: boolean,
-    includeContent: boolean,
     convertToDocx: boolean = false,
   ): Promise<{ stream: PassThrough; filename: string }> {
     const passThrough = new PassThrough();
@@ -101,7 +98,7 @@ export class ExportService {
         };
 
         // Add original file
-        if (includeOriginalFiles && resource.path) {
+        if (resource.path) {
           const fileBuffer = await this.fileStorageService.getFile(resource.path);
           if (fileBuffer) {
             const fileName = resource.originalName || `resource-${resource.id}`;
@@ -112,7 +109,7 @@ export class ExportService {
         }
 
         // Add extracted content
-        if (includeContent && resource.content) {
+        if (resource.content) {
           if (convertToDocx) {
             const docxBuffer = await this.htmlToDocx(resource.content);
             archive.append(docxBuffer, {
@@ -126,7 +123,7 @@ export class ExportService {
         }
 
         // Add translated content if available
-        if (includeContent && resource.translatedContent) {
+        if (resource.translatedContent) {
           if (convertToDocx) {
             const docxBuffer = await this.htmlToDocx(resource.translatedContent);
             archive.append(docxBuffer, {
@@ -140,11 +137,9 @@ export class ExportService {
         }
 
         // Add individual metadata file for this resource
-        if (includeMetadata) {
-          archive.append(JSON.stringify(resourceMeta, null, 2), {
-            name: `${sanitizedProjectName}/files/${resourceBaseName}.metadata.json`,
-          });
-        }
+        archive.append(JSON.stringify(resourceMeta, null, 2), {
+          name: `${sanitizedProjectName}/files/${resourceBaseName}.metadata.json`,
+        });
       }
 
       // Process docs
@@ -168,7 +163,7 @@ export class ExportService {
         };
 
         // Add doc content
-        if (includeContent && doc.content) {
+        if (doc.content) {
           if (convertToDocx) {
             const docxBuffer = await this.htmlToDocx(doc.content);
             archive.append(docxBuffer, {
@@ -182,11 +177,9 @@ export class ExportService {
         }
 
         // Add individual metadata file for this doc
-        if (includeMetadata) {
-          archive.append(JSON.stringify(docMeta, null, 2), {
-            name: `${sanitizedProjectName}/docs/${docFileName}.metadata.json`,
-          });
-        }
+        archive.append(JSON.stringify(docMeta, null, 2), {
+          name: `${sanitizedProjectName}/docs/${docFileName}.metadata.json`,
+        });
       }
 
       exportManifest.projects.push({
@@ -225,7 +218,7 @@ export class ExportService {
           status: resource.status,
         };
 
-        if (includeOriginalFiles && resource.path) {
+        if (resource.path) {
           const fileBuffer = await this.fileStorageService.getFile(resource.path);
           if (fileBuffer) {
             const fileName = resource.originalName || `resource-${resource.id}`;
@@ -235,7 +228,7 @@ export class ExportService {
           }
         }
 
-        if (includeContent && resource.content) {
+        if (resource.content) {
           if (convertToDocx) {
             const docxBuffer = await this.htmlToDocx(resource.content);
             archive.append(docxBuffer, {
@@ -248,11 +241,9 @@ export class ExportService {
           }
         }
 
-        if (includeMetadata) {
-          archive.append(JSON.stringify(resourceMeta, null, 2), {
-            name: `_sin_proyecto/files/${resourceBaseName}.metadata.json`,
-          });
-        }
+        archive.append(JSON.stringify(resourceMeta, null, 2), {
+          name: `_sin_proyecto/files/${resourceBaseName}.metadata.json`,
+        });
       }
 
       for (const doc of orphanDocs) {
@@ -274,7 +265,7 @@ export class ExportService {
           })),
         };
 
-        if (includeContent && doc.content) {
+        if (doc.content) {
           if (convertToDocx) {
             const docxBuffer = await this.htmlToDocx(doc.content);
             archive.append(docxBuffer, {
@@ -287,11 +278,9 @@ export class ExportService {
           }
         }
 
-        if (includeMetadata) {
-          archive.append(JSON.stringify(docMeta, null, 2), {
-            name: `_sin_proyecto/docs/${docFileName}.metadata.json`,
-          });
-        }
+        archive.append(JSON.stringify(docMeta, null, 2), {
+          name: `_sin_proyecto/docs/${docFileName}.metadata.json`,
+        });
       }
 
       exportManifest.projects.push({

@@ -135,19 +135,14 @@ info "Installing npm dependencies..."
 npm install
 ok "Dependencies installed"
 
-# ── Run base migrations (requires running PostgreSQL) ──
+# ── Run migrations (requires running PostgreSQL) ──
 if [ "${SKIP_MIGRATIONS:-}" = "1" ]; then
   info "Skipping migrations (SKIP_MIGRATIONS=1)"
 else
-  info "Running base database migrations..."
+  info "Running database migrations..."
   npm run migration:run
-  ok "Base migrations complete"
+  ok "Migrations complete"
 fi
-
-# ── Install enabled features ──
-info "Installing enabled features..."
-npm run feature:install
-ok "Feature installation complete"
 
 # ── Seed admin user if authentication is enabled ──
 AUTH_ENABLED="${AUTH_ENABLED:-false}"

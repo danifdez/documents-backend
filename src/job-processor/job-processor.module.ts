@@ -43,12 +43,6 @@ export class JobProcessorModule {
 
     // Dynamic imports for toggleable feature modules
     const featureImports: any[] = [];
-    if (features.entities) {
-      const { EntityModule } = require('../entity/entity.module');
-      const { EntityTypeModule } = require('../entity-type/entity-type.module');
-      const { PendingEntityModule } = require('../pending-entity/pending-entity.module');
-      featureImports.push(EntityModule, EntityTypeModule, PendingEntityModule);
-    }
 
     // All processors are registered; the factory skips those whose deps are missing
     const providers: any[] = [
@@ -64,37 +58,33 @@ export class JobProcessorModule {
       TranscribeProcessor,
       DeleteVectorsProcessor,
       SearchProcessor,
+      AssistantChatProcessor,
+      IndexedFileExtractionProcessor,
+      IndexedFileIngestProcessor,
     ];
 
-    if (features.entities) providers.push(EntityExtractionProcessor);
     if (features.timelines) {
       const { ResourceDateModule } = require('../resource-date/resource-date.module');
       featureImports.push(ResourceDateModule);
       providers.push(DateExtractionProcessor);
     }
     if (features.datasets) {
-      featureImports.push(DatasetModule);
-      providers.push(DatasetStatsProcessor, DatasetExtractionProcessor);
-    }
-    if (features.data_sources) {
       const { DataSourceModule } = require('../data-source/data-source.module');
-      featureImports.push(DataSourceModule);
-      providers.push(DataSourceSyncProcessor);
+      featureImports.push(DatasetModule, DataSourceModule);
+      providers.push(DatasetStatsProcessor, DatasetExtractionProcessor, DataSourceSyncProcessor);
     }
-    if (features.relationships) providers.push(
-      RelationshipExtractionProcessor,
-      RelationshipQueryProcessor,
-      RelationshipModifyProcessor,
-    );
-    if (features.assistants) {
-      featureImports.push(AssistantModule, AssistantMemoryModule, IndexedFileModule, AgentModule);
+    if (features.relationships) {
+      const { EntityModule } = require('../entity/entity.module');
+      const { EntityTypeModule } = require('../entity-type/entity-type.module');
+      const { PendingEntityModule } = require('../pending-entity/pending-entity.module');
+      featureImports.push(EntityModule, EntityTypeModule, PendingEntityModule);
       providers.push(
-        AssistantChatProcessor,
-        IndexedFileExtractionProcessor,
-        IndexedFileIngestProcessor,
+        EntityExtractionProcessor,
+        RelationshipExtractionProcessor,
+        RelationshipQueryProcessor,
+        RelationshipModifyProcessor,
       );
     }
-
     return {
       module: JobProcessorModule,
       imports: [
@@ -105,6 +95,10 @@ export class JobProcessorModule {
         JobModule,
         HttpModule,
         DatabaseModule,
+        AssistantModule,
+        AssistantMemoryModule,
+        IndexedFileModule,
+        AgentModule,
         ...featureImports,
       ],
       providers,

@@ -11,13 +11,10 @@ import { MarkEntity } from '../mark/mark.entity';
 import { NoteEntity } from '../note/note.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { FileStorageModule } from '../file-storage/file-storage.module';
-import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Module({})
 export class OfflineModule {
   static register() {
-    const features = readFeaturesFromEnv();
-
     const entities: any[] = [
       ResourceEntity,
       DocEntity,
@@ -25,9 +22,8 @@ export class OfflineModule {
       CommentEntity,
       MarkEntity,
       ProjectEntity,
+      NoteEntity,
     ];
-
-    if (features.notes) entities.push(NoteEntity);
 
     return {
       module: OfflineModule,

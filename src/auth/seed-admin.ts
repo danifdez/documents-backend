@@ -21,13 +21,10 @@ const ALL_PERMISSIONS: Record<string, boolean> = {
   'delete': true,
   'canvas': true,
   'datasets': true,
-  'notes': true,
-  'calendar': true,
   'timelines': true,
   'knowledge-base': true,
   'bibliography': true,
   'relationships': true,
-  'tasks': true,
   'user-management': true,
 };
 

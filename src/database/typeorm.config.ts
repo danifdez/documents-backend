@@ -94,12 +94,13 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       AppStateEntity,
     ],
     synchronize: false,
-    // In embedded/standalone mode the database is created empty, so the backend
-    // applies pending migrations on boot. Gated by env so dev (which runs
-    // `migration:run` manually) is unaffected. Idempotent: TypeORM only runs
-    // migrations not yet recorded in the migrations table.
+    // Apply pending migrations on every boot so that updates ship their schema
+    // automatically (a new release with a new migration runs it on first start).
+    // Idempotent: TypeORM only runs migrations not yet recorded in the
+    // `migrations` table. Set RUN_MIGRATIONS=false to opt out (e.g. when driving
+    // `migration:run` manually).
     migrations: [__dirname + '/../../migrations/*.js'],
-    migrationsRun: configService.get('RUN_MIGRATIONS') === 'true',
+    migrationsRun: configService.get('RUN_MIGRATIONS') !== 'false',
     logging: false,
   };
 };

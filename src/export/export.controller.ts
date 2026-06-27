@@ -21,19 +21,10 @@ export class ExportController {
     @Res() res: Response,
   ) {
     try {
-      const {
-        projectIds = [],
-        includeOriginalFiles = true,
-        includeMetadata = true,
-        includeContent = true,
-        convertToDocx = false,
-      } = body;
+      const { projectIds = [], convertToDocx = false } = body;
 
       const { stream, filename } = await this.exportService.createExportArchive(
         projectIds,
-        includeOriginalFiles,
-        includeMetadata,
-        includeContent,
         convertToDocx,
       );
 

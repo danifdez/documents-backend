@@ -15,8 +15,6 @@ import { CalendarEventService, CalendarEventOccurrence } from './calendar-event.
 import { CalendarEventEntity } from './calendar-event.entity';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
 import { EventOccurrenceCompletionService } from './event-occurrence-completion.service';
-import { RequirePermissions } from '../auth/decorators/permissions.decorator';
-import { Permission } from '../auth/permission.enum';
 
 @Controller('calendar-events')
 export class CalendarEventController {
@@ -56,13 +54,11 @@ export class CalendarEventController {
   }
 
   @Post()
-  @RequirePermissions(Permission.CALENDAR)
   async create(@Body() dto: CreateCalendarEventDto): Promise<CalendarEventEntity> {
     return await this.calendarEventService.create(dto);
   }
 
   @Patch(':id')
-  @RequirePermissions(Permission.CALENDAR)
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateCalendarEventDto,
@@ -71,14 +67,12 @@ export class CalendarEventController {
   }
 
   @Delete(':id')
-  @RequirePermissions(Permission.CALENDAR)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.calendarEventService.remove(id);
   }
 
   @Post(':id/occurrences/:date/complete')
   @HttpCode(204)
-  @RequirePermissions(Permission.CALENDAR)
   async markOccurrenceDone(
     @Param('id', ParseIntPipe) id: number,
     @Param('date') date: string,
@@ -89,7 +83,6 @@ export class CalendarEventController {
 
   @Delete(':id/occurrences/:date/complete')
   @HttpCode(204)
-  @RequirePermissions(Permission.CALENDAR)
   async unmarkOccurrenceDone(
     @Param('id', ParseIntPipe) id: number,
     @Param('date') date: string,

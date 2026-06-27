@@ -2,8 +2,6 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from 
 import { NoteService } from './note.service';
 import { NoteEntity } from './note.entity';
 import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
-import { RequirePermissions } from '../auth/decorators/permissions.decorator';
-import { Permission } from '../auth/permission.enum';
 
 @Controller('notes')
 export class NoteController {
@@ -35,13 +33,11 @@ export class NoteController {
   }
 
   @Post()
-  @RequirePermissions(Permission.NOTES)
   async create(@Body() dto: CreateNoteDto): Promise<NoteEntity> {
     return await this.noteService.create(dto);
   }
 
   @Patch(':id')
-  @RequirePermissions(Permission.NOTES)
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateNoteDto,
@@ -50,7 +46,6 @@ export class NoteController {
   }
 
   @Delete(':id')
-  @RequirePermissions(Permission.NOTES)
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.noteService.remove(id);
   }

@@ -18,12 +18,9 @@ export enum Permission {
   // Feature-specific
   CANVAS = 'canvas',
   DATASETS = 'datasets',
-  NOTES = 'notes',
-  CALENDAR = 'calendar',
   TIMELINES = 'timelines',
   KNOWLEDGE_BASE = 'knowledge-base',
   BIBLIOGRAPHY = 'bibliography',
   RELATIONSHIPS = 'relationships',
-  TASKS = 'tasks',
   USER_MANAGEMENT = 'user-management',
 }
