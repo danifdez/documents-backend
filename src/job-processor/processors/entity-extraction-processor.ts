@@ -12,8 +12,8 @@ export class EntityExtractionProcessor implements JobProcessor {
   private readonly logger = new Logger(EntityExtractionProcessor.name);
   private readonly JOB_TYPE = 'entity-extraction';
 
-  // Map spaCy entity types to standardized database entity types
-  // Comprehensive mapping for all spaCy en_core_web_trf entity types
+  // Map the NER labels emitted by the LLM extractor to standardized database
+  // entity types. The label set is kept in sync with the worker's ENTITIES_GBNF.
   private readonly entityTypeMapping = {
     // Geographic and political entities
     'GPE': 'GEOPOLITICAL',        // Countries, cities, states

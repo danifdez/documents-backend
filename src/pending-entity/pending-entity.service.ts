@@ -43,11 +43,6 @@ export class PendingEntityService {
         private readonly jobService: JobService,
     ) { }
 
-    // Helper to escape strings for use in RegExp
-    private escapeRegExp(str: string): string {
-        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
     async findAll(): Promise<PendingEntityEntity[]> {
         return await this.repository.find({
             relations: ['entityType', 'resource'],
@@ -156,12 +151,6 @@ export class PendingEntityService {
             throw new Error(`Resource with id ${resourceId} not found`);
         }
 
-        let workingContent = resource.workingContent || '';
-        let contentWasModified = false;
-
-        // Build a map of entity names and their aliases that need to be replaced
-        const replacements: Array<{ from: string; to: string }> = [];
-
         for (const pending of pendingEntities) {
             try {
                 // Get all aliases from the entity
@@ -211,19 +200,6 @@ export class PendingEntityService {
                     }
                 }
 
-                // Add aliases to replacements if they exist
-                if (allAliases.length > 0) {
-                    for (const alias of allAliases) {
-                        if (alias.value !== pending.name && alias.scope === 'document') {
-                            // This alias should be replaced in working_content
-                            replacements.push({
-                                from: alias.value,
-                                to: pending.name,
-                            });
-                        }
-                    }
-                }
-
                 // Always link entity to resource (creates resource_entities relation)
                 await this.resourceService.addEntityToResource(resourceId, entity);
 
@@ -235,47 +211,18 @@ export class PendingEntityService {
             }
         }
 
-        // Apply replacements to working_content (replace aliases with main entity names)
-        if (replacements.length > 0 && workingContent) {
-            for (const replacement of replacements) {
-                const pattern = new RegExp(`\\b${this.escapeRegExp(replacement.from)}\\b`, 'gi');
-                const newContent = workingContent.replace(pattern, replacement.to);
-                if (newContent !== workingContent) {
-                    workingContent = newContent;
-                    contentWasModified = true;
-                }
-            }
-
-            // Save updated working_content if it was modified
-            if (contentWasModified) {
-                await this.resourceService.update(resourceId, { workingContent });
-            }
-        }
-
-        // If content was modified and resource language is not English, trigger new translation
-        if (contentWasModified && resource.language && resource.language !== 'en') {
-            try {
-                // Create a translation job for the updated working_content
-                await this.jobService.create('translate', JobPriority.NORMAL, {
-                    translationType: 'content',
-                    resourceId,
-                    sourceLanguage: 'en',
-                    targetLanguage: resource.language,
-                    texts: [{ text: workingContent }],
-                });
-            } catch (error) {
-                errors.push(`Failed to create translation job after updating working_content: ${error.message}`);
-            }
-        }
-
-        // Update resource status to 'confirmed' and launch ingest-content job
+        // Update resource status to 'confirmed' and launch ingest-content job.
+        // Content is ingested as-is (original language, multilingual embedding):
+        // aliases are recorded on the entity but no longer substituted into the
+        // indexed text.
         await this.resourceService.update(resourceId, { status: 'confirmed' });
 
         const projectId = (resource.project && (resource.project as any).id) || (resource as any).projectId || null;
+        const content = await this.resourceService.getContentById(resourceId);
         await this.jobService.create('ingest-content', JobPriority.NORMAL, {
             resourceId,
             projectId,
-            content: workingContent || resource.content,
+            content,
         });
 
         // Trigger relationship extraction if feature enabled
@@ -285,8 +232,7 @@ export class PendingEntityService {
                 const allEntities = await this.entityService.findByResourceId(resourceId);
                 if (allEntities.length >= 2) {
                     // Fetch content explicitly (findOne excludes large text fields)
-                    const relText = workingContent
-                        || await this.resourceService.getWorkingContentById(resourceId)
+                    const relText = content
                         || await this.resourceService.getContentById(resourceId)
                         || '';
                     await this.jobService.create('relationship-extraction', JobPriority.NORMAL, {
@@ -380,44 +326,6 @@ export class PendingEntityService {
             // Always link entity to resource (creates resource_entities relation)
             await this.resourceService.addEntityToResource(pending.resourceId, entity);
 
-            let workingContent = resource.workingContent || '';
-            let contentWasModified = false;
-
-            // Replace document-scoped aliases in working_content
-            if (allAliases.length > 0 && workingContent) {
-                for (const alias of allAliases) {
-                    if (alias.value !== pending.name && alias.scope === 'document') {
-                        const pattern = new RegExp(`\\b${this.escapeRegExp(alias.value)}\\b`, 'gi');
-                        const newContent = workingContent.replace(pattern, pending.name);
-                        if (newContent !== workingContent) {
-                            workingContent = newContent;
-                            contentWasModified = true;
-                        }
-                    }
-                }
-
-                // Save updated working_content if it was modified
-                if (contentWasModified) {
-                    await this.resourceService.update(pending.resourceId, { workingContent });
-
-                    // If resource language is not English, trigger new translation
-                    if (resource.language && resource.language !== 'en') {
-                        try {
-                            await this.jobService.create('translate', JobPriority.NORMAL, {
-                                translationType: 'content',
-                                resourceId: pending.resourceId,
-                                sourceLanguage: 'en',
-                                targetLanguage: resource.language,
-                                texts: [{ text: workingContent }],
-                            });
-                        } catch (error) {
-                            // Log error but don't fail the confirmation
-                            console.error('Failed to create translation job:', error);
-                        }
-                    }
-                }
-            }
-
             // Remove the pending entity from database
             await this.repository.remove(pending);
 
@@ -470,29 +378,6 @@ export class PendingEntityService {
                 sourcePending.mergedAt = new Date();
                 const saved = await this.repository.save(sourcePending);
 
-                // If alias scope is document, and we have a resource, replace occurrences in working_content
-                // NOTE: For document-scoped aliases we replace occurrences of the alias text inside
-                // the resource.working_content with the target entity name. This is a straightforward
-                // regex-based, case-insensitive word-boundary replacement. It may not preserve
-                // original casing in every position and does not attempt to parse HTML. This is
-                // acceptable for the working_content which is normalized text used for entity extraction
-                // and search highlighting.
-                if (aliasScope === 'document' && sourcePending.resourceId) {
-                    try {
-                        const working = await this.resourceService.getWorkingContentById(sourcePending.resourceId);
-                        if (working) {
-                            // Replace full-word occurrences of the alias (case-insensitive)
-                            const pattern = new RegExp(`\\b${this.escapeRegExp(sourcePending.name)}\\b`, 'gi');
-                            const replaced = working.replace(pattern, targetPending.name || sourcePending.name);
-                            if (replaced !== working) {
-                                await this.resourceService.update(sourcePending.resourceId, { workingContent: replaced });
-                            }
-                        }
-                    } catch (err) {
-                        console.error('Failed to update working_content for document-scope alias merge (pending):', err);
-                    }
-                }
-
                 return { success: true, message: 'Entity marked as merged into pending entity', pending: saved } as any;
             } else {
                 // Merge into confirmed entity (update confirmed aliases)
@@ -514,22 +399,6 @@ export class PendingEntityService {
                 sourcePending.mergedTargetId = targetId;
                 sourcePending.mergedAt = new Date();
                 const saved = await this.repository.save(sourcePending);
-
-                // If alias scope is document, update working_content replacing alias with confirmed entity name
-                if (aliasScope === 'document' && sourcePending.resourceId) {
-                    try {
-                        const working = await this.resourceService.getWorkingContentById(sourcePending.resourceId);
-                        if (working) {
-                            const pattern = new RegExp(`\\b${this.escapeRegExp(sourcePending.name)}\\b`, 'gi');
-                            const replaced = working.replace(pattern, confirmedEntity.name || sourcePending.name);
-                            if (replaced !== working) {
-                                await this.resourceService.update(sourcePending.resourceId, { workingContent: replaced });
-                            }
-                        }
-                    } catch (err) {
-                        console.error('Failed to update working_content for document-scope alias merge (confirmed):', err);
-                    }
-                }
 
                 return { success: true, message: 'Entity marked as merged into confirmed entity', pending: saved } as any;
             }

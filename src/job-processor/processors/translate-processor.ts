@@ -8,7 +8,6 @@ import * as cheerio from 'cheerio';
 import { JobService } from 'src/job/job.service';
 import { JobEntity } from 'src/job/job.entity';
 import { PendingEntityService } from 'src/pending-entity/pending-entity.service';
-import { extractTextFromHtml } from 'src/utils/text';
 
 @Injectable()
 export class TranslateProcessor implements JobProcessor {
@@ -481,17 +480,13 @@ export class TranslateProcessor implements JobProcessor {
       throw new Error(errorMessage);
     }
 
-    // Determine source content: try content, workingContent, then translatedContent
     let sourceContent = resource;
-    let contentSource = 'content';
 
     if (!sourceContent) {
-      const errorMessage = `Resource ${resourceId} has no content in any field (content, workingContent, translatedContent). Cannot translate.`;
+      const errorMessage = `Resource ${resourceId} has no content. Cannot translate.`;
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
     }
-
-    this.logger.log(`Using ${contentSource} as source for translation of resource ${resourceId}`);
 
     if (typeof sourceContent !== 'string') {
       // If the content is an object (e.g., already parsed), attempt to stringify it safely
@@ -533,48 +528,6 @@ export class TranslateProcessor implements JobProcessor {
     await this.resourceService.update(resourceId, {
       [saveTo]: bodyContent,
     });
-    const resourceEntity = await this.resourceService.findOne(resourceId);
-
-    if (resourceEntity.status === 'translating') {
-      // Update status to 'entities' and launch entity extraction job
-      await this.resourceService.update(resourceId, { status: 'entities' });
-      const resourceContent = await this.resourceService.getContentById(resourceId);
-
-      const extractedTexts = extractTextFromHtml(resourceContent || '');
-
-      const agentEnabled = process.env.AGENT_ENTITY_EXTRACTION === 'true';
-      const agentMaxSteps = parseInt(process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6', 10);
-      await this.jobService.create(
-        'entity-extraction',
-        JobPriority.NORMAL,
-        {
-          resourceId: resourceId,
-          texts: extractedTexts,
-        },
-        agentEnabled ? { maxSteps: agentMaxSteps, kind: 'agent' } : undefined,
-      );
-
-      const anchorDate = resourceEntity.publicationDate
-        ? String(resourceEntity.publicationDate).slice(0, 10)
-        : null;
-      const englishContent = await this.resourceService.getEnglishContentById(resourceId);
-      await this.jobService.create('date-extraction', JobPriority.NORMAL, {
-        resourceId,
-        text: englishContent || '',
-        language: 'en',
-        anchorDate,
-      });
-    }
-
-    // Ingest translated content into vector database
-    if (job.payload['triggerIngest']) {
-      const projectId = (resourceEntity?.project as any)?.id || null;
-      await this.jobService.create('ingest-content', JobPriority.NORMAL, {
-        resourceId,
-        projectId,
-        content: bodyContent,
-      });
-    }
 
     return {
       success: true,

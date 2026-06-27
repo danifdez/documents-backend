@@ -97,7 +97,7 @@ export class ModelService {
 
     // Create job for entity extraction. When AGENT_ENTITY_EXTRACTION=true,
     // the worker routes the job through the agent loop instead of the
-    // one-shot spaCy handler.
+    // one-shot LLM handler.
     const agentEnabled = process.env.AGENT_ENTITY_EXTRACTION === 'true';
     const agentMaxSteps = parseInt(process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6', 10);
     await this.jobService.create(

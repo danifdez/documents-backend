@@ -46,23 +46,6 @@ export class ResourceService {
     return resource?.translatedContent ?? null;
   }
 
-  async getWorkingContentById(id: number): Promise<string | null> {
-    const resource = await this.repo.findOne({
-      select: ['workingContent'],
-      where: { id },
-    });
-    return resource?.workingContent ?? null;
-  }
-
-  async getEnglishContentById(id: number): Promise<string | null> {
-    const resource = await this.repo.findOne({
-      select: ['content', 'workingContent'],
-      where: { id },
-    });
-    if (!resource) return null;
-    return resource.workingContent ?? resource.content ?? null;
-  }
-
   async create(resource: Partial<ResourceEntity>): Promise<ResourceEntity> {
     const created = this.repo.create(resource);
     return await this.repo.save(created);
@@ -164,12 +147,12 @@ export class ResourceService {
     const saved = await this.repo.save(existing);
 
     if (anchorChanged) {
-      const content = await this.getEnglishContentById(id);
+      const content = await this.getContentById(id);
       if (content) {
         await this.jobService.create('date-extraction', JobPriority.NORMAL, {
           resourceId: id,
           text: content,
-          language: 'en',
+          language: saved.language || null,
           anchorDate: newAnchor,
         });
       }

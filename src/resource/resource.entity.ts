@@ -83,9 +83,6 @@ export class ResourceEntity {
   @Column({ type: 'text', name: 'translated_content', nullable: true })
   translatedContent: string | null;
 
-  @Column({ type: 'text', name: 'working_content', nullable: true })
-  workingContent: string | null;
-
   @Column({ type: 'text', nullable: true })
   summary: string | null;
 

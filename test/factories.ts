@@ -62,7 +62,6 @@ export function buildResource(overrides: Partial<ResourceEntity> = {}): Resource
     publicationDate: null,
     content: null,
     translatedContent: null,
-    workingContent: null,
     summary: null,
     keyPoints: null,
     keywords: null,

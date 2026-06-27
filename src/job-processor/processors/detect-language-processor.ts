@@ -4,7 +4,6 @@ import { ResourceService } from 'src/resource/resource.service';
 import { JobService } from 'src/job/job.service';
 import { JobPriority } from 'src/job/job-priority.enum';
 import { JobEntity } from 'src/job/job.entity';
-import { extractTextFromHtml } from 'src/utils/text';
 
 @Injectable()
 export class DetectLanguageProcessor implements JobProcessor {
@@ -41,48 +40,29 @@ export class DetectLanguageProcessor implements JobProcessor {
         return;
       }
 
-      if (detectedLanguage === 'en') {
-        // English: set workingContent = content and ingest immediately
-        await this.resourceService.update(resourceId, {
-          language: detectedLanguage,
-          workingContent: content,
-          status: 'ready',
-        });
+      // Original language is preserved — no translation. The content is ingested
+      // as-is (multilingual embedding) and dates are extracted in the document's
+      // own language.
+      await this.resourceService.update(resourceId, {
+        language: detectedLanguage,
+        status: 'ready',
+      });
 
-        await this.jobService.create('ingest-content', JobPriority.NORMAL, {
-          resourceId,
-          projectId,
-          content,
-        });
+      await this.jobService.create('ingest-content', JobPriority.NORMAL, {
+        resourceId,
+        projectId,
+        content,
+      });
 
-        const anchorDate = resource?.publicationDate
-          ? String(resource.publicationDate).slice(0, 10)
-          : null;
-        const englishContent = await this.resourceService.getEnglishContentById(resourceId);
-        await this.jobService.create('date-extraction', JobPriority.NORMAL, {
-          resourceId,
-          text: englishContent || content,
-          language: 'en',
-          anchorDate,
-        });
-      } else {
-        // Non-English: translate content to English, save to workingContent, then ingest
-        await this.resourceService.update(resourceId, {
-          language: detectedLanguage,
-          status: 'ready',
-        });
-
-        const extractedTexts = extractTextFromHtml(content);
-        await this.jobService.create('translate', JobPriority.NORMAL, {
-          translationType: 'content',
-          resourceId,
-          sourceLanguage: detectedLanguage,
-          targetLanguage: 'en',
-          saveTo: 'workingContent',
-          triggerIngest: true,
-          texts: extractedTexts,
-        });
-      }
+      const anchorDate = resource?.publicationDate
+        ? String(resource.publicationDate).slice(0, 10)
+        : null;
+      await this.jobService.create('date-extraction', JobPriority.NORMAL, {
+        resourceId,
+        text: content,
+        language: detectedLanguage,
+        anchorDate,
+      });
     }
   }
 }
