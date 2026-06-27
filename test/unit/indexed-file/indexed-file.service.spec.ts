@@ -284,27 +284,29 @@ describe('IndexedFileService', () => {
     expect(payload).toMatchObject({ extension: '.md' });
   });
 
-  describe('vector cleanup', () => {
-    it('deleteFile enqueues an indexed-file-delete-vectors job by sourceId', async () => {
+  // Vector chunks are removed by the indexed_file_chunks.indexed_file_id FK
+  // (ON DELETE CASCADE), so deleting the row is enough — no cleanup job needed.
+  describe('vector cleanup (ON DELETE CASCADE)', () => {
+    it('deleteFile removes the row and enqueues no delete-vectors job', async () => {
       const e = await service.writeFile(OWNER_TYPE, assistantId, 'a.md', 'x', { overwrite: false });
       jobService.create.mockClear();
       await service.deleteFile(e.id, { ownerType: OWNER_TYPE, ownerId: assistantId });
+      expect(indexedRepo.store.size).toBe(0);
       const cleanupCall = jobService.create.mock.calls.find(
         (c) => c[0] === 'indexed-file-delete-vectors',
       );
-      expect(cleanupCall).toBeDefined();
-      expect(cleanupCall![2]).toMatchObject({ sourceId: `indexed_file_${e.id}` });
+      expect(cleanupCall).toBeUndefined();
     });
 
-    it('clearAllForOwner enqueues per-file vector cleanup', async () => {
-      const e = await service.writeFile(OWNER_TYPE, assistantId, 'a.md', 'x', { overwrite: false });
+    it('clearAllForOwner removes the rows and enqueues no delete-vectors job', async () => {
+      await service.writeFile(OWNER_TYPE, assistantId, 'a.md', 'x', { overwrite: false });
       jobService.create.mockClear();
       await service.clearAllForOwner(OWNER_TYPE, assistantId);
+      expect(indexedRepo.store.size).toBe(0);
       const cleanupCall = jobService.create.mock.calls.find(
         (c) => c[0] === 'indexed-file-delete-vectors',
       );
-      expect(cleanupCall).toBeDefined();
-      expect(cleanupCall![2]).toMatchObject({ sourceId: `indexed_file_${e.id}` });
+      expect(cleanupCall).toBeUndefined();
     });
   });
 });

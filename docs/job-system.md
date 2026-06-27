@@ -56,7 +56,7 @@ The 13 built-in processors are:
 | `keywords` | `keywords` | Receives the keywords list and stores it on the resource |
 | `ask` | `ask` | Handles RAG question-answering; emits the answer to the frontend via WebSocket |
 | `dataset-stats` | `dataset-stats` | Computes and stores descriptive statistics for a dataset |
-| `delete-vectors` | `delete-vectors` | Removes vector embeddings from Qdrant when a resource is deleted |
+| `delete-vectors` | `delete-vectors` | Removes vector embeddings (pgvector `rag_chunks`) when a resource is deleted |
 
 ### Full document processing pipeline
 

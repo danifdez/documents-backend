@@ -223,9 +223,9 @@ export class IndexedFileService {
       if (err?.code !== 'ENOENT') this.mapFsError(err);
     }
 
+    // Chunks are removed automatically: indexed_file_chunks.indexed_file_id is a
+    // FK to indexed_files(id) ON DELETE CASCADE.
     await this.repository.delete({ id: file.id });
-
-    void this.enqueueVectorCleanup({ sourceId: sourceIdForIndexedFile(file.id) });
   }
 
   async deleteByFilename(
@@ -254,10 +254,8 @@ export class IndexedFileService {
       select: ['id'],
     });
     if (rows.length === 0) return;
+    // Deleting the rows cascades to their indexed_file_chunks.
     await this.repository.delete({ ownerType, ownerId });
-    for (const row of rows) {
-      void this.enqueueVectorCleanup({ sourceId: sourceIdForIndexedFile(row.id) });
-    }
   }
 
   async hasFolderConfigured(
@@ -376,8 +374,8 @@ export class IndexedFileService {
       stat = await fs.stat(row.filePath);
     } catch (err: any) {
       if (err?.code === 'ENOENT') {
+        // Row delete cascades to indexed_file_chunks.
         await this.repository.delete({ id: row.id });
-        void this.enqueueVectorCleanup({ sourceId: sourceIdForIndexedFile(row.id) });
         return { ok: false, error: 'not_found', filename: row.filename };
       }
       this.mapFsError(err);

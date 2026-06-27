@@ -52,30 +52,6 @@ export class AssistantMemoryService {
     }
   }
 
-  private async enqueueDeleteOne(memoryId: number): Promise<void> {
-    try {
-      await this.jobService.create('memory-delete-vectors', JobPriority.BACKGROUND, {
-        memoryId,
-      });
-    } catch (e: any) {
-      this.logger.warn(
-        `memory-delete-vectors (single) enqueue failed for memory ${memoryId}: ${e?.message ?? e}`,
-      );
-    }
-  }
-
-  private async enqueueDeleteByAssistant(assistantId: number): Promise<void> {
-    try {
-      await this.jobService.create('memory-delete-vectors', JobPriority.BACKGROUND, {
-        assistantId,
-      });
-    } catch (e: any) {
-      this.logger.warn(
-        `memory-delete-vectors (bulk) enqueue failed for assistant ${assistantId}: ${e?.message ?? e}`,
-      );
-    }
-  }
-
   async list(assistantId: number): Promise<MemoryEntryEntity[]> {
     await this.ensureCanHaveMemory(assistantId);
     return this.memoryRepo.find({
@@ -240,14 +216,15 @@ export class AssistantMemoryService {
     await this.ensureCanHaveMemory(assistantId);
     const entry = await this.memoryRepo.findOne({ where: { id, assistantId } });
     if (!entry) throw new NotFoundException(`Memory entry ${id} not found`);
+    // The memory vector is removed automatically: memory_vectors.memory_id is a
+    // FK to assistant_memory_entries(id) ON DELETE CASCADE.
     await this.memoryRepo.remove(entry);
-    void this.enqueueDeleteOne(id);
   }
 
   async clear(assistantId: number): Promise<{ deleted: number }> {
     await this.ensureCanHaveMemory(assistantId);
+    // Deleting the entries cascades to their memory_vectors rows.
     const res = await this.memoryRepo.delete({ assistantId });
-    void this.enqueueDeleteByAssistant(assistantId);
     return { deleted: res.affected ?? 0 };
   }
 }
