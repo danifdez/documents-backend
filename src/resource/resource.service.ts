@@ -367,7 +367,7 @@ export class ResourceService {
     if (resource && resource.path) {
       await this.fileStorageService.deleteFile(resource.path);
     }
-    // Cleanup Neo4j relationships for this resource
+    // Cleanup graph relationships for this resource
     try {
       await this.jobService.create('relationship-modify', JobPriority.BACKGROUND, {
         action: 'delete-by-resource',

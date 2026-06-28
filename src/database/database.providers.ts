@@ -19,6 +19,7 @@ export const databaseProviders = [
       await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
       await pool.query('CREATE EXTENSION IF NOT EXISTS unaccent');
       await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
+      await pool.query('CREATE EXTENSION IF NOT EXISTS age');
       return pool;
     },
   },
