@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, ParseIntPipe, HttpCode } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { AssistantService } from './assistant.service';
 import { AssistantEntity } from './assistant.entity';
@@ -42,8 +42,12 @@ export class AssistantController {
   }
 
   @Get(':id/messages')
-  async getMessages(@Param('id', ParseIntPipe) id: number): Promise<AssistantMessageEntity[]> {
-    return this.service.getMessages(id);
+  async getMessages(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('before', new ParseIntPipe({ optional: true })) before?: number,
+  ): Promise<{ messages: AssistantMessageEntity[]; hasMore: boolean }> {
+    return this.service.getMessages(id, { limit, before });
   }
 
   @Post(':id/messages')

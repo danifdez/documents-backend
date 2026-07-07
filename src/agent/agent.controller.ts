@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   ParseIntPipe,
   HttpCode,
 } from '@nestjs/common';
@@ -62,9 +63,11 @@ export class AgentController {
   @Get(':id/messages')
   async getMessages(
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<AgentMessageDto[]> {
-    const msgs = await this.service.getMessages(id);
-    return msgs.map(toAgentMessageDto);
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('before', new ParseIntPipe({ optional: true })) before?: number,
+  ): Promise<{ messages: AgentMessageDto[]; hasMore: boolean }> {
+    const { messages, hasMore } = await this.service.getMessages(id, { limit, before });
+    return { messages: messages.map(toAgentMessageDto), hasMore };
   }
 
   @Post(':id/messages')

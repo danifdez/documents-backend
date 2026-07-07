@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { AgentEntity } from './agent.entity';
 import { AgentMessageEntity } from './agent-message.entity';
 import {
@@ -26,12 +26,8 @@ import {
   AGENT_UNFAVORITE_GRACE_MS,
 } from './agent.constants';
 
-export const DEFAULT_AGENT_SYSTEM_PROMPT = [
-  'You are an agent created by the user for a specific task.',
-  'Your scope is strictly limited to the files inside your working folder, if one is configured.',
-  'You do not have access to the user\'s workspace, notes, memory, or any other resource.',
-  'If asked about anything beyond your folder, say you cannot see it and suggest the user redirect the request to their main assistant.',
-].join(' ');
+const MESSAGE_PAGE_SIZE = 50;
+const MAX_MESSAGE_PAGE_SIZE = 200;
 
 @Injectable()
 export class AgentService {
@@ -132,12 +128,29 @@ export class AgentService {
     await this.agentRepo.remove(a);
   }
 
-  async getMessages(agentId: number): Promise<AgentMessageEntity[]> {
+  async getMessages(
+    agentId: number,
+    opts: { limit?: number; before?: number } = {},
+  ): Promise<{ messages: AgentMessageEntity[]; hasMore: boolean }> {
     await this.findOne(agentId);
-    return this.messageRepo.find({
-      where: { agentId },
-      order: { createdAt: 'ASC', id: 'ASC' },
+    const limit = Math.min(
+      Math.max(opts.limit ?? MESSAGE_PAGE_SIZE, 1),
+      MAX_MESSAGE_PAGE_SIZE,
+    );
+    const where: Record<string, any> = { agentId };
+    if (opts.before != null) where.id = LessThan(opts.before);
+    // Keyset pagination by id (monotonic, append-only): fetch the newest
+    // `limit + 1` rows to detect whether older history remains, then return
+    // them in ascending order for the UI.
+    const rows = await this.messageRepo.find({
+      where,
+      order: { id: 'DESC' },
+      take: limit + 1,
     });
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    page.reverse();
+    return { messages: page, hasMore };
   }
 
   async sendMessage(
@@ -157,11 +170,15 @@ export class AgentService {
     this.touchInteraction(agent);
     await this.agentRepo.save(agent);
 
-    const history = await this.messageRepo.find({
+    // Only ship a recent slice as transport — models decides the real context
+    // window (history_turns). Never send the whole thread.
+    const recent = await this.messageRepo.find({
       where: { agentId },
-      order: { createdAt: 'ASC', id: 'ASC' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: 40,
     });
-    const conversation = history
+    const conversation = recent
+      .reverse()
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
 

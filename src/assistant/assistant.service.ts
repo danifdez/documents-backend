@@ -1,21 +1,16 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject, forwardRef, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
 import { CreateAssistantDto, UpdateAssistantDto } from './dto/assistant.dto';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
-import { AssistantMemoryService } from '../assistant-memory/assistant-memory.service';
 import { IndexedFileService } from '../indexed-file/indexed-file.service';
 import { validateFolderScope, folderScopeReasonToMessage } from './folder-scope.validator';
 
-export const DEFAULT_SYSTEM_PROMPT = [
-  'You are the user\'s personal assistant in this workspace.',
-  'To look up workspace content (notes, files, tasks, knowledge base, canvases) you MUST use the `search_workspace` tool — do NOT say "I don\'t have access", call the tool. Only after receiving results may you reply to the user.',
-  'You have persistent memory about the user; lean on it when relevant.',
-  'You are concise and clear, and respond in English by default. When asked to do something, do it or explain what you need to do it. Avoid filler.',
-].join(' ');
+export const MESSAGE_PAGE_SIZE = 50;
+const MAX_MESSAGE_PAGE_SIZE = 200;
 
 @Injectable()
 export class AssistantService implements OnApplicationBootstrap {
@@ -27,7 +22,6 @@ export class AssistantService implements OnApplicationBootstrap {
     @InjectRepository(AssistantMessageEntity)
     private readonly messageRepo: Repository<AssistantMessageEntity>,
     private readonly jobService: JobService,
-    private readonly memoryService: AssistantMemoryService,
     @Inject(forwardRef(() => IndexedFileService))
     private readonly indexedFileService: IndexedFileService,
   ) {}
@@ -48,7 +42,6 @@ export class AssistantService implements OnApplicationBootstrap {
         name: 'Assistant',
         icon: '◇',
         isSystem: true,
-        systemPrompt: DEFAULT_SYSTEM_PROMPT,
         sub: 'Your personal assistant',
       });
       personal = await this.assistantRepo.save(personal);
@@ -117,12 +110,29 @@ export class AssistantService implements OnApplicationBootstrap {
     await this.assistantRepo.remove(a);
   }
 
-  async getMessages(assistantId: number): Promise<AssistantMessageEntity[]> {
+  async getMessages(
+    assistantId: number,
+    opts: { limit?: number; before?: number } = {},
+  ): Promise<{ messages: AssistantMessageEntity[]; hasMore: boolean }> {
     await this.findOne(assistantId);
-    return this.messageRepo.find({
-      where: { assistantId },
-      order: { createdAt: 'ASC', id: 'ASC' },
+    const limit = Math.min(
+      Math.max(opts.limit ?? MESSAGE_PAGE_SIZE, 1),
+      MAX_MESSAGE_PAGE_SIZE,
+    );
+    const where: Record<string, any> = { assistantId };
+    if (opts.before != null) where.id = LessThan(opts.before);
+    // Keyset pagination by id (monotonic, append-only): fetch the newest
+    // `limit + 1` rows to detect whether older history remains, then return
+    // them in ascending order for the UI.
+    const rows = await this.messageRepo.find({
+      where,
+      order: { id: 'DESC' },
+      take: limit + 1,
     });
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    page.reverse();
+    return { messages: page, hasMore };
   }
 
   async sendMessage(assistantId: number, content: string): Promise<{ userMessage: AssistantMessageEntity; jobId: number | null }> {
@@ -142,34 +152,17 @@ export class AssistantService implements OnApplicationBootstrap {
     await this.assistantRepo.save(assistant);
 
     // Build conversation history for the worker
-    const history = await this.messageRepo.find({
+    // Only ship a recent slice as transport — models decides the real context
+    // window (history_turns). Never send the whole thread.
+    const recent = await this.messageRepo.find({
       where: { assistantId },
-      order: { createdAt: 'ASC', id: 'ASC' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: 40,
     });
-    const conversation = history
+    const conversation = recent
+      .reverse()
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
-
-    // Retrieve memory entries by relevance to the user's current message.
-    // Only the system assistant has memory; for ayudantes this returns [].
-    const memoryEntries = await this.memoryService.relevantForInjection(
-      assistantId,
-      content,
-      8,
-    );
-    const memorySnippets = memoryEntries.map((m) => ({
-      id: m.id,
-      name: m.name,
-      type: m.type,
-      body: m.body,
-      relevance: m.relevance,
-    }));
-
-    // Memory extraction runs on every turn for the personal assistant — the
-    // LLM itself decides if there's something worth saving (returns an empty
-    // entry otherwise). This avoids language-specific heuristics like keyword
-    // regexes that only catch one locale.
-    const extractMemory = assistant.isSystem;
 
     // Create job for the worker
     const job = await this.jobService.create('assistant-chat', JobPriority.HIGH, {
@@ -179,11 +172,8 @@ export class AssistantService implements OnApplicationBootstrap {
       assistantId,
       assistantName: assistant.name,
       assistantSystem: assistant.isSystem,
-      systemPrompt: assistant.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       folderScope: assistant.folderScope,
       conversation,
-      memorySnippets,
-      extractMemory,
     });
 
     return { userMessage: userMsg, jobId: job?.id ?? null };
