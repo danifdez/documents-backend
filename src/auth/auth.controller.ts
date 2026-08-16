@@ -8,6 +8,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { FeatureFlagService } from '../common/feature-flags.service';
+import { InferenceService } from '../common/inference.service';
 
 @Controller('auth')
 export class AuthController {
@@ -15,6 +16,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly featureFlagService: FeatureFlagService,
     private readonly avatarService: AvatarService,
+    private readonly inferenceService: InferenceService,
   ) {}
 
   @Public()
@@ -24,6 +26,10 @@ export class AuthController {
       authEnabled: this.authService.isAuthEnabled(),
       offlineEnabled: this.authService.isOfflineEnabled(),
       features: this.featureFlagService.getEnabledFeatures(),
+      // Clients that bring their own engine — the embedded browser does —
+      // shut it down and use this one, so the machine loads a single model.
+      // Null when this installation doesn't share one.
+      inference: this.inferenceService.getSharedEngine(),
     };
   }
 

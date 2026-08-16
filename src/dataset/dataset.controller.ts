@@ -7,7 +7,6 @@ import { DatasetCsvService } from './dataset-csv.service';
 import { DatasetExtractionService } from './dataset-extraction.service';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
-import { ResourceService } from '../resource/resource.service';
 import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CsvImportMappingDto, BulkDeleteRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto, ReExtractRowDto, ReExtractCellDto } from './dto/dataset.dto';
 import { ImportDatasetDto, ImportConfirmDto } from './dto/import-dataset.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -20,7 +19,6 @@ export class DatasetController {
         private readonly queryService: DatasetQueryService,
         private readonly csvService: DatasetCsvService,
         private readonly extractionService: DatasetExtractionService,
-        private readonly resourceService: ResourceService,
         private readonly jobService: JobService,
     ) { }
 
@@ -44,16 +42,7 @@ export class DatasetController {
         const name = dto.name || file.originalname?.replace(/\.\w+$/, '') || 'Imported dataset';
         const projectId = dto.projectId ? Number(dto.projectId) : undefined;
 
-        // Build records mapping each header to its inferred field key
-        const keyMap = new Map(headers.map((h, i) => [i, schema[i].key]));
-        const records = rows.map(row => {
-            const record: Record<string, any> = {};
-            row.forEach((value, i) => {
-                const key = keyMap.get(i);
-                if (key) record[key] = value;
-            });
-            return record;
-        });
+        const records = this.csvService.mapRowsToRecords(schema, rows);
 
         return await this.datasetService.createFromCsv(name, schema, records, projectId);
     }
@@ -69,15 +58,7 @@ export class DatasetController {
         const name = body.name || 'Table Dataset';
         const projectId = body.projectId ? Number(body.projectId) : undefined;
 
-        const keyMap = new Map(body.headers.map((h, i) => [i, schema[i].key]));
-        const records = (body.rows || []).map(row => {
-            const record: Record<string, any> = {};
-            row.forEach((value, i) => {
-                const key = keyMap.get(i);
-                if (key) record[key] = value;
-            });
-            return record;
-        });
+        const records = this.csvService.mapRowsToRecords(schema, body.rows || []);
 
         return await this.datasetService.createFromCsv(name, schema, records, projectId);
     }
@@ -140,28 +121,7 @@ export class DatasetController {
     @Post('propose-columns')
     @RequirePermissions(Permission.DATASETS)
     async proposeColumns(@Body() body: { resourceIds: number[]; projectId?: number }) {
-        if (!body?.resourceIds || !Array.isArray(body.resourceIds) || body.resourceIds.length === 0) {
-            throw new HttpException('resourceIds is required and must be non-empty', HttpStatus.BAD_REQUEST);
-        }
-        // Pull excerpts (max 3 resources, first ~2000 chars each) — backend
-        // does the IO so the worker stays a pure LLM call.
-        const slice = body.resourceIds.slice(0, 3);
-        const excerpts = [] as Array<{ id: number; title: string; excerpt: string }>;
-        for (const rid of slice) {
-            const meta = await this.resourceService.findOne(rid);
-            if (!meta) continue;
-            const content = await this.resourceService.getContentById(rid);
-            const text = (content ?? '').slice(0, 2000);
-            excerpts.push({ id: rid, title: meta.title || meta.name || `resource ${rid}`, excerpt: text });
-        }
-        if (excerpts.length === 0 || excerpts.every((e) => !e.excerpt.trim())) {
-            throw new HttpException('no readable content in any of the given resources', HttpStatus.BAD_REQUEST);
-        }
-        const job = await this.jobService.create('dataset.propose-columns', JobPriority.NORMAL, {
-            projectId: body.projectId ?? null,
-            resources: excerpts,
-        });
-        return { jobId: job?.id ?? null };
+        return await this.extractionService.proposeColumns(body?.resourceIds, body?.projectId);
     }
 
     @Get('propose-columns/:jobId')
@@ -385,39 +345,9 @@ export class DatasetController {
         @Query('include_anchors') includeAnchorsQuery: string | undefined,
         @Res() res: Response,
     ) {
-        const dataset = await this.datasetService.findOneDataset(id);
-        if (!dataset) {
-            throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
-        }
-
-        const records = await this.datasetService.findAllRecords(id);
         const includeAnchors = includeAnchorsQuery === 'true' || includeAnchorsQuery === '1';
+        const { filename, csv } = await this.datasetService.exportCsv(id, { includeAnchors });
 
-        let resolver: ((rid: number) => string) | undefined;
-        if (includeAnchors) {
-            const ids = new Set<number>();
-            for (const r of records) {
-                const meta = (r as any).cellMetadata as Record<string, any> | null;
-                if (!meta) continue;
-                for (const key of Object.keys(meta)) {
-                    const sid = meta[key]?.sourceResourceId;
-                    if (typeof sid === 'number') ids.add(sid);
-                }
-            }
-            const resources = await this.resourceService.findByIds([...ids]);
-            const map = new Map<number, string>();
-            for (const r of resources) {
-                map.set(r.id, r.title || r.name || `Resource ${r.id}`);
-            }
-            resolver = (rid: number) => map.get(rid) || '';
-        }
-
-        const csv = this.csvService.exportRecordsCsv(dataset.schema, records, {
-            includeAnchors,
-            resourceTitleResolver: resolver,
-        });
-
-        const filename = dataset.name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.csv';
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(csv);

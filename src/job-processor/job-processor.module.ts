@@ -35,6 +35,11 @@ import { AssistantMemoryModule } from '../assistant-memory/assistant-memory.modu
 import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 import { AgentModule } from '../agent/agent.module';
 import { readFeaturesFromEnv } from '../common/feature-flags';
+import { ContentTranslationStrategy } from './processors/translate/content-translation.strategy';
+import { EntitiesPendingBatchTranslationStrategy } from './processors/translate/entities-pending-batch-translation.strategy';
+import { EntityRetranslationStrategy } from './processors/translate/entity-retranslation.strategy';
+import { EntitiesBatchTranslationStrategy } from './processors/translate/entities-batch-translation.strategy';
+import { EntityTranslationStrategy } from './processors/translate/entity-translation.strategy';
 
 @Module({})
 export class JobProcessorModule {
@@ -50,6 +55,7 @@ export class JobProcessorModule {
       DocumentExtractionProcessor,
       DetectLanguageProcessor,
       TranslateProcessor,
+      ContentTranslationStrategy,
       IngestContentProcessor,
       SummarizeProcessor,
       KeyPointsProcessor,
@@ -83,6 +89,10 @@ export class JobProcessorModule {
         RelationshipExtractionProcessor,
         RelationshipQueryProcessor,
         RelationshipModifyProcessor,
+        EntitiesPendingBatchTranslationStrategy,
+        EntityRetranslationStrategy,
+        EntitiesBatchTranslationStrategy,
+        EntityTranslationStrategy,
       );
     }
     return {

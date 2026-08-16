@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DatasetEntity, DatasetField } from './dataset.entity';
@@ -107,6 +107,34 @@ export class DatasetExtractionService {
             [fieldKey],
             dataset.project?.id ?? null,
         );
+        return { jobId: job?.id ?? null };
+    }
+
+    async proposeColumns(
+        resourceIds: number[],
+        projectId?: number,
+    ): Promise<{ jobId: number | null }> {
+        if (!resourceIds || !Array.isArray(resourceIds) || resourceIds.length === 0) {
+            throw new HttpException('resourceIds is required and must be non-empty', HttpStatus.BAD_REQUEST);
+        }
+        // Pull excerpts (max 3 resources, first ~2000 chars each) — backend
+        // does the IO so the worker stays a pure LLM call.
+        const slice = resourceIds.slice(0, 3);
+        const excerpts = [] as Array<{ id: number; title: string; excerpt: string }>;
+        for (const rid of slice) {
+            const meta = await this.resourceService.findOne(rid);
+            if (!meta) continue;
+            const content = await this.resourceService.getContentById(rid);
+            const text = (content ?? '').slice(0, 2000);
+            excerpts.push({ id: rid, title: meta.title || meta.name || `resource ${rid}`, excerpt: text });
+        }
+        if (excerpts.length === 0 || excerpts.every((e) => !e.excerpt.trim())) {
+            throw new HttpException('no readable content in any of the given resources', HttpStatus.BAD_REQUEST);
+        }
+        const job = await this.jobService.create('dataset.propose-columns', JobPriority.NORMAL, {
+            projectId: projectId ?? null,
+            resources: excerpts,
+        });
         return { jobId: job?.id ?? null };
     }
 

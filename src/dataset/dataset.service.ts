@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DatasetEntity, DatasetField, DatasetSourceMode } from './dataset.entity';
@@ -7,6 +7,9 @@ import { DatasetRelationEntity } from './dataset-relation.entity';
 import { DatasetRecordLinkEntity } from './dataset-record-link.entity';
 import { DatasetChartEntity } from './dataset-chart.entity';
 import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto } from './dto/dataset.dto';
+import { CellAnchor } from './cell-anchor.type';
+import { DatasetCsvService } from './dataset-csv.service';
+import { ResourceService } from '../resource/resource.service';
 import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
@@ -22,6 +25,8 @@ export class DatasetService {
         private readonly linkRepository: Repository<DatasetRecordLinkEntity>,
         @InjectRepository(DatasetChartEntity)
         private readonly chartRepository: Repository<DatasetChartEntity>,
+        private readonly csvService: DatasetCsvService,
+        private readonly resourceService: ResourceService,
     ) { }
 
     async findAllDatasets(projectId?: number): Promise<any[]> {
@@ -648,6 +653,48 @@ export class DatasetService {
             where: { dataset: { id: datasetId } },
             order: { createdAt: 'DESC' },
         });
+    }
+
+    // ── Export CSV ──
+
+    async exportCsv(
+        id: number,
+        options: { includeAnchors: boolean },
+    ): Promise<{ filename: string; csv: string }> {
+        const dataset = await this.findOneDataset(id);
+        if (!dataset) {
+            throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
+        }
+
+        const records = await this.findAllRecords(id);
+        const resourceTitleResolver = options.includeAnchors
+            ? await this.buildResourceTitleResolver(records)
+            : undefined;
+
+        const csv = this.csvService.exportRecordsCsv(dataset.schema, records, {
+            includeAnchors: options.includeAnchors,
+            resourceTitleResolver,
+        });
+
+        return { filename: dataset.name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.csv', csv };
+    }
+
+    private async buildResourceTitleResolver(
+        records: DatasetRecordEntity[],
+    ): Promise<(resourceId: number) => string> {
+        const ids = new Set<number>();
+        for (const record of records) {
+            const anchors: CellAnchor[] = Object.values(record.cellMetadata || {});
+            for (const anchor of anchors) {
+                if (typeof anchor?.sourceResourceId === 'number') {
+                    ids.add(anchor.sourceResourceId);
+                }
+            }
+        }
+
+        const resources = await this.resourceService.findByIds([...ids]);
+        const titles = new Map(resources.map(r => [r.id, r.title || r.name || `Resource ${r.id}`]));
+        return (resourceId: number) => titles.get(resourceId) || '';
     }
 
     // ── Chart CRUD ──

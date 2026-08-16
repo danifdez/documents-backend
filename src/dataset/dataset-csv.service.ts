@@ -140,6 +140,19 @@ export class DatasetCsvService {
         return [headers.join(','), ...rows].join('\n');
     }
 
+    mapRowsToRecords(schema: { key: string }[], rows: string[][]): Record<string, any>[] {
+        const keyMap = new Map(schema.map((field, i) => [i, field.key]));
+
+        return rows.map(row => {
+            const record: Record<string, any> = {};
+            row.forEach((value, i) => {
+                const key = keyMap.get(i);
+                if (key) record[key] = value;
+            });
+            return record;
+        });
+    }
+
     parseAndMap(buffer: Buffer, mappings: CsvColumnMapping[], skipFirstRow: boolean = true): Record<string, any>[] {
         const content = buffer.toString('utf-8');
         const allRows: string[][] = parse(content, {
