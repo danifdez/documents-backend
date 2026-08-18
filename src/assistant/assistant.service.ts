@@ -86,7 +86,7 @@ export class AssistantService implements OnApplicationBootstrap {
     const saved = await this.assistantRepo.save(a);
     if (dto.folderScope !== undefined && previousFolderScope !== saved.folderScope) {
       try {
-        await this.indexedFileService.clearAllForOwner('main-assistant', saved.id);
+        await this.indexedFileService.clearAllForOwner({ ownerType: 'main-assistant', ownerId: saved.id });
       } catch (e: any) {
         this.logger.error(`Failed to clear indexed files for assistant ${saved.id}: ${e?.message ?? e}`);
       }

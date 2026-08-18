@@ -69,10 +69,8 @@ export class IndexedFileService {
     private readonly jobService: JobService,
   ) {}
 
-  async findByOwner(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-  ): Promise<IndexedFileEntity[]> {
+  async findByOwner(owner: OwnerRef): Promise<IndexedFileEntity[]> {
+    const { ownerType, ownerId } = owner;
     return await this.repository.find({
       where: { ownerType, ownerId },
       order: { updatedAt: 'DESC' },
@@ -92,10 +90,10 @@ export class IndexedFileService {
   }
 
   async getByFilename(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
+    owner: OwnerRef,
     filename: string,
   ): Promise<IndexedFileEntity | null> {
+    const { ownerType, ownerId } = owner;
     return await this.repository.findOne({
       where: { ownerType, ownerId, filename },
     });
@@ -121,18 +119,18 @@ export class IndexedFileService {
   }
 
   async writeFile(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
+    owner: OwnerRef,
     filename: string,
     content: Buffer | string,
     opts: { overwrite: boolean },
   ): Promise<IndexedFileEntity> {
-    const folderScope = await this.getFolderScope(ownerType, ownerId);
+    const { ownerType, ownerId } = owner;
+    const folderScope = await this.getFolderScope(owner);
     const safeFilename = sanitizeFilename(filename);
     const absolutePath = await resolveSafePath(folderScope, safeFilename);
 
     const existsOnDisk = await this.pathExists(absolutePath);
-    const existingRow = await this.getByFilename(ownerType, ownerId, safeFilename);
+    const existingRow = await this.getByFilename(owner, safeFilename);
 
     if ((existsOnDisk || existingRow) && !opts.overwrite) {
       throw new ConflictException('file_exists');
@@ -228,27 +226,21 @@ export class IndexedFileService {
     await this.repository.delete({ id: file.id });
   }
 
-  async deleteByFilename(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-    filename: string,
-  ): Promise<void> {
+  async deleteByFilename(owner: OwnerRef, filename: string): Promise<void> {
     const safe = sanitizeFilename(filename);
-    const file = await this.getByFilename(ownerType, ownerId, safe);
+    const file = await this.getByFilename(owner, safe);
     if (!file) return;
-    await this.deleteFile(file.id, { ownerType, ownerId });
+    await this.deleteFile(file.id, owner);
   }
 
   /**
-   * Remove all IndexedFile rows owned by (ownerType, ownerId) and their
+   * Remove all IndexedFile rows owned by the given owner and their
    * vectors. Does NOT touch the disk — the files are the user's. Used when
    * the owner is deleted (agent expiration / explicit DELETE) or when the
    * owner's folderScope changes.
    */
-  async clearAllForOwner(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-  ): Promise<void> {
+  async clearAllForOwner(owner: OwnerRef): Promise<void> {
+    const { ownerType, ownerId } = owner;
     const rows = await this.repository.find({
       where: { ownerType, ownerId },
       select: ['id'],
@@ -258,21 +250,18 @@ export class IndexedFileService {
     await this.repository.delete({ ownerType, ownerId });
   }
 
-  async hasFolderConfigured(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-  ): Promise<boolean> {
-    const scope = await this.resolveFolderScope(ownerType, ownerId);
+  async hasFolderConfigured(owner: OwnerRef): Promise<boolean> {
+    const scope = await this.resolveFolderScope(owner);
     return !!scope;
   }
 
   async search(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
+    owner: OwnerRef,
     query: string,
     limit = 10,
     timeoutMs = 4000,
   ): Promise<Array<{ indexedFileId: number; filename: string; snippet: string; score: number }>> {
+    const { ownerType, ownerId } = owner;
     const q = (query ?? '').trim();
     if (!q) return [];
 
@@ -326,10 +315,10 @@ export class IndexedFileService {
   }
 
   async readWithSync(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
+    owner: OwnerRef,
     ref: { indexedFileId?: number; filename?: string },
   ): Promise<ReadWithSyncResult> {
+    const { ownerType, ownerId } = owner;
     let row: IndexedFileEntity | null = null;
 
     if (typeof ref.indexedFileId === 'number') {
@@ -360,7 +349,7 @@ export class IndexedFileService {
             })),
           };
         } else {
-          const onDisk = await this.tryAdoptFromDisk(ownerType, ownerId, requested);
+          const onDisk = await this.tryAdoptFromDisk(owner, requested);
           if (!onDisk) return { ok: false, error: 'not_found', filename: requested };
           row = onDisk;
         }
@@ -464,11 +453,11 @@ export class IndexedFileService {
   }
 
   private async tryAdoptFromDisk(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
+    owner: OwnerRef,
     requested: string,
   ): Promise<IndexedFileEntity | null> {
-    const folderScope = await this.getFolderScope(ownerType, ownerId);
+    const { ownerType, ownerId } = owner;
+    const folderScope = await this.getFolderScope(owner);
     let safeFilename: string;
     let absolute: string;
     try {
@@ -500,25 +489,20 @@ export class IndexedFileService {
     return saved;
   }
 
-  async scanFolder(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-  ): Promise<ScanFolderResult> {
-    const key = `${ownerType}:${ownerId}`;
+  async scanFolder(owner: OwnerRef): Promise<ScanFolderResult> {
+    const key = `${owner.ownerType}:${owner.ownerId}`;
     const existing = this.scanLocks.get(key);
     if (existing) return await existing;
-    const promise = this.doScanFolder(ownerType, ownerId).finally(() => {
+    const promise = this.doScanFolder(owner).finally(() => {
       this.scanLocks.delete(key);
     });
     this.scanLocks.set(key, promise);
     return await promise;
   }
 
-  private async doScanFolder(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-  ): Promise<ScanFolderResult> {
-    const folderScope = await this.resolveFolderScope(ownerType, ownerId);
+  private async doScanFolder(owner: OwnerRef): Promise<ScanFolderResult> {
+    const { ownerType, ownerId } = owner;
+    const folderScope = await this.resolveFolderScope(owner);
     if (!folderScope) return { status: 'no_folder' };
 
     let entries: any[];
@@ -651,10 +635,8 @@ export class IndexedFileService {
    * has no folder configured. Throws NotFoundException if the owner doesn't
    * exist.
    */
-  private async resolveFolderScope(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-  ): Promise<string | null> {
+  private async resolveFolderScope(owner: OwnerRef): Promise<string | null> {
+    const { ownerType, ownerId } = owner;
     if (ownerType === 'main-assistant') {
       const assistant = await this.assistantRepository.findOne({
         where: { id: ownerId },
@@ -670,11 +652,8 @@ export class IndexedFileService {
     throw new NotFoundException(`Unknown owner type: ${ownerType}`);
   }
 
-  private async getFolderScope(
-    ownerType: IndexedFileOwnerType,
-    ownerId: number,
-  ): Promise<string> {
-    const scope = await this.resolveFolderScope(ownerType, ownerId);
+  private async getFolderScope(owner: OwnerRef): Promise<string> {
+    const scope = await this.resolveFolderScope(owner);
     if (!scope) throw new ConflictException('no_folder_configured');
     return scope;
   }

@@ -105,7 +105,7 @@ export class AgentService {
       && previousFolderScope !== saved.folderScope
     ) {
       try {
-        await this.indexedFileService.clearAllForOwner('agent', saved.id);
+        await this.indexedFileService.clearAllForOwner({ ownerType: 'agent', ownerId: saved.id });
       } catch (e: any) {
         this.logger.error(
           `Failed to clear indexed files for agent ${saved.id}: ${e?.message ?? e}`,
@@ -119,7 +119,7 @@ export class AgentService {
   async remove(id: number): Promise<void> {
     const a = await this.findOne(id);
     try {
-      await this.indexedFileService.clearAllForOwner('agent', a.id);
+      await this.indexedFileService.clearAllForOwner({ ownerType: 'agent', ownerId: a.id });
     } catch (e: any) {
       this.logger.error(
         `Failed to clear indexed files while removing agent ${a.id}: ${e?.message ?? e}`,

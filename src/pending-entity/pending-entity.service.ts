@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { PendingEntityEntity, EntityAlias, EntityScope, EntityTranslation } from './pending-entity.entity';
 import { EntityService } from '../entity/entity.service';
 import { ResourceService } from '../resource/resource.service';
+import { ResourceEntity } from '../resource/resource.entity';
 import { JobService } from '../job/job.service';
 import { JobPriority } from '../job/job-priority.enum';
 import { readFeaturesFromEnv } from '../common/feature-flags';
@@ -136,6 +137,53 @@ export class PendingEntityService {
         return entity;
     }
 
+    private resolveProjectId(resource: ResourceEntity): number {
+        return typeof resource.project === 'object' ? resource.project.id : resource.project;
+    }
+
+    private async materializePendingEntity(pending: PendingEntityEntity, resource: ResourceEntity): Promise<void> {
+        const allAliases = pending.aliases || [];
+
+        // Find existing entity or create new one
+        let entity = await this.entityService.findByNameAndType(pending.name, pending.entityType.id);
+
+        if (!entity) {
+            // Create new entity with appropriate scope
+            const createDto: any = {
+                name: pending.name,
+                entityTypeId: pending.entityType.id,
+                aliases: allAliases.length > 0 ? allAliases : undefined,
+            };
+
+            if (pending.scope === 'global') {
+                createDto.global = true;
+            }
+
+            if (pending.scope === 'project' && resource.project) {
+                createDto.projectIds = [this.resolveProjectId(resource)];
+            }
+
+            entity = await this.entityService.create(createDto);
+        } else {
+            // Entity exists, update scope if needed
+            if (pending.scope === 'global' && !entity.global) {
+                await this.entityService.update(entity.id, { global: true });
+                entity.global = true;
+            }
+
+            // If scope is project, ensure entity-project relation exists
+            if (pending.scope === 'project' && resource.project) {
+                await this.entityService.addProjectToEntity(entity.id, this.resolveProjectId(resource));
+            }
+        }
+
+        // Always link entity to resource (creates resource_entities relation)
+        await this.resourceService.addEntityToResource(pending.resourceId, entity);
+
+        // Remove the pending entity from database
+        await this.repository.remove(pending);
+    }
+
     async confirmEntities(resourceId: number): Promise<{ confirmed: number; errors: string[] }> {
         const allPendingEntities = await this.findByResourceId(resourceId);
 
@@ -153,58 +201,12 @@ export class PendingEntityService {
 
         for (const pending of pendingEntities) {
             try {
-                // Get all aliases from the entity
-                const allAliases = pending.aliases || [];
-
-                // Find or create the entity in the main entities table
                 const entityTypeName = pending.entityType?.name;
                 if (!entityTypeName) {
                     throw new Error(`Entity type is required for "${pending.name}"`);
                 }
 
-                // Find existing entity or create new one
-                let entity = await this.entityService.findByNameAndType(pending.name, pending.entityType.id);
-
-                if (!entity) {
-                    // Create new entity with appropriate scope
-                    const createDto: any = {
-                        name: pending.name,
-                        entityTypeId: pending.entityType.id,
-                        aliases: allAliases.length > 0 ? allAliases : undefined,
-                    };
-
-                    // Set global flag if scope is global
-                    if (pending.scope === 'global') {
-                        createDto.global = true;
-                    }
-
-                    // Set projectIds if scope is project
-                    if (pending.scope === 'project' && resource.project) {
-                        const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
-                        createDto.projectIds = [projectId];
-                    }
-
-                    entity = await this.entityService.create(createDto);
-                } else {
-                    // Entity exists, update scope if needed
-                    if (pending.scope === 'global' && !entity.global) {
-                        await this.entityService.update(entity.id, { global: true });
-                        entity.global = true;
-                    }
-
-                    // If scope is project, ensure entity-project relation exists
-                    if (pending.scope === 'project' && resource.project) {
-                        const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
-                        // Add project relation (this will be handled by addProjectToEntity method)
-                        await this.entityService['addProjectToEntity'](entity.id, projectId);
-                    }
-                }
-
-                // Always link entity to resource (creates resource_entities relation)
-                await this.resourceService.addEntityToResource(resourceId, entity);
-
-                // Remove the pending entity from database
-                await this.repository.remove(pending);
+                await this.materializePendingEntity(pending, resource);
                 confirmed++;
             } catch (error) {
                 errors.push(`Failed to confirm entity "${pending.name}": ${error.message}`);
@@ -271,10 +273,6 @@ export class PendingEntityService {
                 return { success: false, message: 'Cannot confirm a merged entity' };
             }
 
-            // Get all aliases from the entity
-            const allAliases = pending.aliases || [];
-
-            // Find or create the entity in the main entities table
             const entityTypeName = pending.entityType?.name;
             if (!entityTypeName) {
                 return { success: false, message: 'Entity type is required' };
@@ -286,48 +284,7 @@ export class PendingEntityService {
                 return { success: false, message: 'Resource not found' };
             }
 
-            // Find existing entity or create new one
-            let entity = await this.entityService.findByNameAndType(pending.name, pending.entityType.id);
-
-            if (!entity) {
-                // Create new entity with appropriate scope
-                const createDto: any = {
-                    name: pending.name,
-                    entityTypeId: pending.entityType.id,
-                    aliases: allAliases.length > 0 ? allAliases : undefined,
-                };
-
-                // Set global flag if scope is global
-                if (pending.scope === 'global') {
-                    createDto.global = true;
-                }
-
-                // Set projectIds if scope is project
-                if (pending.scope === 'project' && resource.project) {
-                    const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
-                    createDto.projectIds = [projectId];
-                }
-
-                entity = await this.entityService.create(createDto);
-            } else {
-                // Entity exists, update scope if needed
-                if (pending.scope === 'global' && !entity.global) {
-                    await this.entityService.update(entity.id, { global: true });
-                    entity.global = true;
-                }
-
-                // If scope is project, ensure entity-project relation exists
-                if (pending.scope === 'project' && resource.project) {
-                    const projectId = typeof resource.project === 'object' ? resource.project.id : resource.project;
-                    await this.entityService['addProjectToEntity'](entity.id, projectId);
-                }
-            }
-
-            // Always link entity to resource (creates resource_entities relation)
-            await this.resourceService.addEntityToResource(pending.resourceId, entity);
-
-            // Remove the pending entity from database
-            await this.repository.remove(pending);
+            await this.materializePendingEntity(pending, resource);
 
             return { success: true, message: 'Entity confirmed successfully' };
         } catch (error) {

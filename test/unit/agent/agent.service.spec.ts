@@ -250,7 +250,7 @@ describe('AgentService', () => {
             expect(agentRepo.store.size).toBe(0);
             // agent_messages are cascaded by the DB FK; the mock repo doesn't
             // model FK cascade so we only assert the cascade to IndexedFile.
-            expect(indexedFileService.clearAllForOwner).toHaveBeenCalledWith('agent', a.id);
+            expect(indexedFileService.clearAllForOwner).toHaveBeenCalledWith({ ownerType: 'agent', ownerId: a.id });
         });
 
         it('throws when the agent does not exist', async () => {
@@ -267,7 +267,7 @@ describe('AgentService', () => {
             const a = await service.create({ name: 'A' });
             await service.remove(a.id);
             expect(indexedFileService.clearAllForOwner).toHaveBeenCalledTimes(1);
-            expect(indexedFileService.clearAllForOwner).toHaveBeenCalledWith('agent', a.id);
+            expect(indexedFileService.clearAllForOwner).toHaveBeenCalledWith({ ownerType: 'agent', ownerId: a.id });
         });
     });
 

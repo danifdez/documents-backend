@@ -1,17 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { EntityService } from 'src/entity/entity.service';
 import { EntityTranslation } from 'src/entity/entity.entity';
 import { JobEntity } from 'src/job/job.entity';
-import {
-  TranslationStrategy,
-  TRANSLATE_LOG_CONTEXT,
-} from './translation-strategy.interface';
+import { TranslationStrategyBase } from './translation-strategy.base';
 
 @Injectable()
-export class EntitiesBatchTranslationStrategy implements TranslationStrategy {
-  private readonly logger = new Logger(TRANSLATE_LOG_CONTEXT);
-
-  constructor(private readonly entityService: EntityService) { }
+export class EntitiesBatchTranslationStrategy extends TranslationStrategyBase {
+  constructor(private readonly entityService: EntityService) {
+    super();
+  }
 
   async execute(job: JobEntity): Promise<any> {
     const entityIdByIndex: number[] = job.payload['entityIdByIndex'] || [];
@@ -20,18 +17,7 @@ export class EntitiesBatchTranslationStrategy implements TranslationStrategy {
     this.logger.log(`Processing entities-batch translation for ${entityIdByIndex.length} entities`);
     this.logger.debug(`Job result: ${JSON.stringify(job.result)}`);
 
-    if (!job.result) {
-      const errorMessage = `Job result is null or undefined`;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const results = job.result as { response: Array<{ translation_text: string; original_text?: string; path?: string }> };
-    if (!results?.response || !Array.isArray(results.response)) {
-      const errorMessage = `Invalid translation result format for entities-batch: ${JSON.stringify(results)}`;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
+    const results = this.getBatchResults(job, 'entities-batch');
 
     // Map translated texts back to entities and update translations
     for (let i = 0; i < results.response.length; i++) {

@@ -15,8 +15,117 @@ import { SearchResultDto } from './dto/search-result.dto';
 import { PageEntityMatch } from './dto/page-entities.dto';
 import { PageBlockResult } from './dto/page-blocks.dto';
 
+type Highlight = (text: string, chars?: number) => string;
+
+interface CollectionMapperConfig {
+  collection: SearchResultDto['collection'];
+  id: (row: any) => number;
+  name: (row: any) => string;
+  /** Overrides the default relevance score (`parseFloat(row.score) || 0`). */
+  score?: (row: any) => number;
+  highlights: (row: any, highlight: Highlight) => Partial<SearchResultDto>;
+}
+
+interface SearchCollection {
+  search: (searchTerm: string, projectId?: number) => Promise<any[]>;
+  mapper: CollectionMapperConfig;
+  /** Always-on collections map their rows unguarded. */
+  required?: boolean;
+}
+
+const COLLECTION_MAPPERS: Record<string, CollectionMapperConfig> = {
+  // Projects surface through the docs collection and carry a fixed relevance
+  // since project search returns no score.
+  projects: {
+    collection: 'docs',
+    id: (r) => r.id,
+    name: (r) => r.name,
+    score: () => 0.6,
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.name || ''),
+    }),
+  },
+  docs: {
+    collection: 'docs',
+    id: (r) => r.d_id,
+    name: (r) => r.d_name,
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.d_name, 50),
+      highlightedContent: highlight(r.d_content, 100),
+    }),
+  },
+  resources: {
+    collection: 'resources',
+    id: (r) => r.r_id,
+    name: (r) => r.r_name,
+    highlights: (r, highlight) => ({
+      highlightedTitle: highlight(r.r_title, 50),
+      highlightedName: highlight(r.r_name, 50),
+      highlightedContent: highlight(r.r_content, 100)
+        || highlight(r.r_translated_content, 100),
+    }),
+  },
+  canvases: {
+    collection: 'canvases',
+    id: (r) => r.c_id,
+    name: (r) => r.c_name,
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.c_name, 50),
+      highlightedContent: highlight(r.c_content, 100),
+    }),
+  },
+  notes: {
+    collection: 'notes',
+    id: (r) => r.n_id,
+    name: (r) => r.n_title || 'Untitled note',
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.n_title, 50),
+      highlightedContent: highlight(r.n_content, 100),
+    }),
+  },
+  events: {
+    collection: 'events',
+    id: (r) => r.e_id,
+    name: (r) => r.e_title || 'Untitled event',
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.e_title, 50),
+      highlightedContent: highlight(r.e_description, 100),
+    }),
+  },
+  knowledge: {
+    collection: 'knowledge',
+    id: (r) => r.k_id,
+    name: (r) => r.k_title || 'Untitled entry',
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.k_title, 50),
+      highlightedContent: highlight(r.k_content || r.k_summary, 100),
+    }),
+  },
+  entities: {
+    collection: 'entities',
+    id: (r) => r.e_id,
+    name: (r) => r.e_name,
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.e_name, 50),
+      highlightedContent: highlight(r.e_description, 100),
+    }),
+  },
+  datasets: {
+    collection: 'datasets',
+    id: (r) => r.d_id,
+    name: (r) => r.d_name,
+    highlights: (r, highlight) => ({
+      highlightedName: highlight(r.d_name, 50),
+      highlightedContent: highlight(r.d_description, 100),
+    }),
+  },
+};
+
 @Injectable()
 export class SearchService {
+  private readonly projectCollections: SearchCollection[];
+  private readonly globalCollections: SearchCollection[];
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly docService: DocService,
@@ -28,7 +137,53 @@ export class SearchService {
     @Optional() private readonly entityService?: EntityService,
     @Optional() private readonly datasetService?: DatasetService,
     @Optional() private readonly projectService?: ProjectService,
-  ) { }
+  ) {
+    const docs: SearchCollection = {
+      required: true,
+      mapper: COLLECTION_MAPPERS.docs,
+      search: (term, projectId) => this.docService.globalSearch(term, projectId),
+    };
+    const resources: SearchCollection = {
+      required: true,
+      mapper: COLLECTION_MAPPERS.resources,
+      search: (term, projectId) => this.resourceService.globalSearch(term, projectId),
+    };
+    const projects: SearchCollection = this.projectService && {
+      mapper: COLLECTION_MAPPERS.projects,
+      search: (term) => this.searchProjects(term),
+    };
+    const canvases: SearchCollection = this.canvasService && {
+      mapper: COLLECTION_MAPPERS.canvases,
+      search: (term, projectId) => this.canvasService.globalSearch(term, projectId),
+    };
+    const notes: SearchCollection = this.noteService && {
+      mapper: COLLECTION_MAPPERS.notes,
+      search: (term, projectId) => this.noteService.globalSearch(term, projectId),
+    };
+    const events: SearchCollection = this.calendarEventService && {
+      mapper: COLLECTION_MAPPERS.events,
+      search: (term, projectId) => this.calendarEventService.globalSearch(term, projectId),
+    };
+    const knowledge: SearchCollection = this.knowledgeEntryService && {
+      mapper: COLLECTION_MAPPERS.knowledge,
+      search: (term) => this.knowledgeEntryService.globalSearch(term),
+    };
+    const entities: SearchCollection = this.entityService && {
+      mapper: COLLECTION_MAPPERS.entities,
+      search: (term, projectId) => this.entityService.globalSearch(term, projectId),
+    };
+    const datasets: SearchCollection = this.datasetService && {
+      mapper: COLLECTION_MAPPERS.datasets,
+      search: (term, projectId) => this.datasetService.globalSearch(term, projectId),
+    };
+
+    this.projectCollections = [docs, resources, canvases, notes, events, entities, datasets].filter(Boolean);
+    // Docs, resources and projects are always-on here: the legacy shape of
+    // globalSearch only looked at the optional services, so they were
+    // invisible to the global UI — and to the assistant tool. Including them
+    // aligns "global" with what users expect.
+    this.globalCollections = [docs, resources, projects, notes, canvases, events, knowledge, entities, datasets].filter(Boolean);
+  }
 
   private highlightTextInHtml(
     fullContent: string,
@@ -81,182 +236,46 @@ export class SearchService {
   }
 
   private async searchInProject(searchTerm: string, projectId: number): Promise<SearchResultDto[]> {
-    const promises: Promise<any[]>[] = [
-      this.docService.globalSearch(searchTerm, projectId),
-      this.resourceService.globalSearch(searchTerm, projectId),
-    ];
-    const keys = ['docs', 'resources'];
-
-    if (this.canvasService) { promises.push(this.canvasService.globalSearch(searchTerm, projectId)); keys.push('canvases'); }
-    if (this.noteService) { promises.push(this.noteService.globalSearch(searchTerm, projectId)); keys.push('notes'); }
-    if (this.calendarEventService) { promises.push(this.calendarEventService.globalSearch(searchTerm, projectId)); keys.push('events'); }
-    if (this.entityService) { promises.push(this.entityService.globalSearch(searchTerm, projectId)); keys.push('entities'); }
-    if (this.datasetService) { promises.push(this.datasetService.globalSearch(searchTerm, projectId)); keys.push('datasets'); }
-
-    const resolved = await Promise.all(promises);
-    const data: Record<string, any[]> = {};
-    keys.forEach((key, i) => { data[key] = resolved[i]; });
-
-    const results: SearchResultDto[] = [
-      ...this.mapDocs(data.docs, searchTerm),
-      ...this.mapResources(data.resources, searchTerm),
-      ...(data.canvases ? this.mapCanvases(data.canvases, searchTerm) : []),
-      ...(data.notes ? this.mapNotes(data.notes, searchTerm) : []),
-      ...(data.events ? this.mapEvents(data.events, searchTerm) : []),
-      ...(data.entities ? this.mapEntities(data.entities, searchTerm) : []),
-      ...(data.datasets ? this.mapDatasets(data.datasets, searchTerm) : []),
-    ];
-
-    results.sort((a, b) => b.score - a.score);
-    return results;
+    return this.searchCollections(this.projectCollections, searchTerm, projectId);
   }
 
   private async searchGlobal(searchTerm: string): Promise<SearchResultDto[]> {
-    const promises: Promise<any[]>[] = [
-      // Always-on (required services): docs, resources, projects. The legacy
-      // shape of globalSearch only looked at the optional services below, so
-      // resources/docs/projects were invisible to the global UI — and to the
-      // assistant tool. Including them here aligns "global" with what users
-      // expect.
-      this.docService.globalSearch(searchTerm),
-      this.resourceService.globalSearch(searchTerm),
-    ];
-    const keys: string[] = ['docs', 'resources'];
+    return this.searchCollections(this.globalCollections, searchTerm);
+  }
 
-    if (this.projectService) { promises.push(this.searchProjects(searchTerm)); keys.push('projects'); }
-    if (this.noteService) { promises.push(this.noteService.globalSearch(searchTerm)); keys.push('notes'); }
-    if (this.canvasService) { promises.push(this.canvasService.globalSearch(searchTerm)); keys.push('canvases'); }
-    if (this.calendarEventService) { promises.push(this.calendarEventService.globalSearch(searchTerm)); keys.push('events'); }
-    if (this.knowledgeEntryService) { promises.push(this.knowledgeEntryService.globalSearch(searchTerm)); keys.push('knowledge'); }
-    if (this.entityService) { promises.push(this.entityService.globalSearch(searchTerm)); keys.push('entities'); }
-    if (this.datasetService) { promises.push(this.datasetService.globalSearch(searchTerm)); keys.push('datasets'); }
+  private async searchCollections(
+    collections: SearchCollection[],
+    searchTerm: string,
+    projectId?: number,
+  ): Promise<SearchResultDto[]> {
+    const resolved = await Promise.all(collections.map((c) => c.search(searchTerm, projectId)));
 
-    const resolved = await Promise.all(promises);
-    const data: Record<string, any[]> = {};
-    keys.forEach((key, i) => { data[key] = resolved[i]; });
-
-    const results: SearchResultDto[] = [
-      ...this.mapDocs(data.docs, searchTerm),
-      ...this.mapResources(data.resources, searchTerm),
-      ...(data.projects ? this.mapProjects(data.projects, searchTerm) : []),
-      ...(data.notes ? this.mapNotes(data.notes, searchTerm) : []),
-      ...(data.canvases ? this.mapCanvases(data.canvases, searchTerm) : []),
-      ...(data.events ? this.mapEvents(data.events, searchTerm) : []),
-      ...(data.knowledge ? this.mapKnowledge(data.knowledge, searchTerm) : []),
-      ...(data.entities ? this.mapEntities(data.entities, searchTerm) : []),
-      ...(data.datasets ? this.mapDatasets(data.datasets, searchTerm) : []),
-    ];
+    const results = collections.flatMap((c, i) => {
+      const rows = resolved[i];
+      if (!rows && !c.required) return [];
+      return this.mapCollection(rows, searchTerm, c.mapper);
+    });
 
     results.sort((a, b) => b.score - a.score);
     return results;
   }
 
-  /** Project search returns ProjectEntity[]; wrap to the raw shape mapProjects
-   * expects (id/name/description). */
+  /** Project search returns ProjectEntity[]; wrap to the raw shape the
+   * projects mapper expects (id/name/description). */
   private async searchProjects(searchTerm: string): Promise<any[]> {
     if (!this.projectService || !searchTerm?.trim()) return [];
     const projects = await this.projectService.search(searchTerm);
     return projects.map((p) => ({ id: p.id, name: p.name, description: p.description }));
   }
 
-  private mapProjects(raw: any[], searchTerm: string): SearchResultDto[] {
-    if (!raw) return [];
+  private mapCollection(raw: any[], searchTerm: string, config: CollectionMapperConfig): SearchResultDto[] {
+    const highlight: Highlight = (text, chars) => this.highlightTextInHtml(text, searchTerm, chars);
     return raw.map((r) => ({
-      id: r.id,
-      name: r.name,
-      score: 0.6,
-      collection: 'docs' as const,
-      highlightedName: this.highlightTextInHtml(r.name || '', searchTerm),
-    }));
-  }
-
-  private mapDocs(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.d_id,
-      name: r.d_name,
-      score: parseFloat(r.score) || 0,
-      collection: 'docs' as const,
-      highlightedName: this.highlightTextInHtml(r.d_name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.d_content, searchTerm, 100),
-    }));
-  }
-
-  private mapResources(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.r_id,
-      name: r.r_name,
-      score: parseFloat(r.score) || 0,
-      collection: 'resources' as const,
-      highlightedTitle: this.highlightTextInHtml(r.r_title, searchTerm, 50),
-      highlightedName: this.highlightTextInHtml(r.r_name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.r_content, searchTerm, 100)
-        || this.highlightTextInHtml(r.r_translated_content, searchTerm, 100),
-    }));
-  }
-
-  private mapCanvases(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.c_id,
-      name: r.c_name,
-      score: parseFloat(r.score) || 0,
-      collection: 'canvases' as const,
-      highlightedName: this.highlightTextInHtml(r.c_name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.c_content, searchTerm, 100),
-    }));
-  }
-
-  private mapNotes(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.n_id,
-      name: r.n_title || 'Untitled note',
-      score: parseFloat(r.score) || 0,
-      collection: 'notes' as const,
-      highlightedName: this.highlightTextInHtml(r.n_title, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.n_content, searchTerm, 100),
-    }));
-  }
-
-  private mapEvents(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.e_id,
-      name: r.e_title || 'Untitled event',
-      score: parseFloat(r.score) || 0,
-      collection: 'events' as const,
-      highlightedName: this.highlightTextInHtml(r.e_title, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.e_description, searchTerm, 100),
-    }));
-  }
-
-  private mapKnowledge(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.k_id,
-      name: r.k_title || 'Untitled entry',
-      score: parseFloat(r.score) || 0,
-      collection: 'knowledge' as const,
-      highlightedName: this.highlightTextInHtml(r.k_title, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.k_content || r.k_summary, searchTerm, 100),
-    }));
-  }
-
-  private mapEntities(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.e_id,
-      name: r.e_name,
-      score: parseFloat(r.score) || 0,
-      collection: 'entities' as const,
-      highlightedName: this.highlightTextInHtml(r.e_name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.e_description, searchTerm, 100),
-    }));
-  }
-
-  private mapDatasets(raw: any[], searchTerm: string): SearchResultDto[] {
-    return raw.map((r) => ({
-      id: r.d_id,
-      name: r.d_name,
-      score: parseFloat(r.score) || 0,
-      collection: 'datasets' as const,
-      highlightedName: this.highlightTextInHtml(r.d_name, searchTerm, 50),
-      highlightedContent: this.highlightTextInHtml(r.d_description, searchTerm, 100),
+      id: config.id(r),
+      name: config.name(r),
+      score: config.score ? config.score(r) : parseFloat(r.score) || 0,
+      collection: config.collection,
+      ...config.highlights(r, highlight),
     }));
   }
 
@@ -327,7 +346,6 @@ export class SearchService {
       // a character class that covers word chars + Unicode letters
       const matchedTerms: string[] = [];
       for (const term of terms) {
-        const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         // Use case-insensitive indexOf first (fast path), then verify boundaries
         const lowerText = normalizedText.toLowerCase();
         const lowerTerm = term.toLowerCase();

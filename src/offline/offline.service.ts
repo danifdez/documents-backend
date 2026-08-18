@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan } from 'typeorm';
+import { Repository, MoreThan, ObjectLiteral } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ResourceEntity } from '../resource/resource.entity';
 import { DocEntity } from '../doc/doc.entity';
@@ -17,6 +17,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 export class OfflineService {
   private readonly logger = new Logger(OfflineService.name);
   private readonly fileSizeLimit: number;
+  private readonly repoByEntityType: Map<string, Repository<any> | null>;
 
   constructor(
     @InjectRepository(ResourceEntity) private readonly resourceRepo: Repository<ResourceEntity>,
@@ -33,6 +34,13 @@ export class OfflineService {
       this.configService.get('OFFLINE_FILE_SIZE_LIMIT', '10485760'),
       10,
     );
+    this.repoByEntityType = new Map<string, Repository<any> | null>([
+      ['doc', this.docRepo],
+      ['comment', this.commentRepo],
+      ['mark', this.markRepo],
+      ['note', this.noteRepo],
+      ['resource', this.resourceRepo],
+    ]);
   }
 
   async bundleResource(id: number) {
@@ -261,44 +269,32 @@ export class OfflineService {
     const resourceIds = resources.map((r) => r.id);
 
     if (docIds.length > 0) {
-      const dc = await this.commentRepo.createQueryBuilder('c')
-        .where('c.docId IN (:...ids)', { ids: docIds })
-        .andWhere('c.updatedAt > :since', { since: sinceDate })
-        .getMany();
-      comments.push(...dc);
-
-      const dm = await this.markRepo.createQueryBuilder('m')
-        .where('m.docId IN (:...ids)', { ids: docIds })
-        .andWhere('m.updatedAt > :since', { since: sinceDate })
-        .getMany();
-      marks.push(...dm);
+      comments.push(...(await this.findChangedSince(this.commentRepo, 'c', 'docId', docIds, sinceDate)));
+      marks.push(...(await this.findChangedSince(this.markRepo, 'm', 'docId', docIds, sinceDate)));
     }
 
     if (resourceIds.length > 0) {
-      const rc = await this.commentRepo.createQueryBuilder('c')
-        .where('c.resourceId IN (:...ids)', { ids: resourceIds })
-        .andWhere('c.updatedAt > :since', { since: sinceDate })
-        .getMany();
-      comments.push(...rc);
-
-      const rm = await this.markRepo.createQueryBuilder('m')
-        .where('m.resourceId IN (:...ids)', { ids: resourceIds })
-        .andWhere('m.updatedAt > :since', { since: sinceDate })
-        .getMany();
-      marks.push(...rm);
+      comments.push(...(await this.findChangedSince(this.commentRepo, 'c', 'resourceId', resourceIds, sinceDate)));
+      marks.push(...(await this.findChangedSince(this.markRepo, 'm', 'resourceId', resourceIds, sinceDate)));
     }
 
     return { resources, docs, threads, comments, marks, notes };
   }
 
+  private findChangedSince<T extends ObjectLiteral>(
+    repo: Repository<T>,
+    alias: string,
+    fkColumn: 'docId' | 'resourceId',
+    ids: number[],
+    since: Date,
+  ): Promise<T[]> {
+    return repo.createQueryBuilder(alias)
+      .where(`${alias}.${fkColumn} IN (:...ids)`, { ids })
+      .andWhere(`${alias}.updatedAt > :since`, { since })
+      .getMany();
+  }
+
   private getRepo(entityType: string): Repository<any> | null {
-    switch (entityType) {
-      case 'doc': return this.docRepo;
-      case 'comment': return this.commentRepo;
-      case 'mark': return this.markRepo;
-      case 'note': return this.noteRepo;
-      case 'resource': return this.resourceRepo;
-      default: return null;
-    }
+    return this.repoByEntityType.get(entityType) ?? null;
   }
 }

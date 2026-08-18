@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { JobPriority } from 'src/job/job-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
 import { EntityTypeService } from 'src/entity-type/entity-type.service';
@@ -6,10 +6,7 @@ import { JobService } from 'src/job/job.service';
 import { JobEntity } from 'src/job/job.entity';
 import { PendingEntityService } from 'src/pending-entity/pending-entity.service';
 import { PendingEntityEntity } from 'src/pending-entity/pending-entity.entity';
-import {
-  TranslationStrategy,
-  TRANSLATE_LOG_CONTEXT,
-} from './translation-strategy.interface';
+import { TranslationStrategyBase } from './translation-strategy.base';
 
 // NER labels as the worker emits them, mapped to the entity-type names stored here.
 const ENTITY_TYPE_BY_NER_LABEL: Record<string, string> = {
@@ -44,15 +41,15 @@ interface PendingTranslationContext {
 }
 
 @Injectable()
-export class EntitiesPendingBatchTranslationStrategy implements TranslationStrategy {
-  private readonly logger = new Logger(TRANSLATE_LOG_CONTEXT);
-
+export class EntitiesPendingBatchTranslationStrategy extends TranslationStrategyBase {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly jobService: JobService,
     private readonly entityTypeService: EntityTypeService,
     private readonly pendingEntityService: PendingEntityService,
-  ) { }
+  ) {
+    super();
+  }
 
   /**
    * Process translation of entities BEFORE creating them as pending entities.
@@ -67,18 +64,7 @@ export class EntitiesPendingBatchTranslationStrategy implements TranslationStrat
 
     this.logger.log(`Processing entities-pending-batch translation for ${entityDataByIndex.length} entities to languages: ${targetLanguages.join(', ')}`);
 
-    if (!job.result) {
-      const errorMessage = `Job result is null or undefined`;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const results = job.result as { response: TranslationItem[] };
-    if (!results?.response || !Array.isArray(results.response)) {
-      const errorMessage = `Invalid translation result format for entities-pending-batch: ${JSON.stringify(results)}`;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
+    const results = this.getBatchResults(job, 'entities-pending-batch');
 
     const currentTargetLanguage = targetLanguages[0];
     const remainingLanguages = targetLanguages.slice(1);

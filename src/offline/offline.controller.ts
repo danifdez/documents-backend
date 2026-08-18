@@ -8,6 +8,13 @@ import { SyncChangeDto } from './dto/sync-change.dto';
 export class OfflineController {
   constructor(private readonly offlineService: OfflineService) {}
 
+  // Map (not plain object) so inherited Object.prototype keys never match a user-supplied type
+  private readonly bundlersByType = new Map<string, (id: number) => Promise<any>>([
+    ['resource', (id) => this.offlineService.bundleResource(id)],
+    ['thread', (id) => this.offlineService.bundleThread(id)],
+    ['project', (id) => this.offlineService.bundleProject(id)],
+  ]);
+
   @Get('bundle/:type/:id')
   async getBundle(
     @Param('type') type: string,
@@ -16,21 +23,12 @@ export class OfflineController {
     const numId = parseInt(id, 10);
     if (isNaN(numId)) throw new BadRequestException('Invalid ID');
 
-    let bundle: any;
-
-    switch (type) {
-      case 'resource':
-        bundle = await this.offlineService.bundleResource(numId);
-        break;
-      case 'thread':
-        bundle = await this.offlineService.bundleThread(numId);
-        break;
-      case 'project':
-        bundle = await this.offlineService.bundleProject(numId);
-        break;
-      default:
-        throw new BadRequestException(`Invalid bundle type: ${type}. Use resource, thread, or project.`);
+    const bundler = this.bundlersByType.get(type);
+    if (!bundler) {
+      throw new BadRequestException(`Invalid bundle type: ${type}. Use resource, thread, or project.`);
     }
+
+    const bundle = await bundler(numId);
 
     if (!bundle) throw new NotFoundException(`${type} with id ${id} not found`);
     return bundle;

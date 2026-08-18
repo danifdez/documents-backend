@@ -57,8 +57,7 @@ abstract class IndexedFileBaseController {
     }
     try {
       const file = await this.indexedFileService.writeFile(
-        this.ownerType,
-        ownerId,
+        this.owner(ownerId),
         dto.filename,
         payload,
         { overwrite: dto.overwrite === true },
@@ -89,8 +88,7 @@ abstract class IndexedFileBaseController {
     }
     try {
       const saved = await this.indexedFileService.writeFile(
-        this.ownerType,
-        ownerId,
+        this.owner(ownerId),
         filename,
         file.buffer,
         { overwrite: false },
@@ -117,13 +115,13 @@ abstract class IndexedFileBaseController {
       throw new BadRequestException({ error: 'query_too_short' });
     }
     const hasFolder = await this.indexedFileService.hasFolderConfigured(
-      this.ownerType, ownerId,
+      this.owner(ownerId),
     );
     if (!hasFolder) {
       throw new HttpException({ error: 'no_folder_configured' }, HttpStatus.CONFLICT);
     }
     const n = Math.min(Math.max(parseInt(limit ?? '', 10) || 10, 1), 25);
-    const hits = await this.indexedFileService.search(this.ownerType, ownerId, q, n);
+    const hits = await this.indexedFileService.search(this.owner(ownerId), q, n);
     return { hits };
   }
 
@@ -150,7 +148,7 @@ export class AssistantIndexedFileController extends IndexedFileBaseController {
   async list(
     @Param('assistantId', ParseIntPipe) assistantId: number,
   ): Promise<IndexedFileDto[]> {
-    const files = await this.indexedFileService.findByOwner(this.ownerType, assistantId);
+    const files = await this.indexedFileService.findByOwner(this.owner(assistantId));
     return files.map(toIndexedFileDto);
   }
 
@@ -189,7 +187,7 @@ export class AssistantIndexedFileController extends IndexedFileBaseController {
     @Query('filename') filename: string,
   ): Promise<ReadWithSyncResult> {
     return this.handleRead(
-      await this.indexedFileService.readWithSync(this.ownerType, assistantId, { filename: filename ?? '' }),
+      await this.indexedFileService.readWithSync(this.owner(assistantId), { filename: filename ?? '' }),
     );
   }
 
@@ -199,7 +197,7 @@ export class AssistantIndexedFileController extends IndexedFileBaseController {
     @Param('id', ParseIntPipe) id: number,
   ): Promise<ReadWithSyncResult> {
     return this.handleRead(
-      await this.indexedFileService.readWithSync(this.ownerType, assistantId, { indexedFileId: id }),
+      await this.indexedFileService.readWithSync(this.owner(assistantId), { indexedFileId: id }),
     );
   }
 
@@ -216,7 +214,7 @@ export class AssistantIndexedFileController extends IndexedFileBaseController {
   async reconcile(
     @Param('assistantId', ParseIntPipe) assistantId: number,
   ): Promise<ScanFolderResult> {
-    return await this.indexedFileService.scanFolder(this.ownerType, assistantId);
+    return await this.indexedFileService.scanFolder(this.owner(assistantId));
   }
 }
 
@@ -232,7 +230,7 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
   async list(
     @Param('agentId', ParseIntPipe) agentId: number,
   ): Promise<IndexedFileDto[]> {
-    const files = await this.indexedFileService.findByOwner(this.ownerType, agentId);
+    const files = await this.indexedFileService.findByOwner(this.owner(agentId));
     return files.map(toIndexedFileDto);
   }
 
@@ -271,7 +269,7 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
     @Query('filename') filename: string,
   ): Promise<ReadWithSyncResult> {
     return this.handleRead(
-      await this.indexedFileService.readWithSync(this.ownerType, agentId, { filename: filename ?? '' }),
+      await this.indexedFileService.readWithSync(this.owner(agentId), { filename: filename ?? '' }),
     );
   }
 
@@ -281,7 +279,7 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
     @Param('id', ParseIntPipe) id: number,
   ): Promise<ReadWithSyncResult> {
     return this.handleRead(
-      await this.indexedFileService.readWithSync(this.ownerType, agentId, { indexedFileId: id }),
+      await this.indexedFileService.readWithSync(this.owner(agentId), { indexedFileId: id }),
     );
   }
 
@@ -298,6 +296,6 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
   async reconcile(
     @Param('agentId', ParseIntPipe) agentId: number,
   ): Promise<ScanFolderResult> {
-    return await this.indexedFileService.scanFolder(this.ownerType, agentId);
+    return await this.indexedFileService.scanFolder(this.owner(agentId));
   }
 }

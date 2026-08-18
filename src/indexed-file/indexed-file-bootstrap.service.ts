@@ -23,7 +23,7 @@ export class IndexedFileBootstrapService implements OnApplicationBootstrap {
     });
     for (const a of assistants) {
       void this.indexedFileService
-        .scanFolder('main-assistant', a.id)
+        .scanFolder({ ownerType: 'main-assistant', ownerId: a.id })
         .catch((e) =>
           this.logger.error(
             `Failed to reconcile assistant ${a.id}: ${e?.message ?? e}`,
@@ -36,7 +36,7 @@ export class IndexedFileBootstrapService implements OnApplicationBootstrap {
     });
     for (const a of agents) {
       void this.indexedFileService
-        .scanFolder('agent', a.id)
+        .scanFolder({ ownerType: 'agent', ownerId: a.id })
         .catch((e) =>
           this.logger.error(
             `Failed to reconcile agent ${a.id}: ${e?.message ?? e}`,
