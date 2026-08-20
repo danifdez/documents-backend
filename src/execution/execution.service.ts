@@ -26,6 +26,10 @@ import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { WorkerEntity } from '../worker/worker.entity';
+import {
+  ProgressEvent,
+  projectExecutionProgress,
+} from './execution-progress';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -178,6 +182,8 @@ export class ExecutionService {
         result: null,
         error: null,
         checkpoint: null,
+        progressPolicy: null,
+        progressLedger: null,
         step: 0,
         maxSteps: 1,
         availableAt: new Date(),
@@ -325,6 +331,8 @@ export class ExecutionService {
         result: null,
         error: null,
         checkpoint: null,
+        progressPolicy: null,
+        progressLedger: null,
         step: 0,
         maxSteps: options?.maxSteps ?? 1,
         availableAt: new Date(),
@@ -770,6 +778,7 @@ export class ExecutionService {
         accepted += 1;
       }
       execution.lastSequence = String(sequence);
+      await this.refreshProgressProjection(eventRepo, execution);
       await executionRepo.save(execution);
       return { accepted, duplicates, lastSequence: sequence };
     });
@@ -807,6 +816,7 @@ export class ExecutionService {
           .filter((row) => row.producerComponent === 'documents-backend')
           .map((row) => Number(row.producerSequence)),
       );
+      let nextProducerSequence = producerSequence;
       const hasFinalMessage = rows.some((row) => {
         const payload = row.envelope.payload as
           Record<string, unknown> | undefined;
@@ -842,7 +852,7 @@ export class ExecutionService {
         const messageEvent = await this.appendBackendEvent(
           manager,
           execution,
-          producerSequence + 1,
+          ++nextProducerSequence,
           {
             eventType: 'message.recorded',
             payloadSchema: 'message.recorded/1',
@@ -868,6 +878,33 @@ export class ExecutionService {
       }
 
       if (!TERMINAL_STATES.has(execution.status)) {
+        const progress = await this.refreshProgressProjection(
+          eventRepo,
+          execution,
+        );
+        sequence += 1;
+        const progressEvent = await this.appendBackendEvent(
+          manager,
+          execution,
+          ++nextProducerSequence,
+          {
+            eventType: 'progress.reported',
+            payloadSchema: 'progress.reported/1',
+            payload: {
+              message: 'Durable progress ledger recorded',
+              kind: 'ledger_snapshot',
+              ledger: progress.ledger,
+            },
+            actor: { type: 'system' },
+            executionId: execution.executionId,
+            turnId: execution.turnId,
+            causedByEventId: lastEventId,
+            artifactRefs: [],
+          },
+          sequence,
+        );
+        lastEventId = progressEvent.eventId;
+
         sequence += 1;
         const status = error ? 'failed' : 'completed';
         const finalResult = error
@@ -881,7 +918,7 @@ export class ExecutionService {
         const stateEvent = await this.appendBackendEvent(
           manager,
           execution,
-          producerSequence + 2,
+          ++nextProducerSequence,
           {
             eventType: 'execution.state_changed',
             payloadSchema: 'execution.state_changed/1',
@@ -923,6 +960,7 @@ export class ExecutionService {
       execution.lastEventId = lastEventId;
       execution.completedAt = new Date();
       execution.phase = null;
+      await this.refreshProgressProjection(eventRepo, execution);
       await executionRepo.save(execution);
     });
   }
@@ -952,6 +990,14 @@ export class ExecutionService {
         ? Number(page.at(-1).sequence)
         : afterSequence,
       hasMore,
+    };
+  }
+
+  async readProgress(rootExecutionId: string, scope: ExecutionAccessScope) {
+    const execution = await this.findOwned(rootExecutionId, scope);
+    return {
+      policy: execution.progressPolicy,
+      ledger: execution.progressLedger,
     };
   }
 
@@ -1120,6 +1166,22 @@ export class ExecutionService {
     });
     if (!execution) throw new NotFoundException('Execution not found');
     return execution;
+  }
+
+  private async refreshProgressProjection(
+    eventRepo: Repository<ExecutionEventEntity>,
+    execution: ExecutionEntity,
+  ) {
+    const rows = await eventRepo.find({
+      where: { rootExecutionId: execution.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const progress = projectExecutionProgress(
+      rows.map((row) => row.envelope as ProgressEvent),
+    );
+    execution.progressPolicy = progress.policy;
+    execution.progressLedger = progress.ledger;
+    return progress;
   }
 
   private async appendBackendEvent(

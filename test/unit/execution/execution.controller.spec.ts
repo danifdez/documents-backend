@@ -10,6 +10,7 @@ describe('ExecutionController', () => {
       workspaceId: 'workspace-1',
     })),
     readEvents: jest.fn(),
+    readProgress: jest.fn(),
     exportBundle: jest.fn(),
   };
   const config = { get: jest.fn(() => 'internal-secret') };
@@ -50,6 +51,17 @@ describe('ExecutionController', () => {
       'workspace-1',
     );
     expect(service.exportBundle).toHaveBeenCalledWith('run-1', {
+      ownerPrincipal: 'user-1',
+      workspaceId: 'workspace-1',
+    });
+  });
+
+  it('uses the same access scope for the materialized progress projection', async () => {
+    service.readProgress.mockResolvedValue({ policy: null, ledger: null });
+
+    await controller.progress('run-1', { userId: 7 }, 'workspace-1');
+
+    expect(service.readProgress).toHaveBeenCalledWith('run-1', {
       ownerPrincipal: 'user-1',
       workspaceId: 'workspace-1',
     });

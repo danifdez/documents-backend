@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SkipThrottle } from '@nestjs/throttler';
 import { timingSafeEqual } from 'crypto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -50,6 +51,7 @@ export class ExecutionController {
 
   @Post('internal/:rootExecutionId/artifacts')
   @Public()
+  @SkipThrottle()
   async ingestArtifacts(
     @Param('rootExecutionId') rootExecutionId: string,
     @Headers('x-execution-ingest-token') token: string | undefined,
@@ -61,6 +63,7 @@ export class ExecutionController {
 
   @Post('internal/:rootExecutionId/events')
   @Public()
+  @SkipThrottle()
   async ingestEvents(
     @Param('rootExecutionId') rootExecutionId: string,
     @Headers('x-execution-ingest-token') token: string | undefined,
@@ -96,6 +99,16 @@ export class ExecutionController {
   ) {
     const scope = this.service.resolveAccessScope(user, workspaceId);
     return this.service.exportBundle(rootExecutionId, scope);
+  }
+
+  @Get(':rootExecutionId/progress')
+  async progress(
+    @Param('rootExecutionId') rootExecutionId: string,
+    @CurrentUser() user: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+  ) {
+    const scope = this.service.resolveAccessScope(user, workspaceId);
+    return this.service.readProgress(rootExecutionId, scope);
   }
 
   private assertInternalToken(actual: string | undefined): void {

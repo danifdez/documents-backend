@@ -184,13 +184,146 @@ describe('execution v1 contract', () => {
   const validate = ajv.getSchema(
     'https://documents.local/harness/v1/schemas/execution-bundle.schema.json',
   )!;
+  const validateEvent = ajv.getSchema(
+    'https://documents.local/harness/v1/schemas/execution-event.schema.json',
+  )!;
   const contractHash = verifyManifest();
+
+  const event = (payload: any, overrides: any = {}) => ({
+    schemaVersion: 'execution-event/1',
+    eventId: 'event-progress-1',
+    rootExecutionId: 'execution-progress-1',
+    executionId: 'execution-progress-1',
+    sequence: 1,
+    producerSequence: 1,
+    eventType: 'progress.reported',
+    producer: {
+      component: 'documents-models',
+      instanceId: 'models-test',
+      version: 'test',
+    },
+    actor: { type: 'worker' },
+    occurredAt: '2026-08-20T12:00:00Z',
+    ingestedAt: '2026-08-20T12:00:00Z',
+    payloadSchema: 'progress.reported/1',
+    payload,
+    artifactRefs: [],
+    security: {
+      dataClassification: 'workspace',
+      purpose: 'evaluation',
+      allowedDestinations: ['documents', 'ai-train'],
+      redactionApplied: true,
+    },
+    contentHash: `sha256:${'0'.repeat(64)}`,
+    ...overrides,
+  });
 
   it('keeps the runtime adapter pinned to the copied schema set', () => {
     expect(contractHash).toBe(EXECUTION_CONTRACT_SET_HASH);
   });
 
-  it.each(['documents-bundle.json', 'ia-browser-bundle.json'])(
+  it('accepts a policy snapshot and rejects negative limits', () => {
+    const payload = {
+      message: 'Effective progress policy recorded',
+      kind: 'policy_snapshot',
+      policy: {
+        version: '1',
+        source: 'models.task_config',
+        loopId: 'loop-progress-1',
+        agentName: 'assistant',
+        loopKind: 'top_level',
+        maxRounds: 3,
+        maxOutputRepairs: 1,
+        forcedFinalizationAvailable: true,
+        maxTokensPerInference: 1000,
+      },
+    };
+    expect(validateEvent(event(payload))).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          ...payload,
+          policy: { ...payload.policy, maxRounds: -1 },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('accepts an unknown token total and rejects a negative ledger counter', () => {
+    const zero = { started: 0, finished: 0, unfinished: 0, failed: 0 };
+    const payload = {
+      message: 'Durable progress ledger recorded',
+      kind: 'ledger_snapshot',
+      ledger: {
+        version: '1',
+        lastSequence: 4,
+        operations: {
+          inference: { started: 1, finished: 1, unfinished: 0, failed: 0 },
+          tool_call: zero,
+        },
+        inferencePhases: {
+          direct_response: {
+            started: 1,
+            finished: 1,
+            unfinished: 0,
+            failed: 0,
+          },
+        },
+        loops: {},
+        promptTokens: { known: false, total: 0, unknownOperations: 1 },
+        generatedTokens: { known: false, total: 0, unknownOperations: 1 },
+        completeness: 'complete',
+      },
+    };
+    expect(validateEvent(event(payload))).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          ...payload,
+          ledger: {
+            ...payload.ledger,
+            operations: {
+              ...payload.ledger.operations,
+              tool_call: { ...zero, unfinished: -1 },
+            },
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects unknown inference phases when loop metadata is present', () => {
+    expect(
+      validateEvent(
+        event(
+          {
+            operationKind: 'inference',
+            status: 'dispatched',
+            name: 'chat_with_tools',
+            loopId: 'loop-progress-1',
+            agentName: 'assistant',
+            loopKind: 'top_level',
+            round: 1,
+            maxRounds: 3,
+            phase: 'made_up_phase',
+          },
+          {
+            eventType: 'operation.started',
+            payloadSchema: 'operation.started/1',
+            operationId: 'operation-progress-1',
+            attemptId: 'attempt-progress-1',
+          },
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    'documents-bundle.json',
+    'ia-browser-bundle.json',
+    'progress-complete-bundle.json',
+    'progress-interrupted-bundle.json',
+  ])(
     'accepts %s with valid hashes and invariants',
     (name) => {
       const path = join(fixturesRoot, 'valid', name);

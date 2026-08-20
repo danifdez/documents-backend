@@ -7,6 +7,10 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ExecutionStatus } from './execution-status.enum';
+import type {
+  ProgressLedger,
+  ProgressPolicyProjection,
+} from './execution-progress';
 
 @Entity({ name: 'executions' })
 @Index('IDX_executions_access', ['ownerPrincipal', 'workspaceId'])
@@ -81,6 +85,12 @@ export class ExecutionEntity {
 
   @Column({ type: 'jsonb', nullable: true })
   checkpoint: any;
+
+  @Column({ name: 'progress_policy', type: 'jsonb', nullable: true })
+  progressPolicy: ProgressPolicyProjection | null;
+
+  @Column({ name: 'progress_ledger', type: 'jsonb', nullable: true })
+  progressLedger: ProgressLedger | null;
 
   @Column({ type: 'integer', default: 0 })
   step: number;
