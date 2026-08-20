@@ -1,6 +1,6 @@
 ## Architecture
 
-The Documents Backend is built with NestJS 10 and TypeScript. It follows NestJS module conventions:
+The Documents Backend is built with NestJS 11 and TypeScript. It follows NestJS module conventions:
 each feature area is encapsulated in its own module with a controller, service, and entity. All modules
 are wired together in `AppModule`.
 
@@ -27,9 +27,9 @@ The following modules make up the backend. Each maps to a directory under `src/`
 |--------|---------|
 | `DatabaseModule` | Configures and provides the TypeORM `DataSource` used by all repositories |
 | `AuthModule` | JWT authentication, user management, and access control guards |
-| `JobModule` | CRUD over the `jobs` table; job creation and status tracking |
-| `JobProcessorModule` | Auto-discovers and registers all job processors; provides `JobProcessorFactory` |
-| `TaskScheduleModule` | Cron scheduler that polls for pending jobs and dispatches them |
+| `ExecutionModule` | Durable execution identity, queue state, events, artifacts, and bundles |
+| `ExecutionProcessorModule` | Auto-discovers backend finalizers through `ExecutionProcessorFactory` |
+| `TaskScheduleModule` | Finalizes worker results and recovers stale attempts |
 | `FileStorageModule` | SHA256 content-addressed file storage on disk (see [File Storage](./file-storage.md)) |
 | `NotificationModule` | Socket.io WebSocket gateway that pushes events to connected clients |
 | `WorkerModule` | Tracks worker instances, their capabilities, and heartbeat status |
@@ -109,7 +109,9 @@ The database is managed entirely through TypeORM migrations. The schema is split
 - `pending_entities` — unconfirmed NER candidates
 
 **AI and search**
-- `jobs` — async job queue
+- `executions` — durable work and queue state
+- `execution_events` — append-only ordered evidence
+- `execution_artifacts` — manifests and optional evidence bodies
 - `workers` — registered worker instances
 - `knowledge_entries` — manually curated knowledge base entries
 
@@ -138,15 +140,15 @@ HTTP request
 For file uploads, Multer parses the multipart body before the controller method runs.
 
 For real-time events, the `NotificationGateway` pushes Socket.io events directly to connected clients
-at any point during request or job processing.
+at any point during request or execution processing.
 
 ### Interaction with the models service
 
-The backend never runs AI models itself. All AI tasks are delegated to the separate models service
-(a Python worker) via HTTP. The flow is:
+The backend never runs AI models itself. AI tasks are delegated to the separate
+models worker through the shared `executions` table. The flow is:
 
-1. Backend creates a job record in PostgreSQL with the task type and input payload.
-2. The `TaskScheduleService` picks up the job and calls the models service HTTP endpoint.
-3. The models service processes the request and returns results.
-4. The processor stores the results in the database and updates resource state.
-5. A WebSocket notification is emitted to the frontend.
+1. Backend transactionally creates an execution and its first event.
+2. A compatible models worker claims it with `FOR UPDATE SKIP LOCKED` and a new `attemptId`.
+3. The worker persists checkpoint, result, and evidence, then moves the same row to `backend_finalization`.
+4. `TaskScheduleService` selects a backend processor, applies domain effects, and completes or fails the execution.
+5. A Socket.io notification containing the UUID `executionId` is emitted to the frontend.

@@ -12,13 +12,16 @@ describe('ThreadService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ThreadService, { provide: getRepositoryToken(ThreadEntity), useValue: repo }],
+      providers: [
+        ThreadService,
+        { provide: getRepositoryToken(ThreadEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(ThreadService);
   });
 
   it('should find one', async () => {
-    repo.findOneBy.mockResolvedValue(buildThread());
+    repo.findOne.mockResolvedValue(buildThread());
     expect(await service.findOne(1)).toBeDefined();
   });
 

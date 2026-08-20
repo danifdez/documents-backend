@@ -7,6 +7,7 @@ import { ExecutionContractValidator } from '../src/execution/execution-contract-
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
 import { ExecutionEntity } from '../src/execution/execution.entity';
 import { ExecutionService } from '../src/execution/execution.service';
+import { WorkerEntity } from '../src/worker/worker.entity';
 
 loadEnv({ path: '.env' });
 
@@ -29,6 +30,7 @@ describe('execution PostgreSQL integration', () => {
         ExecutionEntity,
         ExecutionEventEntity,
         ExecutionArtifactEntity,
+        WorkerEntity,
       ],
     });
     await dataSource.initialize();
@@ -37,6 +39,17 @@ describe('execution PostgreSQL integration', () => {
     await runner.query(`CREATE SCHEMA "${schema}"`);
     await runner.query(`SET search_path TO "${schema}"`);
     await new CreateExecutions1757668140001().up(runner);
+    await runner.query(`
+      CREATE TABLE "workers" (
+        "id" uuid PRIMARY KEY,
+        "name" varchar NOT NULL,
+        "capabilities" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "status" varchar NOT NULL DEFAULT 'online',
+        "last_heartbeat" timestamp NOT NULL DEFAULT now(),
+        "started_at" timestamp NOT NULL DEFAULT now(),
+        "metadata" jsonb
+      )
+    `);
     await runner.release();
 
     service = new ExecutionService(
@@ -161,5 +174,70 @@ describe('execution PostgreSQL integration', () => {
         eventId: first.eventId,
       });
     expect(stored.eventType).toBe('progress.reported');
+  });
+
+  it('recovers stale attempts and fails executions that exhausted retries', async () => {
+    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const workerId = randomUUID();
+    const recoverable = await service.createForChat(
+      'assistant_chat',
+      'recover me',
+      scope,
+      {},
+    );
+    const exhausted = await service.createForChat(
+      'assistant_chat',
+      'fail me',
+      scope,
+      {},
+    );
+    const recoverableAttempt = randomUUID();
+    const exhaustedAttempt = randomUUID();
+
+    await dataSource.query(
+      `INSERT INTO "${schema}"."workers"
+       ("id", "name", "last_heartbeat") VALUES ($1, 'stale-worker', $2)`,
+      [workerId, new Date('2026-08-19T09:00:00Z')],
+    );
+    await dataSource.query(
+      `UPDATE "${schema}"."executions"
+       SET "status" = 'running', "phase" = 'worker_execution',
+           "claimed_by" = $1, "attempt_id" = $2, "max_attempts" = $3
+       WHERE "execution_id" = $4`,
+      [workerId, recoverableAttempt, 3, recoverable.executionId],
+    );
+    await dataSource.query(
+      `UPDATE "${schema}"."executions"
+       SET "status" = 'running', "phase" = 'worker_execution',
+           "claimed_by" = $1, "attempt_id" = $2, "max_attempts" = $3
+       WHERE "execution_id" = $4`,
+      [workerId, exhaustedAttempt, 1, exhausted.executionId],
+    );
+
+    await expect(
+      service.requeueStaleExecutions(new Date('2026-08-19T10:00:00Z')),
+    ).resolves.toBe(2);
+
+    const recovered = await service.findOne(recoverable.executionId);
+    const failed = await service.findOne(exhausted.executionId);
+    expect(recovered).toMatchObject({
+      status: 'queued',
+      phase: null,
+      claimedBy: null,
+      attemptId: null,
+      retryCount: 1,
+    });
+    expect(failed).toMatchObject({
+      status: 'failed',
+      phase: null,
+      claimedBy: null,
+      attemptId: null,
+      retryCount: 1,
+      completionReason: 'attempts_exhausted',
+    });
+    expect(failed?.error).toEqual({
+      code: 'EXECUTION_FAILED',
+      message: 'Execution attempts exhausted',
+    });
   });
 });

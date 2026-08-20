@@ -28,7 +28,10 @@ describe('ProjectController', () => {
 
   describe('getAll', () => {
     it('should return all projects', async () => {
-      const projects = [buildProject(), buildProject({ id: 2, name: 'Second' })];
+      const projects = [
+        buildProject(),
+        buildProject({ id: 2, name: 'Second' }),
+      ];
       projectService.findAll.mockResolvedValue(projects);
       expect(await controller.getAll()).toEqual(projects);
       expect(projectService.findAll).toHaveBeenCalled();
@@ -59,7 +62,9 @@ describe('ProjectController', () => {
       const project = buildProject({ name: 'New Project' });
       projectService.create.mockResolvedValue(project);
       expect(await controller.create({ name: 'New Project' })).toEqual(project);
-      expect(projectService.create).toHaveBeenCalledWith({ name: 'New Project' });
+      expect(projectService.create).toHaveBeenCalledWith({
+        name: 'New Project',
+      });
     });
   });
 
@@ -68,7 +73,9 @@ describe('ProjectController', () => {
       const project = buildProject({ name: 'Updated' });
       projectService.update.mockResolvedValue(project);
       expect(await controller.update(1, { name: 'Updated' })).toEqual(project);
-      expect(projectService.update).toHaveBeenCalledWith(1, { name: 'Updated' });
+      expect(projectService.update).toHaveBeenCalledWith(1, {
+        name: 'Updated',
+      });
     });
 
     it('should return null when project not found', async () => {
@@ -90,7 +97,7 @@ describe('ProjectController', () => {
       const projects = [buildProject()];
       projectService.search.mockResolvedValue(projects);
       expect(await controller.search('test')).toEqual(projects);
-      expect(projectService.search).toHaveBeenCalledWith('test');
+      expect(projectService.search).toHaveBeenCalledWith('test', false);
     });
   });
 

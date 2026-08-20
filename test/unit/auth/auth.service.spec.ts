@@ -6,7 +6,12 @@ import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../../../src/auth/auth.service';
 import { UserEntity } from '../../../src/auth/user.entity';
-import { createMockRepository, MockRepository, mockConfigService } from '../../test-utils';
+import { PermissionGroupEntity } from '../../../src/auth/permission-group.entity';
+import {
+  createMockRepository,
+  MockRepository,
+  mockConfigService,
+} from '../../test-utils';
 import { buildUser } from '../../factories';
 
 jest.mock('bcrypt');
@@ -14,16 +19,25 @@ jest.mock('bcrypt');
 describe('AuthService', () => {
   let service: AuthService;
   let repo: MockRepository<UserEntity>;
+  let groupRepo: MockRepository<PermissionGroupEntity>;
   let jwtService: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     repo = createMockRepository<UserEntity>();
-    jwtService = { sign: jest.fn().mockReturnValue('token'), verify: jest.fn() };
+    groupRepo = createMockRepository<PermissionGroupEntity>();
+    jwtService = {
+      sign: jest.fn().mockReturnValue('token'),
+      verify: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: getRepositoryToken(UserEntity), useValue: repo },
+        {
+          provide: getRepositoryToken(PermissionGroupEntity),
+          useValue: groupRepo,
+        },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: mockConfigService },
       ],
@@ -80,13 +94,17 @@ describe('AuthService', () => {
 
     it('should throw for non-refresh token type', async () => {
       jwtService.verify.mockReturnValue({ sub: 1, type: 'access' });
-      await expect(service.refreshToken('bad')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken('bad')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('should throw for inactive user', async () => {
       jwtService.verify.mockReturnValue({ sub: 1, type: 'refresh' });
       repo.findOneBy.mockResolvedValue(null);
-      await expect(service.refreshToken('tok')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken('tok')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 
@@ -97,7 +115,10 @@ describe('AuthService', () => {
       repo.create.mockReturnValue(user);
       repo.save.mockResolvedValue(user);
 
-      const result = await service.createUser({ username: 'new', password: 'pw' });
+      const result = await service.createUser({
+        username: 'new',
+        password: 'pw',
+      });
       expect(result).not.toHaveProperty('passwordHash');
     });
   });

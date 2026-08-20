@@ -12,13 +12,16 @@ describe('MarkService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [MarkService, { provide: getRepositoryToken(MarkEntity), useValue: repo }],
+      providers: [
+        MarkService,
+        { provide: getRepositoryToken(MarkEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(MarkService);
   });
 
   it('should find one', async () => {
-    repo.findOneBy.mockResolvedValue(buildMark());
+    repo.findOne.mockResolvedValue(buildMark());
     expect(await service.findOne(1)).toBeDefined();
   });
 

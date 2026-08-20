@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { ExecutionPriority } from 'src/execution/execution-priority.enum';
-import { ExecutionService } from 'src/execution/execution.service';
-import { ResourceService } from 'src/resource/resource.service';
-import { extractTextFromHtml } from 'src/utils/text';
+import { ExecutionPriority } from '../execution/execution-priority.enum';
+import { ExecutionService } from '../execution/execution.service';
+import { ResourceService } from '../resource/resource.service';
+import { extractTextFromHtml } from '../utils/text';
 
 @Injectable()
 export class ModelService {
@@ -37,7 +37,7 @@ export class ModelService {
     text?: string,
     sourceLanguage?: string,
     type?: string,
-  ): Promise<void> {
+  ): Promise<{ executionId: string }> {
     let content: string | null = null;
     if (resourceId) {
       const resource = await this.resourceService.findOne(resourceId);
@@ -54,17 +54,25 @@ export class ModelService {
       content = text;
     }
 
-    await this.executionService.create('summarize', ExecutionPriority.NORMAL, {
-      content: content,
-      sourceLanguage: sourceLanguage,
-      targetLanguage: targetLanguage,
-      resourceId: resourceId,
-      targetDocId: targetDocId,
-      type: type || 'resource',
-    });
+    const execution = await this.executionService.create(
+      'summarize',
+      ExecutionPriority.NORMAL,
+      {
+        content: content,
+        sourceLanguage: sourceLanguage,
+        targetLanguage: targetLanguage,
+        resourceId: resourceId,
+        targetDocId: targetDocId,
+        type: type || 'resource',
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
-  async translate(resourceId: number, language: string): Promise<void> {
+  async translate(
+    resourceId: number,
+    language: string,
+  ): Promise<{ executionId: string }> {
     // Fetch the resource to get content and source language
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
@@ -79,15 +87,20 @@ export class ModelService {
     const sourceLanguage = resource.language || 'en';
     const extractedTexts = extractTextFromHtml(content);
 
-    await this.executionService.create('translate', ExecutionPriority.NORMAL, {
-      resourceId: resourceId,
-      sourceLanguage: sourceLanguage,
-      targetLanguage: language,
-      texts: extractedTexts,
-    });
+    const execution = await this.executionService.create(
+      'translate',
+      ExecutionPriority.NORMAL,
+      {
+        resourceId: resourceId,
+        sourceLanguage: sourceLanguage,
+        targetLanguage: language,
+        texts: extractedTexts,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
-  async extractEntities(resourceId: number): Promise<void> {
+  async extractEntities(resourceId: number): Promise<{ executionId: string }> {
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
       throw new Error(`Resource with ID ${resourceId} not found`);
@@ -108,7 +121,7 @@ export class ModelService {
       process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6',
       10,
     );
-    await this.executionService.create(
+    const execution = await this.executionService.create(
       'entity-extraction',
       ExecutionPriority.NORMAL,
       {
@@ -119,9 +132,13 @@ export class ModelService {
       },
       agentEnabled ? { maxSteps } : undefined,
     );
+    return { executionId: execution.executionId };
   }
 
-  async keyPoints(resourceId: number, targetLanguage?: string): Promise<void> {
+  async keyPoints(
+    resourceId: number,
+    targetLanguage?: string,
+  ): Promise<{ executionId: string }> {
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
       throw new Error(`Resource with ID ${resourceId} not found`);
@@ -138,14 +155,22 @@ export class ModelService {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
 
-    await this.executionService.create('key-point', ExecutionPriority.NORMAL, {
-      resourceId: resourceId,
-      content: content,
-      targetLanguage: targetLanguage || resource.language || 'en',
-    });
+    const execution = await this.executionService.create(
+      'key-point',
+      ExecutionPriority.NORMAL,
+      {
+        resourceId: resourceId,
+        content: content,
+        targetLanguage: targetLanguage || resource.language || 'en',
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
-  async keywords(resourceId: number, targetLanguage?: string): Promise<void> {
+  async keywords(
+    resourceId: number,
+    targetLanguage?: string,
+  ): Promise<{ executionId: string }> {
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
       throw new Error(`Resource with ID ${resourceId} not found`);
@@ -162,11 +187,16 @@ export class ModelService {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
 
-    await this.executionService.create('keywords', ExecutionPriority.NORMAL, {
-      resourceId: resourceId,
-      content: content,
-      targetLanguage: targetLanguage || resource.language || 'en',
-    });
+    const execution = await this.executionService.create(
+      'keywords',
+      ExecutionPriority.NORMAL,
+      {
+        resourceId: resourceId,
+        content: content,
+        targetLanguage: targetLanguage || resource.language || 'en',
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
   async semanticSearch(

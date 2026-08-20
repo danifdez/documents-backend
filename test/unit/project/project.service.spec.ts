@@ -131,7 +131,7 @@ describe('ProjectService', () => {
       const result = await service.search('test');
       expect(result).toHaveLength(1);
       expect(qb.where).toHaveBeenCalledWith(
-        'p.name ILIKE :q OR p.description ILIKE :q',
+        '(p.name ILIKE :q OR p.description ILIKE :q)',
         { q: '%test%' },
       );
     });
@@ -158,24 +158,32 @@ describe('ProjectService', () => {
       const bibByType = [{ type: 'article', count: 3 }];
       const cooccurrence = [{ source: 'E1', target: 'E2', weight: 2 }];
       const keyPointsRaw = [
-        { resourceName: 'Res1', keyPoints: JSON.stringify(['Point A', 'Point B']) },
+        {
+          resourceName: 'Res1',
+          keyPoints: JSON.stringify(['Point A', 'Point B']),
+        },
       ];
       const timelineEvents = [
-        { name: 'TL1', timelineData: JSON.stringify([{ date: '2024-01-01', title: 'Event 1' }]) },
+        {
+          name: 'TL1',
+          timelineData: JSON.stringify([
+            { date: '2024-01-01', title: 'Event 1' },
+          ]),
+        },
       ];
 
       // Mock all 10 query calls in order
       mockQueryRunner.query
-        .mockResolvedValueOnce([countsRow])       // counts
-        .mockResolvedValueOnce(languages)          // languages
-        .mockResolvedValueOnce(keywordsRaw)        // keywords
-        .mockResolvedValueOnce(topEntities)        // top entities
-        .mockResolvedValueOnce(topAuthors)         // top authors
-        .mockResolvedValueOnce(bibByYear)          // bib by year
-        .mockResolvedValueOnce(bibByType)          // bib by type
-        .mockResolvedValueOnce(cooccurrence)       // co-occurrence
-        .mockResolvedValueOnce(keyPointsRaw)       // key points
-        .mockResolvedValueOnce(timelineEvents);    // timeline events
+        .mockResolvedValueOnce([countsRow]) // counts
+        .mockResolvedValueOnce(languages) // languages
+        .mockResolvedValueOnce(keywordsRaw) // keywords
+        .mockResolvedValueOnce(topEntities) // top entities
+        .mockResolvedValueOnce(topAuthors) // top authors
+        .mockResolvedValueOnce(bibByYear) // bib by year
+        .mockResolvedValueOnce(bibByType) // bib by type
+        .mockResolvedValueOnce(cooccurrence) // co-occurrence
+        .mockResolvedValueOnce(keyPointsRaw) // key points
+        .mockResolvedValueOnce(timelineEvents); // timeline events
 
       const result = await service.getStats(1);
 
@@ -190,11 +198,17 @@ describe('ProjectService', () => {
         { word: 'machine-learning', count: 5 },
         { word: 'nlp', count: 3 },
       ]);
-      expect(result.topEntities).toEqual([{ name: 'Entity1', type: 'Person', count: 4 }]);
+      expect(result.topEntities).toEqual([
+        { name: 'Entity1', type: 'Person', count: 4 },
+      ]);
       expect(result.topAuthors).toEqual([{ name: 'Author1', count: 3 }]);
       expect(result.bibliographyByYear).toEqual([{ year: '2024', count: 2 }]);
-      expect(result.bibliographyByType).toEqual([{ type: 'article', count: 3 }]);
-      expect(result.entityCooccurrence).toEqual([{ source: 'E1', target: 'E2', weight: 2 }]);
+      expect(result.bibliographyByType).toEqual([
+        { type: 'article', count: 3 },
+      ]);
+      expect(result.entityCooccurrence).toEqual([
+        { source: 'E1', target: 'E2', weight: 2 },
+      ]);
       expect(result.keyPoints).toEqual([
         { text: 'Point A', source: 'Res1' },
         { text: 'Point B', source: 'Res1' },
@@ -216,15 +230,15 @@ describe('ProjectService', () => {
 
       mockQueryRunner.query
         .mockResolvedValueOnce([emptyCountsRow])
-        .mockResolvedValueOnce([])   // languages
-        .mockResolvedValueOnce([])   // keywords
-        .mockResolvedValueOnce([])   // entities
-        .mockResolvedValueOnce([])   // authors
-        .mockResolvedValueOnce([])   // bib year
-        .mockResolvedValueOnce([])   // bib type
-        .mockResolvedValueOnce([])   // co-occurrence
-        .mockResolvedValueOnce([])   // key points
-        .mockResolvedValueOnce([]);  // timeline
+        .mockResolvedValueOnce([]) // languages
+        .mockResolvedValueOnce([]) // keywords
+        .mockResolvedValueOnce([]) // entities
+        .mockResolvedValueOnce([]) // authors
+        .mockResolvedValueOnce([]) // bib year
+        .mockResolvedValueOnce([]) // bib type
+        .mockResolvedValueOnce([]) // co-occurrence
+        .mockResolvedValueOnce([]) // key points
+        .mockResolvedValueOnce([]); // timeline
 
       const result = await service.getStats(1);
 
@@ -238,7 +252,16 @@ describe('ProjectService', () => {
 
     it('should handle key points stored as already-parsed arrays', async () => {
       mockQueryRunner.query
-        .mockResolvedValueOnce([{ resourceCount: '0', docCount: '0', noteCount: '0', datasetCount: '0', bibliographyCount: '0', entityCount: '0' }])
+        .mockResolvedValueOnce([
+          {
+            resourceCount: '0',
+            docCount: '0',
+            noteCount: '0',
+            datasetCount: '0',
+            bibliographyCount: '0',
+            entityCount: '0',
+          },
+        ])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
@@ -246,7 +269,9 @@ describe('ProjectService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ resourceName: 'R1', keyPoints: ['Already', 'Parsed'] }])
+        .mockResolvedValueOnce([
+          { resourceName: 'R1', keyPoints: ['Already', 'Parsed'] },
+        ])
         .mockResolvedValueOnce([]);
 
       const result = await service.getStats(1);
@@ -259,7 +284,20 @@ describe('ProjectService', () => {
     it('should always release queryRunner even if queries succeed', async () => {
       // Setup minimal mock data
       for (let i = 0; i < 10; i++) {
-        mockQueryRunner.query.mockResolvedValueOnce(i === 0 ? [{ resourceCount: '0', docCount: '0', noteCount: '0', datasetCount: '0', bibliographyCount: '0', entityCount: '0' }] : []);
+        mockQueryRunner.query.mockResolvedValueOnce(
+          i === 0
+            ? [
+                {
+                  resourceCount: '0',
+                  docCount: '0',
+                  noteCount: '0',
+                  datasetCount: '0',
+                  bibliographyCount: '0',
+                  entityCount: '0',
+                },
+              ]
+            : [],
+        );
       }
       await service.getStats(1);
       expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);

@@ -91,7 +91,7 @@ yarn start:dev
 |----------|-------------|
 | [Getting Started](./docs/getting-started.md) | Installation, setup, and available scripts |
 | [Architecture](./docs/architecture.md) | System modules, data model, and request flow |
-| [Job System](./docs/job-system.md) | Async processing pipeline and job processors |
+| [Execution System](./docs/execution-system.md) | Durable execution queue, evidence, and processors |
 | [File Storage](./docs/file-storage.md) | SHA256 content-addressed storage system |
 | [Configuration](./docs/configuration.md) | Environment variables and settings |
 | [Authentication](./docs/authentication.md) | Auth system, roles, and permissions |

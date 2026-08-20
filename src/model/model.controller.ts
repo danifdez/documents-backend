@@ -31,8 +31,10 @@ export class ModelController {
 
   @Post('summarize')
   @RequirePermissions(Permission.SUMMARIZE)
-  async summarize(@Body() summarizeData: SummarizeDto): Promise<void> {
-    await this.modelService.summarize(
+  async summarize(
+    @Body() summarizeData: SummarizeDto,
+  ): Promise<{ executionId: string }> {
+    return this.modelService.summarize(
       summarizeData.targetLanguage,
       summarizeData.resourceId,
       summarizeData.targetDocId,
@@ -44,8 +46,10 @@ export class ModelController {
 
   @Post('translate')
   @RequirePermissions(Permission.TRANSLATE)
-  async translate(@Body() translateData: TranslateDto): Promise<void> {
-    await this.modelService.translate(
+  async translate(
+    @Body() translateData: TranslateDto,
+  ): Promise<{ executionId: string }> {
+    return this.modelService.translate(
       translateData.resourceId,
       translateData.targetLanguage,
     );
@@ -53,20 +57,24 @@ export class ModelController {
 
   @Post('extract-entities')
   @RequirePermissions(Permission.ENTITY_EXTRACTION)
-  async extractEntities(@Body() body: ExtractEntitiesDto): Promise<void> {
-    await this.modelService.extractEntities(body.resourceId);
+  async extractEntities(
+    @Body() body: ExtractEntitiesDto,
+  ): Promise<{ executionId: string }> {
+    return this.modelService.extractEntities(body.resourceId);
   }
 
   @Post('key-points')
   @RequirePermissions(Permission.KEY_POINTS)
-  async keyPoints(@Body() body: KeyPointsDto): Promise<void> {
-    await this.modelService.keyPoints(body.resourceId, body.targetLanguage);
+  async keyPoints(
+    @Body() body: KeyPointsDto,
+  ): Promise<{ executionId: string }> {
+    return this.modelService.keyPoints(body.resourceId, body.targetLanguage);
   }
 
   @Post('keywords')
   @RequirePermissions(Permission.KEYWORDS)
-  async keywords(@Body() body: KeywordsDto): Promise<void> {
-    await this.modelService.keywords(body.resourceId, body.targetLanguage);
+  async keywords(@Body() body: KeywordsDto): Promise<{ executionId: string }> {
+    return this.modelService.keywords(body.resourceId, body.targetLanguage);
   }
 
   @Post('semantic-search')

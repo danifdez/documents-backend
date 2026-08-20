@@ -36,8 +36,9 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
       return { success: false, reason: 'not_found' };
     }
 
-    const jobChecksum = execution.payload['checksum'] as string | undefined;
-    if (jobChecksum && jobChecksum !== file.checksum) {
+    const executionChecksum = execution.payload['checksum'] as
+      string | undefined;
+    if (executionChecksum && executionChecksum !== file.checksum) {
       this.logger.log(
         `[indexed-file] discarding stale ingest for id=${indexedFileId} (checksum changed)`,
       );

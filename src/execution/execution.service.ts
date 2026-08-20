@@ -25,6 +25,7 @@ import {
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
+import { WorkerEntity } from '../worker/worker.entity';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -516,7 +517,7 @@ export class ExecutionService {
   async requeueStaleExecutions(heartbeatThresholdDate: Date): Promise<number> {
     const stale = await this.executionRepo
       .createQueryBuilder('execution')
-      .innerJoin('workers', 'worker', 'worker.id = execution.claimed_by')
+      .innerJoin(WorkerEntity, 'worker', 'worker.id = execution.claimed_by')
       .where('execution.status = :status', { status: ExecutionStatus.RUNNING })
       .andWhere('execution.phase = :phase', { phase: 'worker_execution' })
       .andWhere('worker.last_heartbeat < :threshold', {

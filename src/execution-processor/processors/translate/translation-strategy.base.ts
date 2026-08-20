@@ -19,7 +19,7 @@ export abstract class TranslationStrategyBase implements TranslationStrategy {
 
   abstract execute(execution: ExecutionEntity): Promise<any>;
 
-  protected ensureJobResult(execution: ExecutionEntity): void {
+  protected ensureExecutionResult(execution: ExecutionEntity): void {
     if (!execution.result) {
       const errorMessage = `Execution result is null or undefined`;
       this.logger.error(errorMessage);
@@ -32,7 +32,7 @@ export abstract class TranslationStrategyBase implements TranslationStrategy {
     execution: ExecutionEntity,
     translationType: string,
   ): TranslationResults {
-    this.ensureJobResult(execution);
+    this.ensureExecutionResult(execution);
 
     const results = execution.result as TranslationResults;
     if (!results?.response || !Array.isArray(results.response)) {
@@ -64,7 +64,7 @@ export abstract class SingleEntityTranslationStrategyBase<
 
     this.validatePayload(execution);
 
-    this.ensureJobResult(execution);
+    this.ensureExecutionResult(execution);
 
     const results = execution.result as TranslationResults;
 

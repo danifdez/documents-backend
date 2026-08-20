@@ -38,12 +38,12 @@ describe('KnowledgeEntryService', () => {
   describe('findOne', () => {
     it('should find by id', async () => {
       const entry = buildKnowledgeEntry();
-      repo.findOneBy.mockResolvedValue(entry);
+      repo.findOne.mockResolvedValue(entry);
       expect(await service.findOne(1)).toEqual(entry);
     });
 
     it('should return null when not found', async () => {
-      repo.findOneBy.mockResolvedValue(null);
+      repo.findOne.mockResolvedValue(null);
       expect(await service.findOne(999)).toBeNull();
     });
   });
