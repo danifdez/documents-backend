@@ -16,12 +16,14 @@ describe('execution progress projection', () => {
         repair: 1,
         closing: 1,
         maxTokensPerInference: 1000,
+        toolCalls: 2,
       },
       effectivePolicy: {
         normal: 1,
         repair: 1,
         closing: 1,
         maxTokensPerInference: 512,
+        toolCalls: 1,
       },
       grantedAt: '2026-08-20T10:00:00Z',
     };
@@ -31,6 +33,7 @@ describe('execution progress projection', () => {
       grantId: 'grant-1',
       operationId: 'operation-1',
       executionAttemptId: 'execution-attempt-1',
+      operationKind: 'inference' as const,
       bucket: 'normal' as const,
       phase: 'agent_loop',
       round: 1,
@@ -97,18 +100,46 @@ describe('execution progress projection', () => {
           },
         },
       },
+      {
+        sequence: 6,
+        eventType: 'progress.reported',
+        payload: {
+          message: 'tool reserved',
+          kind: 'budget_reservation',
+          reservation: {
+            ...reservation,
+            reservationId: 'reservation-tool-1',
+            operationId: 'operation-tool-1',
+            operationKind: 'tool_call',
+            bucket: 'tool',
+            toolCallId: 'tool-call-1',
+            name: 'folder_read',
+          },
+        },
+      },
+      {
+        sequence: 7,
+        eventType: 'operation.started',
+        operationId: 'operation-tool-1',
+        attemptId: 'operation-attempt-tool-1',
+        payload: {
+          operationKind: 'tool_call',
+          name: 'folder_read',
+        },
+      },
     ]);
 
-    expect(progress.ledger.inferenceBudget?.grants['grant-1'].usage).toEqual({
+    expect(progress.ledger.operationBudget?.grants['grant-1'].usage).toEqual({
       normal: { granted: 1, reserved: 0, consumed: 1, available: 0 },
       repair: { granted: 1, reserved: 0, consumed: 0, available: 1 },
       closing: { granted: 1, reserved: 0, consumed: 0, available: 1 },
+      tool: { granted: 1, reserved: 0, consumed: 1, available: 0 },
     });
     expect(
-      progress.ledger.inferenceBudget?.reservations['operation-1'].status,
+      progress.ledger.operationBudget?.reservations['operation-1'].status,
     ).toBe('consumed');
     expect(
-      progress.ledger.inferenceBudget?.reservations['operation-2'].status,
+      progress.ledger.operationBudget?.reservations['operation-2'].status,
     ).toBe('denied');
   });
 

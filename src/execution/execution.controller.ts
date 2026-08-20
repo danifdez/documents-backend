@@ -19,7 +19,7 @@ import { Permission } from '../auth/permission.enum';
 import { ExecutionService } from './execution.service';
 import {
   IncomingExecutionArtifact,
-  InferenceBudgetReservationRequest,
+  OperationBudgetReservationRequest,
   ProgressGrantRequest,
 } from './execution.types';
 import { CreateExecutionDto } from './dto/execution.dto';
@@ -92,13 +92,13 @@ export class ExecutionController {
   @Post('internal/:rootExecutionId/progress/reservations')
   @Public()
   @SkipThrottle()
-  async reserveInferenceBudget(
+  async reserveOperationBudget(
     @Param('rootExecutionId') rootExecutionId: string,
     @Headers('x-execution-ingest-token') token: string | undefined,
-    @Body() body: InferenceBudgetReservationRequest,
+    @Body() body: OperationBudgetReservationRequest,
   ) {
     this.assertInternalToken(token);
-    return this.service.reserveInferenceBudget(rootExecutionId, body);
+    return this.service.reserveOperationBudget(rootExecutionId, body);
   }
 
   @Get(':rootExecutionId/events')

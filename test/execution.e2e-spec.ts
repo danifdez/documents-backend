@@ -243,7 +243,7 @@ describe('execution PostgreSQL integration', () => {
     });
   });
 
-  it('serializes the last inference reservation and fences stale attempts', async () => {
+  it('serializes the last operation budget slots and fences stale attempts', async () => {
     const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
     const context = await service.createForChat(
       'assistant_chat',
@@ -265,6 +265,7 @@ describe('execution PostgreSQL integration', () => {
       repair: 0,
       closing: 0,
       maxTokensPerInference: 512,
+      toolCalls: 1,
     };
     const { grant } = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
@@ -276,11 +277,12 @@ describe('execution PostgreSQL integration', () => {
       requestedPolicy,
     });
     const reserve = (operationId: string, executionAttemptId = attemptId) =>
-      service.reserveInferenceBudget(context.executionId, {
+      service.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
         grantId: grant.grantId,
         operationId,
+        operationKind: 'inference',
         bucket: 'normal',
         phase: 'direct_response',
         round: 1,
@@ -294,6 +296,31 @@ describe('execution PostgreSQL integration', () => {
     ]);
     expect(decisions.filter((decision) => decision.granted)).toHaveLength(1);
     expect(decisions.filter((decision) => !decision.granted)).toHaveLength(1);
+
+    const reserveTool = (
+      operationId: string,
+      toolCallId: string,
+      executionAttemptId = attemptId,
+    ) =>
+      service.reserveOperationBudget(context.executionId, {
+        executionId: context.executionId,
+        loopId: context.executionId,
+        grantId: grant.grantId,
+        operationId,
+        operationKind: 'tool_call',
+        bucket: 'tool',
+        toolCallId,
+        phase: 'agent_loop',
+        round: 1,
+        name: 'folder_read',
+        executionAttemptId,
+      });
+    const toolDecisions = await Promise.all([
+      reserveTool(randomUUID(), randomUUID()),
+      reserveTool(randomUUID(), randomUUID()),
+    ]);
+    expect(toolDecisions.filter((decision) => decision.granted)).toHaveLength(1);
+    expect(toolDecisions.filter((decision) => !decision.granted)).toHaveLength(1);
 
     const nextAttemptId = randomUUID();
     await dataSource.query(
@@ -317,6 +344,12 @@ describe('execution PostgreSQL integration', () => {
     await expect(reserve(randomUUID(), nextAttemptId)).resolves.toMatchObject({
       granted: false,
       reservation: { reason: 'budget_hard_limit_reached' },
+    });
+    await expect(
+      reserveTool(randomUUID(), randomUUID(), nextAttemptId),
+    ).resolves.toMatchObject({
+      granted: false,
+      reservation: { reason: 'tool_budget_hard_limit_reached' },
     });
   });
 });

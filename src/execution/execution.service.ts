@@ -16,7 +16,7 @@ import {
   ExecutionTelemetrySummary,
   ExecutionAccessScope,
   ExecutionCompletion,
-  InferenceBudgetReservationRequest,
+  OperationBudgetReservationRequest,
   ProgressGrantRequest,
 } from './execution.types';
 import {
@@ -31,21 +31,21 @@ import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { WorkerEntity } from '../worker/worker.entity';
 import {
-  InferenceBudgetGrant,
-  InferenceBudgetReservation,
+  OperationBudgetGrant,
+  OperationBudgetReservation,
   ProgressEvent,
   projectExecutionProgress,
 } from './execution-progress';
 import {
   assertActiveBudgetAttempt,
-  assertBucketMatchesPhase,
+  assertBucketMatchesOperation,
   assertGrantScope,
-  assertInferenceBudgetProjection,
+  assertOperationBudgetProjection,
   assertReservationMatches,
   assertReservationScope,
-  createInferenceBudgetGrant,
-  createInferenceBudgetReservation,
-  governedInferenceStart,
+  createOperationBudgetGrant,
+  createOperationBudgetReservation,
+  governedBudgetStart,
   resolveEffectivePolicy,
   validateProgressGrantRequest,
   validateReservationRequest,
@@ -758,7 +758,7 @@ export class ExecutionService {
           rootExecutionId,
           incoming,
         );
-        await this.validateInferenceBudgetStart(
+        await this.validateOperationBudgetStart(
           eventRepo,
           targetExecution,
           incoming,
@@ -811,7 +811,7 @@ export class ExecutionService {
   async requestProgressGrant(
     rootExecutionId: string,
     request: ProgressGrantRequest,
-  ): Promise<{ grant: InferenceBudgetGrant; eventId: string }> {
+  ): Promise<{ grant: OperationBudgetGrant; eventId: string }> {
     validateProgressGrantRequest(rootExecutionId, request);
     return this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
@@ -832,7 +832,7 @@ export class ExecutionService {
         rows.map((row) => row.envelope as ProgressEvent),
       );
       const existing = Object.values(
-        progress.ledger.inferenceBudget?.grants ?? {},
+        progress.ledger.operationBudget?.grants ?? {},
       )[0];
       if (existing) {
         if (
@@ -867,8 +867,9 @@ export class ExecutionService {
           1,
           this.progressLimit('PROGRESS_CHAT_MAX_TOKENS_PER_INFERENCE', 4096),
         ),
+        toolCalls: this.progressLimit('PROGRESS_CHAT_MAX_TOOL_CALLS', 6),
       });
-      const grant = createInferenceBudgetGrant(
+      const grant = createOperationBudgetGrant(
         execution,
         request,
         effectivePolicy,
@@ -885,7 +886,7 @@ export class ExecutionService {
           eventType: 'progress.reported',
           payloadSchema: 'progress.reported/1',
           payload: {
-            message: 'Authoritative inference budget granted',
+            message: 'Authoritative operation budget granted',
             kind: 'budget_grant',
             grant,
           },
@@ -905,12 +906,12 @@ export class ExecutionService {
     });
   }
 
-  async reserveInferenceBudget(
+  async reserveOperationBudget(
     rootExecutionId: string,
-    request: InferenceBudgetReservationRequest,
+    request: OperationBudgetReservationRequest,
   ): Promise<{
     granted: boolean;
-    reservation: InferenceBudgetReservation;
+    reservation: OperationBudgetReservation;
     eventId: string;
   }> {
     validateReservationRequest(rootExecutionId, request);
@@ -933,7 +934,7 @@ export class ExecutionService {
         rows.map((row) => row.envelope as ProgressEvent),
       );
       const existing =
-        progress.ledger.inferenceBudget?.reservations[request.operationId];
+        progress.ledger.operationBudget?.reservations[request.operationId];
       if (existing) {
         assertReservationMatches(existing, request);
         const event = rows.find(
@@ -954,14 +955,18 @@ export class ExecutionService {
           eventId: event!.eventId,
         };
       }
-      const grant = progress.ledger.inferenceBudget?.grants[request.grantId];
+      const grant = progress.ledger.operationBudget?.grants[request.grantId];
       if (!grant || grant.loopId !== request.loopId) {
-        throw new BadRequestException('Unknown inference budget grant');
+        throw new BadRequestException('Unknown operation budget grant');
       }
-      assertBucketMatchesPhase(request.bucket, request.phase);
+      assertBucketMatchesOperation(
+        request.operationKind,
+        request.bucket,
+        request.phase,
+      );
       const usage = grant.usage[request.bucket];
       const granted = usage.available > 0;
-      const reservation = createInferenceBudgetReservation(
+      const reservation = createOperationBudgetReservation(
         request,
         granted,
         randomUUID(),
@@ -978,8 +983,8 @@ export class ExecutionService {
           payloadSchema: 'progress.reported/1',
           payload: {
             message: granted
-              ? 'Inference budget reserved'
-              : 'Inference budget reservation denied',
+              ? 'Operation budget reserved'
+              : 'Operation budget reservation denied',
             kind: 'budget_reservation',
             reservation,
           },
@@ -1478,12 +1483,12 @@ export class ExecutionService {
     );
   }
 
-  private async validateInferenceBudgetStart(
+  private async validateOperationBudgetStart(
     eventRepo: Repository<ExecutionEventEntity>,
     execution: ExecutionEntity,
     event: Record<string, unknown>,
   ): Promise<void> {
-    const identity = governedInferenceStart(execution, event);
+    const identity = governedBudgetStart(execution, event);
     if (!identity) return;
     const rows = await eventRepo.find({
       where: { rootExecutionId: execution.rootExecutionId },
@@ -1492,7 +1497,7 @@ export class ExecutionService {
     const progress = projectExecutionProgress(
       rows.map((row) => row.envelope as ProgressEvent),
     );
-    assertInferenceBudgetProjection(identity, progress.ledger.inferenceBudget);
+    assertOperationBudgetProjection(identity, progress.ledger.operationBudget);
   }
 
   private validateIncomingEvent(
@@ -1550,6 +1555,16 @@ export class ExecutionService {
       !Array.isArray(event.artifactRefs)
     ) {
       throw new BadRequestException('payload and artifactRefs are required');
+    }
+    const payload = event.payload as Record<string, unknown>;
+    if (
+      eventType === 'progress.reported' &&
+      (payload.kind === 'budget_grant' ||
+        payload.kind === 'budget_reservation')
+    ) {
+      throw new BadRequestException(
+        'Budget decisions can only be emitted by documents-backend',
+      );
     }
     this.contractValidator.assertEvent({
       ...event,

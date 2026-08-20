@@ -11,9 +11,9 @@ export type ProgressTokenUsage = {
   unknownOperations: number;
 };
 
-export type InferenceBudgetBucket = 'normal' | 'repair' | 'closing';
+export type OperationBudgetBucket = 'normal' | 'repair' | 'closing' | 'tool';
 
-export type InferenceBudgetGrant = {
+export type OperationBudgetGrant = {
   version: '1';
   grantId: string;
   executionId: string;
@@ -27,23 +27,27 @@ export type InferenceBudgetGrant = {
     repair: number;
     closing: number;
     maxTokensPerInference: number;
+    toolCalls: number;
   };
   effectivePolicy: {
     normal: number;
     repair: number;
     closing: number;
     maxTokensPerInference: number;
+    toolCalls: number;
   };
   grantedAt: string;
 };
 
-export type InferenceBudgetReservation = {
+export type OperationBudgetReservation = {
   version: '1';
   reservationId: string;
   grantId: string;
   operationId: string;
   executionAttemptId: string;
-  bucket: InferenceBudgetBucket;
+  operationKind: 'inference' | 'tool_call';
+  bucket: OperationBudgetBucket;
+  toolCallId?: string;
   phase: string;
   round: number;
   name: string;
@@ -52,12 +56,12 @@ export type InferenceBudgetReservation = {
   decidedAt: string;
 };
 
-export type InferenceBudgetProjection = {
+export type OperationBudgetProjection = {
   grants: Record<
     string,
-    InferenceBudgetGrant & {
+    OperationBudgetGrant & {
       usage: Record<
-        InferenceBudgetBucket,
+        OperationBudgetBucket,
         {
           granted: number;
           reserved: number;
@@ -67,7 +71,7 @@ export type InferenceBudgetProjection = {
       >;
     }
   >;
-  reservations: Record<string, InferenceBudgetReservation>;
+  reservations: Record<string, OperationBudgetReservation>;
 };
 
 export type ProgressLedger = {
@@ -94,7 +98,7 @@ export type ProgressLedger = {
   promptTokens: ProgressTokenUsage;
   generatedTokens: ProgressTokenUsage;
   completeness: 'complete' | 'partial';
-  inferenceBudget?: InferenceBudgetProjection;
+  operationBudget?: OperationBudgetProjection;
 };
 
 export type ProgressPolicyProjection = {
@@ -131,8 +135,8 @@ function budgetUsage(granted: number) {
   return { granted, reserved: 0, consumed: 0, available: granted };
 }
 
-function ensureBudget(ledger: ProgressLedger): InferenceBudgetProjection {
-  return (ledger.inferenceBudget ??= { grants: {}, reservations: {} });
+function ensureBudget(ledger: ProgressLedger): OperationBudgetProjection {
+  return (ledger.operationBudget ??= { grants: {}, reservations: {} });
 }
 
 function applyBudgetEvent(
@@ -141,7 +145,7 @@ function applyBudgetEvent(
 ): boolean {
   if (event.eventType !== 'progress.reported') return false;
   if (event.payload.kind === 'budget_grant') {
-    const grant = event.payload.grant as InferenceBudgetGrant | undefined;
+    const grant = event.payload.grant as OperationBudgetGrant | undefined;
     if (!grant?.grantId) return true;
     const budget = ensureBudget(ledger);
     budget.grants[grant.grantId] ??= {
@@ -150,17 +154,20 @@ function applyBudgetEvent(
         normal: budgetUsage(grant.effectivePolicy.normal),
         repair: budgetUsage(grant.effectivePolicy.repair),
         closing: budgetUsage(grant.effectivePolicy.closing),
+        tool: budgetUsage(grant.effectivePolicy.toolCalls ?? 0),
       },
     };
     return true;
   }
   if (event.payload.kind !== 'budget_reservation') return false;
   const reservation = event.payload.reservation as
-    InferenceBudgetReservation | undefined;
+    OperationBudgetReservation | undefined;
   if (!reservation?.operationId) return true;
   const budget = ensureBudget(ledger);
   if (budget.reservations[reservation.operationId]) return true;
-  budget.reservations[reservation.operationId] = structuredClone(reservation);
+  const normalized = structuredClone(reservation);
+  normalized.operationKind ??= 'inference';
+  budget.reservations[reservation.operationId] = normalized;
   if (reservation.status === 'reserved') {
     const usage = budget.grants[reservation.grantId]?.usage[reservation.bucket];
     if (usage) {
@@ -180,15 +187,22 @@ function consumeBudgetReservation(
 ): void {
   if (
     event.eventType !== 'operation.started' ||
-    event.payload.operationKind !== 'inference'
+    (event.payload.operationKind !== 'inference' &&
+      event.payload.operationKind !== 'tool_call')
   ) {
     return;
   }
   const operationId = String(event.operationId ?? '');
-  const reservation = ledger.inferenceBudget?.reservations[operationId];
-  if (!reservation || reservation.status !== 'reserved') return;
+  const reservation = ledger.operationBudget?.reservations[operationId];
+  if (
+    !reservation ||
+    reservation.status !== 'reserved' ||
+    reservation.operationKind !== event.payload.operationKind
+  ) {
+    return;
+  }
   const usage =
-    ledger.inferenceBudget?.grants[reservation.grantId]?.usage[
+    ledger.operationBudget?.grants[reservation.grantId]?.usage[
       reservation.bucket
     ];
   if (!usage) return;

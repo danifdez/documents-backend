@@ -3,13 +3,13 @@ import type { ExecutionEntity } from './execution.entity';
 import { ExecutionStatus } from './execution-status.enum';
 import { EXECUTION_UUID_PATTERN } from './execution.constants';
 import type {
-  InferenceBudgetBucket,
-  InferenceBudgetGrant,
-  InferenceBudgetProjection,
-  InferenceBudgetReservation,
+  OperationBudgetBucket,
+  OperationBudgetGrant,
+  OperationBudgetProjection,
+  OperationBudgetReservation,
 } from './execution-progress';
 import type {
-  InferenceBudgetReservationRequest,
+  OperationBudgetReservationRequest,
   ProgressGrantRequest,
 } from './execution.types';
 
@@ -18,22 +18,26 @@ const EXCLUDED_CHAT_INFERENCE_PHASES = new Set([
   'memory_extraction',
   'structured_output_repair',
 ]);
-const BUCKET_BY_PHASE: Record<string, InferenceBudgetBucket> = {
+const INFERENCE_BUCKET_BY_PHASE: Record<string, OperationBudgetBucket> = {
   direct_response: 'normal',
   agent_loop: 'normal',
   output_repair: 'repair',
   forced_finalization: 'closing',
 };
+const TOOL_BUDGET_PHASES = new Set(['agent_loop', 'output_repair']);
 
-export type InferenceBudgetLimits = {
+export type OperationBudgetLimits = {
   normal: number;
   repair: number;
   closing: number;
   maxTokensPerInference: number;
+  toolCalls: number;
 };
 
-export type GovernedInferenceStart = {
+export type GovernedBudgetStart = {
   operationId: string;
+  operationKind: 'inference' | 'tool_call';
+  toolCallId?: string;
   grantId: string;
   reservationId: string;
   executionAttemptId: string;
@@ -74,6 +78,8 @@ export function validateProgressGrantRequest(
     policy.closing > 1 ||
     !Number.isInteger(policy.maxTokensPerInference) ||
     policy.maxTokensPerInference < 1 ||
+    !Number.isInteger(policy.toolCalls) ||
+    policy.toolCalls < 0 ||
     !String(request.agentName ?? '').trim()
   ) {
     throw new BadRequestException('Invalid progress grant request');
@@ -82,7 +88,7 @@ export function validateProgressGrantRequest(
 
 export function validateReservationRequest(
   rootExecutionId: string,
-  request: InferenceBudgetReservationRequest,
+  request: OperationBudgetReservationRequest,
 ): void {
   for (const [name, value] of Object.entries({
     rootExecutionId,
@@ -97,13 +103,28 @@ export function validateReservationRequest(
     }
   }
   if (
-    !['normal', 'repair', 'closing'].includes(request?.bucket) ||
+    !['inference', 'tool_call'].includes(request?.operationKind) ||
+    !['normal', 'repair', 'closing', 'tool'].includes(request?.bucket) ||
     !String(request?.phase ?? '').trim() ||
     !String(request?.name ?? '').trim() ||
     !Number.isInteger(request?.round) ||
     request.round < 1
   ) {
-    throw new BadRequestException('Invalid inference budget reservation');
+    throw new BadRequestException('Invalid operation budget reservation');
+  }
+  if (
+    request.operationKind === 'tool_call' &&
+    !EXECUTION_UUID_PATTERN.test(String(request.toolCallId ?? ''))
+  ) {
+    throw new BadRequestException('toolCallId must be a UUID');
+  }
+  if (
+    request.operationKind === 'inference' &&
+    request.toolCallId !== undefined
+  ) {
+    throw new BadRequestException(
+      'toolCallId is only valid for tool budget reservations',
+    );
   }
 }
 
@@ -140,7 +161,7 @@ export function assertGrantScope(
 
 export function resolveEffectivePolicy(
   requested: ProgressGrantRequest['requestedPolicy'],
-  limits: InferenceBudgetLimits,
+  limits: OperationBudgetLimits,
 ): ProgressGrantRequest['requestedPolicy'] {
   return {
     normal: Math.min(requested.normal, limits.normal),
@@ -150,16 +171,17 @@ export function resolveEffectivePolicy(
       requested.maxTokensPerInference,
       limits.maxTokensPerInference,
     ),
+    toolCalls: Math.min(requested.toolCalls, limits.toolCalls),
   };
 }
 
-export function createInferenceBudgetGrant(
+export function createOperationBudgetGrant(
   execution: ExecutionEntity,
   request: ProgressGrantRequest,
   effectivePolicy: ProgressGrantRequest['requestedPolicy'],
   grantId: string,
   grantedAt: string,
-): InferenceBudgetGrant {
+): OperationBudgetGrant {
   return {
     version: '1',
     grantId,
@@ -176,8 +198,8 @@ export function createInferenceBudgetGrant(
 }
 
 export function withoutGrantUsage(
-  grant: InferenceBudgetGrant & { usage?: unknown },
-): InferenceBudgetGrant {
+  grant: OperationBudgetGrant & { usage?: unknown },
+): OperationBudgetGrant {
   const value = { ...grant };
   delete value.usage;
   return value;
@@ -185,7 +207,7 @@ export function withoutGrantUsage(
 
 export function assertReservationScope(
   execution: ExecutionEntity,
-  request: InferenceBudgetReservationRequest,
+  request: OperationBudgetReservationRequest,
 ): void {
   if (
     request.executionId !== execution.executionId ||
@@ -198,14 +220,16 @@ export function assertReservationScope(
 }
 
 export function assertReservationMatches(
-  reservation: InferenceBudgetReservation,
-  request: InferenceBudgetReservationRequest,
+  reservation: OperationBudgetReservation,
+  request: OperationBudgetReservationRequest,
 ): void {
   if (
     reservation.grantId !== request.grantId ||
     reservation.operationId !== request.operationId ||
     reservation.executionAttemptId !== request.executionAttemptId ||
+    reservation.operationKind !== request.operationKind ||
     reservation.bucket !== request.bucket ||
+    reservation.toolCallId !== request.toolCallId ||
     reservation.phase !== request.phase ||
     reservation.round !== request.round ||
     reservation.name !== request.name
@@ -216,47 +240,65 @@ export function assertReservationMatches(
   }
 }
 
-export function assertBucketMatchesPhase(
-  bucket: InferenceBudgetBucket,
+export function assertBucketMatchesOperation(
+  operationKind: 'inference' | 'tool_call',
+  bucket: OperationBudgetBucket,
   phase: string,
 ): void {
-  if (BUCKET_BY_PHASE[phase] !== bucket) {
+  const expected =
+    operationKind === 'tool_call'
+      ? 'tool'
+      : INFERENCE_BUCKET_BY_PHASE[phase];
+  if (
+    expected !== bucket ||
+    (operationKind === 'tool_call' && !TOOL_BUDGET_PHASES.has(phase))
+  ) {
     throw new BadRequestException(
-      `Budget bucket ${bucket} cannot be used for phase ${phase}`,
+      `Budget bucket ${bucket} cannot be used for ${operationKind} in phase ${phase}`,
     );
   }
 }
 
-export function createInferenceBudgetReservation(
-  request: InferenceBudgetReservationRequest,
+export function createOperationBudgetReservation(
+  request: OperationBudgetReservationRequest,
   granted: boolean,
   reservationId: string,
   decidedAt: string,
-): InferenceBudgetReservation {
+): OperationBudgetReservation {
   return {
     version: '1',
     reservationId,
     grantId: request.grantId,
     operationId: request.operationId,
     executionAttemptId: request.executionAttemptId,
+    operationKind: request.operationKind,
     bucket: request.bucket,
+    ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
     phase: request.phase,
     round: request.round,
     name: request.name,
     status: granted ? 'reserved' : 'denied',
-    ...(granted ? {} : { reason: 'budget_hard_limit_reached' }),
+    ...(granted
+      ? {}
+      : {
+          reason:
+            request.operationKind === 'tool_call'
+              ? 'tool_budget_hard_limit_reached'
+              : 'budget_hard_limit_reached',
+        }),
     decidedAt,
   };
 }
 
-export function governedInferenceStart(
+export function governedBudgetStart(
   execution: ExecutionEntity,
   event: Record<string, unknown>,
-): GovernedInferenceStart | null {
+): GovernedBudgetStart | null {
   const payload = event.payload as Record<string, unknown> | undefined;
+  const operationKind = payload?.operationKind;
   if (
     event.eventType !== 'operation.started' ||
-    payload?.operationKind !== 'inference'
+    (operationKind !== 'inference' && operationKind !== 'tool_call')
   ) {
     return null;
   }
@@ -264,10 +306,13 @@ export function governedInferenceStart(
   const governed =
     CHAT_TASK_TYPES.has(execution.taskType) &&
     payload.loopKind !== 'synchronous_subagent' &&
-    !EXCLUDED_CHAT_INFERENCE_PHASES.has(phase);
+    (operationKind === 'tool_call' ||
+      !EXCLUDED_CHAT_INFERENCE_PHASES.has(phase));
   if (!governed) return null;
-  const identity: GovernedInferenceStart = {
+  const identity: GovernedBudgetStart = {
     operationId: String(event.operationId ?? ''),
+    operationKind,
+    ...(event.toolCallId ? { toolCallId: String(event.toolCallId) } : {}),
     grantId: String(payload.budgetGrantId ?? ''),
     reservationId: String(payload.budgetReservationId ?? ''),
     executionAttemptId: String(payload.executionAttemptId ?? ''),
@@ -281,18 +326,20 @@ export function governedInferenceStart(
     !EXECUTION_UUID_PATTERN.test(identity.grantId) ||
     !EXECUTION_UUID_PATTERN.test(identity.reservationId) ||
     !EXECUTION_UUID_PATTERN.test(identity.executionAttemptId) ||
+    (operationKind === 'tool_call' &&
+      !EXECUTION_UUID_PATTERN.test(identity.toolCallId ?? '')) ||
     execution.attemptId !== identity.executionAttemptId
   ) {
     throw new ConflictException(
-      'Top-level inference has no valid budget reservation',
+      `Top-level ${operationKind} has no valid budget reservation`,
     );
   }
   return identity;
 }
 
-export function assertInferenceBudgetProjection(
-  identity: GovernedInferenceStart,
-  budget: InferenceBudgetProjection | undefined,
+export function assertOperationBudgetProjection(
+  identity: GovernedBudgetStart,
+  budget: OperationBudgetProjection | undefined,
 ): void {
   const reservation = budget?.reservations[identity.operationId];
   const grant = budget?.grants[identity.grantId];
@@ -304,13 +351,15 @@ export function assertInferenceBudgetProjection(
     reservation.grantId !== identity.grantId ||
     reservation.reservationId !== identity.reservationId ||
     reservation.executionAttemptId !== identity.executionAttemptId ||
+    reservation.operationKind !== identity.operationKind ||
+    reservation.toolCallId !== identity.toolCallId ||
     reservation.bucket !== identity.bucket ||
     reservation.phase !== identity.phase ||
     reservation.round !== identity.round ||
     reservation.name !== identity.name
   ) {
     throw new ConflictException(
-      'Top-level inference budget reservation is invalid or consumed',
+      `Top-level ${identity.operationKind} budget reservation is invalid or consumed`,
     );
   }
 }

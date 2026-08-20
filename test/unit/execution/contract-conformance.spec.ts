@@ -236,6 +236,7 @@ describe('execution v1 contract', () => {
         maxOutputRepairs: 1,
         forcedFinalizationAvailable: true,
         maxTokensPerInference: 1000,
+        maxToolCalls: 6,
       },
     };
     expect(validateEvent(event(payload))).toBe(true);
@@ -307,12 +308,14 @@ describe('execution v1 contract', () => {
         repair: 1,
         closing: 1,
         maxTokensPerInference: 1000,
+        toolCalls: 6,
       },
       effectivePolicy: {
         normal: 2,
         repair: 1,
         closing: 1,
         maxTokensPerInference: 512,
+        toolCalls: 2,
       },
       grantedAt: '2026-08-20T10:00:00Z',
     };
@@ -322,6 +325,18 @@ describe('execution v1 contract', () => {
           message: 'Authoritative inference budget granted',
           kind: 'budget_grant',
           grant,
+        }),
+      ),
+    ).toBe(true);
+    const historicalGrant = structuredClone(grant);
+    delete (historicalGrant.requestedPolicy as { toolCalls?: number }).toolCalls;
+    delete (historicalGrant.effectivePolicy as { toolCalls?: number }).toolCalls;
+    expect(
+      validateEvent(
+        event({
+          message: 'Historical inference budget granted',
+          kind: 'budget_grant',
+          grant: historicalGrant,
         }),
       ),
     ).toBe(true);
@@ -339,6 +354,47 @@ describe('execution v1 contract', () => {
       status: 'reserved',
       decidedAt: '2026-08-20T10:00:01Z',
     };
+    const toolReservation = {
+      ...reservation,
+      reservationId: 'reservation-progress-tool-1',
+      operationId: 'operation-progress-tool-1',
+      operationKind: 'tool_call',
+      bucket: 'tool',
+      toolCallId: 'tool-call-progress-1',
+      phase: 'agent_loop',
+      round: 1,
+      name: 'folder_read',
+    };
+    expect(
+      validateEvent(
+        event({
+          message: 'Tool budget reserved',
+          kind: 'budget_reservation',
+          reservation: toolReservation,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid tool bucket',
+          kind: 'budget_reservation',
+          reservation: { ...toolReservation, bucket: 'normal' },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid tool phase',
+          kind: 'budget_reservation',
+          reservation: {
+            ...toolReservation,
+            phase: 'forced_finalization',
+          },
+        }),
+      ),
+    ).toBe(false);
     expect(
       validateEvent(
         event({
@@ -348,6 +404,19 @@ describe('execution v1 contract', () => {
         }),
       ),
     ).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid inference tool identity',
+          kind: 'budget_reservation',
+          reservation: {
+            ...reservation,
+            operationKind: 'inference',
+            toolCallId: 'tool-1',
+          },
+        }),
+      ),
+    ).toBe(false);
     expect(
       validateEvent(
         event({
@@ -364,7 +433,19 @@ describe('execution v1 contract', () => {
           kind: 'budget_grant',
           grant: {
             ...grant,
-            effectivePolicy: { ...grant.effectivePolicy, normal: -1 },
+            effectivePolicy: { ...grant.effectivePolicy, toolCalls: -1 },
+          },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid extra policy field',
+          kind: 'budget_grant',
+          grant: {
+            ...grant,
+            effectivePolicy: { ...grant.effectivePolicy, unlimited: true },
           },
         }),
       ),
@@ -382,6 +463,42 @@ describe('execution v1 contract', () => {
         }),
       ),
     ).toBe(true);
+    const budgetedToolStart = event(
+      {
+        operationKind: 'tool_call',
+        status: 'dispatched',
+        name: 'folder_read',
+        loopId: 'loop-progress-1',
+        agentName: 'assistant',
+        loopKind: 'top_level',
+        round: 1,
+        maxRounds: 2,
+        phase: 'agent_loop',
+        budgetGrantId: grant.grantId,
+        budgetReservationId: toolReservation.reservationId,
+        budgetBucket: 'tool',
+        executionAttemptId: 'execution-attempt-progress-1',
+      },
+      {
+        eventType: 'operation.started',
+        payloadSchema: 'operation.started/1',
+        operationId: toolReservation.operationId,
+        attemptId: 'attempt-progress-tool-1',
+        toolCallId: toolReservation.toolCallId,
+      },
+    );
+    expect(validateEvent(budgetedToolStart)).toBe(true);
+    expect(
+      validateEvent({
+        ...budgetedToolStart,
+        payload: {
+          ...budgetedToolStart.payload,
+          phase: 'forced_finalization',
+        },
+      }),
+    ).toBe(false);
+    const { toolCallId: _toolCallId, ...toolStartWithoutId } = budgetedToolStart;
+    expect(validateEvent(toolStartWithoutId)).toBe(false);
     expect(
       validateEvent(
         event(

@@ -6,7 +6,7 @@ describe('ExecutionController', () => {
     acceptArtifacts: jest.fn(),
     acceptEvents: jest.fn(),
     requestProgressGrant: jest.fn(),
-    reserveInferenceBudget: jest.fn(),
+    reserveOperationBudget: jest.fn(),
     resolveAccessScope: jest.fn(() => ({
       ownerPrincipal: 'user-1',
       workspaceId: 'workspace-1',
@@ -45,7 +45,7 @@ describe('ExecutionController', () => {
     const grant = { executionId: 'execution-1' } as any;
     const reservation = { operationId: 'operation-1' } as any;
     service.requestProgressGrant.mockResolvedValue({ grant: {} });
-    service.reserveInferenceBudget.mockResolvedValue({ granted: true });
+    service.reserveOperationBudget.mockResolvedValue({ granted: true });
 
     await expect(
       controller.requestProgressGrant('execution-1', 'wrong', grant),
@@ -55,7 +55,7 @@ describe('ExecutionController', () => {
       'internal-secret',
       grant,
     );
-    await controller.reserveInferenceBudget(
+    await controller.reserveOperationBudget(
       'execution-1',
       'internal-secret',
       reservation,
@@ -65,7 +65,7 @@ describe('ExecutionController', () => {
       'execution-1',
       grant,
     );
-    expect(service.reserveInferenceBudget).toHaveBeenCalledWith(
+    expect(service.reserveOperationBudget).toHaveBeenCalledWith(
       'execution-1',
       reservation,
     );

@@ -44,15 +44,18 @@ export interface ProgressGrantRequest {
     repair: number;
     closing: number;
     maxTokensPerInference: number;
+    toolCalls: number;
   };
 }
 
-export interface InferenceBudgetReservationRequest {
+export interface OperationBudgetReservationRequest {
   executionId: string;
   loopId: string;
   grantId: string;
   operationId: string;
-  bucket: 'normal' | 'repair' | 'closing';
+  operationKind: 'inference' | 'tool_call';
+  bucket: 'normal' | 'repair' | 'closing' | 'tool';
+  toolCallId?: string;
   phase: string;
   round: number;
   name: string;
