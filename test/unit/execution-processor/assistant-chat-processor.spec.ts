@@ -121,4 +121,29 @@ describe('AssistantChatProcessor final response', () => {
       },
     });
   });
+
+  it('persists and publishes a terminal model error without a final reply', async () => {
+    const dependencies = build();
+    const error = 'Model returned an empty response';
+    const execution = {
+      executionId,
+      taskType: 'assistant-chat',
+      payload: { kind: 'assistant', ownerId: 7 },
+      result: { error },
+    } as ExecutionEntity;
+
+    await dependencies.processor.process(execution);
+
+    expect(
+      dependencies.assistantService.recordAssistantReply,
+    ).toHaveBeenCalledWith(7, '', executionId, error);
+    expect(
+      dependencies.executionService.completeExecution,
+    ).toHaveBeenCalledWith(executionId, '', error, undefined);
+    expect(
+      dependencies.notificationGateway.sendAssistantResponse,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantId: 7, executionId }),
+    );
+  });
 });
