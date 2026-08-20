@@ -31,8 +31,10 @@ import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { WorkerEntity } from '../worker/worker.entity';
 import {
+  BudgetSoftLimitSignal,
   OperationBudgetGrant,
   OperationBudgetReservation,
+  OperationBudgetSnapshot,
   ProgressEvent,
   projectExecutionProgress,
 } from './execution-progress';
@@ -63,6 +65,17 @@ const BEARER_DETECTOR = /\bbearer\s+[a-z0-9._~+/-]+=*/i;
 const SECRET_VALUE_DETECTOR =
   /\b(access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|id[_-]?token|password|refresh[_-]?token|session[_-]?token|token)\s*[:=]\s*([^\s,;]+)/i;
 const MAX_ARTIFACT_BYTES = 1024 * 1024;
+
+function operationBudgetSnapshot(
+  grant: OperationBudgetGrant & {
+    usage: { tool: OperationBudgetSnapshot['tool'] };
+  },
+): OperationBudgetSnapshot {
+  const tool = structuredClone(grant.usage.tool);
+  tool.softLimit ??= 0;
+  tool.softLimitReached ??= false;
+  return { tool };
+}
 const FORBIDDEN_KEYS = new Set([
   'accesstoken',
   'apikey',
@@ -811,7 +824,11 @@ export class ExecutionService {
   async requestProgressGrant(
     rootExecutionId: string,
     request: ProgressGrantRequest,
-  ): Promise<{ grant: OperationBudgetGrant; eventId: string }> {
+  ): Promise<{
+    grant: OperationBudgetGrant;
+    budgetState: OperationBudgetSnapshot;
+    eventId: string;
+  }> {
     validateProgressGrantRequest(rootExecutionId, request);
     return this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
@@ -835,10 +852,16 @@ export class ExecutionService {
         progress.ledger.operationBudget?.grants ?? {},
       )[0];
       if (existing) {
+        const comparableRequest = structuredClone(
+          request.requestedPolicy,
+        ) as Record<string, unknown>;
+        if (existing.requestedPolicy.toolCallSoftLimit === undefined) {
+          delete comparableRequest.toolCallSoftLimit;
+        }
         if (
           existing.loopId !== request.loopId ||
           canonicalJson(existing.requestedPolicy) !==
-            canonicalJson(request.requestedPolicy)
+            canonicalJson(comparableRequest)
         ) {
           throw new ConflictException(
             'An incompatible progress grant already exists',
@@ -851,6 +874,7 @@ export class ExecutionService {
         );
         return {
           grant: withoutGrantUsage(existing),
+          budgetState: operationBudgetSnapshot(existing),
           eventId: event!.eventId,
         };
       }
@@ -868,6 +892,10 @@ export class ExecutionService {
           this.progressLimit('PROGRESS_CHAT_MAX_TOKENS_PER_INFERENCE', 4096),
         ),
         toolCalls: this.progressLimit('PROGRESS_CHAT_MAX_TOOL_CALLS', 6),
+        toolCallSoftLimit: this.progressLimit(
+          'PROGRESS_CHAT_TOOL_CALL_SOFT_LIMIT',
+          4,
+        ),
       });
       const grant = createOperationBudgetGrant(
         execution,
@@ -900,9 +928,17 @@ export class ExecutionService {
       );
       execution.lastSequence = String(sequence);
       execution.lastEventId = event.eventId;
-      await this.refreshProgressProjection(eventRepo, execution);
+      const refreshed = await this.refreshProgressProjection(
+        eventRepo,
+        execution,
+      );
       await executionRepo.save(execution);
-      return { grant, eventId: event.eventId };
+      const projected = refreshed.ledger.operationBudget!.grants[grant.grantId];
+      return {
+        grant,
+        budgetState: operationBudgetSnapshot(projected),
+        eventId: event.eventId,
+      };
     });
   }
 
@@ -912,6 +948,8 @@ export class ExecutionService {
   ): Promise<{
     granted: boolean;
     reservation: OperationBudgetReservation;
+    budgetState: OperationBudgetSnapshot;
+    softLimitSignal?: BudgetSoftLimitSignal;
     eventId: string;
   }> {
     validateReservationRequest(rootExecutionId, request);
@@ -942,6 +980,17 @@ export class ExecutionService {
             (row.envelope.payload as Record<string, any>)?.reservation
               ?.operationId === request.operationId,
         );
+        const softLimitEvent = rows.find(
+          (row) =>
+            (row.envelope.payload as Record<string, any>)?.signal
+              ?.triggeringOperationId === request.operationId,
+        );
+        const softLimitPayload = softLimitEvent?.envelope.payload as
+          Record<string, unknown> | undefined;
+        const softLimitSignal = softLimitPayload?.signal as
+          BudgetSoftLimitSignal | undefined;
+        const existingGrant =
+          progress.ledger.operationBudget!.grants[existing.grantId];
         const granted = existing.status === 'reserved';
         return {
           granted,
@@ -952,7 +1001,9 @@ export class ExecutionService {
                   reason: 'budget_reservation_consumed',
                 }
               : existing,
-          eventId: event!.eventId,
+          budgetState: operationBudgetSnapshot(existingGrant),
+          ...(softLimitSignal ? { softLimitSignal } : {}),
+          eventId: softLimitEvent?.eventId ?? event!.eventId,
         };
       }
       const grant = progress.ledger.operationBudget?.grants[request.grantId];
@@ -966,14 +1017,21 @@ export class ExecutionService {
       );
       const usage = grant.usage[request.bucket];
       const granted = usage.available > 0;
+      const committed = usage.reserved + usage.consumed + (granted ? 1 : 0);
+      const crossesSoftLimit =
+        granted &&
+        request.operationKind === 'tool_call' &&
+        Number(usage.softLimit ?? 0) > 0 &&
+        !usage.softLimitReached &&
+        committed >= Number(usage.softLimit);
       const reservation = createOperationBudgetReservation(
         request,
         granted,
         randomUUID(),
         new Date().toISOString(),
       );
-      const producerSequence = this.nextBackendProducerSequence(rows);
-      const sequence = Number(execution.lastSequence) + 1;
+      let producerSequence = this.nextBackendProducerSequence(rows);
+      let sequence = Number(execution.lastSequence) + 1;
       const event = await this.appendBackendEvent(
         manager,
         execution,
@@ -996,11 +1054,59 @@ export class ExecutionService {
         },
         sequence,
       );
+      let lastEventId = event.eventId;
+      let softLimitSignal: BudgetSoftLimitSignal | undefined;
+      if (crossesSoftLimit) {
+        softLimitSignal = {
+          version: '1',
+          grantId: grant.grantId,
+          operationKind: 'tool_call',
+          bucket: 'tool',
+          softLimit: Number(usage.softLimit),
+          hardLimit: usage.granted,
+          committed,
+          available: Math.max(0, usage.granted - committed),
+          triggeringOperationId: request.operationId,
+          executionAttemptId: request.executionAttemptId,
+          decidedAt: new Date().toISOString(),
+        };
+        const signalEvent = await this.appendBackendEvent(
+          manager,
+          execution,
+          ++producerSequence,
+          {
+            eventType: 'progress.reported',
+            payloadSchema: 'progress.reported/1',
+            payload: {
+              message: 'Tool budget soft limit reached',
+              kind: 'budget_soft_limit_reached',
+              signal: softLimitSignal,
+            },
+            actor: { type: 'system' },
+            executionId: execution.executionId,
+            turnId: execution.turnId,
+            causedByEventId: event.eventId,
+            artifactRefs: [],
+          },
+          ++sequence,
+        );
+        lastEventId = signalEvent.eventId;
+      }
       execution.lastSequence = String(sequence);
-      execution.lastEventId = event.eventId;
-      await this.refreshProgressProjection(eventRepo, execution);
+      execution.lastEventId = lastEventId;
+      const refreshed = await this.refreshProgressProjection(
+        eventRepo,
+        execution,
+      );
       await executionRepo.save(execution);
-      return { granted, reservation, eventId: event.eventId };
+      const projected = refreshed.ledger.operationBudget!.grants[grant.grantId];
+      return {
+        granted,
+        reservation,
+        budgetState: operationBudgetSnapshot(projected),
+        ...(softLimitSignal ? { softLimitSignal } : {}),
+        eventId: lastEventId,
+      };
     });
   }
 
@@ -1560,7 +1666,8 @@ export class ExecutionService {
     if (
       eventType === 'progress.reported' &&
       (payload.kind === 'budget_grant' ||
-        payload.kind === 'budget_reservation')
+        payload.kind === 'budget_reservation' ||
+        payload.kind === 'budget_soft_limit_reached')
     ) {
       throw new BadRequestException(
         'Budget decisions can only be emitted by documents-backend',

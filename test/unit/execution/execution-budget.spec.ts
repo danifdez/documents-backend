@@ -22,10 +22,7 @@ describe('ExecutionService operation budget', () => {
   let rows: any[];
 
   const validateBudgetStart = (event: Record<string, unknown>) => {
-    const identity = governedBudgetStart(
-      execution as ExecutionEntity,
-      event,
-    );
+    const identity = governedBudgetStart(execution as ExecutionEntity, event);
     if (!identity) return;
     const progress = projectExecutionProgress(
       rows.map((row) => row.envelope as ProgressEvent),
@@ -98,6 +95,7 @@ describe('ExecutionService operation budget', () => {
       closing: 1,
       maxTokensPerInference: 1000,
       toolCalls: 6,
+      toolCallSoftLimit: 4,
     },
   });
 
@@ -112,6 +110,7 @@ describe('ExecutionService operation budget', () => {
     );
     expect(firstGrant.grant.effectivePolicy.normal).toBe(1);
     expect(firstGrant.grant.effectivePolicy.toolCalls).toBe(1);
+    expect(firstGrant.grant.effectivePolicy.toolCallSoftLimit).toBe(0);
     expect(repeatedGrant.grant.grantId).toBe(firstGrant.grant.grantId);
 
     const baseReservation = {
@@ -158,6 +157,143 @@ describe('ExecutionService operation budget', () => {
       first.reservation.reservationId,
     );
     expect(repeatedReservation.granted).toBe(true);
+  });
+
+  it('records the tool soft limit once and returns its durable snapshot', async () => {
+    (service as any).config.get = jest.fn((name: string) => {
+      if (name === 'PROGRESS_CHAT_MAX_NORMAL_INFERENCES') return '1';
+      if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '6';
+      if (name === 'PROGRESS_CHAT_TOOL_CALL_SOFT_LIMIT') return '4';
+      return undefined;
+    });
+    const { grant, budgetState } = await service.requestProgressGrant(
+      EXECUTION_ID,
+      grantRequest(),
+    );
+    expect(grant.effectivePolicy.toolCallSoftLimit).toBe(4);
+    expect(budgetState.tool).toMatchObject({
+      granted: 6,
+      available: 6,
+      softLimit: 4,
+      softLimitReached: false,
+    });
+
+    const decisions = [];
+    for (let index = 0; index < 4; index += 1) {
+      decisions.push(
+        await service.reserveOperationBudget(EXECUTION_ID, {
+          executionId: EXECUTION_ID,
+          loopId: EXECUTION_ID,
+          grantId: grant.grantId,
+          operationId: `018f1d8a-54d7-7d63-a1ee-5e9a6adca73${index}`,
+          operationKind: 'tool_call',
+          bucket: 'tool',
+          toolCallId: `018f1d8a-54d7-7d63-a1ee-5e9a6adca74${index}`,
+          phase: 'agent_loop',
+          round: index + 1,
+          name: 'folder_read',
+          executionAttemptId: ATTEMPT_ID,
+        }),
+      );
+    }
+
+    expect(decisions.slice(0, 3).every((item) => !item.softLimitSignal)).toBe(
+      true,
+    );
+    expect(decisions[3]).toMatchObject({
+      granted: true,
+      budgetState: {
+        tool: {
+          available: 2,
+          softLimit: 4,
+          softLimitReached: true,
+          softLimitTriggeringOperationId:
+            '018f1d8a-54d7-7d63-a1ee-5e9a6adca733',
+        },
+      },
+      softLimitSignal: {
+        bucket: 'tool',
+        softLimit: 4,
+        hardLimit: 6,
+        committed: 4,
+        available: 2,
+      },
+    });
+    expect(
+      rows.filter(
+        (row) => row.envelope.payload.kind === 'budget_soft_limit_reached',
+      ),
+    ).toHaveLength(1);
+
+    const recoveredGrant = await service.requestProgressGrant(
+      EXECUTION_ID,
+      grantRequest(),
+    );
+    expect(recoveredGrant.budgetState.tool).toMatchObject({
+      available: 2,
+      softLimitReached: true,
+      softLimitTriggeringOperationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca733',
+    });
+
+    const repeated = await service.reserveOperationBudget(EXECUTION_ID, {
+      executionId: EXECUTION_ID,
+      loopId: EXECUTION_ID,
+      grantId: grant.grantId,
+      operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca733',
+      operationKind: 'tool_call',
+      bucket: 'tool',
+      toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca743',
+      phase: 'agent_loop',
+      round: 4,
+      name: 'folder_read',
+      executionAttemptId: ATTEMPT_ID,
+    });
+    expect(repeated.softLimitSignal?.triggeringOperationId).toBe(
+      '018f1d8a-54d7-7d63-a1ee-5e9a6adca733',
+    );
+    expect(
+      rows.filter(
+        (row) => row.envelope.payload.kind === 'budget_soft_limit_reached',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('keeps historical grants compatible with the soft limit disabled', async () => {
+    (service as any).config.get = jest.fn((name: string) => {
+      if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '6';
+      if (name === 'PROGRESS_CHAT_TOOL_CALL_SOFT_LIMIT') return '4';
+      return undefined;
+    });
+    await service.requestProgressGrant(EXECUTION_ID, grantRequest());
+    const storedGrant = rows[0].envelope.payload.grant;
+    delete storedGrant.requestedPolicy.toolCallSoftLimit;
+    delete storedGrant.effectivePolicy.toolCallSoftLimit;
+
+    const repeated = await service.requestProgressGrant(
+      EXECUTION_ID,
+      grantRequest(),
+    );
+
+    expect(repeated.grant.requestedPolicy.toolCallSoftLimit).toBe(0);
+    expect(repeated.grant.effectivePolicy.toolCallSoftLimit).toBe(0);
+    expect(repeated.budgetState.tool).toMatchObject({
+      softLimit: 0,
+      softLimitReached: false,
+    });
+  });
+
+  it('does not enable a soft limit that models explicitly disabled', async () => {
+    (service as any).config.get = jest.fn((name: string) => {
+      if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '6';
+      if (name === 'PROGRESS_CHAT_TOOL_CALL_SOFT_LIMIT') return '4';
+      return undefined;
+    });
+    const request = grantRequest();
+    request.requestedPolicy.toolCallSoftLimit = 0;
+
+    const { grant } = await service.requestProgressGrant(EXECUTION_ID, request);
+
+    expect(grant.effectivePolicy.toolCallSoftLimit).toBe(0);
   });
 
   it('reserves the last tool slot and validates it before dispatch', async () => {
@@ -310,6 +446,16 @@ describe('ExecutionService operation budget', () => {
         ...incoming,
         eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca730',
         payload: { message: 'spoofed reservation', kind: 'budget_reservation' },
+      }),
+    ).toThrow('Budget decisions can only be emitted by documents-backend');
+    expect(() =>
+      (service as any).validateIncomingEvent(execution, {
+        ...incoming,
+        eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca731',
+        payload: {
+          message: 'spoofed soft limit',
+          kind: 'budget_soft_limit_reached',
+        },
       }),
     ).toThrow('Budget decisions can only be emitted by documents-backend');
   });

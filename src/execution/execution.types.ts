@@ -45,6 +45,7 @@ export interface ProgressGrantRequest {
     closing: number;
     maxTokensPerInference: number;
     toolCalls: number;
+    toolCallSoftLimit: number;
   };
 }
 

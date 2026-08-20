@@ -266,6 +266,7 @@ describe('execution PostgreSQL integration', () => {
       closing: 0,
       maxTokensPerInference: 512,
       toolCalls: 1,
+      toolCallSoftLimit: 0,
     };
     const { grant } = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
@@ -319,8 +320,12 @@ describe('execution PostgreSQL integration', () => {
       reserveTool(randomUUID(), randomUUID()),
       reserveTool(randomUUID(), randomUUID()),
     ]);
-    expect(toolDecisions.filter((decision) => decision.granted)).toHaveLength(1);
-    expect(toolDecisions.filter((decision) => !decision.granted)).toHaveLength(1);
+    expect(toolDecisions.filter((decision) => decision.granted)).toHaveLength(
+      1,
+    );
+    expect(toolDecisions.filter((decision) => !decision.granted)).toHaveLength(
+      1,
+    );
 
     const nextAttemptId = randomUUID();
     await dataSource.query(
@@ -351,5 +356,92 @@ describe('execution PostgreSQL integration', () => {
       granted: false,
       reservation: { reason: 'tool_budget_hard_limit_reached' },
     });
+  });
+
+  it('records one soft-limit signal when concurrent tool reservations cross it', async () => {
+    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const context = await service.createForChat(
+      'assistant_chat',
+      'cross the tool soft limit',
+      scope,
+      {},
+    );
+    const attemptId = randomUUID();
+    await dataSource.query(
+      `UPDATE "${schema}"."executions"
+       SET "status" = 'running', "phase" = 'worker_execution',
+           "attempt_id" = $1
+       WHERE "execution_id" = $2`,
+      [attemptId, context.executionId],
+    );
+    const { grant } = await service.requestProgressGrant(context.executionId, {
+      executionId: context.executionId,
+      turnId: context.turnId,
+      loopId: context.executionId,
+      agentName: 'assistant',
+      loopKind: 'top_level',
+      executionAttemptId: attemptId,
+      requestedPolicy: {
+        normal: 1,
+        repair: 0,
+        closing: 1,
+        maxTokensPerInference: 512,
+        toolCalls: 6,
+        toolCallSoftLimit: 4,
+      },
+    });
+    const reserveTool = (operationId = randomUUID()) =>
+      service.reserveOperationBudget(context.executionId, {
+        executionId: context.executionId,
+        loopId: context.executionId,
+        grantId: grant.grantId,
+        operationId,
+        operationKind: 'tool_call',
+        bucket: 'tool',
+        toolCallId: randomUUID(),
+        phase: 'agent_loop',
+        round: 1,
+        name: 'folder_read',
+        executionAttemptId: attemptId,
+      });
+
+    await reserveTool();
+    await reserveTool();
+    await reserveTool();
+    const concurrentOperationIds = [randomUUID(), randomUUID()];
+    const decisions = await Promise.all(
+      concurrentOperationIds.map((operationId) => reserveTool(operationId)),
+    );
+
+    expect(decisions.every((decision) => decision.granted)).toBe(true);
+    const signals = decisions
+      .map((decision) => decision.softLimitSignal)
+      .filter(Boolean);
+    expect(signals).toHaveLength(1);
+    expect(concurrentOperationIds).toContain(signals[0]?.triggeringOperationId);
+    const projected = await service.readProgress(
+      context.rootExecutionId,
+      scope,
+    );
+    const usage = Object.values(projected.ledger.operationBudget.grants)[0]
+      .usage.tool;
+    expect(usage).toMatchObject({
+      granted: 6,
+      reserved: 5,
+      consumed: 0,
+      available: 1,
+      softLimit: 4,
+      softLimitReached: true,
+    });
+    const storedSignals = (
+      await dataSource.getRepository(ExecutionEventEntity).find({
+        where: { rootExecutionId: context.rootExecutionId },
+      })
+    ).filter(
+      (event) =>
+        (event.envelope.payload as Record<string, unknown>)?.kind ===
+        'budget_soft_limit_reached',
+    );
+    expect(storedSignals).toHaveLength(1);
   });
 });

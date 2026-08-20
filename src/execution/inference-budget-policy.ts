@@ -32,6 +32,7 @@ export type OperationBudgetLimits = {
   closing: number;
   maxTokensPerInference: number;
   toolCalls: number;
+  toolCallSoftLimit: number;
 };
 
 export type GovernedBudgetStart = {
@@ -80,6 +81,8 @@ export function validateProgressGrantRequest(
     policy.maxTokensPerInference < 1 ||
     !Number.isInteger(policy.toolCalls) ||
     policy.toolCalls < 0 ||
+    !Number.isInteger(policy.toolCallSoftLimit) ||
+    policy.toolCallSoftLimit < 0 ||
     !String(request.agentName ?? '').trim()
   ) {
     throw new BadRequestException('Invalid progress grant request');
@@ -163,6 +166,20 @@ export function resolveEffectivePolicy(
   requested: ProgressGrantRequest['requestedPolicy'],
   limits: OperationBudgetLimits,
 ): ProgressGrantRequest['requestedPolicy'] {
+  const toolCalls = Math.min(requested.toolCalls, limits.toolCalls);
+  const toolCallSoftLimit =
+    toolCalls <= 1 ||
+    requested.toolCallSoftLimit === 0 ||
+    limits.toolCallSoftLimit === 0
+      ? 0
+      : Math.max(
+          1,
+          Math.min(
+            requested.toolCallSoftLimit,
+            limits.toolCallSoftLimit,
+            toolCalls - 1,
+          ),
+        );
   return {
     normal: Math.min(requested.normal, limits.normal),
     repair: Math.min(requested.repair, limits.repair),
@@ -171,7 +188,8 @@ export function resolveEffectivePolicy(
       requested.maxTokensPerInference,
       limits.maxTokensPerInference,
     ),
-    toolCalls: Math.min(requested.toolCalls, limits.toolCalls),
+    toolCalls,
+    toolCallSoftLimit,
   };
 }
 
@@ -200,7 +218,17 @@ export function createOperationBudgetGrant(
 export function withoutGrantUsage(
   grant: OperationBudgetGrant & { usage?: unknown },
 ): OperationBudgetGrant {
-  const value = { ...grant };
+  const value = {
+    ...grant,
+    requestedPolicy: {
+      ...grant.requestedPolicy,
+      toolCallSoftLimit: grant.requestedPolicy.toolCallSoftLimit ?? 0,
+    },
+    effectivePolicy: {
+      ...grant.effectivePolicy,
+      toolCallSoftLimit: grant.effectivePolicy.toolCallSoftLimit ?? 0,
+    },
+  };
   delete value.usage;
   return value;
 }
@@ -246,9 +274,7 @@ export function assertBucketMatchesOperation(
   phase: string,
 ): void {
   const expected =
-    operationKind === 'tool_call'
-      ? 'tool'
-      : INFERENCE_BUCKET_BY_PHASE[phase];
+    operationKind === 'tool_call' ? 'tool' : INFERENCE_BUCKET_BY_PHASE[phase];
   if (
     expected !== bucket ||
     (operationKind === 'tool_call' && !TOOL_BUDGET_PHASES.has(phase))

@@ -13,6 +13,17 @@ export type ProgressTokenUsage = {
 
 export type OperationBudgetBucket = 'normal' | 'repair' | 'closing' | 'tool';
 
+export type OperationBudgetUsage = {
+  granted: number;
+  reserved: number;
+  consumed: number;
+  available: number;
+  softLimit?: number;
+  softLimitReached?: boolean;
+  softLimitReachedAt?: string;
+  softLimitTriggeringOperationId?: string;
+};
+
 export type OperationBudgetGrant = {
   version: '1';
   grantId: string;
@@ -28,6 +39,7 @@ export type OperationBudgetGrant = {
     closing: number;
     maxTokensPerInference: number;
     toolCalls: number;
+    toolCallSoftLimit?: number;
   };
   effectivePolicy: {
     normal: number;
@@ -35,6 +47,7 @@ export type OperationBudgetGrant = {
     closing: number;
     maxTokensPerInference: number;
     toolCalls: number;
+    toolCallSoftLimit?: number;
   };
   grantedAt: string;
 };
@@ -60,18 +73,28 @@ export type OperationBudgetProjection = {
   grants: Record<
     string,
     OperationBudgetGrant & {
-      usage: Record<
-        OperationBudgetBucket,
-        {
-          granted: number;
-          reserved: number;
-          consumed: number;
-          available: number;
-        }
-      >;
+      usage: Record<OperationBudgetBucket, OperationBudgetUsage>;
     }
   >;
   reservations: Record<string, OperationBudgetReservation>;
+};
+
+export type OperationBudgetSnapshot = {
+  tool: OperationBudgetUsage;
+};
+
+export type BudgetSoftLimitSignal = {
+  version: '1';
+  grantId: string;
+  operationKind: 'tool_call';
+  bucket: 'tool';
+  softLimit: number;
+  hardLimit: number;
+  committed: number;
+  available: number;
+  triggeringOperationId: string;
+  executionAttemptId: string;
+  decidedAt: string;
 };
 
 export type ProgressLedger = {
@@ -131,8 +154,17 @@ function tokenUsage(): ProgressTokenUsage {
   return { known: true, total: 0, unknownOperations: 0 };
 }
 
-function budgetUsage(granted: number) {
-  return { granted, reserved: 0, consumed: 0, available: granted };
+function budgetUsage(
+  granted: number,
+  softLimit?: number,
+): OperationBudgetUsage {
+  return {
+    granted,
+    reserved: 0,
+    consumed: 0,
+    available: granted,
+    ...(softLimit === undefined ? {} : { softLimit, softLimitReached: false }),
+  };
 }
 
 function ensureBudget(ledger: ProgressLedger): OperationBudgetProjection {
@@ -154,9 +186,24 @@ function applyBudgetEvent(
         normal: budgetUsage(grant.effectivePolicy.normal),
         repair: budgetUsage(grant.effectivePolicy.repair),
         closing: budgetUsage(grant.effectivePolicy.closing),
-        tool: budgetUsage(grant.effectivePolicy.toolCalls ?? 0),
+        tool: budgetUsage(
+          grant.effectivePolicy.toolCalls ?? 0,
+          grant.effectivePolicy.toolCallSoftLimit,
+        ),
       },
     };
+    return true;
+  }
+  if (event.payload.kind === 'budget_soft_limit_reached') {
+    const signal = event.payload.signal as BudgetSoftLimitSignal | undefined;
+    if (!signal?.grantId) return true;
+    const usage = ensureBudget(ledger).grants[signal.grantId]?.usage.tool;
+    if (usage && !usage.softLimitReached) {
+      usage.softLimit = signal.softLimit;
+      usage.softLimitReached = true;
+      usage.softLimitReachedAt = signal.decidedAt;
+      usage.softLimitTriggeringOperationId = signal.triggeringOperationId;
+    }
     return true;
   }
   if (event.payload.kind !== 'budget_reservation') return false;

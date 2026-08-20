@@ -17,6 +17,7 @@ describe('execution progress projection', () => {
         closing: 1,
         maxTokensPerInference: 1000,
         toolCalls: 2,
+        toolCallSoftLimit: 1,
       },
       effectivePolicy: {
         normal: 1,
@@ -24,6 +25,7 @@ describe('execution progress projection', () => {
         closing: 1,
         maxTokensPerInference: 512,
         toolCalls: 1,
+        toolCallSoftLimit: 0,
       },
       grantedAt: '2026-08-20T10:00:00Z',
     };
@@ -133,7 +135,14 @@ describe('execution progress projection', () => {
       normal: { granted: 1, reserved: 0, consumed: 1, available: 0 },
       repair: { granted: 1, reserved: 0, consumed: 0, available: 1 },
       closing: { granted: 1, reserved: 0, consumed: 0, available: 1 },
-      tool: { granted: 1, reserved: 0, consumed: 1, available: 0 },
+      tool: {
+        granted: 1,
+        reserved: 0,
+        consumed: 1,
+        available: 0,
+        softLimit: 0,
+        softLimitReached: false,
+      },
     });
     expect(
       progress.ledger.operationBudget?.reservations['operation-1'].status,

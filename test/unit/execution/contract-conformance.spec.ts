@@ -309,6 +309,7 @@ describe('execution v1 contract', () => {
         closing: 1,
         maxTokensPerInference: 1000,
         toolCalls: 6,
+        toolCallSoftLimit: 4,
       },
       effectivePolicy: {
         normal: 2,
@@ -316,6 +317,7 @@ describe('execution v1 contract', () => {
         closing: 1,
         maxTokensPerInference: 512,
         toolCalls: 2,
+        toolCallSoftLimit: 1,
       },
       grantedAt: '2026-08-20T10:00:00Z',
     };
@@ -329,8 +331,10 @@ describe('execution v1 contract', () => {
       ),
     ).toBe(true);
     const historicalGrant = structuredClone(grant);
-    delete (historicalGrant.requestedPolicy as { toolCalls?: number }).toolCalls;
-    delete (historicalGrant.effectivePolicy as { toolCalls?: number }).toolCalls;
+    delete (historicalGrant.requestedPolicy as { toolCalls?: number })
+      .toolCalls;
+    delete (historicalGrant.effectivePolicy as { toolCalls?: number })
+      .toolCalls;
     expect(
       validateEvent(
         event({
@@ -374,6 +378,37 @@ describe('execution v1 contract', () => {
         }),
       ),
     ).toBe(true);
+    const softLimitSignal = {
+      version: '1',
+      grantId: grant.grantId,
+      operationKind: 'tool_call',
+      bucket: 'tool',
+      softLimit: 1,
+      hardLimit: 2,
+      committed: 1,
+      available: 1,
+      triggeringOperationId: toolReservation.operationId,
+      executionAttemptId: 'execution-attempt-progress-1',
+      decidedAt: '2026-08-20T10:00:02Z',
+    };
+    expect(
+      validateEvent(
+        event({
+          message: 'Tool budget soft limit reached',
+          kind: 'budget_soft_limit_reached',
+          signal: softLimitSignal,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid soft limit signal',
+          kind: 'budget_soft_limit_reached',
+          signal: { ...softLimitSignal, operationKind: 'inference' },
+        }),
+      ),
+    ).toBe(false);
     expect(
       validateEvent(
         event({
@@ -497,7 +532,8 @@ describe('execution v1 contract', () => {
         },
       }),
     ).toBe(false);
-    const { toolCallId: _toolCallId, ...toolStartWithoutId } = budgetedToolStart;
+    const toolStartWithoutId = structuredClone(budgetedToolStart);
+    delete (toolStartWithoutId as { toolCallId?: string }).toolCallId;
     expect(validateEvent(toolStartWithoutId)).toBe(false);
     expect(
       validateEvent(
