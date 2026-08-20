@@ -1,6 +1,117 @@
 import { projectExecutionProgress } from '../../../src/execution/execution-progress';
 
 describe('execution progress projection', () => {
+  it('projects authoritative grants, reservations, consumption, and denials', () => {
+    const grant = {
+      version: '1' as const,
+      grantId: 'grant-1',
+      executionId: 'execution-1',
+      turnId: 'turn-1',
+      loopId: 'loop-1',
+      executionAttemptId: 'execution-attempt-1',
+      profileId: 'documents_chat_v1' as const,
+      policyVersion: '1' as const,
+      requestedPolicy: {
+        normal: 2,
+        repair: 1,
+        closing: 1,
+        maxTokensPerInference: 1000,
+      },
+      effectivePolicy: {
+        normal: 1,
+        repair: 1,
+        closing: 1,
+        maxTokensPerInference: 512,
+      },
+      grantedAt: '2026-08-20T10:00:00Z',
+    };
+    const reservation = {
+      version: '1' as const,
+      reservationId: 'reservation-1',
+      grantId: 'grant-1',
+      operationId: 'operation-1',
+      executionAttemptId: 'execution-attempt-1',
+      bucket: 'normal' as const,
+      phase: 'agent_loop',
+      round: 1,
+      name: 'chat_with_tools',
+      status: 'reserved' as const,
+      decidedAt: '2026-08-20T10:00:01Z',
+    };
+
+    const progress = projectExecutionProgress([
+      {
+        sequence: 1,
+        eventType: 'progress.reported',
+        payload: { message: 'granted', kind: 'budget_grant', grant },
+      },
+      {
+        sequence: 2,
+        eventType: 'progress.reported',
+        payload: {
+          message: 'reserved',
+          kind: 'budget_reservation',
+          reservation,
+        },
+      },
+      {
+        sequence: 3,
+        eventType: 'progress.reported',
+        payload: {
+          message: 'duplicate delivery',
+          kind: 'budget_reservation',
+          reservation,
+        },
+      },
+      {
+        sequence: 4,
+        eventType: 'operation.started',
+        operationId: 'operation-1',
+        attemptId: 'operation-attempt-1',
+        payload: {
+          operationKind: 'inference',
+          name: 'chat_with_tools',
+          loopId: 'loop-1',
+          agentName: 'assistant',
+          loopKind: 'top_level',
+          round: 1,
+          maxRounds: 1,
+          phase: 'agent_loop',
+          budgetGrantId: 'grant-1',
+          budgetReservationId: 'reservation-1',
+          budgetBucket: 'normal',
+        },
+      },
+      {
+        sequence: 5,
+        eventType: 'progress.reported',
+        payload: {
+          message: 'denied',
+          kind: 'budget_reservation',
+          reservation: {
+            ...reservation,
+            reservationId: 'reservation-2',
+            operationId: 'operation-2',
+            status: 'denied',
+            reason: 'budget_hard_limit_reached',
+          },
+        },
+      },
+    ]);
+
+    expect(progress.ledger.inferenceBudget?.grants['grant-1'].usage).toEqual({
+      normal: { granted: 1, reserved: 0, consumed: 1, available: 0 },
+      repair: { granted: 1, reserved: 0, consumed: 0, available: 1 },
+      closing: { granted: 1, reserved: 0, consumed: 0, available: 1 },
+    });
+    expect(
+      progress.ledger.inferenceBudget?.reservations['operation-1'].status,
+    ).toBe('consumed');
+    expect(
+      progress.ledger.inferenceBudget?.reservations['operation-2'].status,
+    ).toBe('denied');
+  });
+
   it('materializes policies, operation state, phases, and known token usage', () => {
     const progress = projectExecutionProgress([
       {

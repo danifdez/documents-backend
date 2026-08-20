@@ -31,3 +31,35 @@ export interface ExecutionTelemetrySummary {
   acceptedEvents?: number;
   errors?: string[];
 }
+
+export interface ProgressGrantRequest {
+  executionId: string;
+  turnId: string;
+  loopId: string;
+  agentName: string;
+  loopKind: 'top_level';
+  executionAttemptId: string;
+  requestedPolicy: {
+    normal: number;
+    repair: number;
+    closing: number;
+    maxTokensPerInference: number;
+  };
+}
+
+export interface InferenceBudgetReservationRequest {
+  executionId: string;
+  loopId: string;
+  grantId: string;
+  operationId: string;
+  bucket: 'normal' | 'repair' | 'closing';
+  phase: string;
+  round: number;
+  name: string;
+  executionAttemptId: string;
+}
+
+export interface ExecutionCompletion {
+  kind?: 'full' | 'partial';
+  reason?: string;
+}

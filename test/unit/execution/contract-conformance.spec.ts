@@ -292,6 +292,122 @@ describe('execution v1 contract', () => {
     ).toBe(false);
   });
 
+  it('accepts authoritative grants and rejects invalid reservations', () => {
+    const grant = {
+      version: '1',
+      grantId: 'grant-progress-1',
+      executionId: 'execution-progress-1',
+      turnId: 'turn-progress-1',
+      loopId: 'loop-progress-1',
+      executionAttemptId: 'execution-attempt-progress-1',
+      profileId: 'documents_chat_v1',
+      policyVersion: '1',
+      requestedPolicy: {
+        normal: 3,
+        repair: 1,
+        closing: 1,
+        maxTokensPerInference: 1000,
+      },
+      effectivePolicy: {
+        normal: 2,
+        repair: 1,
+        closing: 1,
+        maxTokensPerInference: 512,
+      },
+      grantedAt: '2026-08-20T10:00:00Z',
+    };
+    expect(
+      validateEvent(
+        event({
+          message: 'Authoritative inference budget granted',
+          kind: 'budget_grant',
+          grant,
+        }),
+      ),
+    ).toBe(true);
+
+    const reservation = {
+      version: '1',
+      reservationId: 'reservation-progress-1',
+      grantId: grant.grantId,
+      operationId: 'operation-progress-1',
+      executionAttemptId: 'execution-attempt-progress-1',
+      bucket: 'closing',
+      phase: 'forced_finalization',
+      round: 2,
+      name: 'forced_finalization',
+      status: 'reserved',
+      decidedAt: '2026-08-20T10:00:01Z',
+    };
+    expect(
+      validateEvent(
+        event({
+          message: 'Inference budget reserved',
+          kind: 'budget_reservation',
+          reservation,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid reservation',
+          kind: 'budget_reservation',
+          reservation: { ...reservation, bucket: 'unknown' },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid negative grant',
+          kind: 'budget_grant',
+          grant: {
+            ...grant,
+            effectivePolicy: { ...grant.effectivePolicy, normal: -1 },
+          },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        event({
+          message: 'Inference budget reservation denied',
+          kind: 'budget_reservation',
+          reservation: {
+            ...reservation,
+            status: 'denied',
+            reason: 'budget_hard_limit_reached',
+          },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      validateEvent(
+        event(
+          {
+            operationKind: 'inference',
+            status: 'dispatched',
+            name: 'forced_finalization',
+            loopId: 'loop-progress-1',
+            agentName: 'assistant',
+            loopKind: 'top_level',
+            round: 2,
+            maxRounds: 2,
+            phase: 'forced_finalization',
+            budgetGrantId: grant.grantId,
+          },
+          {
+            eventType: 'operation.started',
+            payloadSchema: 'operation.started/1',
+            operationId: 'operation-progress-2',
+            attemptId: 'attempt-progress-2',
+          },
+        ),
+      ),
+    ).toBe(false);
+  });
+
   it('rejects unknown inference phases when loop metadata is present', () => {
     expect(
       validateEvent(
@@ -323,15 +439,12 @@ describe('execution v1 contract', () => {
     'ia-browser-bundle.json',
     'progress-complete-bundle.json',
     'progress-interrupted-bundle.json',
-  ])(
-    'accepts %s with valid hashes and invariants',
-    (name) => {
-      const path = join(fixturesRoot, 'valid', name);
-      const bundle = readJson(path);
-      if (!validate(bundle)) throw new Error(JSON.stringify(validate.errors));
-      assertInvariants(bundle, path, contractHash);
-    },
-  );
+  ])('accepts %s with valid hashes and invariants', (name) => {
+    const path = join(fixturesRoot, 'valid', name);
+    const bundle = readJson(path);
+    if (!validate(bundle)) throw new Error(JSON.stringify(validate.errors));
+    assertInvariants(bundle, path, contractHash);
+  });
 
   it.each(readdirSync(join(fixturesRoot, 'invalid')).sort())(
     'rejects %s',

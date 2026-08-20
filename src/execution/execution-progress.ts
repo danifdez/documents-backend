@@ -11,6 +11,65 @@ export type ProgressTokenUsage = {
   unknownOperations: number;
 };
 
+export type InferenceBudgetBucket = 'normal' | 'repair' | 'closing';
+
+export type InferenceBudgetGrant = {
+  version: '1';
+  grantId: string;
+  executionId: string;
+  turnId: string | null;
+  loopId: string;
+  executionAttemptId: string;
+  profileId: 'documents_chat_v1';
+  policyVersion: '1';
+  requestedPolicy: {
+    normal: number;
+    repair: number;
+    closing: number;
+    maxTokensPerInference: number;
+  };
+  effectivePolicy: {
+    normal: number;
+    repair: number;
+    closing: number;
+    maxTokensPerInference: number;
+  };
+  grantedAt: string;
+};
+
+export type InferenceBudgetReservation = {
+  version: '1';
+  reservationId: string;
+  grantId: string;
+  operationId: string;
+  executionAttemptId: string;
+  bucket: InferenceBudgetBucket;
+  phase: string;
+  round: number;
+  name: string;
+  status: 'reserved' | 'denied' | 'consumed';
+  reason?: string;
+  decidedAt: string;
+};
+
+export type InferenceBudgetProjection = {
+  grants: Record<
+    string,
+    InferenceBudgetGrant & {
+      usage: Record<
+        InferenceBudgetBucket,
+        {
+          granted: number;
+          reserved: number;
+          consumed: number;
+          available: number;
+        }
+      >;
+    }
+  >;
+  reservations: Record<string, InferenceBudgetReservation>;
+};
+
 export type ProgressLedger = {
   version: '1';
   lastSequence: number;
@@ -35,6 +94,7 @@ export type ProgressLedger = {
   promptTokens: ProgressTokenUsage;
   generatedTokens: ProgressTokenUsage;
   completeness: 'complete' | 'partial';
+  inferenceBudget?: InferenceBudgetProjection;
 };
 
 export type ProgressPolicyProjection = {
@@ -65,6 +125,80 @@ function counter(): ProgressCounter {
 
 function tokenUsage(): ProgressTokenUsage {
   return { known: true, total: 0, unknownOperations: 0 };
+}
+
+function budgetUsage(granted: number) {
+  return { granted, reserved: 0, consumed: 0, available: granted };
+}
+
+function ensureBudget(ledger: ProgressLedger): InferenceBudgetProjection {
+  return (ledger.inferenceBudget ??= { grants: {}, reservations: {} });
+}
+
+function applyBudgetEvent(
+  ledger: ProgressLedger,
+  event: ProgressEvent,
+): boolean {
+  if (event.eventType !== 'progress.reported') return false;
+  if (event.payload.kind === 'budget_grant') {
+    const grant = event.payload.grant as InferenceBudgetGrant | undefined;
+    if (!grant?.grantId) return true;
+    const budget = ensureBudget(ledger);
+    budget.grants[grant.grantId] ??= {
+      ...structuredClone(grant),
+      usage: {
+        normal: budgetUsage(grant.effectivePolicy.normal),
+        repair: budgetUsage(grant.effectivePolicy.repair),
+        closing: budgetUsage(grant.effectivePolicy.closing),
+      },
+    };
+    return true;
+  }
+  if (event.payload.kind !== 'budget_reservation') return false;
+  const reservation = event.payload.reservation as
+    InferenceBudgetReservation | undefined;
+  if (!reservation?.operationId) return true;
+  const budget = ensureBudget(ledger);
+  if (budget.reservations[reservation.operationId]) return true;
+  budget.reservations[reservation.operationId] = structuredClone(reservation);
+  if (reservation.status === 'reserved') {
+    const usage = budget.grants[reservation.grantId]?.usage[reservation.bucket];
+    if (usage) {
+      usage.reserved += 1;
+      usage.available = Math.max(
+        0,
+        usage.granted - usage.reserved - usage.consumed,
+      );
+    }
+  }
+  return true;
+}
+
+function consumeBudgetReservation(
+  ledger: ProgressLedger,
+  event: ProgressEvent,
+): void {
+  if (
+    event.eventType !== 'operation.started' ||
+    event.payload.operationKind !== 'inference'
+  ) {
+    return;
+  }
+  const operationId = String(event.operationId ?? '');
+  const reservation = ledger.inferenceBudget?.reservations[operationId];
+  if (!reservation || reservation.status !== 'reserved') return;
+  const usage =
+    ledger.inferenceBudget?.grants[reservation.grantId]?.usage[
+      reservation.bucket
+    ];
+  if (!usage) return;
+  reservation.status = 'consumed';
+  usage.reserved = Math.max(0, usage.reserved - 1);
+  usage.consumed += 1;
+  usage.available = Math.max(
+    0,
+    usage.granted - usage.reserved - usage.consumed,
+  );
 }
 
 function operationKey(event: ProgressEvent): string {
@@ -99,10 +233,7 @@ function recordStarted(counters: ProgressCounter[]): void {
   }
 }
 
-function recordFinished(
-  counters: ProgressCounter[],
-  failed: boolean,
-): void {
+function recordFinished(counters: ProgressCounter[], failed: boolean): void {
   for (const value of counters) {
     value.finished += 1;
     value.unfinished = Math.max(0, value.unfinished - 1);
@@ -139,6 +270,7 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
       ledger.lastSequence,
       Number(event.sequence ?? 0),
     );
+    if (applyBudgetEvent(ledger, event)) continue;
     if (
       event.eventType === 'progress.reported' &&
       event.payload.kind === 'policy_snapshot'
@@ -156,6 +288,7 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
     const operationKind = kind as 'inference' | 'tool_call';
     const key = operationKey(event);
     if (event.eventType === 'operation.started') {
+      consumeBudgetReservation(ledger, event);
       const phase =
         operationKind === 'inference'
           ? inferencePhase(event.payload)

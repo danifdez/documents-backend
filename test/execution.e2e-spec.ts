@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import { DataSource } from 'typeorm';
 import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
+import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-AddExecutionProgress';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -39,6 +40,7 @@ describe('execution PostgreSQL integration', () => {
     await runner.query(`CREATE SCHEMA "${schema}"`);
     await runner.query(`SET search_path TO "${schema}"`);
     await new CreateExecutions1757668140001().up(runner);
+    await new AddExecutionProgress1757668140350().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -238,6 +240,83 @@ describe('execution PostgreSQL integration', () => {
     expect(failed?.error).toEqual({
       code: 'EXECUTION_FAILED',
       message: 'Execution attempts exhausted',
+    });
+  });
+
+  it('serializes the last inference reservation and fences stale attempts', async () => {
+    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const context = await service.createForChat(
+      'assistant_chat',
+      'budget me',
+      scope,
+      {},
+    );
+    const attemptId = randomUUID();
+    await dataSource.query(
+      `UPDATE "${schema}"."executions"
+       SET "status" = 'running', "phase" = 'worker_execution',
+           "attempt_id" = $1
+       WHERE "execution_id" = $2`,
+      [attemptId, context.executionId],
+    );
+
+    const requestedPolicy = {
+      normal: 1,
+      repair: 0,
+      closing: 0,
+      maxTokensPerInference: 512,
+    };
+    const { grant } = await service.requestProgressGrant(context.executionId, {
+      executionId: context.executionId,
+      turnId: context.turnId,
+      loopId: context.executionId,
+      agentName: 'assistant',
+      loopKind: 'top_level',
+      executionAttemptId: attemptId,
+      requestedPolicy,
+    });
+    const reserve = (operationId: string, executionAttemptId = attemptId) =>
+      service.reserveInferenceBudget(context.executionId, {
+        executionId: context.executionId,
+        loopId: context.executionId,
+        grantId: grant.grantId,
+        operationId,
+        bucket: 'normal',
+        phase: 'direct_response',
+        round: 1,
+        name: 'direct_response',
+        executionAttemptId,
+      });
+
+    const decisions = await Promise.all([
+      reserve(randomUUID()),
+      reserve(randomUUID()),
+    ]);
+    expect(decisions.filter((decision) => decision.granted)).toHaveLength(1);
+    expect(decisions.filter((decision) => !decision.granted)).toHaveLength(1);
+
+    const nextAttemptId = randomUUID();
+    await dataSource.query(
+      `UPDATE "${schema}"."executions" SET "attempt_id" = $1
+       WHERE "execution_id" = $2`,
+      [nextAttemptId, context.executionId],
+    );
+    await expect(reserve(randomUUID())).rejects.toThrow(
+      'Execution attempt is not active',
+    );
+    const repeated = await service.requestProgressGrant(context.executionId, {
+      executionId: context.executionId,
+      turnId: context.turnId,
+      loopId: context.executionId,
+      agentName: 'assistant',
+      loopKind: 'top_level',
+      executionAttemptId: nextAttemptId,
+      requestedPolicy,
+    });
+    expect(repeated.grant.grantId).toBe(grant.grantId);
+    await expect(reserve(randomUUID(), nextAttemptId)).resolves.toMatchObject({
+      granted: false,
+      reservation: { reason: 'budget_hard_limit_reached' },
     });
   });
 });

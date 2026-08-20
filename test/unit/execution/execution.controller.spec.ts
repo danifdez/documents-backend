@@ -5,6 +5,8 @@ describe('ExecutionController', () => {
   const service = {
     acceptArtifacts: jest.fn(),
     acceptEvents: jest.fn(),
+    requestProgressGrant: jest.fn(),
+    reserveInferenceBudget: jest.fn(),
     resolveAccessScope: jest.fn(() => ({
       ownerPrincipal: 'user-1',
       workspaceId: 'workspace-1',
@@ -37,6 +39,36 @@ describe('ExecutionController', () => {
     ).resolves.toEqual({ accepted: 1, duplicates: 0 });
     expect(config.get).toHaveBeenCalledWith('EXECUTION_INGEST_TOKEN');
     expect(service.acceptEvents).toHaveBeenCalledWith('run-1', events);
+  });
+
+  it('protects and forwards progress grant and reservation requests', async () => {
+    const grant = { executionId: 'execution-1' } as any;
+    const reservation = { operationId: 'operation-1' } as any;
+    service.requestProgressGrant.mockResolvedValue({ grant: {} });
+    service.reserveInferenceBudget.mockResolvedValue({ granted: true });
+
+    await expect(
+      controller.requestProgressGrant('execution-1', 'wrong', grant),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await controller.requestProgressGrant(
+      'execution-1',
+      'internal-secret',
+      grant,
+    );
+    await controller.reserveInferenceBudget(
+      'execution-1',
+      'internal-secret',
+      reservation,
+    );
+
+    expect(service.requestProgressGrant).toHaveBeenCalledWith(
+      'execution-1',
+      grant,
+    );
+    expect(service.reserveInferenceBudget).toHaveBeenCalledWith(
+      'execution-1',
+      reservation,
+    );
   });
 
   it('derives the read scope from the authenticated principal and workspace header', async () => {

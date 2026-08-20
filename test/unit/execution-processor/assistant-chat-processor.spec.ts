@@ -122,6 +122,35 @@ describe('AssistantChatProcessor final response', () => {
     });
   });
 
+  it('preserves a reserved budget closure as an explicit partial result', async () => {
+    const dependencies = build();
+    const execution = {
+      executionId,
+      taskType: 'assistant-chat',
+      payload: { kind: 'assistant', ownerId: 7 },
+      result: {
+        reply: 'Partial answer from completed tools',
+        completionKind: 'partial',
+        completionReason: 'budget_exhausted',
+      },
+    } as ExecutionEntity;
+
+    await dependencies.processor.process(execution);
+
+    expect(
+      dependencies.executionService.completeExecution,
+    ).toHaveBeenCalledWith(
+      executionId,
+      'Partial answer from completed tools',
+      null,
+      undefined,
+      { kind: 'partial', reason: 'budget_exhausted' },
+    );
+    expect(
+      dependencies.notificationGateway.sendAssistantResponse,
+    ).toHaveBeenCalled();
+  });
+
   it('persists and publishes a terminal model error without a final reply', async () => {
     const dependencies = build();
     const error = 'Model returned an empty response';
@@ -145,5 +174,33 @@ describe('AssistantChatProcessor final response', () => {
     ).toHaveBeenCalledWith(
       expect.objectContaining({ assistantId: 7, executionId }),
     );
+  });
+
+  it('preserves the explicit budget reason on a failed execution', async () => {
+    const dependencies = build();
+    const execution = {
+      executionId,
+      taskType: 'assistant-chat',
+      payload: { kind: 'assistant', ownerId: 7 },
+      result: {
+        error: 'budget_empty_forced_finalization',
+        completionReason: 'budget_exhausted',
+      },
+    } as ExecutionEntity;
+
+    await dependencies.processor.process(execution);
+
+    expect(
+      dependencies.executionService.completeExecution,
+    ).toHaveBeenCalledWith(
+      executionId,
+      '',
+      'budget_empty_forced_finalization',
+      undefined,
+      { kind: undefined, reason: 'budget_exhausted' },
+    );
+    expect(
+      dependencies.notificationGateway.sendAssistantResponse,
+    ).toHaveBeenCalled();
   });
 });

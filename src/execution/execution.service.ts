@@ -15,26 +15,45 @@ import {
   IncomingExecutionArtifact,
   ExecutionTelemetrySummary,
   ExecutionAccessScope,
+  ExecutionCompletion,
+  InferenceBudgetReservationRequest,
+  ProgressGrantRequest,
 } from './execution.types';
 import {
   EXECUTION_EVENT_PAYLOADS,
   EXECUTION_BUNDLE_SCHEMA,
   EXECUTION_CONTRACT_SET_HASH,
   EXECUTION_EVENT_SCHEMA,
+  EXECUTION_UUID_PATTERN,
 } from './execution.constants';
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { WorkerEntity } from '../worker/worker.entity';
 import {
+  InferenceBudgetGrant,
+  InferenceBudgetReservation,
   ProgressEvent,
   projectExecutionProgress,
 } from './execution-progress';
+import {
+  assertActiveBudgetAttempt,
+  assertBucketMatchesPhase,
+  assertGrantScope,
+  assertInferenceBudgetProjection,
+  assertReservationMatches,
+  assertReservationScope,
+  createInferenceBudgetGrant,
+  createInferenceBudgetReservation,
+  governedInferenceStart,
+  resolveEffectivePolicy,
+  validateProgressGrantRequest,
+  validateReservationRequest,
+  withoutGrantUsage,
+} from './inference-budget-policy';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRIVATE_REASONING_PATTERN = /<think>[\s\S]*?<\/think>/gi;
 const BEARER_PATTERN = /\bbearer\s+[a-z0-9._~+/-]+=*/gi;
 const SECRET_VALUE_PATTERN =
@@ -739,6 +758,11 @@ export class ExecutionService {
           rootExecutionId,
           incoming,
         );
+        await this.validateInferenceBudgetStart(
+          eventRepo,
+          targetExecution,
+          incoming,
+        );
         this.validateStateTransition(targetExecution, incoming);
         sequence += 1;
         const ingestedAt = new Date().toISOString();
@@ -784,11 +808,203 @@ export class ExecutionService {
     });
   }
 
+  async requestProgressGrant(
+    rootExecutionId: string,
+    request: ProgressGrantRequest,
+  ): Promise<{ grant: InferenceBudgetGrant; eventId: string }> {
+    validateProgressGrantRequest(rootExecutionId, request);
+    return this.dataSource.transaction(async (manager) => {
+      const executionRepo = manager.getRepository(ExecutionEntity);
+      const eventRepo = manager.getRepository(ExecutionEventEntity);
+      const execution = await executionRepo.findOne({
+        where: { executionId: rootExecutionId, rootExecutionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!execution) throw new NotFoundException('Execution not found');
+      assertActiveBudgetAttempt(execution, request.executionAttemptId);
+      assertGrantScope(execution, request);
+
+      const rows = await eventRepo.find({
+        where: { rootExecutionId },
+        order: { sequence: 'ASC' },
+      });
+      const progress = projectExecutionProgress(
+        rows.map((row) => row.envelope as ProgressEvent),
+      );
+      const existing = Object.values(
+        progress.ledger.inferenceBudget?.grants ?? {},
+      )[0];
+      if (existing) {
+        if (
+          existing.loopId !== request.loopId ||
+          canonicalJson(existing.requestedPolicy) !==
+            canonicalJson(request.requestedPolicy)
+        ) {
+          throw new ConflictException(
+            'An incompatible progress grant already exists',
+          );
+        }
+        const event = rows.find(
+          (row) =>
+            (row.envelope.payload as Record<string, any>)?.grant?.grantId ===
+            existing.grantId,
+        );
+        return {
+          grant: withoutGrantUsage(existing),
+          eventId: event!.eventId,
+        };
+      }
+
+      const now = new Date().toISOString();
+      const effectivePolicy = resolveEffectivePolicy(request.requestedPolicy, {
+        normal: Math.max(
+          1,
+          this.progressLimit('PROGRESS_CHAT_MAX_NORMAL_INFERENCES', 3),
+        ),
+        repair: this.progressLimit('PROGRESS_CHAT_MAX_OUTPUT_REPAIRS', 1),
+        closing: this.progressLimit('PROGRESS_CHAT_CLOSING_INFERENCES', 1),
+        maxTokensPerInference: Math.max(
+          1,
+          this.progressLimit('PROGRESS_CHAT_MAX_TOKENS_PER_INFERENCE', 4096),
+        ),
+      });
+      const grant = createInferenceBudgetGrant(
+        execution,
+        request,
+        effectivePolicy,
+        randomUUID(),
+        now,
+      );
+      const producerSequence = this.nextBackendProducerSequence(rows);
+      const sequence = Number(execution.lastSequence) + 1;
+      const event = await this.appendBackendEvent(
+        manager,
+        execution,
+        producerSequence,
+        {
+          eventType: 'progress.reported',
+          payloadSchema: 'progress.reported/1',
+          payload: {
+            message: 'Authoritative inference budget granted',
+            kind: 'budget_grant',
+            grant,
+          },
+          actor: { type: 'system' },
+          executionId: execution.executionId,
+          turnId: execution.turnId,
+          causedByEventId: execution.lastEventId,
+          artifactRefs: [],
+        },
+        sequence,
+      );
+      execution.lastSequence = String(sequence);
+      execution.lastEventId = event.eventId;
+      await this.refreshProgressProjection(eventRepo, execution);
+      await executionRepo.save(execution);
+      return { grant, eventId: event.eventId };
+    });
+  }
+
+  async reserveInferenceBudget(
+    rootExecutionId: string,
+    request: InferenceBudgetReservationRequest,
+  ): Promise<{
+    granted: boolean;
+    reservation: InferenceBudgetReservation;
+    eventId: string;
+  }> {
+    validateReservationRequest(rootExecutionId, request);
+    return this.dataSource.transaction(async (manager) => {
+      const executionRepo = manager.getRepository(ExecutionEntity);
+      const eventRepo = manager.getRepository(ExecutionEventEntity);
+      const execution = await executionRepo.findOne({
+        where: { executionId: rootExecutionId, rootExecutionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!execution) throw new NotFoundException('Execution not found');
+      assertActiveBudgetAttempt(execution, request.executionAttemptId);
+      assertReservationScope(execution, request);
+
+      const rows = await eventRepo.find({
+        where: { rootExecutionId },
+        order: { sequence: 'ASC' },
+      });
+      const progress = projectExecutionProgress(
+        rows.map((row) => row.envelope as ProgressEvent),
+      );
+      const existing =
+        progress.ledger.inferenceBudget?.reservations[request.operationId];
+      if (existing) {
+        assertReservationMatches(existing, request);
+        const event = rows.find(
+          (row) =>
+            (row.envelope.payload as Record<string, any>)?.reservation
+              ?.operationId === request.operationId,
+        );
+        const granted = existing.status === 'reserved';
+        return {
+          granted,
+          reservation:
+            existing.status === 'consumed'
+              ? {
+                  ...existing,
+                  reason: 'budget_reservation_consumed',
+                }
+              : existing,
+          eventId: event!.eventId,
+        };
+      }
+      const grant = progress.ledger.inferenceBudget?.grants[request.grantId];
+      if (!grant || grant.loopId !== request.loopId) {
+        throw new BadRequestException('Unknown inference budget grant');
+      }
+      assertBucketMatchesPhase(request.bucket, request.phase);
+      const usage = grant.usage[request.bucket];
+      const granted = usage.available > 0;
+      const reservation = createInferenceBudgetReservation(
+        request,
+        granted,
+        randomUUID(),
+        new Date().toISOString(),
+      );
+      const producerSequence = this.nextBackendProducerSequence(rows);
+      const sequence = Number(execution.lastSequence) + 1;
+      const event = await this.appendBackendEvent(
+        manager,
+        execution,
+        producerSequence,
+        {
+          eventType: 'progress.reported',
+          payloadSchema: 'progress.reported/1',
+          payload: {
+            message: granted
+              ? 'Inference budget reserved'
+              : 'Inference budget reservation denied',
+            kind: 'budget_reservation',
+            reservation,
+          },
+          actor: { type: 'system' },
+          executionId: execution.executionId,
+          turnId: execution.turnId,
+          causedByEventId: execution.lastEventId,
+          artifactRefs: [],
+        },
+        sequence,
+      );
+      execution.lastSequence = String(sequence);
+      execution.lastEventId = event.eventId;
+      await this.refreshProgressProjection(eventRepo, execution);
+      await executionRepo.save(execution);
+      return { granted, reservation, eventId: event.eventId };
+    });
+  }
+
   async completeExecution(
     executionId: string,
     reply: string,
     error: string | null,
     telemetry?: ExecutionTelemetrySummary,
+    completion?: ExecutionCompletion,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
@@ -907,6 +1123,10 @@ export class ExecutionService {
 
         sequence += 1;
         const status = error ? 'failed' : 'completed';
+        const completionKind = completion?.kind ?? 'full';
+        const completionReason =
+          completion?.reason ??
+          (error ? 'model_or_tool_failed' : 'goal_satisfied');
         const finalResult = error
           ? null
           : {
@@ -925,10 +1145,8 @@ export class ExecutionService {
             payload: {
               from: execution.status,
               to: status,
-              completionKind: 'full',
-              completionReason: error
-                ? 'model_or_tool_failed'
-                : 'goal_satisfied',
+              completionKind,
+              completionReason,
               result: finalResult,
               error: error
                 ? { code: 'CHAT_FAILED', message: redactExecutionText(error) }
@@ -944,10 +1162,8 @@ export class ExecutionService {
         );
         lastEventId = stateEvent.eventId;
         execution.status = status as ExecutionStatus;
-        execution.completionKind = 'full';
-        execution.completionReason = error
-          ? 'model_or_tool_failed'
-          : 'goal_satisfied';
+        execution.completionKind = completionKind;
+        execution.completionReason = completionReason;
         execution.result = finalResult;
         execution.error = error
           ? { code: 'CHAT_FAILED', message: redactExecutionText(error) }
@@ -1246,13 +1462,46 @@ export class ExecutionService {
     return manager.save(row);
   }
 
+  private progressLimit(name: string, fallback: number): number {
+    const value = Number(this.config.get<string>(name) ?? fallback);
+    return Number.isInteger(value) && value >= 0 ? value : fallback;
+  }
+
+  private nextBackendProducerSequence(rows: ExecutionEventEntity[]): number {
+    return (
+      Math.max(
+        1,
+        ...rows
+          .filter((row) => row.producerComponent === 'documents-backend')
+          .map((row) => Number(row.producerSequence)),
+      ) + 1
+    );
+  }
+
+  private async validateInferenceBudgetStart(
+    eventRepo: Repository<ExecutionEventEntity>,
+    execution: ExecutionEntity,
+    event: Record<string, unknown>,
+  ): Promise<void> {
+    const identity = governedInferenceStart(execution, event);
+    if (!identity) return;
+    const rows = await eventRepo.find({
+      where: { rootExecutionId: execution.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const progress = projectExecutionProgress(
+      rows.map((row) => row.envelope as ProgressEvent),
+    );
+    assertInferenceBudgetProjection(identity, progress.ledger.inferenceBudget);
+  }
+
   private validateIncomingEvent(
     execution: ExecutionEntity,
     event: Record<string, unknown>,
   ): void {
     rejectForbiddenData(event);
     for (const field of ['eventId', 'rootExecutionId', 'executionId']) {
-      if (!UUID_PATTERN.test(String(event[field] ?? ''))) {
+      if (!EXECUTION_UUID_PATTERN.test(String(event[field] ?? ''))) {
         throw new BadRequestException(`${field} must be a UUID`);
       }
     }
@@ -1313,7 +1562,10 @@ export class ExecutionService {
 
   private validateArtifact(artifact: IncomingExecutionArtifact): void {
     rejectForbiddenData(artifact);
-    if (!artifact || !UUID_PATTERN.test(String(artifact.artifactId ?? ''))) {
+    if (
+      !artifact ||
+      !EXECUTION_UUID_PATTERN.test(String(artifact.artifactId ?? ''))
+    ) {
       throw new BadRequestException('artifactId must be a UUID');
     }
     if (

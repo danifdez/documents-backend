@@ -10,7 +10,10 @@ import { AssistantMemoryService } from '../../assistant-memory/assistant-memory.
 import { MemoryEntryType } from '../../assistant-memory/memory-entry.entity';
 import { AgentService } from '../../agent/agent.service';
 import { toAgentMessageDto } from '../../agent/dto/agent.dto';
-import { ExecutionTelemetrySummary } from '../../execution/execution.types';
+import {
+  ExecutionCompletion,
+  ExecutionTelemetrySummary,
+} from '../../execution/execution.types';
 
 const VALID_MEMORY_TYPES: MemoryEntryType[] = [
   'fact',
@@ -304,11 +307,24 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     error: string | null,
     result: Record<string, any>,
   ): Promise<void> {
+    if (!result['completionKind'] && !result['completionReason']) {
+      await this.executionService.completeExecution(
+        execution.executionId,
+        reply,
+        error,
+        result['executionTelemetry'] as ExecutionTelemetrySummary | undefined,
+      );
+      return;
+    }
     await this.executionService.completeExecution(
       execution.executionId,
       reply,
       error,
       result['executionTelemetry'] as ExecutionTelemetrySummary | undefined,
+      {
+        kind: result['completionKind'],
+        reason: result['completionReason'],
+      } as ExecutionCompletion,
     );
   }
 }

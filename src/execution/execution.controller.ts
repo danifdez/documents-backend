@@ -17,7 +17,11 @@ import { Public } from '../auth/decorators/public.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 import { ExecutionService } from './execution.service';
-import { IncomingExecutionArtifact } from './execution.types';
+import {
+  IncomingExecutionArtifact,
+  InferenceBudgetReservationRequest,
+  ProgressGrantRequest,
+} from './execution.types';
 import { CreateExecutionDto } from './dto/execution.dto';
 import { ExecutionPriority } from './execution-priority.enum';
 
@@ -71,6 +75,30 @@ export class ExecutionController {
   ) {
     this.assertInternalToken(token);
     return this.service.acceptEvents(rootExecutionId, body?.events);
+  }
+
+  @Post('internal/:rootExecutionId/progress/grants')
+  @Public()
+  @SkipThrottle()
+  async requestProgressGrant(
+    @Param('rootExecutionId') rootExecutionId: string,
+    @Headers('x-execution-ingest-token') token: string | undefined,
+    @Body() body: ProgressGrantRequest,
+  ) {
+    this.assertInternalToken(token);
+    return this.service.requestProgressGrant(rootExecutionId, body);
+  }
+
+  @Post('internal/:rootExecutionId/progress/reservations')
+  @Public()
+  @SkipThrottle()
+  async reserveInferenceBudget(
+    @Param('rootExecutionId') rootExecutionId: string,
+    @Headers('x-execution-ingest-token') token: string | undefined,
+    @Body() body: InferenceBudgetReservationRequest,
+  ) {
+    this.assertInternalToken(token);
+    return this.service.reserveInferenceBudget(rootExecutionId, body);
   }
 
   @Get(':rootExecutionId/events')
