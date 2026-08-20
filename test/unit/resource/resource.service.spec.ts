@@ -4,7 +4,7 @@ import { HttpException, NotFoundException } from '@nestjs/common';
 import { ResourceService } from '../../../src/resource/resource.service';
 import { ResourceEntity } from '../../../src/resource/resource.entity';
 import { FileStorageService } from '../../../src/file-storage/file-storage.service';
-import { JobService } from '../../../src/job/job.service';
+import { ExecutionService } from '../../../src/execution/execution.service';
 import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildResource } from '../../factories';
 
@@ -12,7 +12,7 @@ describe('ResourceService', () => {
   let service: ResourceService;
   let repo: MockRepository<ResourceEntity>;
   let fileStorage: Record<string, jest.Mock>;
-  let jobService: Record<string, jest.Mock>;
+  let executionService: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     repo = createMockRepository<ResourceEntity>();
@@ -22,14 +22,14 @@ describe('ResourceService', () => {
       getFile: jest.fn(),
       deleteFile: jest.fn(),
     };
-    jobService = { create: jest.fn() };
+    executionService = { create: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ResourceService,
         { provide: getRepositoryToken(ResourceEntity), useValue: repo },
         { provide: FileStorageService, useValue: fileStorage },
-        { provide: JobService, useValue: jobService },
+        { provide: ExecutionService, useValue: executionService },
       ],
     }).compile();
 
@@ -111,7 +111,7 @@ describe('ResourceService', () => {
   });
 
   describe('confirmExtraction', () => {
-    it('should confirm extraction and create detect-language job', async () => {
+    it('should confirm extraction and create a detect-language execution', async () => {
       const resource = buildResource({ status: 'extracted' });
       repo.findOne.mockResolvedValue(resource);
       repo.preload.mockResolvedValue(resource);
@@ -121,11 +121,11 @@ describe('ResourceService', () => {
         .mockResolvedValueOnce(resource) // findOne in confirmExtraction
         .mockResolvedValueOnce({ content: '<p>Hello world</p>' }); // getContentById
 
-      jobService.create.mockResolvedValue({ id: 1 });
+      executionService.create.mockResolvedValue({ id: 1 });
 
       const result = await service.confirmExtraction(1);
       expect(result.success).toBe(true);
-      expect(jobService.create).toHaveBeenCalledWith(
+      expect(executionService.create).toHaveBeenCalledWith(
         'detect-language',
         expect.any(String),
         expect.objectContaining({ resourceId: 1 }),
@@ -134,7 +134,9 @@ describe('ResourceService', () => {
 
     it('should throw NotFoundException if resource not found', async () => {
       repo.findOne.mockResolvedValue(null);
-      await expect(service.confirmExtraction(999)).rejects.toThrow(NotFoundException);
+      await expect(service.confirmExtraction(999)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw if resource is not in extracted state', async () => {
@@ -151,7 +153,7 @@ describe('ResourceService', () => {
       size: 4,
     } as Express.Multer.File;
 
-    it('should upload, create resource, and create extraction job', async () => {
+    it('should upload, create resource, and create extraction execution', async () => {
       fileStorage.calculateHash.mockReturnValue('hash123');
       repo.findOne.mockResolvedValue(null); // findByHash
       fileStorage.storeFile.mockResolvedValue({
@@ -162,39 +164,53 @@ describe('ResourceService', () => {
       const created = buildResource({ id: 5 });
       repo.create.mockReturnValue(created);
       repo.save.mockResolvedValue(created);
-      jobService.create.mockResolvedValue({ id: 1 });
+      executionService.create.mockResolvedValue({ id: 1 });
 
       const result = await service.uploadAndProcess(mockFile, {});
       expect(result).toEqual({ success: true });
-      expect(jobService.create).toHaveBeenCalledWith(
+      expect(executionService.create).toHaveBeenCalledWith(
         'document-extraction',
         expect.any(String),
         expect.objectContaining({ resourceId: 5 }),
+        undefined,
+        mockFile.buffer,
       );
     });
 
     it('should throw AlreadyExistException if hash already exists', async () => {
       fileStorage.calculateHash.mockReturnValue('hash123');
       repo.findOne.mockResolvedValue(buildResource()); // findByHash returns existing
-      await expect(service.uploadAndProcess(mockFile, {})).rejects.toThrow('File with the same content already exists');
+      await expect(service.uploadAndProcess(mockFile, {})).rejects.toThrow(
+        'File with the same content already exists',
+      );
     });
 
-    it('should not create extraction job for images', async () => {
-      const imageFile = { ...mockFile, mimetype: 'image/png' } as Express.Multer.File;
+    it('should not create an extraction execution for images', async () => {
+      const imageFile = {
+        ...mockFile,
+        mimetype: 'image/png',
+      } as Express.Multer.File;
       fileStorage.calculateHash.mockReturnValue('hash456');
       repo.findOne.mockResolvedValue(null);
-      fileStorage.storeFile.mockResolvedValue({ hash: 'hash456', relativePath: 'x', extension: '.png' });
+      fileStorage.storeFile.mockResolvedValue({
+        hash: 'hash456',
+        relativePath: 'x',
+        extension: '.png',
+      });
       repo.create.mockReturnValue(buildResource());
       repo.save.mockResolvedValue(buildResource());
 
       await service.uploadAndProcess(imageFile, {});
-      expect(jobService.create).not.toHaveBeenCalled();
+      expect(executionService.create).not.toHaveBeenCalled();
     });
   });
 
   describe('getFileBuffer', () => {
     it('should return buffer and resource', async () => {
-      const resource = buildResource({ path: 'some/path.pdf', mimeType: 'application/pdf' });
+      const resource = buildResource({
+        path: 'some/path.pdf',
+        mimeType: 'application/pdf',
+      });
       repo.findOne.mockResolvedValue(resource);
       const buf = Buffer.from('content');
       fileStorage.getFile.mockResolvedValue(buf);
@@ -206,7 +222,9 @@ describe('ResourceService', () => {
 
     it('should throw NotFoundException if no resource', async () => {
       repo.findOne.mockResolvedValue(null);
-      await expect(service.getFileBuffer(999)).rejects.toThrow(NotFoundException);
+      await expect(service.getFileBuffer(999)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw NotFoundException if file not on disk', async () => {

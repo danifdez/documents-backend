@@ -1,26 +1,34 @@
 import { Injectable } from '@nestjs/common';
-import { JobPriority } from 'src/job/job-priority.enum';
-import { JobService } from 'src/job/job.service';
+import { ExecutionPriority } from 'src/execution/execution-priority.enum';
+import { ExecutionService } from 'src/execution/execution.service';
 import { ResourceService } from 'src/resource/resource.service';
 import { extractTextFromHtml } from 'src/utils/text';
 
 @Injectable()
 export class ModelService {
   constructor(
-    private readonly jobService: JobService,
+    private readonly executionService: ExecutionService,
     private readonly resourceService: ResourceService,
-  ) { }
+  ) {}
 
-  async ask(question: string, projectId?: number, requestId?: string, context?: string): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('ask', JobPriority.HIGH, {
-      question,
-      projectId,
-      requestId,
-      context,
-    });
-    return { jobId: job.id };
+  async ask(
+    question: string,
+    projectId?: number,
+    requestId?: string,
+    context?: string,
+  ): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'ask',
+      ExecutionPriority.HIGH,
+      {
+        question,
+        projectId,
+        requestId,
+        context,
+      },
+    );
+    return { executionId: execution.executionId };
   }
-
 
   async summarize(
     targetLanguage: string,
@@ -46,7 +54,7 @@ export class ModelService {
       content = text;
     }
 
-    await this.jobService.create('summarize', JobPriority.NORMAL, {
+    await this.executionService.create('summarize', ExecutionPriority.NORMAL, {
       content: content,
       sourceLanguage: sourceLanguage,
       targetLanguage: targetLanguage,
@@ -56,10 +64,7 @@ export class ModelService {
     });
   }
 
-  async translate(
-    resourceId: number,
-    language: string,
-  ): Promise<void> {
+  async translate(resourceId: number, language: string): Promise<void> {
     // Fetch the resource to get content and source language
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
@@ -74,7 +79,7 @@ export class ModelService {
     const sourceLanguage = resource.language || 'en';
     const extractedTexts = extractTextFromHtml(content);
 
-    await this.jobService.create('translate', JobPriority.NORMAL, {
+    await this.executionService.create('translate', ExecutionPriority.NORMAL, {
       resourceId: resourceId,
       sourceLanguage: sourceLanguage,
       targetLanguage: language,
@@ -95,20 +100,24 @@ export class ModelService {
 
     const extractedTexts = extractTextFromHtml(content);
 
-    // Create job for entity extraction. When AGENT_ENTITY_EXTRACTION=true,
-    // the worker routes the job through the agent loop instead of the
+    // Create execution for entity extraction. When AGENT_ENTITY_EXTRACTION=true,
+    // the worker routes the execution through the agent loop instead of the
     // one-shot LLM handler.
     const agentEnabled = process.env.AGENT_ENTITY_EXTRACTION === 'true';
-    const agentMaxSteps = parseInt(process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6', 10);
-    await this.jobService.create(
+    const maxSteps = parseInt(
+      process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6',
+      10,
+    );
+    await this.executionService.create(
       'entity-extraction',
-      JobPriority.NORMAL,
+      ExecutionPriority.NORMAL,
       {
         resourceId: resourceId,
         from: 'content',
         texts: extractedTexts,
+        kind: agentEnabled ? 'agent' : 'one_shot',
       },
-      agentEnabled ? { maxSteps: agentMaxSteps, kind: 'agent' } : undefined,
+      agentEnabled ? { maxSteps } : undefined,
     );
   }
 
@@ -119,7 +128,8 @@ export class ModelService {
     }
 
     // Prefer translated content if available
-    let content = await this.resourceService.getTranslatedContentById(resourceId);
+    let content =
+      await this.resourceService.getTranslatedContentById(resourceId);
     if (!content) {
       content = await this.resourceService.getContentById(resourceId);
     }
@@ -128,7 +138,7 @@ export class ModelService {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
 
-    await this.jobService.create('key-point', JobPriority.NORMAL, {
+    await this.executionService.create('key-point', ExecutionPriority.NORMAL, {
       resourceId: resourceId,
       content: content,
       targetLanguage: targetLanguage || resource.language || 'en',
@@ -142,7 +152,8 @@ export class ModelService {
     }
 
     // Prefer translated content if available
-    let content = await this.resourceService.getTranslatedContentById(resourceId);
+    let content =
+      await this.resourceService.getTranslatedContentById(resourceId);
     if (!content) {
       content = await this.resourceService.getContentById(resourceId);
     }
@@ -151,21 +162,29 @@ export class ModelService {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
 
-    await this.jobService.create('keywords', JobPriority.NORMAL, {
+    await this.executionService.create('keywords', ExecutionPriority.NORMAL, {
       resourceId: resourceId,
       content: content,
       targetLanguage: targetLanguage || resource.language || 'en',
     });
   }
 
-  async semanticSearch(query: string, projectId?: number, requestId?: string, limit?: number): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('search', JobPriority.HIGH, {
-      query,
-      projectId,
-      requestId,
-      limit: limit || 10,
-    });
-    return { jobId: job.id };
+  async semanticSearch(
+    query: string,
+    projectId?: number,
+    requestId?: string,
+    limit?: number,
+  ): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'search',
+      ExecutionPriority.HIGH,
+      {
+        query,
+        projectId,
+        requestId,
+        limit: limit || 10,
+      },
+    );
+    return { executionId: execution.executionId };
   }
-
 }

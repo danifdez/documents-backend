@@ -3,25 +3,35 @@ import { ModelService } from './model.service';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 import {
-  AskQuestionDto, SummarizeDto, TranslateDto, ExtractEntitiesDto,
-  KeyPointsDto, KeywordsDto, SemanticSearchDto,
+  AskQuestionDto,
+  SummarizeDto,
+  TranslateDto,
+  ExtractEntitiesDto,
+  KeyPointsDto,
+  KeywordsDto,
+  SemanticSearchDto,
 } from './dto/model.dto';
 
 @Controller('model')
 export class ModelController {
-  constructor(private readonly modelService: ModelService) { }
+  constructor(private readonly modelService: ModelService) {}
 
   @Post('ask')
   @RequirePermissions(Permission.ASK)
-  async askQuestion(@Body() questionData: AskQuestionDto): Promise<{ jobId: number }> {
-    return this.modelService.ask(questionData.question, questionData.projectId, questionData.requestId, questionData.context);
+  async askQuestion(
+    @Body() questionData: AskQuestionDto,
+  ): Promise<{ executionId: string }> {
+    return this.modelService.ask(
+      questionData.question,
+      questionData.projectId,
+      questionData.requestId,
+      questionData.context,
+    );
   }
 
   @Post('summarize')
   @RequirePermissions(Permission.SUMMARIZE)
-  async summarize(
-    @Body() summarizeData: SummarizeDto,
-  ): Promise<void> {
+  async summarize(@Body() summarizeData: SummarizeDto): Promise<void> {
     await this.modelService.summarize(
       summarizeData.targetLanguage,
       summarizeData.resourceId,
@@ -34,9 +44,7 @@ export class ModelController {
 
   @Post('translate')
   @RequirePermissions(Permission.TRANSLATE)
-  async translate(
-    @Body() translateData: TranslateDto,
-  ): Promise<void> {
+  async translate(@Body() translateData: TranslateDto): Promise<void> {
     await this.modelService.translate(
       translateData.resourceId,
       translateData.targetLanguage,
@@ -45,31 +53,32 @@ export class ModelController {
 
   @Post('extract-entities')
   @RequirePermissions(Permission.ENTITY_EXTRACTION)
-  async extractEntities(
-    @Body() body: ExtractEntitiesDto,
-  ): Promise<void> {
+  async extractEntities(@Body() body: ExtractEntitiesDto): Promise<void> {
     await this.modelService.extractEntities(body.resourceId);
   }
 
   @Post('key-points')
   @RequirePermissions(Permission.KEY_POINTS)
-  async keyPoints(
-    @Body() body: KeyPointsDto,
-  ): Promise<void> {
+  async keyPoints(@Body() body: KeyPointsDto): Promise<void> {
     await this.modelService.keyPoints(body.resourceId, body.targetLanguage);
   }
 
   @Post('keywords')
   @RequirePermissions(Permission.KEYWORDS)
-  async keywords(
-    @Body() body: KeywordsDto,
-  ): Promise<void> {
+  async keywords(@Body() body: KeywordsDto): Promise<void> {
     await this.modelService.keywords(body.resourceId, body.targetLanguage);
   }
 
   @Post('semantic-search')
   @RequirePermissions(Permission.ASK)
-  async semanticSearch(@Body() body: SemanticSearchDto): Promise<{ jobId: number }> {
-    return this.modelService.semanticSearch(body.query, body.projectId, body.requestId, body.limit);
+  async semanticSearch(
+    @Body() body: SemanticSearchDto,
+  ): Promise<{ executionId: string }> {
+    return this.modelService.semanticSearch(
+      body.query,
+      body.projectId,
+      body.requestId,
+      body.limit,
+    );
   }
 }

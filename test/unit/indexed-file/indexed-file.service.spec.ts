@@ -4,11 +4,14 @@ import * as os from 'os';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException } from '@nestjs/common';
-import { IndexedFileService, OwnerRef } from '../../../src/indexed-file/indexed-file.service';
+import {
+  IndexedFileService,
+  OwnerRef,
+} from '../../../src/indexed-file/indexed-file.service';
 import { IndexedFileEntity } from '../../../src/indexed-file/indexed-file.entity';
 import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { AgentEntity } from '../../../src/agent/agent.entity';
-import { JobService } from '../../../src/job/job.service';
+import { ExecutionService } from '../../../src/execution/execution.service';
 
 function createMockRepo() {
   const store = new Map<number, any>();
@@ -25,7 +28,10 @@ function createMockRepo() {
     find: jest.fn(async ({ where }: any = {}) => {
       const list: any[] = [];
       for (const row of store.values()) {
-        if (!where) { list.push(row); continue; }
+        if (!where) {
+          list.push(row);
+          continue;
+        }
         const match = Object.entries(where).every(([k, v]) => row[k] === v);
         if (match) list.push(row);
       }
@@ -63,7 +69,7 @@ describe('IndexedFileService', () => {
   let indexedRepo: ReturnType<typeof createMockRepo>;
   let assistantRepo: ReturnType<typeof createMockRepo>;
   let agentRepo: ReturnType<typeof createMockRepo>;
-  let jobService: { create: jest.Mock };
+  let executionService: { create: jest.Mock };
 
   beforeEach(async () => {
     tmpScope = await fs.mkdtemp(path.join(os.tmpdir(), 'indexed-file-test-'));
@@ -75,15 +81,21 @@ describe('IndexedFileService', () => {
       folderScope: tmpScope,
     });
 
-    jobService = { create: jest.fn(async () => ({ id: 1 })) };
+    executionService = { create: jest.fn(async () => ({ id: 1 })) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IndexedFileService,
-        { provide: getRepositoryToken(IndexedFileEntity), useValue: indexedRepo },
-        { provide: getRepositoryToken(AssistantEntity), useValue: assistantRepo },
+        {
+          provide: getRepositoryToken(IndexedFileEntity),
+          useValue: indexedRepo,
+        },
+        {
+          provide: getRepositoryToken(AssistantEntity),
+          useValue: assistantRepo,
+        },
         { provide: getRepositoryToken(AgentEntity), useValue: agentRepo },
-        { provide: JobService, useValue: jobService },
+        { provide: ExecutionService, useValue: executionService },
       ],
     }).compile();
     service = module.get(IndexedFileService);
@@ -94,7 +106,9 @@ describe('IndexedFileService', () => {
   });
 
   it('writeFile creates file on disk and row in DB', async () => {
-    const entity = await service.writeFile(owner, 'notes.md', '# Hello', { overwrite: false });
+    const entity = await service.writeFile(owner, 'notes.md', '# Hello', {
+      overwrite: false,
+    });
     expect(entity.filename).toBe('notes.md');
     expect(entity.ownerType).toBe(OWNER_TYPE);
     expect(entity.ownerId).toBe(assistantId);
@@ -113,8 +127,12 @@ describe('IndexedFileService', () => {
   });
 
   it('writeFile with overwrite updates existing row', async () => {
-    const first = await service.writeFile(owner, 'lista.md', 'one', { overwrite: false });
-    const second = await service.writeFile(owner, 'lista.md', 'two', { overwrite: true });
+    const first = await service.writeFile(owner, 'lista.md', 'one', {
+      overwrite: false,
+    });
+    const second = await service.writeFile(owner, 'lista.md', 'two', {
+      overwrite: true,
+    });
     expect(second.id).toBe(first.id);
     expect(second.size).toBe(3);
     expect(indexedRepo.store.size).toBe(1);
@@ -122,7 +140,9 @@ describe('IndexedFileService', () => {
 
   it('writeFile accepts a Buffer for binary content', async () => {
     const buf = Buffer.from([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x01]);
-    const entity = await service.writeFile(owner, 'report.pdf', buf, { overwrite: false });
+    const entity = await service.writeFile(owner, 'report.pdf', buf, {
+      overwrite: false,
+    });
     expect(entity.filename).toBe('report.pdf');
     expect(entity.mimeType).toBe('application/pdf');
     expect(entity.size).toBe(8);
@@ -132,14 +152,26 @@ describe('IndexedFileService', () => {
 
   it('writeFile uses MIME from filename, not from content (xlsx case)', async () => {
     const xlsxLike = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]);
-    const entity = await service.writeFile(owner, 'data.xlsx', xlsxLike, { overwrite: false });
-    expect(entity.mimeType).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    const entity = await service.writeFile(owner, 'data.xlsx', xlsxLike, {
+      overwrite: false,
+    });
+    expect(entity.mimeType).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
   });
 
   it('deleteFile is idempotent', async () => {
-    const e = await service.writeFile(owner, 'borrar.md', 'x', { overwrite: false });
-    await service.deleteFile(e.id, { ownerType: OWNER_TYPE, ownerId: assistantId });
-    await service.deleteFile(e.id, { ownerType: OWNER_TYPE, ownerId: assistantId });
+    const e = await service.writeFile(owner, 'borrar.md', 'x', {
+      overwrite: false,
+    });
+    await service.deleteFile(e.id, {
+      ownerType: OWNER_TYPE,
+      ownerId: assistantId,
+    });
+    await service.deleteFile(e.id, {
+      ownerType: OWNER_TYPE,
+      ownerId: assistantId,
+    });
     expect(indexedRepo.store.size).toBe(0);
   });
 
@@ -152,7 +184,10 @@ describe('IndexedFileService', () => {
 
   describe('scanFolder', () => {
     it('returns no_folder when owner has no folderScope', async () => {
-      assistantRepo.store.set(assistantId, { id: assistantId, folderScope: null });
+      assistantRepo.store.set(assistantId, {
+        id: assistantId,
+        folderScope: null,
+      });
       const result = await service.scanFolder(owner);
       expect(result).toEqual({ status: 'no_folder' });
     });
@@ -161,7 +196,12 @@ describe('IndexedFileService', () => {
       await fs.writeFile(path.join(tmpScope, 'a.md'), 'A');
       await fs.writeFile(path.join(tmpScope, 'b.md'), 'B');
       const result = await service.scanFolder(owner);
-      expect(result).toEqual({ status: 'done', added: 2, updated: 0, removed: 0 });
+      expect(result).toEqual({
+        status: 'done',
+        added: 2,
+        updated: 0,
+        removed: 0,
+      });
       expect(indexedRepo.store.size).toBe(2);
     });
 
@@ -175,7 +215,12 @@ describe('IndexedFileService', () => {
       await fs.utimes(path.join(tmpScope, 'a.md'), futureMtime, futureMtime);
 
       const result = await service.scanFolder(owner);
-      expect(result).toEqual({ status: 'done', added: 0, updated: 1, removed: 0 });
+      expect(result).toEqual({
+        status: 'done',
+        added: 0,
+        updated: 1,
+        removed: 0,
+      });
       const updated: any = [...indexedRepo.store.values()][0];
       expect(updated.extractedText).toBeNull();
       expect(updated.embeddingId).toBeNull();
@@ -185,7 +230,12 @@ describe('IndexedFileService', () => {
       await service.writeFile(owner, 'a.md', 'x', { overwrite: false });
       await fs.unlink(path.join(tmpScope, 'a.md'));
       const result = await service.scanFolder(owner);
-      expect(result).toEqual({ status: 'done', added: 0, updated: 0, removed: 1 });
+      expect(result).toEqual({
+        status: 'done',
+        added: 0,
+        updated: 0,
+        removed: 1,
+      });
       expect(indexedRepo.store.size).toBe(0);
     });
 
@@ -204,19 +254,24 @@ describe('IndexedFileService', () => {
       expect(r1).toBe(r2);
     });
 
-    it('enqueues an extraction job per new file', async () => {
+    it('enqueues an extraction execution per new file', async () => {
       await fs.writeFile(path.join(tmpScope, 'a.md'), 'A');
       await fs.writeFile(path.join(tmpScope, 'b.txt'), 'B');
       await service.scanFolder(owner);
-      expect(jobService.create).toHaveBeenCalledTimes(2);
-      const types = jobService.create.mock.calls.map((c) => c[0]);
-      expect(types).toEqual(['indexed-file-extraction', 'indexed-file-extraction']);
+      expect(executionService.create).toHaveBeenCalledTimes(2);
+      const types = executionService.create.mock.calls.map((c) => c[0]);
+      expect(types).toEqual([
+        'indexed-file-extraction',
+        'indexed-file-extraction',
+      ]);
     });
   });
 
   describe('readWithSync', () => {
     it('returns content of an indexed text file', async () => {
-      const f = await service.writeFile(owner, 'a.md', 'hello', { overwrite: false });
+      const f = await service.writeFile(owner, 'a.md', 'hello', {
+        overwrite: false,
+      });
       const result = await service.readWithSync(owner, { indexedFileId: f.id });
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -227,7 +282,9 @@ describe('IndexedFileService', () => {
     });
 
     it('returns not_found when the file is missing on disk and clears the index', async () => {
-      const f = await service.writeFile(owner, 'a.md', 'hello', { overwrite: false });
+      const f = await service.writeFile(owner, 'a.md', 'hello', {
+        overwrite: false,
+      });
       await fs.unlink(path.join(tmpScope, 'a.md'));
       const result = await service.readWithSync(owner, { indexedFileId: f.id });
       expect(result).toMatchObject({ ok: false, error: 'not_found' });
@@ -235,9 +292,15 @@ describe('IndexedFileService', () => {
     });
 
     it('detects ambiguous filenames', async () => {
-      await service.writeFile(owner, 'recipes/paella.md', 'x', { overwrite: false });
-      await service.writeFile(owner, 'archive/paella.md', 'y', { overwrite: false });
-      const result = await service.readWithSync(owner, { filename: 'paella.md' });
+      await service.writeFile(owner, 'recipes/paella.md', 'x', {
+        overwrite: false,
+      });
+      await service.writeFile(owner, 'archive/paella.md', 'y', {
+        overwrite: false,
+      });
+      const result = await service.readWithSync(owner, {
+        filename: 'paella.md',
+      });
       expect(result.ok).toBe(false);
       const r = result as any;
       expect(r.error).toBe('ambiguous');
@@ -245,14 +308,20 @@ describe('IndexedFileService', () => {
     });
 
     it('reads via basename when only one match exists', async () => {
-      await service.writeFile(owner, 'recipes/paella.md', 'rice', { overwrite: false });
-      const result = await service.readWithSync(owner, { filename: 'paella.md' });
+      await service.writeFile(owner, 'recipes/paella.md', 'rice', {
+        overwrite: false,
+      });
+      const result = await service.readWithSync(owner, {
+        filename: 'paella.md',
+      });
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.filename).toBe('recipes/paella.md');
     });
 
     it('reindexes when the file changed on disk', async () => {
-      const f = await service.writeFile(owner, 'a.md', 'first', { overwrite: false });
+      const f = await service.writeFile(owner, 'a.md', 'first', {
+        overwrite: false,
+      });
       const originalChecksum = (await service.getById(f.id)).checksum;
       await new Promise((r) => setTimeout(r, 10));
       await fs.writeFile(path.join(tmpScope, 'a.md'), 'second longer content');
@@ -270,41 +339,48 @@ describe('IndexedFileService', () => {
 
     it('adopts a file that exists on disk but not in the index', async () => {
       await fs.writeFile(path.join(tmpScope, 'orphan.md'), 'orphan');
-      const result = await service.readWithSync(owner, { filename: 'orphan.md' });
+      const result = await service.readWithSync(owner, {
+        filename: 'orphan.md',
+      });
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.content).toBe('orphan');
       expect(indexedRepo.store.size).toBe(1);
     });
   });
 
-  it('writeFile enqueues an extraction job', async () => {
+  it('writeFile enqueues an extraction execution', async () => {
     await service.writeFile(owner, 'a.md', 'hello', { overwrite: false });
-    expect(jobService.create).toHaveBeenCalledTimes(1);
-    const [type, , payload] = jobService.create.mock.calls[0];
+    expect(executionService.create).toHaveBeenCalledTimes(1);
+    const [type, , payload] = executionService.create.mock.calls[0];
     expect(type).toBe('indexed-file-extraction');
     expect(payload).toMatchObject({ extension: '.md' });
   });
 
   // Vector chunks are removed by the indexed_file_chunks.indexed_file_id FK
-  // (ON DELETE CASCADE), so deleting the row is enough — no cleanup job needed.
+  // (ON DELETE CASCADE), so deleting the row is enough and needs no cleanup execution.
   describe('vector cleanup (ON DELETE CASCADE)', () => {
-    it('deleteFile removes the row and enqueues no delete-vectors job', async () => {
-      const e = await service.writeFile(owner, 'a.md', 'x', { overwrite: false });
-      jobService.create.mockClear();
-      await service.deleteFile(e.id, { ownerType: OWNER_TYPE, ownerId: assistantId });
+    it('deleteFile removes the row and enqueues no delete-vectors execution', async () => {
+      const e = await service.writeFile(owner, 'a.md', 'x', {
+        overwrite: false,
+      });
+      executionService.create.mockClear();
+      await service.deleteFile(e.id, {
+        ownerType: OWNER_TYPE,
+        ownerId: assistantId,
+      });
       expect(indexedRepo.store.size).toBe(0);
-      const cleanupCall = jobService.create.mock.calls.find(
+      const cleanupCall = executionService.create.mock.calls.find(
         (c) => c[0] === 'indexed-file-delete-vectors',
       );
       expect(cleanupCall).toBeUndefined();
     });
 
-    it('clearAllForOwner removes the rows and enqueues no delete-vectors job', async () => {
+    it('clearAllForOwner removes the rows and enqueues no delete-vectors execution', async () => {
       await service.writeFile(owner, 'a.md', 'x', { overwrite: false });
-      jobService.create.mockClear();
+      executionService.create.mockClear();
       await service.clearAllForOwner(owner);
       expect(indexedRepo.store.size).toBe(0);
-      const cleanupCall = jobService.create.mock.calls.find(
+      const cleanupCall = executionService.create.mock.calls.find(
         (c) => c[0] === 'indexed-file-delete-vectors',
       );
       expect(cleanupCall).toBeUndefined();

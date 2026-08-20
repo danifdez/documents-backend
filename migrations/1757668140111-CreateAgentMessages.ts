@@ -10,21 +10,22 @@ export class CreateAgentMessages1757668140111 implements MigrationInterface {
                 "agent_id" integer NOT NULL,
                 "role" character varying(16) NOT NULL,
                 "content" text NOT NULL,
-                "job_id" integer,
+                "execution_id" uuid,
                 "error" text,
                 "event" jsonb,
                 "created_at" TIMESTAMP NOT NULL DEFAULT now(),
-                CONSTRAINT "FK_agent_messages_agent" FOREIGN KEY ("agent_id") REFERENCES "agents"("id") ON DELETE CASCADE ON UPDATE NO ACTION
+                CONSTRAINT "FK_agent_messages_agent" FOREIGN KEY ("agent_id") REFERENCES "agents"("id") ON DELETE CASCADE ON UPDATE NO ACTION,
+                CONSTRAINT "FK_agent_messages_execution" FOREIGN KEY ("execution_id") REFERENCES "executions"("execution_id") ON DELETE SET NULL ON UPDATE NO ACTION
             )
         `);
         await queryRunner.query(`CREATE INDEX "IDX_agent_messages_agent_id" ON "agent_messages" ("agent_id")`);
-        await queryRunner.query(`CREATE INDEX "IDX_agent_messages_job_id" ON "agent_messages" ("job_id")`);
+        await queryRunner.query(`CREATE INDEX "IDX_agent_messages_execution_id" ON "agent_messages" ("execution_id")`);
         await queryRunner.query(`CREATE INDEX "IDX_agent_messages_agent_id_created_at" ON "agent_messages" ("agent_id", "created_at")`);
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
         await queryRunner.query(`DROP INDEX "IDX_agent_messages_agent_id_created_at"`);
-        await queryRunner.query(`DROP INDEX "IDX_agent_messages_job_id"`);
+        await queryRunner.query(`DROP INDEX "IDX_agent_messages_execution_id"`);
         await queryRunner.query(`DROP INDEX "IDX_agent_messages_agent_id"`);
         await queryRunner.query(`DROP TABLE "agent_messages"`);
     }

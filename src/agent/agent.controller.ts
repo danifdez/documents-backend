@@ -9,6 +9,7 @@ import {
   Query,
   ParseIntPipe,
   HttpCode,
+  Headers,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { AgentService } from './agent.service';
@@ -22,12 +23,15 @@ import {
   toAgentMessageDto,
 } from './dto/agent.dto';
 import { NotificationGateway } from '../notification/notification.gateway';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ExecutionService } from '../execution/execution.service';
 
 @Controller('agents')
 export class AgentController {
   constructor(
     private readonly service: AgentService,
     private readonly notificationGateway: NotificationGateway,
+    private readonly executionService: ExecutionService,
   ) {}
 
   @Get()
@@ -66,7 +70,10 @@ export class AgentController {
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
     @Query('before', new ParseIntPipe({ optional: true })) before?: number,
   ): Promise<{ messages: AgentMessageDto[]; hasMore: boolean }> {
-    const { messages, hasMore } = await this.service.getMessages(id, { limit, before });
+    const { messages, hasMore } = await this.service.getMessages(id, {
+      limit,
+      before,
+    });
     return { messages: messages.map(toAgentMessageDto), hasMore };
   }
 
@@ -74,9 +81,22 @@ export class AgentController {
   async sendMessage(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SendAgentMessageDto,
-  ): Promise<{ userMessage: AgentMessageDto; jobId: number | null }> {
-    const { userMessage, jobId } = await this.service.sendMessage(id, dto.content);
-    return { userMessage: toAgentMessageDto(userMessage), jobId };
+    @CurrentUser() user: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+  ): Promise<{
+    userMessage: AgentMessageDto;
+    executionId: string;
+  }> {
+    const scope = this.executionService.resolveAccessScope(user, workspaceId);
+    const { userMessage, executionId } = await this.service.sendMessage(
+      id,
+      dto.content,
+      scope,
+    );
+    return {
+      userMessage: toAgentMessageDto(userMessage),
+      executionId,
+    };
   }
 
   // Internal callback: worker pushes streaming chunks for live UX.
@@ -85,12 +105,12 @@ export class AgentController {
   @SkipThrottle()
   async streamChunk(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { jobId: number; chunk: string; done?: boolean },
+    @Body() body: { executionId: string; chunk: string; done?: boolean },
   ): Promise<void> {
     if (!body || typeof body.chunk !== 'string') return;
     this.notificationGateway.sendAgentStreamChunk({
       agentId: id,
-      jobId: body.jobId,
+      executionId: body.executionId,
       chunk: body.chunk,
       done: !!body.done,
     });
@@ -102,14 +122,19 @@ export class AgentController {
   @SkipThrottle()
   async toolEvent(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: {
-      jobId: number;
+    @Body()
+    body: {
+      executionId: string;
       status: 'running' | 'done' | 'pending_confirmation';
       tool: {
         name: string;
         args?: string;
         summary?: string;
-        entity?: { kind: 'note' | 'task' | 'indexedFile'; id: number; title?: string };
+        entity?: {
+          kind: 'note' | 'task' | 'indexedFile';
+          id: number;
+          title?: string;
+        };
         kind?: string;
         payload?: Record<string, any>;
         confirmLabel?: string;
@@ -119,9 +144,10 @@ export class AgentController {
   ): Promise<void> {
     if (!body?.tool?.name) return;
     const label = body.tool.args || body.tool.name;
-    const content = body.status === 'running'
-      ? `Tool ${body.tool.name}: ${label} (in progress)`
-      : `Tool ${body.tool.name}: ${label}`;
+    const content =
+      body.status === 'running'
+        ? `Tool ${body.tool.name}: ${label} (in progress)`
+        : `Tool ${body.tool.name}: ${label}`;
     const toolPayload: Record<string, any> = {
       name: body.tool.name,
       args: body.tool.args || '',
@@ -141,14 +167,13 @@ export class AgentController {
       toolPayload.confirmLabel = body.tool.confirmLabel || 'Confirm';
       toolPayload.cancelLabel = body.tool.cancelLabel || 'Cancel';
     }
-    const eventMessage = await this.service.recordEvent(
-      id,
-      content,
-      { kind: 'tool_executed', tool: toolPayload },
-    );
+    const eventMessage = await this.service.recordEvent(id, content, {
+      kind: 'tool_executed',
+      tool: toolPayload,
+    });
     this.notificationGateway.sendAgentToolEvent({
       agentId: id,
-      jobId: body.jobId,
+      executionId: body.executionId,
       eventMessage: toAgentMessageDto(eventMessage),
     });
   }
@@ -159,7 +184,12 @@ export class AgentController {
     @Param('messageId', ParseIntPipe) messageId: number,
     @Body() body: { status: 'done' | 'cancelled'; summary?: string },
   ): Promise<{ ok: boolean }> {
-    await this.service.updateEventStatus(id, messageId, body.status, body.summary);
+    await this.service.updateEventStatus(
+      id,
+      messageId,
+      body.status,
+      body.summary,
+    );
     return { ok: true };
   }
 }

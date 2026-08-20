@@ -37,6 +37,8 @@
     "@nestjs/throttler": "6.5.0",
     "@nestjs/typeorm": "11.0.3",
     "@nestjs/websockets": "11.1.28",
+    "ajv": "8.18.0",
+    "ajv-formats": "3.0.1",
     "@types/fs-extra": "^11.0.4",
     "@types/multer": "2.2.0",
     "archiver": "^7.0.1",

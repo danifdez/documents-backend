@@ -3,14 +3,14 @@ import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { AgentExpirationService } from './agent-expiration.service';
 import { DatabaseModule } from '../database/database.module';
-import { JobModule } from '../job/job.module';
 import { NotificationModule } from '../notification/notification.module';
 import { IndexedFileModule } from '../indexed-file/indexed-file.module';
+import { ExecutionModule } from '../execution/execution.module';
 
 @Module({
   imports: [
     DatabaseModule,
-    JobModule,
+    ExecutionModule,
     NotificationModule,
     forwardRef(() => IndexedFileModule),
   ],

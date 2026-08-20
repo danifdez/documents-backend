@@ -1,13 +1,18 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { MemoryEntryEntity } from './memory-entry.entity';
 import { AssistantEntity } from '../assistant/assistant.entity';
 import { CreateMemoryEntryDto, UpdateMemoryEntryDto } from './dto/memory.dto';
-import { JobService } from '../job/job.service';
-import { JobPriority } from '../job/job-priority.enum';
-import { JobStatus } from '../job/job-status.enum';
-import { JobEntity } from '../job/job.entity';
+import { ExecutionService } from '../execution/execution.service';
+import { ExecutionPriority } from '../execution/execution-priority.enum';
+import { ExecutionStatus } from '../execution/execution-status.enum';
+import { ExecutionEntity } from '../execution/execution.entity';
 
 export type MemoryRelevance = 'high' | 'medium' | 'recent';
 
@@ -24,10 +29,12 @@ export class AssistantMemoryService {
     private readonly memoryRepo: Repository<MemoryEntryEntity>,
     @InjectRepository(AssistantEntity)
     private readonly assistantRepo: Repository<AssistantEntity>,
-    private readonly jobService: JobService,
+    private readonly executionService: ExecutionService,
   ) {}
 
-  private async ensureCanHaveMemory(assistantId: number): Promise<AssistantEntity> {
+  private async ensureCanHaveMemory(
+    assistantId: number,
+  ): Promise<AssistantEntity> {
     const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
     if (!a) throw new NotFoundException(`Assistant ${assistantId} not found`);
     if (!a.isSystem) {
@@ -38,13 +45,17 @@ export class AssistantMemoryService {
 
   private async enqueueIngest(entry: MemoryEntryEntity): Promise<void> {
     try {
-      await this.jobService.create('memory-ingest', JobPriority.BACKGROUND, {
-        memoryId: entry.id,
-        assistantId: entry.assistantId,
-        name: entry.name,
-        type: entry.type,
-        body: entry.body,
-      });
+      await this.executionService.create(
+        'memory-ingest',
+        ExecutionPriority.BACKGROUND,
+        {
+          memoryId: entry.id,
+          ownerId: entry.assistantId,
+          name: entry.name,
+          type: entry.type,
+          body: entry.body,
+        },
+      );
     } catch (e: any) {
       this.logger.warn(
         `memory-ingest enqueue failed for memory ${entry.id}: ${e?.message ?? e}`,
@@ -66,7 +77,10 @@ export class AssistantMemoryService {
    * Returns [] if the assistant doesn't have memory (instead of throwing) so
    * callers can use it unconditionally.
    */
-  async recentForInjection(assistantId: number, limit = 25): Promise<MemoryEntryEntity[]> {
+  async recentForInjection(
+    assistantId: number,
+    limit = 25,
+  ): Promise<MemoryEntryEntity[]> {
     const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
     if (!a || !a.isSystem) return [];
     return this.memoryRepo.find({
@@ -82,37 +96,47 @@ export class AssistantMemoryService {
     limit: number,
     timeoutMs = 3000,
   ): Promise<Array<{ memoryId: number; score: number }>> {
-    let job;
+    let execution;
     try {
-      job = await this.jobService.create('memory-search', JobPriority.HIGH, {
-        assistantId,
-        query,
-        limit,
-      });
+      execution = await this.executionService.create(
+        'memory-search',
+        ExecutionPriority.HIGH,
+        {
+          ownerId: assistantId,
+          query,
+          limit,
+        },
+      );
     } catch (e: any) {
       this.logger.warn(`memory-search enqueue failed: ${e?.message ?? e}`);
       return [];
     }
-    if (!job) return [];
+    if (!execution) return [];
 
     const start = Date.now();
     const poll = 100;
     while (Date.now() - start < timeoutMs) {
-      const current = (await this.jobService.findOne(job.id)) as JobEntity | null;
+      const current = (await this.executionService.findOne(
+        execution.executionId,
+      )) as ExecutionEntity | null;
       if (!current) return [];
-      if (current.status === JobStatus.COMPLETED) {
-        const r = current.result as
-          | { results?: Array<{ memoryId: number; score: number }> }
-          | null;
+      if (current.status === ExecutionStatus.COMPLETED) {
+        const r = current.result as {
+          results?: Array<{ memoryId: number; score: number }>;
+        } | null;
         return Array.isArray(r?.results) ? r!.results : [];
       }
-      if (current.status === JobStatus.FAILED) {
-        this.logger.warn(`memory-search job ${job.id} failed`);
+      if (current.status === ExecutionStatus.FAILED) {
+        this.logger.warn(
+          `memory-search execution ${execution.executionId} failed`,
+        );
         return [];
       }
       await new Promise((resolve) => setTimeout(resolve, poll));
     }
-    this.logger.warn(`memory-search job ${job.id} timed out`);
+    this.logger.warn(
+      `memory-search execution ${execution.executionId} timed out`,
+    );
     return [];
   }
 
@@ -177,7 +201,10 @@ export class AssistantMemoryService {
     return merged.slice(0, cap);
   }
 
-  async create(assistantId: number, dto: CreateMemoryEntryDto): Promise<MemoryEntryEntity> {
+  async create(
+    assistantId: number,
+    dto: CreateMemoryEntryDto,
+  ): Promise<MemoryEntryEntity> {
     await this.ensureCanHaveMemory(assistantId);
     const created = this.memoryRepo.create({
       assistantId,
@@ -191,7 +218,11 @@ export class AssistantMemoryService {
     return saved;
   }
 
-  async update(assistantId: number, id: number, dto: UpdateMemoryEntryDto): Promise<MemoryEntryEntity> {
+  async update(
+    assistantId: number,
+    id: number,
+    dto: UpdateMemoryEntryDto,
+  ): Promise<MemoryEntryEntity> {
     await this.ensureCanHaveMemory(assistantId);
     const entry = await this.memoryRepo.findOne({ where: { id, assistantId } });
     if (!entry) throw new NotFoundException(`Memory entry ${id} not found`);
@@ -208,7 +239,10 @@ export class AssistantMemoryService {
    * Used by the chat processor to look up an entry before deleting it so the
    * event card can include its name. Does not throw — caller checks for null.
    */
-  async findOwned(assistantId: number, id: number): Promise<MemoryEntryEntity | null> {
+  async findOwned(
+    assistantId: number,
+    id: number,
+  ): Promise<MemoryEntryEntity | null> {
     return this.memoryRepo.findOne({ where: { id, assistantId } });
   }
 

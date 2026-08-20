@@ -29,9 +29,9 @@ export class AgentMessageEntity {
   @Column({ type: 'text' })
   content: string;
 
-  @Index('IDX_agent_messages_job_id')
-  @Column({ name: 'job_id', type: 'integer', nullable: true })
-  jobId: number | null;
+  @Index('IDX_agent_messages_execution_id')
+  @Column({ name: 'execution_id', type: 'uuid', nullable: true })
+  executionId: string | null;
 
   @Column({ type: 'text', nullable: true })
   error: string | null;

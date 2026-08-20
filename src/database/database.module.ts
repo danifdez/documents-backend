@@ -3,7 +3,6 @@ import { databaseProviders } from './database.providers';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { getTypeOrmConfig } from './typeorm.config';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { JobEntity } from '../job/job.entity';
 import { ResourceEntity } from '../resource/resource.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { DocEntity } from '../doc/doc.entity';
@@ -44,6 +43,9 @@ import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentMessageEntity } from '../agent/agent-message.entity';
 import { AppStateEntity } from '../app-state/app-state.entity';
+import { ExecutionEntity } from '../execution/execution.entity';
+import { ExecutionEventEntity } from '../execution/execution-event.entity';
+import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 
 @Module({
   imports: [
@@ -51,10 +53,11 @@ import { AppStateEntity } from '../app-state/app-state.entity';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => getTypeOrmConfig(configService),
+      useFactory: (configService: ConfigService) =>
+        getTypeOrmConfig(configService),
     }),
     TypeOrmModule.forFeature([
-      JobEntity,
+      ExecutionEntity,
       ResourceEntity,
       ProjectEntity,
       DocEntity,
@@ -95,9 +98,11 @@ import { AppStateEntity } from '../app-state/app-state.entity';
       AgentEntity,
       AgentMessageEntity,
       AppStateEntity,
+      ExecutionEventEntity,
+      ExecutionArtifactEntity,
     ]),
   ],
   providers: [...databaseProviders],
   exports: [...databaseProviders, TypeOrmModule],
 })
-export class DatabaseModule { }
+export class DatabaseModule {}

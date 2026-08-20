@@ -4,10 +4,10 @@ import { PendingEntityController } from './pending-entity.controller';
 import { PendingEntityService } from './pending-entity.service';
 import { EntityModule } from '../entity/entity.module';
 import { ResourceModule } from '../resource/resource.module';
-import { JobModule } from '../job/job.module';
+import { ExecutionModule } from '../execution/execution.module';
 
 @Module({
-    imports: [DatabaseModule, EntityModule, ResourceModule, JobModule],
+    imports: [DatabaseModule, EntityModule, ResourceModule, ExecutionModule],
     controllers: [PendingEntityController],
     providers: [PendingEntityService],
     exports: [PendingEntityService],

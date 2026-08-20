@@ -1,16 +1,35 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, ParseIntPipe, HttpCode } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  ParseIntPipe,
+  HttpCode,
+  Headers,
+} from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { AssistantService } from './assistant.service';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
-import { CreateAssistantDto, UpdateAssistantDto, SendMessageDto } from './dto/assistant.dto';
+import {
+  CreateAssistantDto,
+  UpdateAssistantDto,
+  SendMessageDto,
+} from './dto/assistant.dto';
 import { NotificationGateway } from '../notification/notification.gateway';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ExecutionService } from '../execution/execution.service';
 
 @Controller('assistants')
 export class AssistantController {
   constructor(
     private readonly service: AssistantService,
     private readonly notificationGateway: NotificationGateway,
+    private readonly executionService: ExecutionService,
   ) {}
 
   @Get()
@@ -19,7 +38,9 @@ export class AssistantController {
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<AssistantEntity> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<AssistantEntity> {
     return this.service.findOne(id);
   }
 
@@ -54,14 +75,20 @@ export class AssistantController {
   async sendMessage(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SendMessageDto,
-  ): Promise<{ userMessage: AssistantMessageEntity; jobId: number | null }> {
-    return this.service.sendMessage(id, dto.content);
+    @CurrentUser() user: unknown,
+    @Headers('x-workspace-id') workspaceId: string | undefined,
+  ): Promise<{
+    userMessage: AssistantMessageEntity;
+    executionId: string;
+  }> {
+    const scope = this.executionService.resolveAccessScope(user, workspaceId);
+    return this.service.sendMessage(id, dto.content, scope);
   }
 
   /**
    * Internal callback for the Python worker to push streaming chunks while
    * generating an assistant reply. Forwards the chunk via socket so the UI
-   * can render tokens as they arrive. The job result still flows through the
+   * can render tokens as they arrive. The execution result still flows through the
    * normal completion path — this endpoint is purely for live UX.
    *
    * No auth: the worker calls localhost. If we ever expose this to the
@@ -72,12 +99,12 @@ export class AssistantController {
   @SkipThrottle()
   async streamChunk(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { jobId: number; chunk: string; done?: boolean },
+    @Body() body: { executionId: string; chunk: string; done?: boolean },
   ): Promise<void> {
     if (!body || typeof body.chunk !== 'string') return;
     this.notificationGateway.sendAssistantStreamChunk({
       assistantId: id,
-      jobId: body.jobId,
+      executionId: body.executionId,
       chunk: body.chunk,
       done: !!body.done,
     });
@@ -85,7 +112,7 @@ export class AssistantController {
 
   /**
    * Internal callback for the worker to push a live event message (typically
-   * "tool started/finished") while a job is in flight. We persist it as an
+   * "tool started/finished") while a execution is in flight. We persist it as an
    * assistant event message AND broadcast it via socket so the UI shows
    * "🔍 Buscando…" the instant the tool runs, instead of waiting for the
    * final assistantResponse. Status `running` lets the frontend mark the card
@@ -96,8 +123,9 @@ export class AssistantController {
   @SkipThrottle()
   async toolEvent(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: {
-      jobId: number;
+    @Body()
+    body: {
+      executionId: string;
       status: 'running' | 'done' | 'pending_confirmation';
       tool: {
         name: string;
@@ -105,7 +133,11 @@ export class AssistantController {
         summary?: string;
         // Optional: set on `done` events that created something deletable
         // (e.g. note, task). The frontend uses this to show a Delete button.
-        entity?: { kind: 'note' | 'task' | 'indexedFile'; id: number; title?: string };
+        entity?: {
+          kind: 'note' | 'task' | 'indexedFile';
+          id: number;
+          title?: string;
+        };
         // Optional: set on `pending_confirmation` events. The frontend reads
         // `kind` to dispatch the right confirm-handler (folder_delete, etc.)
         // and passes back `payload` to the action endpoint.
@@ -118,9 +150,10 @@ export class AssistantController {
   ): Promise<void> {
     if (!body?.tool?.name) return;
     const label = body.tool.args || body.tool.name;
-    const content = body.status === 'running'
-      ? `Tool ${body.tool.name}: ${label} (in progress)`
-      : `Tool ${body.tool.name}: ${label}`;
+    const content =
+      body.status === 'running'
+        ? `Tool ${body.tool.name}: ${label} (in progress)`
+        : `Tool ${body.tool.name}: ${label}`;
     const toolPayload: Record<string, any> = {
       name: body.tool.name,
       args: body.tool.args || '',
@@ -140,14 +173,13 @@ export class AssistantController {
       toolPayload.confirmLabel = body.tool.confirmLabel || 'Confirm';
       toolPayload.cancelLabel = body.tool.cancelLabel || 'Cancel';
     }
-    const eventMessage = await this.service.recordEvent(
-      id,
-      content,
-      { kind: 'tool_executed', tool: toolPayload },
-    );
+    const eventMessage = await this.service.recordEvent(id, content, {
+      kind: 'tool_executed',
+      tool: toolPayload,
+    });
     this.notificationGateway.sendAssistantToolEvent({
       assistantId: id,
-      jobId: body.jobId,
+      executionId: body.executionId,
       eventMessage,
     });
   }
@@ -158,7 +190,12 @@ export class AssistantController {
     @Param('messageId', ParseIntPipe) messageId: number,
     @Body() body: { status: 'done' | 'cancelled'; summary?: string },
   ): Promise<{ ok: boolean }> {
-    await this.service.updateEventStatus(id, messageId, body.status, body.summary);
+    await this.service.updateEventStatus(
+      id,
+      messageId,
+      body.status,
+      body.summary,
+    );
     return { ok: true };
   }
 }

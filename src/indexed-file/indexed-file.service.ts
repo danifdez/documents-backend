@@ -14,10 +14,10 @@ import * as crypto from 'crypto';
 import { IndexedFileEntity, IndexedFileOwnerType } from './indexed-file.entity';
 import { AssistantEntity } from '../assistant/assistant.entity';
 import { AgentEntity } from '../agent/agent.entity';
-import { JobEntity } from '../job/job.entity';
-import { JobStatus } from '../job/job-status.enum';
-import { JobService } from '../job/job.service';
-import { JobPriority } from '../job/job-priority.enum';
+import { ExecutionEntity } from '../execution/execution.entity';
+import { ExecutionStatus } from '../execution/execution-status.enum';
+import { ExecutionService } from '../execution/execution.service';
+import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { sourceIdForIndexedFile } from '../vector/vector-source-id.util';
 import {
   detectMimeType,
@@ -43,9 +43,25 @@ export type ReadWithSyncResult =
       derivedFromExtraction?: boolean;
     }
   | { ok: false; error: 'not_found'; filename?: string }
-  | { ok: false; error: 'ambiguous'; candidates: Array<{ indexedFileId: number; filename: string }> }
-  | { ok: false; error: 'not_ready'; filename: string; indexedFileId: number; retryAfterSeconds: number }
-  | { ok: false; error: 'not_extractable'; filename: string; indexedFileId: number; mimeType: string };
+  | {
+      ok: false;
+      error: 'ambiguous';
+      candidates: Array<{ indexedFileId: number; filename: string }>;
+    }
+  | {
+      ok: false;
+      error: 'not_ready';
+      filename: string;
+      indexedFileId: number;
+      retryAfterSeconds: number;
+    }
+  | {
+      ok: false;
+      error: 'not_extractable';
+      filename: string;
+      indexedFileId: number;
+      mimeType: string;
+    };
 
 export interface OwnerRef {
   ownerType: IndexedFileOwnerType;
@@ -66,7 +82,7 @@ export class IndexedFileService {
     private readonly assistantRepository: Repository<AssistantEntity>,
     @InjectRepository(AgentEntity)
     private readonly agentRepository: Repository<AgentEntity>,
-    private readonly jobService: JobService,
+    private readonly executionService: ExecutionService,
   ) {}
 
   async findByOwner(owner: OwnerRef): Promise<IndexedFileEntity[]> {
@@ -77,13 +93,13 @@ export class IndexedFileService {
     });
   }
 
-  async getById(
-    id: number,
-    owner?: OwnerRef,
-  ): Promise<IndexedFileEntity> {
+  async getById(id: number, owner?: OwnerRef): Promise<IndexedFileEntity> {
     const file = await this.repository.findOne({ where: { id } });
     if (!file) throw new NotFoundException(`IndexedFile ${id} not found`);
-    if (owner !== undefined && (file.ownerType !== owner.ownerType || file.ownerId !== owner.ownerId)) {
+    if (
+      owner !== undefined &&
+      (file.ownerType !== owner.ownerType || file.ownerId !== owner.ownerId)
+    ) {
       throw new NotFoundException(`IndexedFile ${id} not found`);
     }
     return file;
@@ -136,7 +152,8 @@ export class IndexedFileService {
       throw new ConflictException('file_exists');
     }
 
-    const buffer = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
+    const buffer =
+      typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
 
     try {
       await fs.mkdir(path.dirname(absolutePath), { recursive: true });
@@ -158,16 +175,18 @@ export class IndexedFileService {
     const checksum = crypto.createHash('sha256').update(buffer).digest('hex');
     const mimeType = detectMimeType(safeFilename);
 
-    const row = existingRow ?? this.repository.create({
-      ownerType,
-      ownerId,
-      filename: safeFilename,
-      filePath: absolutePath,
-      mimeType,
-      size,
-      mtime,
-      checksum,
-    });
+    const row =
+      existingRow ??
+      this.repository.create({
+        ownerType,
+        ownerId,
+        filename: safeFilename,
+        filePath: absolutePath,
+        mimeType,
+        size,
+        mtime,
+        checksum,
+      });
     row.ownerType = ownerType;
     row.ownerId = ownerId;
     row.filename = safeFilename;
@@ -190,9 +209,9 @@ export class IndexedFileService {
   ): Promise<void> {
     const extension = path.extname(file.filename).toLowerCase() || '';
     try {
-      await this.jobService.create(
+      await this.executionService.create(
         'indexed-file-extraction',
-        JobPriority.NORMAL,
+        ExecutionPriority.NORMAL,
         {
           indexedFileId: file.id,
           extension,
@@ -211,7 +230,10 @@ export class IndexedFileService {
   async deleteFile(id: number, owner?: OwnerRef): Promise<void> {
     const file = await this.repository.findOne({ where: { id } });
     if (!file) return;
-    if (owner !== undefined && (file.ownerType !== owner.ownerType || file.ownerId !== owner.ownerId)) {
+    if (
+      owner !== undefined &&
+      (file.ownerType !== owner.ownerType || file.ownerId !== owner.ownerId)
+    ) {
       throw new NotFoundException(`IndexedFile ${id} not found`);
     }
 
@@ -260,40 +282,55 @@ export class IndexedFileService {
     query: string,
     limit = 10,
     timeoutMs = 4000,
-  ): Promise<Array<{ indexedFileId: number; filename: string; snippet: string; score: number }>> {
+  ): Promise<
+    Array<{
+      indexedFileId: number;
+      filename: string;
+      snippet: string;
+      score: number;
+    }>
+  > {
     const { ownerType, ownerId } = owner;
     const q = (query ?? '').trim();
     if (!q) return [];
 
-    let job;
+    let execution;
     try {
-      job = await this.jobService.create(
+      execution = await this.executionService.create(
         'indexed-file-search',
-        JobPriority.HIGH,
+        ExecutionPriority.HIGH,
         { ownerType, ownerId, query: q, limit },
       );
     } catch (e: any) {
-      this.logger.warn(`folder search: failed to enqueue job: ${e?.message ?? e}`);
+      this.logger.warn(
+        `folder search: failed to enqueue execution: ${e?.message ?? e}`,
+      );
       return [];
     }
-    if (!job) return [];
+    if (!execution) return [];
 
     const start = Date.now();
     const poll = 100;
     while (Date.now() - start < timeoutMs) {
-      const current = (await this.jobService.findOne(job.id)) as JobEntity | null;
+      const current = (await this.executionService.findOne(
+        execution.executionId,
+      )) as ExecutionEntity | null;
       if (!current) return [];
-      if (current.status === JobStatus.COMPLETED) {
+      if (current.status === ExecutionStatus.COMPLETED) {
         const r = current.result as { results?: any[] } | null;
         return Array.isArray(r?.results) ? (r!.results as any[]) : [];
       }
-      if (current.status === JobStatus.FAILED) {
-        this.logger.warn(`folder search job ${job.id} failed`);
+      if (current.status === ExecutionStatus.FAILED) {
+        this.logger.warn(
+          `folder search execution ${execution.executionId} failed`,
+        );
         return [];
       }
       await new Promise((resolve) => setTimeout(resolve, poll));
     }
-    this.logger.warn(`folder search job ${job.id} timed out`);
+    this.logger.warn(
+      `folder search execution ${execution.executionId} timed out`,
+    );
     return [];
   }
 
@@ -304,9 +341,9 @@ export class IndexedFileService {
     ownerId?: number;
   }): Promise<void> {
     try {
-      await this.jobService.create(
+      await this.executionService.create(
         'indexed-file-delete-vectors',
-        JobPriority.BACKGROUND,
+        ExecutionPriority.BACKGROUND,
         args,
       );
     } catch (e: any) {
@@ -334,7 +371,9 @@ export class IndexedFileService {
       if (exact) {
         row = exact;
       } else {
-        const all = await this.repository.find({ where: { ownerType, ownerId } });
+        const all = await this.repository.find({
+          where: { ownerType, ownerId },
+        });
         const base = path.basename(requested);
         const matches = all.filter((r) => path.basename(r.filename) === base);
         if (matches.length === 1) {
@@ -350,7 +389,8 @@ export class IndexedFileService {
           };
         } else {
           const onDisk = await this.tryAdoptFromDisk(owner, requested);
-          if (!onDisk) return { ok: false, error: 'not_found', filename: requested };
+          if (!onDisk)
+            return { ok: false, error: 'not_found', filename: requested };
           row = onDisk;
         }
       }
@@ -387,7 +427,9 @@ export class IndexedFileService {
         row.extractedText = null;
         row.embeddingId = null;
         row = await this.repository.save(row);
-        void this.enqueueVectorCleanup({ sourceId: sourceIdForIndexedFile(row.id) });
+        void this.enqueueVectorCleanup({
+          sourceId: sourceIdForIndexedFile(row.id),
+        });
         await this.enqueueExtraction(row, buffer);
       } else {
         row.mtime = stat.mtime;
@@ -399,7 +441,8 @@ export class IndexedFileService {
     if (isTextual) {
       if (!buffer) {
         buffer = await this.readFileSafe(row.filePath);
-        if (buffer === null) return { ok: false, error: 'not_found', filename: row.filename };
+        if (buffer === null)
+          return { ok: false, error: 'not_found', filename: row.filename };
       }
       return {
         ok: true,
@@ -521,7 +564,12 @@ export class IndexedFileService {
       throw err;
     }
 
-    type FsItem = { filename: string; filePath: string; mtime: Date; size: number };
+    type FsItem = {
+      filename: string;
+      filePath: string;
+      mtime: Date;
+      size: number;
+    };
     const onDisk = new Map<string, FsItem>();
 
     for (const entry of entries as any[]) {
@@ -551,7 +599,9 @@ export class IndexedFileService {
       }
     }
 
-    const indexed = await this.repository.find({ where: { ownerType, ownerId } });
+    const indexed = await this.repository.find({
+      where: { ownerType, ownerId },
+    });
     const indexedByName = new Map(indexed.map((row) => [row.filename, row]));
 
     let added = 0;
@@ -563,7 +613,10 @@ export class IndexedFileService {
       if (!row) {
         const buffer = await this.readFileSafe(item.filePath);
         if (buffer === null) continue;
-        const checksum = crypto.createHash('sha256').update(buffer).digest('hex');
+        const checksum = crypto
+          .createHash('sha256')
+          .update(buffer)
+          .digest('hex');
         const created = this.repository.create({
           ownerType,
           ownerId,
@@ -586,7 +639,10 @@ export class IndexedFileService {
       if (mtimeDiffers || sizeDiffers) {
         const buffer = await this.readFileSafe(item.filePath);
         if (buffer === null) continue;
-        const checksum = crypto.createHash('sha256').update(buffer).digest('hex');
+        const checksum = crypto
+          .createHash('sha256')
+          .update(buffer)
+          .digest('hex');
         if (checksum !== row.checksum) {
           row.size = item.size;
           row.mtime = item.mtime;
@@ -641,11 +697,14 @@ export class IndexedFileService {
       const assistant = await this.assistantRepository.findOne({
         where: { id: ownerId },
       });
-      if (!assistant) throw new NotFoundException(`Assistant ${ownerId} not found`);
+      if (!assistant)
+        throw new NotFoundException(`Assistant ${ownerId} not found`);
       return assistant.folderScope ?? null;
     }
     if (ownerType === 'agent') {
-      const agent = await this.agentRepository.findOne({ where: { id: ownerId } });
+      const agent = await this.agentRepository.findOne({
+        where: { id: ownerId },
+      });
       if (!agent) throw new NotFoundException(`Agent ${ownerId} not found`);
       return agent.folderScope ?? null;
     }

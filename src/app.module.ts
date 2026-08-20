@@ -9,10 +9,9 @@ import { DocModule } from './doc/doc.module';
 import { ResourceModule } from './resource/resource.module';
 import { ResourceTypeModule } from './resource-type/resource-type.module';
 import { FileStorageModule } from './file-storage/file-storage.module';
-import { JobModule } from './job/job.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TaskScheduleModule } from './task-schedule/task-schedule.module';
-import { JobProcessorModule } from './job-processor/job-processor.module';
+import { ExecutionProcessorModule } from './execution-processor/execution-processor.module';
 import { NotificationModule } from './notification/notification.module';
 import { VoiceModule } from './voice/voice.module';
 import { ConfigModule } from '@nestjs/config';
@@ -52,6 +51,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConditionalAuthGuard } from './auth/guards/conditional-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
+import { ExecutionModule } from './execution/execution.module';
 
 @Module({})
 export class AppModule {
@@ -64,11 +64,13 @@ export class AppModule {
         isGlobal: true,
         envFilePath: resolve(__dirname, '..', '..', '.env'),
       }),
-      ThrottlerModule.forRoot([{
-        ttl: 60000,
-        limit: 100,
-        skipIf: () => process.env.NODE_ENV === 'test',
-      }]),
+      ThrottlerModule.forRoot([
+        {
+          ttl: 60000,
+          limit: 100,
+          skipIf: () => process.env.NODE_ENV === 'test',
+        },
+      ]),
       ScheduleModule.forRoot(),
       FeatureFlagModule,
       InferenceModule,
@@ -81,8 +83,8 @@ export class AppModule {
       ResourceModule,
       ResourceTypeModule,
       FileStorageModule,
-      JobModule,
-      JobProcessorModule.register(),
+      ExecutionModule,
+      ExecutionProcessorModule.register(),
       TaskScheduleModule,
       NotificationModule,
       VoiceModule,
@@ -114,7 +116,13 @@ export class AppModule {
     if (features.timelines) imports.push(TimelineModule, ResourceDateModule);
     if (features.knowledge_base) imports.push(KnowledgeBaseModule);
     if (features.bibliography) imports.push(BibliographyModule);
-    if (features.relationships) imports.push(EntityTypeModule, EntityModule, PendingEntityModule, RelationshipModule);
+    if (features.relationships)
+      imports.push(
+        EntityTypeModule,
+        EntityModule,
+        PendingEntityModule,
+        RelationshipModule,
+      );
 
     return {
       module: AppModule,

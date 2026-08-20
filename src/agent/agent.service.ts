@@ -10,12 +10,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
 import { AgentEntity } from './agent.entity';
 import { AgentMessageEntity } from './agent-message.entity';
-import {
-  CreateAgentDto,
-  UpdateAgentDto,
-} from './dto/agent.dto';
-import { JobService } from '../job/job.service';
-import { JobPriority } from '../job/job-priority.enum';
+import { CreateAgentDto, UpdateAgentDto } from './dto/agent.dto';
+import { ExecutionService } from '../execution/execution.service';
 import { IndexedFileService } from '../indexed-file/indexed-file.service';
 import {
   validateFolderScope,
@@ -25,6 +21,7 @@ import {
   AGENT_DEFAULT_TTL_MS,
   AGENT_UNFAVORITE_GRACE_MS,
 } from './agent.constants';
+import { ExecutionAccessScope } from '../execution/execution.types';
 
 const MESSAGE_PAGE_SIZE = 50;
 const MAX_MESSAGE_PAGE_SIZE = 200;
@@ -38,9 +35,9 @@ export class AgentService {
     private readonly agentRepo: Repository<AgentEntity>,
     @InjectRepository(AgentMessageEntity)
     private readonly messageRepo: Repository<AgentMessageEntity>,
-    private readonly jobService: JobService,
     @Inject(forwardRef(() => IndexedFileService))
     private readonly indexedFileService: IndexedFileService,
+    private readonly executionService: ExecutionService,
   ) {}
 
   async findAll(): Promise<AgentEntity[]> {
@@ -101,11 +98,14 @@ export class AgentService {
     const saved = await this.agentRepo.save(a);
 
     if (
-      dto.folderScope !== undefined
-      && previousFolderScope !== saved.folderScope
+      dto.folderScope !== undefined &&
+      previousFolderScope !== saved.folderScope
     ) {
       try {
-        await this.indexedFileService.clearAllForOwner({ ownerType: 'agent', ownerId: saved.id });
+        await this.indexedFileService.clearAllForOwner({
+          ownerType: 'agent',
+          ownerId: saved.id,
+        });
       } catch (e: any) {
         this.logger.error(
           `Failed to clear indexed files for agent ${saved.id}: ${e?.message ?? e}`,
@@ -119,7 +119,10 @@ export class AgentService {
   async remove(id: number): Promise<void> {
     const a = await this.findOne(id);
     try {
-      await this.indexedFileService.clearAllForOwner({ ownerType: 'agent', ownerId: a.id });
+      await this.indexedFileService.clearAllForOwner({
+        ownerType: 'agent',
+        ownerId: a.id,
+      });
     } catch (e: any) {
       this.logger.error(
         `Failed to clear indexed files while removing agent ${a.id}: ${e?.message ?? e}`,
@@ -156,7 +159,14 @@ export class AgentService {
   async sendMessage(
     agentId: number,
     content: string,
-  ): Promise<{ userMessage: AgentMessageEntity; jobId: number | null }> {
+    accessScope: ExecutionAccessScope = {
+      ownerPrincipal: 'standalone',
+      workspaceId: 'default',
+    },
+  ): Promise<{
+    userMessage: AgentMessageEntity;
+    executionId: string;
+  }> {
     const agent = await this.findOne(agentId);
 
     const userMsg = await this.messageRepo.save(
@@ -182,18 +192,25 @@ export class AgentService {
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
 
-    const job = await this.jobService.create('assistant-chat', JobPriority.HIGH, {
-      kind: 'agent',
-      ownerType: 'agent',
-      ownerId: agent.id,
-      agentId: agent.id,
-      assistantName: agent.name,
-      systemPrompt: agent.systemPrompt ?? null,
-      folderScope: agent.folderScope,
-      conversation,
-    });
+    const execution = await this.executionService.createForChat(
+      'agent_chat',
+      content,
+      accessScope,
+      {
+        kind: 'agent',
+        ownerType: 'agent',
+        ownerId: agent.id,
+        name: agent.name,
+        systemPrompt: agent.systemPrompt ?? null,
+        folderScope: agent.folderScope,
+        conversation,
+      },
+    );
 
-    return { userMessage: userMsg, jobId: job?.id ?? null };
+    return {
+      userMessage: userMsg,
+      executionId: execution.executionId,
+    };
   }
 
   async recordEvent(
@@ -220,7 +237,8 @@ export class AgentService {
     const msg = await this.messageRepo.findOne({
       where: { id: messageId, agentId },
     });
-    if (!msg) throw new NotFoundException(`Event message ${messageId} not found`);
+    if (!msg)
+      throw new NotFoundException(`Event message ${messageId} not found`);
     if (msg.role !== 'event' || !msg.event) {
       throw new NotFoundException(`Message ${messageId} is not an event`);
     }
@@ -236,7 +254,7 @@ export class AgentService {
   async recordAgentReply(
     agentId: number,
     reply: string,
-    jobId: number | null,
+    executionId: string | null,
     error: string | null = null,
   ): Promise<AgentMessageEntity> {
     const msg = await this.messageRepo.save(
@@ -244,7 +262,7 @@ export class AgentService {
         agentId,
         role: 'assistant',
         content: reply,
-        jobId,
+        executionId,
         error,
       }),
     );

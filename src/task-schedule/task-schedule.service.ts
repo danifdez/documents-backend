@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import * as os from 'os';
 import * as process from 'process';
-import { JobStatus } from 'src/job/job-status.enum';
-import { JobService } from 'src/job/job.service';
-import { JobProcessorFactory } from 'src/job-processor/job-processor.factory';
+import { ExecutionService } from 'src/execution/execution.service';
+import { ExecutionStatus } from 'src/execution/execution-status.enum';
+import { ExecutionProcessorFactory } from 'src/execution-processor/execution-processor.factory';
 import { WorkerService } from 'src/worker/worker.service';
 
 @Injectable()
@@ -12,10 +12,10 @@ export class TaskScheduleService {
   private readonly logger = new Logger(TaskScheduleService.name);
 
   constructor(
-    private readonly jobService: JobService,
-    private readonly jobProcessorFactory: JobProcessorFactory,
+    private readonly executionService: ExecutionService,
+    private readonly executionProcessorFactory: ExecutionProcessorFactory,
     private readonly workerService: WorkerService,
-  ) { }
+  ) {}
 
   private getCPUAndMemoryUsage() {
     const cpuCount = os.cpus().length;
@@ -45,43 +45,59 @@ export class TaskScheduleService {
 
     if (cpuUsagePercent > 80 || memoryUsagePercent > 80) {
       this.logger.warn(
-        `Skipping job processing ${cpuUsagePercent.toFixed(2)}% CPU ${memoryUsagePercent.toFixed(2)}% Memory.`,
+        `Skipping execution processing ${cpuUsagePercent.toFixed(2)}% CPU ${memoryUsagePercent.toFixed(2)}% Memory.`,
       );
       return;
     }
 
-    const pendingJobs = await this.jobService.findByStatus(JobStatus.PROCESSED);
+    const pendingExecutions =
+      await this.executionService.findReadyForFinalization();
 
-    const firstJob = pendingJobs[0];
+    const firstExecution = pendingExecutions[0];
     if (
-      !firstJob ||
-      !firstJob.payload ||
-      typeof firstJob.payload !== 'object'
+      !firstExecution ||
+      !firstExecution.payload ||
+      typeof firstExecution.payload !== 'object'
     ) {
       return;
     }
 
     try {
-      const processor = this.jobProcessorFactory.getProcessor(firstJob.type);
+      const processor = this.executionProcessorFactory.getProcessor(
+        firstExecution.taskType,
+      );
 
       if (!processor) {
-        // The Python worker already processed the job (it set status=processed
-        // and wrote `result`). No backend post-processing is needed for this
-        // job type, so finalize it as completed instead of marking it failed.
-        await this.jobService.markAsCompleted((firstJob as any).id?.toString?.() || String((firstJob as any).id));
+        await this.executionService.markAsCompleted(firstExecution.executionId);
         return;
       }
 
-      this.logger.log(`Processing job ${firstJob.id} of type ${firstJob.type}`);
-      await processor.process(firstJob);
+      this.logger.log(
+        `Processing execution ${firstExecution.executionId} of type ${firstExecution.taskType}`,
+      );
+      await processor.process(firstExecution);
 
-      await this.jobService.markAsCompleted((firstJob as any).id?.toString?.() || String((firstJob as any).id));
-
+      const current = await this.executionService.findOne(
+        firstExecution.executionId,
+      );
+      if (
+        current &&
+        ![
+          ExecutionStatus.COMPLETED,
+          ExecutionStatus.FAILED,
+          ExecutionStatus.CANCELLED,
+        ].includes(current.status)
+      ) {
+        await this.executionService.markAsCompleted(firstExecution.executionId);
+      }
     } catch (error) {
       this.logger.error(
-        `Error processing job ${firstJob.id}: ${error.message}`,
+        `Error processing execution ${firstExecution.executionId}: ${error.message}`,
       );
-      await this.jobService.markAsFailed((firstJob as any).id?.toString?.() || String((firstJob as any).id));
+      await this.executionService.markAsFailed(
+        firstExecution.executionId,
+        error.message,
+      );
     }
   }
 
@@ -91,9 +107,10 @@ export class TaskScheduleService {
   async handleStaleRecovery() {
     try {
       const thresholdDate = new Date(Date.now() - 60 * 1000);
-      const requeued = await this.jobService.requeueStaleJobs(thresholdDate);
+      const requeued =
+        await this.executionService.requeueStaleExecutions(thresholdDate);
       if (requeued > 0) {
-        this.logger.log(`Requeued ${requeued} stale job(s)`);
+        this.logger.log(`Requeued ${requeued} stale execution(s)`);
       }
       const offlined = await this.workerService.markStaleOffline(60);
       if (offlined > 0) {
@@ -103,22 +120,4 @@ export class TaskScheduleService {
       this.logger.error(`Error during stale recovery: ${error.message}`);
     }
   }
-
-  @Cron(CronExpression.EVERY_HOUR, {
-    waitForCompletion: true,
-  })
-  async cleanupExpiredJobs() {
-    this.logger.log('Running cleanup task for expired jobs...');
-    try {
-      const deletedCount = await this.jobService.deleteExpiredJobs();
-      if (deletedCount > 0) {
-        this.logger.log(`Cleanup completed: ${deletedCount} expired job(s) deleted`);
-      } else {
-        this.logger.log('Cleanup completed: No expired jobs found');
-      }
-    } catch (error) {
-      this.logger.error(`Error during cleanup of expired jobs: ${error.message}`);
-    }
-  }
-
 }

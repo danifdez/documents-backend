@@ -1,6 +1,5 @@
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
-import { JobEntity } from '../job/job.entity';
 import { ResourceEntity } from '../resource/resource.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { DocEntity } from '../doc/doc.entity';
@@ -41,8 +40,13 @@ import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentMessageEntity } from '../agent/agent-message.entity';
 import { AppStateEntity } from '../app-state/app-state.entity';
+import { ExecutionEntity } from '../execution/execution.entity';
+import { ExecutionEventEntity } from '../execution/execution-event.entity';
+import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 
-export const getTypeOrmConfig = async (configService: ConfigService): Promise<TypeOrmModuleOptions> => {
+export const getTypeOrmConfig = async (
+  configService: ConfigService,
+): Promise<TypeOrmModuleOptions> => {
   return {
     type: 'postgres',
     host: String(configService.get('POSTGRES_HOST') ?? '127.0.0.1'),
@@ -51,7 +55,7 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
     password: String(configService.get('POSTGRES_PASSWORD') ?? ''),
     database: String(configService.get('POSTGRES_DB') ?? 'documents'),
     entities: [
-      JobEntity,
+      ExecutionEntity,
       ResourceEntity,
       ProjectEntity,
       DocEntity,
@@ -92,6 +96,8 @@ export const getTypeOrmConfig = async (configService: ConfigService): Promise<Ty
       AgentEntity,
       AgentMessageEntity,
       AppStateEntity,
+      ExecutionEventEntity,
+      ExecutionArtifactEntity,
     ],
     synchronize: false,
     // Apply pending migrations on every boot so that updates ship their schema

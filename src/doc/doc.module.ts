@@ -3,12 +3,12 @@ import { DocController } from './doc.controller';
 import { DocService } from './doc.service';
 import { DocIngestService } from './doc-ingest.service';
 import { DatabaseModule } from '../database/database.module';
-import { JobModule } from '../job/job.module';
+import { ExecutionModule } from '../execution/execution.module';
 
 @Module({
-  imports: [DatabaseModule, JobModule],
+  imports: [DatabaseModule, ExecutionModule],
   controllers: [DocController],
   providers: [DocService, DocIngestService],
   exports: [DocService],
 })
-export class DocModule { }
+export class DocModule {}

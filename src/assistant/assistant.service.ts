@@ -1,13 +1,25 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject, forwardRef, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Inject,
+  forwardRef,
+  Logger,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
 import { CreateAssistantDto, UpdateAssistantDto } from './dto/assistant.dto';
-import { JobService } from '../job/job.service';
-import { JobPriority } from '../job/job-priority.enum';
+import { ExecutionService } from '../execution/execution.service';
 import { IndexedFileService } from '../indexed-file/indexed-file.service';
-import { validateFolderScope, folderScopeReasonToMessage } from './folder-scope.validator';
+import {
+  validateFolderScope,
+  folderScopeReasonToMessage,
+} from './folder-scope.validator';
+import { ExecutionAccessScope } from '../execution/execution.types';
 
 export const MESSAGE_PAGE_SIZE = 50;
 const MAX_MESSAGE_PAGE_SIZE = 200;
@@ -21,9 +33,9 @@ export class AssistantService implements OnApplicationBootstrap {
     private readonly assistantRepo: Repository<AssistantEntity>,
     @InjectRepository(AssistantMessageEntity)
     private readonly messageRepo: Repository<AssistantMessageEntity>,
-    private readonly jobService: JobService,
     @Inject(forwardRef(() => IndexedFileService))
     private readonly indexedFileService: IndexedFileService,
+    private readonly executionService: ExecutionService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -31,12 +43,16 @@ export class AssistantService implements OnApplicationBootstrap {
       const personal = await this.ensureDefault();
       this.logger.log(`Personal assistant ready (id=${personal.id})`);
     } catch (e: any) {
-      this.logger.error(`Failed to seed personal assistant: ${e?.message ?? e}`);
+      this.logger.error(
+        `Failed to seed personal assistant: ${e?.message ?? e}`,
+      );
     }
   }
 
   async ensureDefault(): Promise<AssistantEntity> {
-    let personal = await this.assistantRepo.findOne({ where: { isSystem: true } });
+    let personal = await this.assistantRepo.findOne({
+      where: { isSystem: true },
+    });
     if (!personal) {
       personal = this.assistantRepo.create({
         name: 'Assistant',
@@ -79,25 +95,37 @@ export class AssistantService implements OnApplicationBootstrap {
     const previousFolderScope = a.folderScope;
     if (dto.name !== undefined) a.name = dto.name;
     if (dto.systemPrompt !== undefined) a.systemPrompt = dto.systemPrompt;
-    if (dto.folderScope !== undefined) a.folderScope = await this.resolveFolderScope(dto.folderScope);
+    if (dto.folderScope !== undefined)
+      a.folderScope = await this.resolveFolderScope(dto.folderScope);
     if (dto.icon !== undefined) a.icon = dto.icon;
     if (dto.sub !== undefined) a.sub = dto.sub;
     if (dto.pinned !== undefined) a.pinned = dto.pinned;
     const saved = await this.assistantRepo.save(a);
-    if (dto.folderScope !== undefined && previousFolderScope !== saved.folderScope) {
+    if (
+      dto.folderScope !== undefined &&
+      previousFolderScope !== saved.folderScope
+    ) {
       try {
-        await this.indexedFileService.clearAllForOwner({ ownerType: 'main-assistant', ownerId: saved.id });
+        await this.indexedFileService.clearAllForOwner({
+          ownerType: 'main-assistant',
+          ownerId: saved.id,
+        });
       } catch (e: any) {
-        this.logger.error(`Failed to clear indexed files for assistant ${saved.id}: ${e?.message ?? e}`);
+        this.logger.error(
+          `Failed to clear indexed files for assistant ${saved.id}: ${e?.message ?? e}`,
+        );
       }
     }
     return saved;
   }
 
-  private async resolveFolderScope(input: string | null | undefined): Promise<string | null> {
+  private async resolveFolderScope(
+    input: string | null | undefined,
+  ): Promise<string | null> {
     if (input === undefined || input === null || input === '') return null;
     const result = await validateFolderScope(input);
-    if (result.ok === true) return (result as { ok: true; absolutePath: string }).absolutePath;
+    if (result.ok === true)
+      return (result as { ok: true; absolutePath: string }).absolutePath;
     const reason = (result as { ok: false; reason: any }).reason;
     throw new BadRequestException(folderScopeReasonToMessage(reason));
   }
@@ -135,7 +163,17 @@ export class AssistantService implements OnApplicationBootstrap {
     return { messages: page, hasMore };
   }
 
-  async sendMessage(assistantId: number, content: string): Promise<{ userMessage: AssistantMessageEntity; jobId: number | null }> {
+  async sendMessage(
+    assistantId: number,
+    content: string,
+    accessScope: ExecutionAccessScope = {
+      ownerPrincipal: 'standalone',
+      workspaceId: 'default',
+    },
+  ): Promise<{
+    userMessage: AssistantMessageEntity;
+    executionId: string;
+  }> {
     const assistant = await this.findOne(assistantId);
 
     // Persist user message
@@ -164,19 +202,25 @@ export class AssistantService implements OnApplicationBootstrap {
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
 
-    // Create job for the worker
-    const job = await this.jobService.create('assistant-chat', JobPriority.HIGH, {
-      kind: 'assistant',
-      ownerType: 'main-assistant',
-      ownerId: assistantId,
-      assistantId,
-      assistantName: assistant.name,
-      assistantSystem: assistant.isSystem,
-      folderScope: assistant.folderScope,
-      conversation,
-    });
+    const execution = await this.executionService.createForChat(
+      'assistant_chat',
+      content,
+      accessScope,
+      {
+        kind: 'assistant',
+        ownerType: 'main-assistant',
+        ownerId: assistantId,
+        name: assistant.name,
+        assistantSystem: assistant.isSystem,
+        folderScope: assistant.folderScope,
+        conversation,
+      },
+    );
 
-    return { userMessage: userMsg, jobId: job?.id ?? null };
+    return {
+      userMessage: userMsg,
+      executionId: execution.executionId,
+    };
   }
 
   async recordEvent(
@@ -203,7 +247,8 @@ export class AssistantService implements OnApplicationBootstrap {
     const msg = await this.messageRepo.findOne({
       where: { id: messageId, assistantId },
     });
-    if (!msg) throw new NotFoundException(`Event message ${messageId} not found`);
+    if (!msg)
+      throw new NotFoundException(`Event message ${messageId} not found`);
     if (msg.role !== 'event' || !msg.event) {
       throw new NotFoundException(`Message ${messageId} is not an event`);
     }
@@ -219,7 +264,7 @@ export class AssistantService implements OnApplicationBootstrap {
   async recordAssistantReply(
     assistantId: number,
     reply: string,
-    jobId: number | null,
+    executionId: string | null,
     error: string | null = null,
   ): Promise<AssistantMessageEntity> {
     const msg = await this.messageRepo.save(
@@ -227,7 +272,7 @@ export class AssistantService implements OnApplicationBootstrap {
         assistantId,
         role: 'assistant',
         content: reply,
-        jobId,
+        executionId,
         error,
       }),
     );

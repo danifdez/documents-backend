@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
-import { JobModule } from '../job/job.module';
+import { ExecutionModule } from '../execution/execution.module';
 import { KnowledgeEntryController } from './knowledge-entry.controller';
 import { KnowledgeEntryService } from './knowledge-entry.service';
 
 @Module({
-    imports: [DatabaseModule, JobModule],
+    imports: [DatabaseModule, ExecutionModule],
     controllers: [KnowledgeEntryController],
     providers: [KnowledgeEntryService],
     exports: [KnowledgeEntryService],

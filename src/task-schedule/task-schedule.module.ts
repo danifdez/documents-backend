@@ -1,17 +1,17 @@
 import { Module } from '@nestjs/common';
 import { TaskScheduleService } from './task-schedule.service';
-import { JobModule } from 'src/job/job.module';
+import { ExecutionModule } from 'src/execution/execution.module';
 import { FileStorageModule } from 'src/file-storage/file-storage.module';
-import { JobProcessorModule } from 'src/job-processor/job-processor.module';
+import { ExecutionProcessorModule } from 'src/execution-processor/execution-processor.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { WorkerModule } from 'src/worker/worker.module';
 
 @Module({
   imports: [
     DatabaseModule,
-    JobModule,
+    ExecutionModule,
     FileStorageModule,
-    JobProcessorModule.register(),
+    ExecutionProcessorModule.register(),
     WorkerModule,
   ],
   providers: [TaskScheduleService],

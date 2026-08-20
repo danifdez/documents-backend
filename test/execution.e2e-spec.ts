@@ -1,0 +1,165 @@
+import { randomUUID } from 'crypto';
+import { config as loadEnv } from 'dotenv';
+import { DataSource } from 'typeorm';
+import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
+import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
+import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
+import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
+import { ExecutionEntity } from '../src/execution/execution.entity';
+import { ExecutionService } from '../src/execution/execution.service';
+
+loadEnv({ path: '.env' });
+
+describe('execution PostgreSQL integration', () => {
+  const schema = `execution_test_${randomUUID().replaceAll('-', '_')}`;
+  let dataSource: DataSource;
+  let service: ExecutionService;
+
+  beforeAll(async () => {
+    dataSource = new DataSource({
+      type: 'postgres',
+      host: process.env.POSTGRES_HOST,
+      port: Number(process.env.POSTGRES_PORT),
+      username: process.env.POSTGRES_USER,
+      password: process.env.POSTGRES_PASSWORD,
+      database: process.env.POSTGRES_DB,
+      schema,
+      synchronize: false,
+      entities: [
+        ExecutionEntity,
+        ExecutionEventEntity,
+        ExecutionArtifactEntity,
+      ],
+    });
+    await dataSource.initialize();
+    const runner = dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.query(`CREATE SCHEMA "${schema}"`);
+    await runner.query(`SET search_path TO "${schema}"`);
+    await new CreateExecutions1757668140001().up(runner);
+    await runner.release();
+
+    service = new ExecutionService(
+      dataSource,
+      dataSource.getRepository(ExecutionEntity),
+      dataSource.getRepository(ExecutionEventEntity),
+      dataSource.getRepository(ExecutionArtifactEntity),
+      { get: (_key: string, fallback?: unknown) => fallback } as any,
+      new ExecutionContractValidator(),
+    );
+  });
+
+  afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
+    await dataSource.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    await dataSource.destroy();
+  });
+
+  const progress = (context: any, instanceId: string) => ({
+    eventId: randomUUID(),
+    rootExecutionId: context.rootExecutionId,
+    executionId: context.executionId,
+    turnId: context.turnId,
+    producerSequence: 1,
+    eventType: 'progress.reported',
+    producer: { component: 'documents-models', instanceId, version: 'test' },
+    actor: { type: 'worker' },
+    causedByEventId: context.lastEventId,
+    occurredAt: '2026-08-19T10:00:01Z',
+    payloadSchema: 'progress.reported/1',
+    payload: { message: `progress from ${instanceId}` },
+    artifactRefs: [],
+    security: {
+      dataClassification: 'workspace',
+      purpose: 'evaluation',
+      allowedDestinations: ['documents', 'ai-train'],
+      redactionApplied: false,
+    },
+  });
+
+  it('keeps assistant and agent chat as distinct execution types', async () => {
+    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const assistant = await service.createForChat(
+      'assistant_chat',
+      'assistant message',
+      scope,
+      {},
+    );
+    const agent = await service.createForChat(
+      'agent_chat',
+      'agent message',
+      scope,
+      {},
+    );
+
+    expect(assistant.taskType).toBe('assistant-chat');
+    expect(agent.taskType).toBe('agent-chat');
+  });
+
+  it('serializes concurrent producers, paginates, deduplicates, and enforces append-only rows', async () => {
+    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const context = await service.createForChat(
+      'assistant_chat',
+      'Authorization: Bearer known-secret',
+      scope,
+      {},
+    );
+    const first = progress(context, 'worker-a');
+    const second = progress(context, 'worker-b');
+
+    await Promise.all([
+      service.acceptEvents(context.rootExecutionId, [first]),
+      service.acceptEvents(context.rootExecutionId, [second]),
+    ]);
+    await expect(
+      service.acceptEvents(context.rootExecutionId, [first]),
+    ).resolves.toMatchObject({
+      accepted: 0,
+      duplicates: 1,
+      lastSequence: 5,
+    });
+
+    const page1 = await service.readEvents(
+      context.rootExecutionId,
+      scope,
+      0,
+      2,
+    );
+    const page2 = await service.readEvents(
+      context.rootExecutionId,
+      scope,
+      page1.nextAfterSequence,
+      10,
+    );
+    expect(page1.events.map((event: any) => event.sequence)).toEqual([1, 2]);
+    expect(page2.events.map((event: any) => event.sequence)).toEqual([3, 4, 5]);
+    await expect(
+      service.readEvents(context.rootExecutionId, {
+        ownerPrincipal: 'e2e-user',
+        workspaceId: 'other',
+      }),
+    ).rejects.toThrow('Execution not found');
+
+    const bundle = await service.exportBundle(context.rootExecutionId, scope);
+    expect(JSON.stringify(bundle)).not.toContain('known-secret');
+    expect(bundle.embeddedArtifacts).toBeDefined();
+    expect(bundle.bundleCompleteness).toEqual({
+      status: 'evaluable_partial',
+      reproducible: false,
+      missing: ['environment.documentsRevision'],
+    });
+
+    await expect(
+      dataSource.query(
+        `UPDATE "${schema}"."execution_events" SET "event_type" = 'changed' WHERE "event_id" = $1`,
+        [first.eventId],
+      ),
+    ).rejects.toThrow('append-only');
+    const stored = await dataSource
+      .getRepository(ExecutionEventEntity)
+      .findOneBy({
+        eventId: first.eventId,
+      });
+    expect(stored.eventType).toBe('progress.reported');
+  });
+});

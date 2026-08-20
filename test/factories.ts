@@ -3,8 +3,8 @@ import { ProjectEntity } from '../src/project/project.entity';
 import { EntityEntity } from '../src/entity/entity.entity';
 import { AuthorEntity } from '../src/author/author.entity';
 import { UserEntity } from '../src/auth/user.entity';
-import { JobEntity } from '../src/job/job.entity';
-import { JobStatus } from '../src/job/job-status.enum';
+import { ExecutionEntity } from '../src/execution/execution.entity';
+import { ExecutionStatus } from '../src/execution/execution-status.enum';
 import { DocEntity } from '../src/doc/doc.entity';
 import { CommentEntity } from '../src/comment/comment.entity';
 import { NoteEntity } from '../src/note/note.entity';
@@ -25,7 +25,9 @@ import { ResourceTypeEntity } from '../src/resource-type/resource-type.entity';
 
 const now = new Date('2025-01-01T00:00:00Z');
 
-export function buildProject(overrides: Partial<ProjectEntity> = {}): ProjectEntity {
+export function buildProject(
+  overrides: Partial<ProjectEntity> = {},
+): ProjectEntity {
   return {
     id: 1,
     name: 'Test Project',
@@ -44,7 +46,9 @@ export function buildProject(overrides: Partial<ProjectEntity> = {}): ProjectEnt
   } as ProjectEntity;
 }
 
-export function buildResource(overrides: Partial<ResourceEntity> = {}): ResourceEntity {
+export function buildResource(
+  overrides: Partial<ResourceEntity> = {},
+): ResourceEntity {
   return {
     id: 1,
     name: 'Test Resource',
@@ -77,7 +81,9 @@ export function buildResource(overrides: Partial<ResourceEntity> = {}): Resource
   } as ResourceEntity;
 }
 
-export function buildEntityType(overrides: Partial<EntityTypeEntity> = {}): EntityTypeEntity {
+export function buildEntityType(
+  overrides: Partial<EntityTypeEntity> = {},
+): EntityTypeEntity {
   return {
     id: 1,
     name: 'Person',
@@ -89,7 +95,9 @@ export function buildEntityType(overrides: Partial<EntityTypeEntity> = {}): Enti
   } as EntityTypeEntity;
 }
 
-export function buildEntity(overrides: Partial<EntityEntity> = {}): EntityEntity {
+export function buildEntity(
+  overrides: Partial<EntityEntity> = {},
+): EntityEntity {
   return {
     id: 1,
     name: 'Test Entity',
@@ -106,7 +114,9 @@ export function buildEntity(overrides: Partial<EntityEntity> = {}): EntityEntity
   } as EntityEntity;
 }
 
-export function buildAuthor(overrides: Partial<AuthorEntity> = {}): AuthorEntity {
+export function buildAuthor(
+  overrides: Partial<AuthorEntity> = {},
+): AuthorEntity {
   return {
     id: 1,
     name: 'Test Author',
@@ -132,25 +142,53 @@ export function buildUser(overrides: Partial<UserEntity> = {}): UserEntity {
   } as UserEntity;
 }
 
-export function buildJob(overrides: Partial<JobEntity> = {}): JobEntity {
+export function buildExecution(
+  overrides: Partial<ExecutionEntity> = {},
+): ExecutionEntity {
   return {
-    id: 1,
-    type: 'document-extraction',
+    executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+    rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+    parentExecutionId: null,
+    turnId: null,
+    ownerPrincipal: 'test-user',
+    workspaceId: 'test-workspace',
+    schemaVersion: 'execution-event/1',
+    taskType: 'document-extraction',
+    origin: 'root',
     priority: 'normal',
     payload: {},
-    status: JobStatus.PENDING,
+    status: ExecutionStatus.QUEUED,
+    phase: null,
+    waitReason: null,
+    completionKind: null,
+    completionReason: null,
     result: null,
+    error: null,
+    checkpoint: null,
+    step: 0,
+    maxSteps: 1,
+    availableAt: now,
     claimedBy: null,
+    attemptId: null,
     retryCount: 0,
+    maxAttempts: 3,
     startedAt: null,
-    expiresAt: null,
+    completedAt: null,
+    inputBlob: null,
+    resultBlob: null,
+    lastSequence: '0',
+    lastEventId: null,
+    completenessStatus: 'reproducible',
+    missingEvidence: [],
     createdAt: now,
     updatedAt: now,
     ...overrides,
-  } as JobEntity;
+  } as ExecutionEntity;
 }
 
-export function buildThread(overrides: Partial<ThreadEntity> = {}): ThreadEntity {
+export function buildThread(
+  overrides: Partial<ThreadEntity> = {},
+): ThreadEntity {
   return {
     id: 1,
     name: 'Test Thread',
@@ -181,7 +219,9 @@ export function buildDoc(overrides: Partial<DocEntity> = {}): DocEntity {
   } as DocEntity;
 }
 
-export function buildComment(overrides: Partial<CommentEntity> = {}): CommentEntity {
+export function buildComment(
+  overrides: Partial<CommentEntity> = {},
+): CommentEntity {
   return {
     id: 1,
     content: 'Test comment',
@@ -217,7 +257,9 @@ export function buildMark(overrides: Partial<MarkEntity> = {}): MarkEntity {
   } as MarkEntity;
 }
 
-export function buildCanvas(overrides: Partial<CanvasEntity> = {}): CanvasEntity {
+export function buildCanvas(
+  overrides: Partial<CanvasEntity> = {},
+): CanvasEntity {
   return {
     id: 1,
     name: 'Test Canvas',
@@ -231,7 +273,9 @@ export function buildCanvas(overrides: Partial<CanvasEntity> = {}): CanvasEntity
   } as CanvasEntity;
 }
 
-export function buildDataset(overrides: Partial<DatasetEntity> = {}): DatasetEntity {
+export function buildDataset(
+  overrides: Partial<DatasetEntity> = {},
+): DatasetEntity {
   return {
     id: 1,
     name: 'Test Dataset',
@@ -245,7 +289,9 @@ export function buildDataset(overrides: Partial<DatasetEntity> = {}): DatasetEnt
   } as DatasetEntity;
 }
 
-export function buildDatasetRecord(overrides: Partial<DatasetRecordEntity> = {}): DatasetRecordEntity {
+export function buildDatasetRecord(
+  overrides: Partial<DatasetRecordEntity> = {},
+): DatasetRecordEntity {
   return {
     id: 1,
     dataset: buildDataset(),
@@ -256,7 +302,9 @@ export function buildDatasetRecord(overrides: Partial<DatasetRecordEntity> = {})
   } as DatasetRecordEntity;
 }
 
-export function buildBibliographyEntry(overrides: Partial<BibliographyEntryEntity> = {}): BibliographyEntryEntity {
+export function buildBibliographyEntry(
+  overrides: Partial<BibliographyEntryEntity> = {},
+): BibliographyEntryEntity {
   return {
     id: 1,
     project: null,
@@ -308,7 +356,9 @@ export function buildBibliographyEntry(overrides: Partial<BibliographyEntryEntit
   } as BibliographyEntryEntity;
 }
 
-export function buildCalendarEvent(overrides: Partial<CalendarEventEntity> = {}): CalendarEventEntity {
+export function buildCalendarEvent(
+  overrides: Partial<CalendarEventEntity> = {},
+): CalendarEventEntity {
   return {
     id: 1,
     title: 'Test Event',
@@ -327,7 +377,9 @@ export function buildCalendarEvent(overrides: Partial<CalendarEventEntity> = {})
   } as CalendarEventEntity;
 }
 
-export function buildTimeline(overrides: Partial<TimelineEntity> = {}): TimelineEntity {
+export function buildTimeline(
+  overrides: Partial<TimelineEntity> = {},
+): TimelineEntity {
   return {
     id: 1,
     name: 'Test Timeline',
@@ -345,7 +397,9 @@ export function buildTimeline(overrides: Partial<TimelineEntity> = {}): Timeline
   } as TimelineEntity;
 }
 
-export function buildUserTask(overrides: Partial<UserTaskEntity> = {}): UserTaskEntity {
+export function buildUserTask(
+  overrides: Partial<UserTaskEntity> = {},
+): UserTaskEntity {
   return {
     id: 1,
     title: 'Test Task',
@@ -358,7 +412,9 @@ export function buildUserTask(overrides: Partial<UserTaskEntity> = {}): UserTask
   } as UserTaskEntity;
 }
 
-export function buildKnowledgeEntry(overrides: Partial<KnowledgeEntryEntity> = {}): KnowledgeEntryEntity {
+export function buildKnowledgeEntry(
+  overrides: Partial<KnowledgeEntryEntity> = {},
+): KnowledgeEntryEntity {
   return {
     id: 1,
     title: 'Test Knowledge Entry',
@@ -371,7 +427,9 @@ export function buildKnowledgeEntry(overrides: Partial<KnowledgeEntryEntity> = {
   } as KnowledgeEntryEntity;
 }
 
-export function buildWorker(overrides: Partial<WorkerEntity> = {}): WorkerEntity {
+export function buildWorker(
+  overrides: Partial<WorkerEntity> = {},
+): WorkerEntity {
   return {
     id: 'test-worker-uuid',
     name: 'test-worker',
@@ -384,7 +442,9 @@ export function buildWorker(overrides: Partial<WorkerEntity> = {}): WorkerEntity
   } as WorkerEntity;
 }
 
-export function buildPendingEntity(overrides: Partial<PendingEntityEntity> = {}): PendingEntityEntity {
+export function buildPendingEntity(
+  overrides: Partial<PendingEntityEntity> = {},
+): PendingEntityEntity {
   return {
     id: 1,
     resourceId: 1,
@@ -406,7 +466,9 @@ export function buildPendingEntity(overrides: Partial<PendingEntityEntity> = {})
   } as PendingEntityEntity;
 }
 
-export function buildResourceType(overrides: Partial<ResourceTypeEntity> = {}): ResourceTypeEntity {
+export function buildResourceType(
+  overrides: Partial<ResourceTypeEntity> = {},
+): ResourceTypeEntity {
   return {
     id: 1,
     abbreviation: 'ART',

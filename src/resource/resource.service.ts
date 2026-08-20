@@ -5,8 +5,8 @@ import { ResourceEntity } from './resource.entity';
 import { EntityEntity } from '../entity/entity.entity';
 import { AuthorEntity } from '../author/author.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
-import { JobService } from '../job/job.service';
-import { JobPriority } from '../job/job-priority.enum';
+import { ExecutionService } from '../execution/execution.service';
+import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
 import { RESOURCE_TYPE_WEBPAGE } from '../common/constants';
 import { globalSimilaritySearch } from '../common/global-search';
@@ -19,7 +19,7 @@ export class ResourceService {
     @InjectRepository(ResourceEntity)
     private readonly repo: Repository<ResourceEntity>,
     private readonly fileStorageService: FileStorageService,
-    private readonly jobService: JobService,
+    private readonly executionService: ExecutionService,
   ) { }
 
   async findOne(id: number): Promise<ResourceEntity | null> {
@@ -149,7 +149,7 @@ export class ResourceService {
     if (anchorChanged) {
       const content = await this.getContentById(id);
       if (content) {
-        await this.jobService.create('date-extraction', JobPriority.NORMAL, {
+        await this.executionService.create('date-extraction', ExecutionPriority.NORMAL, {
           resourceId: id,
           text: content,
           language: saved.language || null,
@@ -276,14 +276,14 @@ export class ResourceService {
 
     const content = await this.getContentById(id);
     const samples = this.extractTextSamples(content);
-    await this.jobService.create('detect-language', JobPriority.NORMAL, {
+    await this.executionService.create('detect-language', ExecutionPriority.NORMAL, {
       resourceId: id,
       samples,
     });
 
     return {
       success: true,
-      message: 'Resource extraction confirmed and language detection job created',
+      message: 'Resource extraction confirmed and language detection execution created',
     };
   }
 
@@ -330,9 +330,9 @@ export class ResourceService {
 
     const resourceCreated = await this.create(resourceToCreate);
     if (!file.mimetype.startsWith('image/')) {
-      await this.jobService.create(
+      await this.executionService.create(
         'document-extraction',
-        JobPriority.NORMAL,
+        ExecutionPriority.NORMAL,
         {
           hash: result.hash,
           extension: result.extension,
@@ -369,7 +369,7 @@ export class ResourceService {
     }
     // Cleanup graph relationships for this resource
     try {
-      await this.jobService.create('relationship-modify', JobPriority.BACKGROUND, {
+      await this.executionService.create('relationship-modify', ExecutionPriority.BACKGROUND, {
         action: 'delete-by-resource',
         resourceId: id,
       });

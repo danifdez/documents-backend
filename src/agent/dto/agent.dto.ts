@@ -112,7 +112,7 @@ export interface AgentMessageDto {
   agentId: number;
   role: 'user' | 'assistant' | 'system' | 'event';
   content: string;
-  jobId: number | null;
+  executionId: string | null;
   error: string | null;
   event: Record<string, any> | null;
   createdAt: string;
@@ -124,7 +124,7 @@ export function toAgentMessageDto(entity: AgentMessageEntity): AgentMessageDto {
     agentId: entity.agentId,
     role: entity.role,
     content: entity.content,
-    jobId: entity.jobId,
+    executionId: entity.executionId,
     error: entity.error,
     event: entity.event,
     createdAt: entity.createdAt.toISOString(),

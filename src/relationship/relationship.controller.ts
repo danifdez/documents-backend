@@ -10,18 +10,22 @@ import {
   ParseIntPipe,
 } from '@nestjs/common';
 import { RelationshipService } from './relationship.service';
-import { CreateRelationshipDto, UpdateRelationshipDto, DeleteRelationshipDto } from './dto/relationship.dto';
+import {
+  CreateRelationshipDto,
+  UpdateRelationshipDto,
+  DeleteRelationshipDto,
+} from './dto/relationship.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 
 @Controller('relationships')
 export class RelationshipController {
-  constructor(private readonly service: RelationshipService) { }
+  constructor(private readonly service: RelationshipService) {}
 
   @Get('all')
   async queryAll(
     @Query('requestId') requestId?: string,
-  ): Promise<{ jobId: number }> {
+  ): Promise<{ executionId: string }> {
     return this.service.queryAll(requestId);
   }
 
@@ -29,7 +33,7 @@ export class RelationshipController {
   async queryByResource(
     @Param('resourceId', ParseIntPipe) resourceId: number,
     @Query('requestId') requestId?: string,
-  ): Promise<{ jobId: number }> {
+  ): Promise<{ executionId: string }> {
     return this.service.queryByResource(resourceId, requestId);
   }
 
@@ -38,7 +42,7 @@ export class RelationshipController {
     @Param('projectId', ParseIntPipe) projectId: number,
     @Query('resourceIds') resourceIdsStr?: string,
     @Query('requestId') requestId?: string,
-  ): Promise<{ jobId: number }> {
+  ): Promise<{ executionId: string }> {
     const resourceIds = resourceIdsStr
       ? resourceIdsStr.split(',').map(Number).filter(Boolean)
       : undefined;
@@ -49,8 +53,13 @@ export class RelationshipController {
   async queryNeighborhood(
     @Query('names') namesStr: string,
     @Query('requestId') requestId?: string,
-  ): Promise<{ jobId: number }> {
-    const entityNames = namesStr ? namesStr.split(',').map(n => n.trim()).filter(Boolean) : [];
+  ): Promise<{ executionId: string }> {
+    const entityNames = namesStr
+      ? namesStr
+          .split(',')
+          .map((n) => n.trim())
+          .filter(Boolean)
+      : [];
     return this.service.queryNeighborhood(entityNames, requestId);
   }
 
@@ -58,7 +67,7 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async createRelationship(
     @Body() dto: CreateRelationshipDto,
-  ): Promise<{ jobId: number }> {
+  ): Promise<{ executionId: string }> {
     return this.service.createRelationship(dto);
   }
 
@@ -66,7 +75,7 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async updateRelationship(
     @Body() dto: UpdateRelationshipDto,
-  ): Promise<{ jobId: number }> {
+  ): Promise<{ executionId: string }> {
     return this.service.updateRelationship(dto);
   }
 
@@ -74,7 +83,7 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async deleteRelationship(
     @Body() dto: DeleteRelationshipDto,
-  ): Promise<{ jobId: number }> {
+  ): Promise<{ executionId: string }> {
     return this.service.deleteRelationship(dto);
   }
 
@@ -82,7 +91,7 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async extractRelationships(
     @Param('resourceId', ParseIntPipe) resourceId: number,
-  ): Promise<{ jobId: number }> {
+  ): Promise<{ executionId: string }> {
     return this.service.extractRelationships(resourceId);
   }
 
@@ -90,7 +99,7 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async extractRelationshipsForProject(
     @Param('projectId', ParseIntPipe) projectId: number,
-  ): Promise<{ jobIds: number[] }> {
+  ): Promise<{ executionIds: string[] }> {
     return this.service.extractRelationshipsForProject(projectId);
   }
 }

@@ -2,24 +2,24 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { KnowledgeEntryService } from '../../../src/knowledge-base/knowledge-entry.service';
 import { KnowledgeEntryEntity } from '../../../src/knowledge-base/knowledge-entry.entity';
-import { JobService } from '../../../src/job/job.service';
+import { ExecutionService } from '../../../src/execution/execution.service';
 import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildKnowledgeEntry } from '../../factories';
 
 describe('KnowledgeEntryService', () => {
   let service: KnowledgeEntryService;
   let repo: MockRepository<KnowledgeEntryEntity>;
-  let jobService: Record<string, jest.Mock>;
+  let executionService: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     repo = createMockRepository<KnowledgeEntryEntity>();
-    jobService = { create: jest.fn().mockResolvedValue({}) };
+    executionService = { create: jest.fn().mockResolvedValue({}) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KnowledgeEntryService,
         { provide: getRepositoryToken(KnowledgeEntryEntity), useValue: repo },
-        { provide: JobService, useValue: jobService },
+        { provide: ExecutionService, useValue: executionService },
       ],
     }).compile();
 
@@ -73,7 +73,9 @@ describe('KnowledgeEntryService', () => {
 
     it('should use similarity scoring', async () => {
       const qb = repo.createQueryBuilder();
-      qb.getRawMany.mockResolvedValue([{ k_id: 1, k_title: 'Test', score: 0.8 }]);
+      qb.getRawMany.mockResolvedValue([
+        { k_id: 1, k_title: 'Test', score: 0.8 },
+      ]);
       const result = await service.globalSearch('test');
       expect(result).toHaveLength(1);
       expect(qb.addSelect).toHaveBeenCalled();
@@ -82,13 +84,19 @@ describe('KnowledgeEntryService', () => {
 
   describe('create', () => {
     it('should create entry and schedule ingest', async () => {
-      const entry = buildKnowledgeEntry({ title: 'New Entry', content: '<p>Content</p>' });
+      const entry = buildKnowledgeEntry({
+        title: 'New Entry',
+        content: '<p>Content</p>',
+      });
       repo.create.mockReturnValue(entry);
       repo.save.mockResolvedValue(entry);
 
-      const result = await service.create({ title: 'New Entry', content: '<p>Content</p>' });
+      const result = await service.create({
+        title: 'New Entry',
+        content: '<p>Content</p>',
+      });
       expect(result).toEqual(entry);
-      expect(jobService.create).toHaveBeenCalledWith(
+      expect(executionService.create).toHaveBeenCalledWith(
         'ingest-content',
         expect.any(String),
         expect.objectContaining({
@@ -107,7 +115,7 @@ describe('KnowledgeEntryService', () => {
 
       const result = await service.update(1, { title: 'Updated' });
       expect(result).toEqual(entry);
-      expect(jobService.create).toHaveBeenCalled();
+      expect(executionService.create).toHaveBeenCalled();
     });
 
     it('should return null if entry not found', async () => {
@@ -121,7 +129,7 @@ describe('KnowledgeEntryService', () => {
       repo.save.mockResolvedValue(entry);
 
       await service.update(1, { tags: ['new-tag'] } as any);
-      expect(jobService.create).not.toHaveBeenCalled();
+      expect(executionService.create).not.toHaveBeenCalled();
     });
   });
 
@@ -133,7 +141,7 @@ describe('KnowledgeEntryService', () => {
 
       const result = await service.remove(1);
       expect(result).toEqual({ deleted: true });
-      expect(jobService.create).toHaveBeenCalledWith(
+      expect(executionService.create).toHaveBeenCalledWith(
         'delete-vectors',
         expect.any(String),
         { sourceId: 'knowledge_1' },
@@ -143,7 +151,7 @@ describe('KnowledgeEntryService', () => {
     it('should return deleted false when not found', async () => {
       repo.findOneBy.mockResolvedValue(null);
       expect(await service.remove(999)).toEqual({ deleted: false });
-      expect(jobService.create).not.toHaveBeenCalled();
+      expect(executionService.create).not.toHaveBeenCalled();
     });
   });
 });

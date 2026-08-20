@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { JobService } from 'src/job/job.service';
-import { JobPriority } from 'src/job/job-priority.enum';
+import { ExecutionService } from 'src/execution/execution.service';
+import { ExecutionPriority } from 'src/execution/execution-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
 import { EntityService } from 'src/entity/entity.service';
 import { extractTextFromHtml } from 'src/utils/text';
@@ -8,55 +8,71 @@ import { extractTextFromHtml } from 'src/utils/text';
 @Injectable()
 export class RelationshipService {
   constructor(
-    private readonly jobService: JobService,
+    private readonly executionService: ExecutionService,
     private readonly resourceService: ResourceService,
     private readonly entityService: EntityService,
   ) {}
 
-  async queryAll(requestId?: string): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-query', JobPriority.HIGH, {
-      query_type: 'all',
-      requestId,
-    });
-    return { jobId: job.id };
+  async queryAll(requestId?: string): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-query',
+      ExecutionPriority.HIGH,
+      {
+        query_type: 'all',
+        requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
   async queryByResource(
     resourceId: number,
     requestId?: string,
-  ): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-query', JobPriority.HIGH, {
-      query_type: 'by-resource',
-      resourceId,
-      requestId,
-    });
-    return { jobId: job.id };
+  ): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-query',
+      ExecutionPriority.HIGH,
+      {
+        query_type: 'by-resource',
+        resourceId,
+        requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
   async queryNeighborhood(
     entityNames: string[],
     requestId?: string,
-  ): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-query', JobPriority.HIGH, {
-      query_type: 'neighborhood',
-      entityNames,
-      requestId,
-    });
-    return { jobId: job.id };
+  ): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-query',
+      ExecutionPriority.HIGH,
+      {
+        query_type: 'neighborhood',
+        entityNames,
+        requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
   async queryByProject(
     projectId: number,
     resourceIds?: number[],
     requestId?: string,
-  ): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-query', JobPriority.HIGH, {
-      query_type: 'by-project',
-      projectId,
-      resourceIds,
-      requestId,
-    });
-    return { jobId: job.id };
+  ): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-query',
+      ExecutionPriority.HIGH,
+      {
+        query_type: 'by-project',
+        projectId,
+        resourceIds,
+        requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
   async createRelationship(dto: {
@@ -66,17 +82,21 @@ export class RelationshipService {
     resourceId: number;
     projectId?: number;
     requestId?: string;
-  }): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-modify', JobPriority.NORMAL, {
-      action: 'create',
-      subjectId: dto.subjectId,
-      predicate: dto.predicate,
-      objectId: dto.objectId,
-      resourceId: dto.resourceId,
-      projectId: dto.projectId,
-      requestId: dto.requestId,
-    });
-    return { jobId: job.id };
+  }): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-modify',
+      ExecutionPriority.NORMAL,
+      {
+        action: 'create',
+        subjectId: dto.subjectId,
+        predicate: dto.predicate,
+        objectId: dto.objectId,
+        resourceId: dto.resourceId,
+        projectId: dto.projectId,
+        requestId: dto.requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
   async updateRelationship(dto: {
@@ -86,17 +106,21 @@ export class RelationshipService {
     newPredicate: string;
     resourceId: number;
     requestId?: string;
-  }): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-modify', JobPriority.NORMAL, {
-      action: 'update',
-      subjectId: dto.subjectId,
-      predicate: dto.predicate,
-      objectId: dto.objectId,
-      newPredicate: dto.newPredicate,
-      resourceId: dto.resourceId,
-      requestId: dto.requestId,
-    });
-    return { jobId: job.id };
+  }): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-modify',
+      ExecutionPriority.NORMAL,
+      {
+        action: 'update',
+        subjectId: dto.subjectId,
+        predicate: dto.predicate,
+        objectId: dto.objectId,
+        newPredicate: dto.newPredicate,
+        resourceId: dto.resourceId,
+        requestId: dto.requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
   async deleteRelationship(dto: {
@@ -105,35 +129,43 @@ export class RelationshipService {
     objectId: number;
     resourceId: number;
     requestId?: string;
-  }): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-modify', JobPriority.NORMAL, {
-      action: 'delete',
-      subjectId: dto.subjectId,
-      predicate: dto.predicate,
-      objectId: dto.objectId,
-      resourceId: dto.resourceId,
-      requestId: dto.requestId,
-    });
-    return { jobId: job.id };
+  }): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-modify',
+      ExecutionPriority.NORMAL,
+      {
+        action: 'delete',
+        subjectId: dto.subjectId,
+        predicate: dto.predicate,
+        objectId: dto.objectId,
+        resourceId: dto.resourceId,
+        requestId: dto.requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 
-  async extractRelationshipsForProject(projectId: number): Promise<{ jobIds: number[] }> {
+  async extractRelationshipsForProject(
+    projectId: number,
+  ): Promise<{ executionIds: string[] }> {
     const resources = await this.resourceService.findByProject(projectId);
-    const jobIds: number[] = [];
+    const executionIds: string[] = [];
 
     for (const resource of resources) {
       try {
         const result = await this.extractRelationships(resource.id);
-        jobIds.push(result.jobId);
+        executionIds.push(result.executionId);
       } catch {
         // Skip resources without content or entities
       }
     }
 
-    return { jobIds };
+    return { executionIds };
   }
 
-  async extractRelationships(resourceId: number): Promise<{ jobId: number }> {
+  async extractRelationships(
+    resourceId: number,
+  ): Promise<{ executionId: string }> {
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
       throw new Error(`Resource with ID ${resourceId} not found`);
@@ -146,7 +178,9 @@ export class RelationshipService {
 
     const entities = await this.entityService.findByResourceId(resourceId);
     if (entities.length === 0) {
-      throw new Error(`Resource with ID ${resourceId} has no confirmed entities`);
+      throw new Error(
+        `Resource with ID ${resourceId} has no confirmed entities`,
+      );
     }
 
     const projectId =
@@ -158,9 +192,9 @@ export class RelationshipService {
       .map((t) => t.text)
       .join('\n');
 
-    const job = await this.jobService.create(
+    const execution = await this.executionService.create(
       'relationship-extraction',
-      JobPriority.NORMAL,
+      ExecutionPriority.NORMAL,
       {
         resourceId,
         projectId,
@@ -172,18 +206,22 @@ export class RelationshipService {
         })),
       },
     );
-    return { jobId: job.id };
+    return { executionId: execution.executionId };
   }
 
   async deleteByResource(
     resourceId: number,
     requestId?: string,
-  ): Promise<{ jobId: number }> {
-    const job = await this.jobService.create('relationship-modify', JobPriority.NORMAL, {
-      action: 'delete-by-resource',
-      resourceId,
-      requestId,
-    });
-    return { jobId: job.id };
+  ): Promise<{ executionId: string }> {
+    const execution = await this.executionService.create(
+      'relationship-modify',
+      ExecutionPriority.NORMAL,
+      {
+        action: 'delete-by-resource',
+        resourceId,
+        requestId,
+      },
+    );
+    return { executionId: execution.executionId };
   }
 }

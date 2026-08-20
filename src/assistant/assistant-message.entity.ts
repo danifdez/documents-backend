@@ -1,4 +1,12 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  Index,
+} from 'typeorm';
 import { AssistantEntity } from './assistant.entity';
 
 @Entity({ name: 'assistant_messages' })
@@ -21,8 +29,8 @@ export class AssistantMessageEntity {
   content: string;
 
   @Index()
-  @Column({ name: 'job_id', type: 'integer', nullable: true })
-  jobId: number | null;
+  @Column({ name: 'execution_id', type: 'uuid', nullable: true })
+  executionId: string | null;
 
   @Column({ type: 'text', nullable: true })
   error: string | null;
