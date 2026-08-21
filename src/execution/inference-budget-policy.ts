@@ -37,6 +37,7 @@ export type OperationBudgetLimits = {
   toolCallSoftLimit: number;
   exactToolRepeatWarning: boolean;
   exactToolRepeatBlockAfterWarning: boolean;
+  exactToolRepeatTerminateAfterBlock: boolean;
 };
 
 export type GovernedBudgetStart = {
@@ -54,7 +55,10 @@ export type GovernedBudgetStart = {
   budgetSoftLimitWarningApplied: boolean;
   operationFingerprint?: string;
   operationFingerprintVersion?: 'canonical_tool_input_v1';
+  toolBatchSize?: number;
+  toolBatchIndex?: number;
   loopGuardWarningApplied: boolean;
+  loopGuardBlockResultApplied: boolean;
 };
 
 export function validateProgressGrantRequest(
@@ -97,6 +101,8 @@ export function validateProgressGrantRequest(
       typeof policy.exactToolRepeatWarning !== 'boolean') ||
     (policy.exactToolRepeatBlockAfterWarning !== undefined &&
       typeof policy.exactToolRepeatBlockAfterWarning !== 'boolean') ||
+    (policy.exactToolRepeatTerminateAfterBlock !== undefined &&
+      typeof policy.exactToolRepeatTerminateAfterBlock !== 'boolean') ||
     !String(request.agentName ?? '').trim()
   ) {
     throw new BadRequestException('Invalid progress grant request');
@@ -139,7 +145,9 @@ export function validateReservationRequest(
     request.operationKind === 'inference' &&
     (request.toolCallId !== undefined ||
       request.operationFingerprint !== undefined ||
-      request.operationFingerprintVersion !== undefined)
+      request.operationFingerprintVersion !== undefined ||
+      request.toolBatchSize !== undefined ||
+      request.toolBatchIndex !== undefined)
   ) {
     throw new BadRequestException(
       'Tool identity is only valid for tool budget reservations',
@@ -148,6 +156,8 @@ export function validateReservationRequest(
   const hasFingerprint = request.operationFingerprint !== undefined;
   const hasFingerprintVersion =
     request.operationFingerprintVersion !== undefined;
+  const hasBatchSize = request.toolBatchSize !== undefined;
+  const hasBatchIndex = request.toolBatchIndex !== undefined;
   if (
     hasFingerprint !== hasFingerprintVersion ||
     (hasFingerprint &&
@@ -155,6 +165,18 @@ export function validateReservationRequest(
         request.operationFingerprintVersion !== 'canonical_tool_input_v1'))
   ) {
     throw new BadRequestException('Invalid tool operation fingerprint');
+  }
+  if (
+    hasBatchSize !== hasBatchIndex ||
+    (hasBatchSize &&
+      (request.operationKind !== 'tool_call' ||
+        !Number.isInteger(request.toolBatchSize) ||
+        request.toolBatchSize! < 1 ||
+        !Number.isInteger(request.toolBatchIndex) ||
+        request.toolBatchIndex! < 0 ||
+        request.toolBatchIndex! >= request.toolBatchSize!))
+  ) {
+    throw new BadRequestException('Invalid tool batch identity');
   }
 }
 
@@ -240,6 +262,13 @@ export function resolveEffectivePolicy(
       requested.exactToolRepeatBlockAfterWarning === true &&
       limits.exactToolRepeatWarning &&
       limits.exactToolRepeatBlockAfterWarning,
+    exactToolRepeatTerminateAfterBlock:
+      requested.exactToolRepeatWarning === true &&
+      requested.exactToolRepeatBlockAfterWarning === true &&
+      requested.exactToolRepeatTerminateAfterBlock === true &&
+      limits.exactToolRepeatWarning &&
+      limits.exactToolRepeatBlockAfterWarning &&
+      limits.exactToolRepeatTerminateAfterBlock,
   };
 }
 
@@ -279,6 +308,8 @@ export function withoutGrantUsage(
         grant.requestedPolicy.exactToolRepeatWarning ?? false,
       exactToolRepeatBlockAfterWarning:
         grant.requestedPolicy.exactToolRepeatBlockAfterWarning ?? false,
+      exactToolRepeatTerminateAfterBlock:
+        grant.requestedPolicy.exactToolRepeatTerminateAfterBlock ?? false,
     },
     effectivePolicy: {
       ...grant.effectivePolicy,
@@ -289,6 +320,8 @@ export function withoutGrantUsage(
         grant.effectivePolicy.exactToolRepeatWarning ?? false,
       exactToolRepeatBlockAfterWarning:
         grant.effectivePolicy.exactToolRepeatBlockAfterWarning ?? false,
+      exactToolRepeatTerminateAfterBlock:
+        grant.effectivePolicy.exactToolRepeatTerminateAfterBlock ?? false,
     },
   };
   delete value.usage;
@@ -325,7 +358,9 @@ export function assertReservationMatches(
     reservation.name !== request.name ||
     reservation.operationFingerprint !== request.operationFingerprint ||
     reservation.operationFingerprintVersion !==
-      request.operationFingerprintVersion
+      request.operationFingerprintVersion ||
+    reservation.toolBatchSize !== request.toolBatchSize ||
+    reservation.toolBatchIndex !== request.toolBatchIndex
   ) {
     throw new ConflictException(
       'operationId already belongs to another budget reservation',
@@ -370,6 +405,12 @@ export function createOperationBudgetReservation(
       ? {
           operationFingerprint: request.operationFingerprint,
           operationFingerprintVersion: request.operationFingerprintVersion,
+        }
+      : {}),
+    ...(request.toolBatchSize !== undefined
+      ? {
+          toolBatchSize: request.toolBatchSize,
+          toolBatchIndex: request.toolBatchIndex,
         }
       : {}),
     phase: request.phase,
@@ -430,7 +471,14 @@ export function governedBudgetStart(
           ) as 'canonical_tool_input_v1',
         }
       : {}),
+    ...(payload.toolBatchSize !== undefined
+      ? {
+          toolBatchSize: Number(payload.toolBatchSize),
+          toolBatchIndex: Number(payload.toolBatchIndex),
+        }
+      : {}),
     loopGuardWarningApplied: payload.loopGuardWarningApplied === true,
+    loopGuardBlockResultApplied: payload.loopGuardBlockResultApplied === true,
   };
   if (
     !EXECUTION_UUID_PATTERN.test(identity.grantId) ||
@@ -470,7 +518,9 @@ export function assertOperationBudgetProjection(
     reservation.name !== identity.name ||
     reservation.operationFingerprint !== identity.operationFingerprint ||
     reservation.operationFingerprintVersion !==
-      identity.operationFingerprintVersion
+      identity.operationFingerprintVersion ||
+    reservation.toolBatchSize !== identity.toolBatchSize ||
+    reservation.toolBatchIndex !== identity.toolBatchIndex
   ) {
     throw new ConflictException(
       `Top-level ${identity.operationKind} budget reservation is invalid or consumed`,
@@ -493,6 +543,15 @@ export function assertOperationBudgetProjection(
   if (identity.loopGuardWarningApplied !== loopGuardWarningRequired) {
     throw new ConflictException(
       'Loop guard warning does not match the durable progress state',
+    );
+  }
+  const loopGuardBlockResultRequired =
+    identity.operationKind === 'inference' &&
+    identity.bucket === 'normal' &&
+    exactToolRepeatGuard?.blockResultPending === true;
+  if (identity.loopGuardBlockResultApplied !== loopGuardBlockResultRequired) {
+    throw new ConflictException(
+      'Loop guard block result does not match the durable progress state',
     );
   }
 }

@@ -49,6 +49,7 @@ export interface ProgressGrantRequest {
     toolCallSoftLimit: number;
     exactToolRepeatWarning?: boolean;
     exactToolRepeatBlockAfterWarning?: boolean;
+    exactToolRepeatTerminateAfterBlock?: boolean;
   };
 }
 
@@ -62,6 +63,8 @@ export interface OperationBudgetReservationRequest {
   toolCallId?: string;
   operationFingerprint?: string;
   operationFingerprintVersion?: 'canonical_tool_input_v1';
+  toolBatchSize?: number;
+  toolBatchIndex?: number;
   phase: string;
   round: number;
   name: string;
@@ -84,10 +87,17 @@ export interface DeterministicPartialOperation {
 
 export interface DeterministicPartialResult {
   version: '1';
-  trigger: 'closing_unavailable' | 'closing_output_empty';
+  trigger:
+    | 'closing_unavailable'
+    | 'closing_output_empty'
+    | 'exact_tool_repeat_persisted';
   loopId: string;
   grantId: string;
   executionAttemptId: string;
   completedOperations: DeterministicPartialOperation[];
-  pending: ['final_synthesis'];
+  pending: ['final_synthesis'] | ['strategy_change'];
+  continuation?: {
+    kind: 'new_turn';
+    reason: 'different_strategy_required';
+  };
 }

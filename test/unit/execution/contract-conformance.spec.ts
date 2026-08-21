@@ -21,9 +21,7 @@ function canonicalValue(value: any): any {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) =>
-          left < right ? -1 : left > right ? 1 : 0,
-        )
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
         .map(([key, child]) => [key, canonicalValue(child)]),
     );
   }
@@ -243,9 +241,9 @@ describe('execution v1 contract', () => {
       });
 
     expect(validateEvent(finishedEvent(payload))).toBe(true);
-    expect(validateEvent(finishedEvent({ ...payload, resultSummary: '' }))).toBe(
-      false,
-    );
+    expect(
+      validateEvent(finishedEvent({ ...payload, resultSummary: '' })),
+    ).toBe(false);
     expect(
       validateEvent(
         finishedEvent({ ...payload, resultSummary: 'x'.repeat(201) }),
@@ -256,9 +254,9 @@ describe('execution v1 contract', () => {
         finishedEvent({ ...payload, resultSummaryKind: 'model_summary' }),
       ),
     ).toBe(false);
-    expect(
-      validateEvent(finishedEvent({ ...payload, status: 'failed' })),
-    ).toBe(false);
+    expect(validateEvent(finishedEvent({ ...payload, status: 'failed' }))).toBe(
+      false,
+    );
   });
 
   it('requires a successful partial result for runtime-authored completion', () => {
@@ -301,7 +299,10 @@ describe('execution v1 contract', () => {
       validateEvent(
         terminalEvent({
           ...payload,
-          partialResult: { ...payload.partialResult, trigger: 'provider_error' },
+          partialResult: {
+            ...payload.partialResult,
+            trigger: 'provider_error',
+          },
         }),
       ),
     ).toBe(false);
@@ -311,6 +312,31 @@ describe('execution v1 contract', () => {
           ...payload,
           to: 'failed',
           error: { code: 'failed', message: 'failed' },
+        }),
+      ),
+    ).toBe(false);
+    const loopPartial = {
+      ...payload,
+      completionReason: 'loop_detected',
+      partialResult: {
+        ...payload.partialResult,
+        trigger: 'exact_tool_repeat_persisted',
+        pending: ['strategy_change'],
+        continuation: {
+          kind: 'new_turn',
+          reason: 'different_strategy_required',
+        },
+      },
+    };
+    expect(validateEvent(terminalEvent(loopPartial))).toBe(true);
+    expect(
+      validateEvent(
+        terminalEvent({
+          ...loopPartial,
+          partialResult: {
+            ...loopPartial.partialResult,
+            pending: ['final_synthesis'],
+          },
         }),
       ),
     ).toBe(false);
@@ -416,6 +442,7 @@ describe('execution v1 contract', () => {
         toolCallSoftLimit: 4,
         exactToolRepeatWarning: true,
         exactToolRepeatBlockAfterWarning: true,
+        exactToolRepeatTerminateAfterBlock: true,
       },
       effectivePolicy: {
         normal: 2,
@@ -427,6 +454,7 @@ describe('execution v1 contract', () => {
         toolCallSoftLimit: 1,
         exactToolRepeatWarning: true,
         exactToolRepeatBlockAfterWarning: true,
+        exactToolRepeatTerminateAfterBlock: true,
       },
       grantedAt: '2026-08-20T10:00:00Z',
     };
@@ -488,6 +516,8 @@ describe('execution v1 contract', () => {
       name: 'folder_read',
       operationFingerprint: `sha256:${'a'.repeat(64)}`,
       operationFingerprintVersion: 'canonical_tool_input_v1',
+      toolBatchSize: 1,
+      toolBatchIndex: 0,
     };
     expect(
       validateEvent(
@@ -549,6 +579,37 @@ describe('execution v1 contract', () => {
         }),
       ),
     ).toBe(true);
+    const terminateSignal = {
+      ...blockSignal,
+      action: 'terminate',
+      blockedOperationId: blockSignal.triggeringOperationId,
+      triggeringOperationId: 'operation-progress-tool-3',
+      blockResultAppliedToOperationId: 'operation-progress-inference-2',
+    };
+    expect(
+      validateEvent(
+        event({
+          message: 'Immediate exact tool repeat persisted',
+          kind: 'loop_guard_triggered',
+          loopGuardSignal: terminateSignal,
+        }),
+      ),
+    ).toBe(true);
+    const terminateWithoutApplication = structuredClone(terminateSignal);
+    delete (
+      terminateWithoutApplication as {
+        blockResultAppliedToOperationId?: string;
+      }
+    ).blockResultAppliedToOperationId;
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid termination without application',
+          kind: 'loop_guard_triggered',
+          loopGuardSignal: terminateWithoutApplication,
+        }),
+      ),
+    ).toBe(false);
     const blockWithoutEvidence = structuredClone(blockSignal);
     delete (blockWithoutEvidence as { resultFingerprint?: string })
       .resultFingerprint;
@@ -752,6 +813,7 @@ describe('execution v1 contract', () => {
         executionAttemptId: 'execution-attempt-progress-1',
         budgetSoftLimitWarningApplied: true,
         loopGuardWarningApplied: true,
+        loopGuardBlockResultApplied: true,
       },
       {
         eventType: 'operation.started',

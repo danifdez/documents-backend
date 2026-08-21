@@ -293,6 +293,108 @@ function exactToolRepeatBlockSignal(
     decidedAt: new Date().toISOString(),
   };
 }
+
+function exactToolRepeatTerminateSignal(
+  rows: ExecutionEventEntity[],
+  request: OperationBudgetReservationRequest,
+  guard: ExactToolRepeatGuardState,
+): Extract<ExactToolRepeatSignal, { action: 'terminate' }> | undefined {
+  if (
+    request.operationKind !== 'tool_call' ||
+    request.toolBatchSize !== 1 ||
+    request.toolBatchIndex !== 0 ||
+    !request.operationFingerprint ||
+    request.operationFingerprintVersion !== 'canonical_tool_input_v1' ||
+    guard.blockResultPending ||
+    !guard.lastBlockedOperationId ||
+    !guard.warningAppliedToOperationId ||
+    !guard.blockResultAppliedToOperationId
+  ) {
+    return undefined;
+  }
+  const blockEvent = rows.find((row) => {
+    const signal = (row.envelope.payload as Record<string, any> | undefined)
+      ?.loopGuardSignal as ExactToolRepeatSignal | undefined;
+    return (
+      signal?.action === 'block' &&
+      signal.grantId === request.grantId &&
+      signal.loopId === request.loopId &&
+      signal.triggeringOperationId === guard.lastBlockedOperationId
+    );
+  });
+  const blockSignal = (
+    blockEvent?.envelope.payload as Record<string, any> | undefined
+  )?.loopGuardSignal as
+    Extract<ExactToolRepeatSignal, { action: 'block' }> | undefined;
+  const application = rows.find((row) => {
+    const envelope = row.envelope as Record<string, any>;
+    const payload = envelope.payload as Record<string, unknown> | undefined;
+    return (
+      envelope.eventType === 'operation.started' &&
+      envelope.operationId === guard.blockResultAppliedToOperationId &&
+      payload?.operationKind === 'inference' &&
+      payload.budgetBucket === 'normal' &&
+      payload.budgetGrantId === request.grantId &&
+      payload.loopId === request.loopId &&
+      payload.loopGuardBlockResultApplied === true &&
+      payload.executionAttemptId === request.executionAttemptId
+    );
+  });
+  if (
+    !blockEvent ||
+    !blockSignal ||
+    !application ||
+    Number(application.sequence) <= Number(blockEvent.sequence) ||
+    blockSignal.operationFingerprint !== request.operationFingerprint ||
+    blockSignal.operationFingerprintVersion !==
+      request.operationFingerprintVersion ||
+    blockSignal.executionAttemptId !== request.executionAttemptId
+  ) {
+    return undefined;
+  }
+  const lastTool = [...rows].reverse().find((row) => {
+    const envelope = row.envelope as Record<string, any>;
+    const payload = envelope.payload as Record<string, unknown> | undefined;
+    return (
+      envelope.eventType === 'operation.started' &&
+      payload?.operationKind === 'tool_call' &&
+      payload.loopId === request.loopId &&
+      payload.budgetGrantId === request.grantId
+    );
+  });
+  const lastEnvelope = lastTool?.envelope as Record<string, any> | undefined;
+  const lastPayload = lastEnvelope?.payload as
+    Record<string, unknown> | undefined;
+  if (
+    !lastTool ||
+    lastEnvelope?.operationId !== blockSignal.previousOperationId ||
+    lastPayload?.name !== request.name ||
+    lastPayload.operationFingerprint !== request.operationFingerprint ||
+    lastPayload.operationFingerprintVersion !==
+      request.operationFingerprintVersion ||
+    lastPayload.executionAttemptId !== request.executionAttemptId
+  ) {
+    return undefined;
+  }
+  return {
+    version: '1',
+    guardKind: 'immediate_exact_tool_repeat',
+    action: 'terminate',
+    grantId: request.grantId,
+    loopId: request.loopId,
+    previousOperationId: blockSignal.previousOperationId,
+    blockedOperationId: blockSignal.triggeringOperationId,
+    triggeringOperationId: request.operationId,
+    warningAppliedToOperationId: blockSignal.warningAppliedToOperationId,
+    blockResultAppliedToOperationId: guard.blockResultAppliedToOperationId,
+    operationFingerprint: request.operationFingerprint,
+    operationFingerprintVersion: 'canonical_tool_input_v1',
+    resultFingerprint: blockSignal.resultFingerprint,
+    resultFingerprintVersion: 'tool_output_content_hash_v1',
+    executionAttemptId: request.executionAttemptId,
+    decidedAt: new Date().toISOString(),
+  };
+}
 const FORBIDDEN_KEYS = new Set([
   'accesstoken',
   'apikey',
@@ -1115,6 +1217,12 @@ export class ExecutionService {
           delete comparableRequest.exactToolRepeatBlockAfterWarning;
         }
         if (
+          existing.requestedPolicy.exactToolRepeatTerminateAfterBlock ===
+          undefined
+        ) {
+          delete comparableRequest.exactToolRepeatTerminateAfterBlock;
+        }
+        if (
           existing.loopId !== request.loopId ||
           canonicalJson(existing.requestedPolicy) !==
             canonicalJson(comparableRequest)
@@ -1165,6 +1273,11 @@ export class ExecutionService {
         exactToolRepeatBlockAfterWarning:
           this.progressLimit(
             'PROGRESS_CHAT_EXACT_TOOL_REPEAT_BLOCK_AFTER_WARNING',
+            1,
+          ) > 0,
+        exactToolRepeatTerminateAfterBlock:
+          this.progressLimit(
+            'PROGRESS_CHAT_EXACT_TOOL_REPEAT_TERMINATE_AFTER_BLOCK',
             1,
           ) > 0,
       });
@@ -1304,6 +1417,16 @@ export class ExecutionService {
       if (!grant || grant.loopId !== request.loopId) {
         throw new BadRequestException('Unknown operation budget grant');
       }
+      if (
+        request.operationKind === 'tool_call' &&
+        grant.effectivePolicy.exactToolRepeatTerminateAfterBlock === true &&
+        (request.toolBatchSize === undefined ||
+          request.toolBatchIndex === undefined)
+      ) {
+        throw new BadRequestException(
+          'Tool batch identity is required by the active loop guard policy',
+        );
+      }
       assertBucketMatchesOperation(
         request.operationKind,
         request.bucket,
@@ -1315,12 +1438,18 @@ export class ExecutionService {
         progress.ledger,
         grant.grantId,
       );
+      const terminateSignal =
+        hasBudget &&
+        grant.effectivePolicy.exactToolRepeatTerminateAfterBlock === true
+          ? exactToolRepeatTerminateSignal(rows, request, guardBefore)
+          : undefined;
       const blockSignal =
         hasBudget &&
+        !terminateSignal &&
         grant.effectivePolicy.exactToolRepeatBlockAfterWarning === true
           ? exactToolRepeatBlockSignal(rows, request, guardBefore)
           : undefined;
-      const granted = hasBudget && !blockSignal;
+      const granted = hasBudget && !terminateSignal && !blockSignal;
       const committed = usage.reserved + usage.consumed + (granted ? 1 : 0);
       const crossesSoftLimit =
         granted &&
@@ -1334,13 +1463,17 @@ export class ExecutionService {
         granted && grant.effectivePolicy.exactToolRepeatWarning === true
           ? exactToolRepeatWarningSignal(rows, request, guardBefore)
           : undefined;
-      const loopGuardSignal = blockSignal ?? warningSignal;
+      const loopGuardSignal = terminateSignal ?? blockSignal ?? warningSignal;
       const reservation = createOperationBudgetReservation(
         request,
         granted,
         randomUUID(),
         new Date().toISOString(),
-        blockSignal ? 'immediate_exact_tool_repeat_blocked' : undefined,
+        terminateSignal
+          ? 'immediate_exact_tool_repeat_terminated'
+          : blockSignal
+            ? 'immediate_exact_tool_repeat_blocked'
+            : undefined,
       );
       let producerSequence = this.nextBackendProducerSequence(rows);
       let sequence = Number(execution.lastSequence) + 1;
@@ -1354,8 +1487,10 @@ export class ExecutionService {
           payload: {
             message: granted
               ? 'Operation budget reserved'
-              : blockSignal
-                ? 'Operation blocked by loop guard'
+              : loopGuardSignal
+                ? terminateSignal
+                  ? 'Execution terminated by loop guard'
+                  : 'Operation blocked by loop guard'
                 : 'Operation budget reservation denied',
             kind: 'budget_reservation',
             reservation,
@@ -1419,9 +1554,11 @@ export class ExecutionService {
             payloadSchema: 'progress.reported/1',
             payload: {
               message:
-                loopGuardSignal.action === 'block'
-                  ? 'Immediate exact tool repeat blocked'
-                  : 'Immediate exact tool repeat detected',
+                loopGuardSignal.action === 'terminate'
+                  ? 'Immediate exact tool repeat persisted'
+                  : loopGuardSignal.action === 'block'
+                    ? 'Immediate exact tool repeat blocked'
+                    : 'Immediate exact tool repeat detected',
               kind: 'loop_guard_triggered',
               loopGuardSignal,
             },
@@ -1490,6 +1627,7 @@ export class ExecutionService {
               execution.rootExecutionId,
             )
           : [];
+      this.assertLoopDetectedCompletion(execution, rows, error, completion);
       this.assertDeterministicPartial(
         execution,
         rows,
@@ -1632,7 +1770,13 @@ export class ExecutionService {
                 : {}),
               result: finalResult,
               error: error
-                ? { code: 'CHAT_FAILED', message: redactExecutionText(error) }
+                ? {
+                    code:
+                      completionReason === 'loop_detected'
+                        ? 'IMMEDIATE_EXACT_TOOL_REPEAT_PERSISTED'
+                        : 'CHAT_FAILED',
+                    message: redactExecutionText(error),
+                  }
                 : null,
             },
             actor: { type: 'system' },
@@ -1649,7 +1793,13 @@ export class ExecutionService {
         execution.completionReason = completionReason;
         execution.result = finalResult;
         execution.error = error
-          ? { code: 'CHAT_FAILED', message: redactExecutionText(error) }
+          ? {
+              code:
+                completionReason === 'loop_detected'
+                  ? 'IMMEDIATE_EXACT_TOOL_REPEAT_PERSISTED'
+                  : 'CHAT_FAILED',
+              message: redactExecutionText(error),
+            }
           : null;
       }
       execution.lastSequence = String(sequence);
@@ -1684,6 +1834,7 @@ export class ExecutionService {
       this.artifactRepo,
       execution.rootExecutionId,
     );
+    this.assertLoopDetectedCompletion(execution, rows, error, completion);
     this.assertDeterministicPartial(
       execution,
       rows,
@@ -1726,12 +1877,12 @@ export class ExecutionService {
     if (
       error ||
       completion.kind !== 'partial' ||
-      !['budget_exhausted', 'tool_budget_exhausted'].includes(
+      !['budget_exhausted', 'tool_budget_exhausted', 'loop_detected'].includes(
         String(completion.reason),
       )
     ) {
       throw new BadRequestException(
-        'Runtime template completion must be a successful budget partial',
+        'Runtime template completion must be a supported successful partial',
       );
     }
     const partial = completion.partialResult;
@@ -1877,7 +2028,28 @@ export class ExecutionService {
         );
       }
     }
-    if (partial.trigger === 'closing_output_empty') {
+    if (partial.trigger === 'exact_tool_repeat_persisted') {
+      const termination = rows.some((row) => {
+        const payload = row.envelope['payload'] as
+          Record<string, any> | undefined;
+        const signal = payload?.['loopGuardSignal'] as
+          Record<string, any> | undefined;
+        return (
+          row.executionId === execution.executionId &&
+          row.eventType === 'progress.reported' &&
+          payload?.['kind'] === 'loop_guard_triggered' &&
+          signal?.['action'] === 'terminate' &&
+          signal?.['grantId'] === partial.grantId &&
+          signal?.['loopId'] === partial.loopId &&
+          signal?.['executionAttemptId'] === partial.executionAttemptId
+        );
+      });
+      if (!termination) {
+        throw new BadRequestException(
+          'Runtime template loop termination is not durable',
+        );
+      }
+    } else if (partial.trigger === 'closing_output_empty') {
       const closingStart = rows.find((row) => {
         const payload = row.envelope['payload'] as
           Record<string, any> | undefined;
@@ -1944,9 +2116,11 @@ export class ExecutionService {
   ): void {
     if (
       partial.version !== '1' ||
-      !['closing_unavailable', 'closing_output_empty'].includes(
-        partial.trigger,
-      ) ||
+      ![
+        'closing_unavailable',
+        'closing_output_empty',
+        'exact_tool_repeat_persisted',
+      ].includes(partial.trigger) ||
       partial.executionAttemptId !== execution.attemptId ||
       !EXECUTION_UUID_PATTERN.test(partial.loopId) ||
       !EXECUTION_UUID_PATTERN.test(partial.grantId) ||
@@ -1954,8 +2128,19 @@ export class ExecutionService {
       !Array.isArray(partial.completedOperations) ||
       partial.completedOperations.length === 0 ||
       !Array.isArray(partial.pending) ||
-      partial.pending.length !== 1 ||
-      partial.pending[0] !== 'final_synthesis'
+      partial.pending.length !== 1
+    ) {
+      throw new BadRequestException('Invalid deterministic partial result');
+    }
+    const loopPartial = partial.trigger === 'exact_tool_repeat_persisted';
+    if (
+      (loopPartial &&
+        (partial.pending[0] !== 'strategy_change' ||
+          partial.continuation?.kind !== 'new_turn' ||
+          partial.continuation.reason !== 'different_strategy_required')) ||
+      (!loopPartial &&
+        (partial.pending[0] !== 'final_synthesis' ||
+          partial.continuation !== undefined))
     ) {
       throw new BadRequestException('Invalid deterministic partial result');
     }
@@ -1972,6 +2157,42 @@ export class ExecutionService {
           'Invalid deterministic partial operation reference',
         );
       }
+    }
+  }
+
+  private assertLoopDetectedCompletion(
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+    error: string | null,
+    completion?: ExecutionCompletion,
+  ): void {
+    if (completion?.reason !== 'loop_detected') return;
+    const hasTermination = rows.some((row) => {
+      const payload = row.envelope.payload as Record<string, any> | undefined;
+      const signal = payload?.loopGuardSignal as
+        Record<string, unknown> | undefined;
+      return (
+        row.executionId === execution.executionId &&
+        row.eventType === 'progress.reported' &&
+        payload?.kind === 'loop_guard_triggered' &&
+        signal?.action === 'terminate' &&
+        signal?.executionAttemptId === execution.attemptId
+      );
+    });
+    if (!hasTermination) {
+      throw new BadRequestException(
+        'Loop-detected completion requires a durable termination signal',
+      );
+    }
+    if (error && (completion.kind === 'partial' || completion.partialResult)) {
+      throw new BadRequestException(
+        'Failed loop termination cannot contain a partial result',
+      );
+    }
+    if (!error && completion.source !== 'runtime_template') {
+      throw new BadRequestException(
+        'Successful loop termination requires a runtime template',
+      );
     }
   }
 

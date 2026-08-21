@@ -107,6 +107,7 @@ describe('ExecutionService operation budget', () => {
       toolCallSoftLimit: 4,
       exactToolRepeatWarning: true,
       exactToolRepeatBlockAfterWarning: true,
+      exactToolRepeatTerminateAfterBlock: false,
     },
   });
 
@@ -128,6 +129,8 @@ describe('ExecutionService operation budget', () => {
       toolCallId,
       operationFingerprint: fingerprint,
       operationFingerprintVersion: 'canonical_tool_input_v1',
+      toolBatchSize: 1,
+      toolBatchIndex: 0,
       phase: 'agent_loop',
       round,
       name,
@@ -159,6 +162,8 @@ describe('ExecutionService operation budget', () => {
           executionAttemptId: ATTEMPT_ID,
           operationFingerprint: fingerprint,
           operationFingerprintVersion: 'canonical_tool_input_v1',
+          toolBatchSize: 1,
+          toolBatchIndex: 0,
         },
       },
     });
@@ -376,6 +381,80 @@ describe('ExecutionService operation budget', () => {
         'Different reply',
         null,
         completion,
+      ),
+    ).toThrow(BadRequestException);
+  });
+
+  it('requires durable termination evidence for a loop-detected failure', () => {
+    const completion = { reason: 'loop_detected' };
+    const termination = {
+      executionId: EXECUTION_ID,
+      eventType: 'progress.reported',
+      envelope: {
+        payload: {
+          kind: 'loop_guard_triggered',
+          loopGuardSignal: {
+            action: 'terminate',
+            executionAttemptId: ATTEMPT_ID,
+          },
+        },
+      },
+    };
+
+    expect(() =>
+      (service as any).assertLoopDetectedCompletion(
+        execution,
+        [termination],
+        'Immediate exact tool repeat persisted',
+        completion,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      (service as any).assertLoopDetectedCompletion(
+        execution,
+        [],
+        'Immediate exact tool repeat persisted',
+        completion,
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      (service as any).assertLoopDetectedCompletion(
+        execution,
+        [termination],
+        null,
+        completion,
+      ),
+    ).toThrow(BadRequestException);
+  });
+
+  it('accepts only the strategy-change shape for loop partials', () => {
+    const partial = {
+      version: '1',
+      trigger: 'exact_tool_repeat_persisted',
+      loopId: EXECUTION_ID,
+      grantId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+      executionAttemptId: ATTEMPT_ID,
+      completedOperations: [
+        {
+          operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
+          toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
+          name: 'folder_read',
+          summary: 'Document read',
+        },
+      ],
+      pending: ['strategy_change'],
+      continuation: {
+        kind: 'new_turn',
+        reason: 'different_strategy_required',
+      },
+    };
+    expect(() =>
+      (service as any).assertPartialShape(partial, execution),
+    ).not.toThrow();
+    expect(() =>
+      (service as any).assertPartialShape(
+        { ...partial, pending: ['final_synthesis'] },
+        execution,
       ),
     ).toThrow(BadRequestException);
   });
@@ -690,6 +769,7 @@ describe('ExecutionService operation budget', () => {
     const request = grantRequest();
     delete request.requestedPolicy.exactToolRepeatWarning;
     delete request.requestedPolicy.exactToolRepeatBlockAfterWarning;
+    delete request.requestedPolicy.exactToolRepeatTerminateAfterBlock;
 
     const { grant, guardState } = await service.requestProgressGrant(
       EXECUTION_ID,
@@ -704,6 +784,8 @@ describe('ExecutionService operation budget', () => {
       warningIssued: false,
       warningPending: false,
       blocks: 0,
+      blockResultPending: false,
+      terminations: 0,
     });
   });
 
@@ -804,6 +886,8 @@ describe('ExecutionService operation budget', () => {
       bucket: 'tool' as const,
       operationFingerprint: fingerprint,
       operationFingerprintVersion: 'canonical_tool_input_v1' as const,
+      toolBatchSize: 1,
+      toolBatchIndex: 0,
       phase: 'agent_loop',
       name: 'folder_read',
       executionAttemptId: ATTEMPT_ID,
@@ -972,12 +1056,15 @@ describe('ExecutionService operation budget', () => {
       if (name === 'PROGRESS_CHAT_EXACT_TOOL_REPEAT_BLOCK_AFTER_WARNING') {
         return '1';
       }
+      if (name === 'PROGRESS_CHAT_EXACT_TOOL_REPEAT_TERMINATE_AFTER_BLOCK') {
+        return '1';
+      }
       return undefined;
     });
-    const { grant } = await service.requestProgressGrant(
-      EXECUTION_ID,
-      grantRequest(),
-    );
+    const request = grantRequest();
+    request.requestedPolicy.exactToolRepeatTerminateAfterBlock = true;
+    const { grant } = await service.requestProgressGrant(EXECUTION_ID, request);
+    expect(grant.effectivePolicy.exactToolRepeatTerminateAfterBlock).toBe(true);
     const fingerprint = `sha256:${'f'.repeat(64)}`;
     const resultHash = `sha256:${'1'.repeat(64)}`;
     const firstOperationId = '018f1d8a-54d7-7d63-a1ee-000000000901';
@@ -1062,6 +1149,8 @@ describe('ExecutionService operation budget', () => {
       toolCallId: '018f1d8a-54d7-7d63-a1ee-000000000908',
       operationFingerprint: fingerprint,
       operationFingerprintVersion: 'canonical_tool_input_v1' as const,
+      toolBatchSize: 1,
+      toolBatchIndex: 0,
       phase: 'agent_loop',
       round: 3,
       name: 'folder_read',
@@ -1112,6 +1201,154 @@ describe('ExecutionService operation budget', () => {
         (row) => row.envelope.payload.kind === 'loop_guard_triggered',
       ),
     ).toHaveLength(2);
+
+    const applyingOperationId = '018f1d8a-54d7-7d63-a1ee-000000000909';
+    const applying = await service.reserveOperationBudget(EXECUTION_ID, {
+      executionId: EXECUTION_ID,
+      loopId: EXECUTION_ID,
+      grantId: grant.grantId,
+      operationId: applyingOperationId,
+      operationKind: 'inference',
+      bucket: 'normal',
+      phase: 'agent_loop',
+      round: 4,
+      name: 'chat_with_tools',
+      executionAttemptId: ATTEMPT_ID,
+    });
+    const applyingSequence = Number(execution.lastSequence) + 1;
+    const applyingStart = {
+      sequence: String(applyingSequence),
+      executionId: EXECUTION_ID,
+      operationId: applyingOperationId,
+      eventType: 'operation.started',
+      envelope: {
+        sequence: applyingSequence,
+        eventType: 'operation.started',
+        operationId: applyingOperationId,
+        attemptId: '018f1d8a-54d7-7d63-a1ee-000000000910',
+        payload: {
+          operationKind: 'inference',
+          loopId: EXECUTION_ID,
+          loopKind: 'top_level',
+          phase: 'agent_loop',
+          name: 'chat_with_tools',
+          round: 4,
+          budgetGrantId: grant.grantId,
+          budgetReservationId: applying.reservation.reservationId,
+          budgetBucket: 'normal',
+          executionAttemptId: ATTEMPT_ID,
+          budgetSoftLimitWarningApplied: true,
+          loopGuardBlockResultApplied: true,
+        },
+      },
+    };
+    expect(() => validateBudgetStart(applyingStart.envelope)).not.toThrow();
+    rows.push(applyingStart);
+    execution.lastSequence = String(applyingSequence);
+
+    const sameBatchOperationId = '018f1d8a-54d7-7d63-a1ee-000000000911';
+    const sameBatch = await service.reserveOperationBudget(EXECUTION_ID, {
+      ...blockRequest,
+      operationId: sameBatchOperationId,
+      toolCallId: '018f1d8a-54d7-7d63-a1ee-000000000912',
+      toolBatchSize: 2,
+      round: 4,
+    });
+    expect(sameBatch).toMatchObject({
+      granted: false,
+      reservation: { reason: 'immediate_exact_tool_repeat_blocked' },
+      loopGuardSignal: { action: 'block' },
+      guardState: { blockResultPending: true, terminations: 0 },
+    });
+
+    const secondApplyingOperationId = '018f1d8a-54d7-7d63-a1ee-000000000913';
+    const secondApplying = await service.reserveOperationBudget(EXECUTION_ID, {
+      executionId: EXECUTION_ID,
+      loopId: EXECUTION_ID,
+      grantId: grant.grantId,
+      operationId: secondApplyingOperationId,
+      operationKind: 'inference',
+      bucket: 'normal',
+      phase: 'agent_loop',
+      round: 5,
+      name: 'chat_with_tools',
+      executionAttemptId: ATTEMPT_ID,
+    });
+    const secondApplyingSequence = Number(execution.lastSequence) + 1;
+    const secondApplyingStart = {
+      sequence: String(secondApplyingSequence),
+      executionId: EXECUTION_ID,
+      operationId: secondApplyingOperationId,
+      eventType: 'operation.started',
+      envelope: {
+        sequence: secondApplyingSequence,
+        eventType: 'operation.started',
+        operationId: secondApplyingOperationId,
+        attemptId: '018f1d8a-54d7-7d63-a1ee-000000000914',
+        payload: {
+          operationKind: 'inference',
+          loopId: EXECUTION_ID,
+          loopKind: 'top_level',
+          phase: 'agent_loop',
+          name: 'chat_with_tools',
+          round: 5,
+          budgetGrantId: grant.grantId,
+          budgetReservationId: secondApplying.reservation.reservationId,
+          budgetBucket: 'normal',
+          executionAttemptId: ATTEMPT_ID,
+          loopGuardBlockResultApplied: true,
+        },
+      },
+    };
+    expect(() =>
+      validateBudgetStart(secondApplyingStart.envelope),
+    ).not.toThrow();
+    rows.push(secondApplyingStart);
+    execution.lastSequence = String(secondApplyingSequence);
+
+    const terminalOperationId = '018f1d8a-54d7-7d63-a1ee-000000000915';
+    const terminalRequest = {
+      ...blockRequest,
+      operationId: terminalOperationId,
+      toolCallId: '018f1d8a-54d7-7d63-a1ee-000000000916',
+      round: 5,
+    };
+    const terminated = await service.reserveOperationBudget(
+      EXECUTION_ID,
+      terminalRequest,
+    );
+    expect(terminated).toMatchObject({
+      granted: false,
+      reservation: {
+        reason: 'immediate_exact_tool_repeat_terminated',
+        toolBatchSize: 1,
+        toolBatchIndex: 0,
+      },
+      budgetState: { tool: { consumed: 2, available: 4 } },
+      loopGuardSignal: {
+        action: 'terminate',
+        blockedOperationId: sameBatchOperationId,
+        triggeringOperationId: terminalOperationId,
+        blockResultAppliedToOperationId: secondApplyingOperationId,
+        resultFingerprint: resultHash,
+      },
+      guardState: {
+        blocks: 2,
+        blockResultPending: false,
+        terminations: 1,
+        lastTerminatedOperationId: terminalOperationId,
+      },
+    });
+    const terminalReplay = await service.reserveOperationBudget(
+      EXECUTION_ID,
+      terminalRequest,
+    );
+    expect(terminalReplay.loopGuardSignal).toEqual(terminated.loopGuardSignal);
+    expect(
+      rows.filter(
+        (row) => row.envelope.payload.loopGuardSignal?.action === 'terminate',
+      ),
+    ).toHaveLength(1);
   });
 
   it('does not block when the repeated tools produced different results', async () => {

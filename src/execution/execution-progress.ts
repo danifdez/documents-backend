@@ -44,6 +44,7 @@ export type OperationBudgetGrant = {
     toolCallSoftLimit?: number;
     exactToolRepeatWarning?: boolean;
     exactToolRepeatBlockAfterWarning?: boolean;
+    exactToolRepeatTerminateAfterBlock?: boolean;
   };
   effectivePolicy: {
     normal: number;
@@ -55,6 +56,7 @@ export type OperationBudgetGrant = {
     toolCallSoftLimit?: number;
     exactToolRepeatWarning?: boolean;
     exactToolRepeatBlockAfterWarning?: boolean;
+    exactToolRepeatTerminateAfterBlock?: boolean;
   };
   grantedAt: string;
 };
@@ -70,6 +72,8 @@ export type OperationBudgetReservation = {
   toolCallId?: string;
   operationFingerprint?: string;
   operationFingerprintVersion?: 'canonical_tool_input_v1';
+  toolBatchSize?: number;
+  toolBatchIndex?: number;
   phase: string;
   round: number;
   name: string;
@@ -138,8 +142,29 @@ export type ExactToolRepeatBlockSignal = {
   decidedAt: string;
 };
 
+export type ExactToolRepeatTerminateSignal = {
+  version: '1';
+  guardKind: 'immediate_exact_tool_repeat';
+  action: 'terminate';
+  grantId: string;
+  loopId: string;
+  previousOperationId: string;
+  blockedOperationId: string;
+  triggeringOperationId: string;
+  warningAppliedToOperationId: string;
+  blockResultAppliedToOperationId: string;
+  operationFingerprint: string;
+  operationFingerprintVersion: 'canonical_tool_input_v1';
+  resultFingerprint: string;
+  resultFingerprintVersion: 'tool_output_content_hash_v1';
+  executionAttemptId: string;
+  decidedAt: string;
+};
+
 export type ExactToolRepeatSignal =
-  ExactToolRepeatWarningSignal | ExactToolRepeatBlockSignal;
+  | ExactToolRepeatWarningSignal
+  | ExactToolRepeatBlockSignal
+  | ExactToolRepeatTerminateSignal;
 
 export type ExactToolRepeatGuardState = {
   detections: number;
@@ -151,10 +176,14 @@ export type ExactToolRepeatGuardState = {
   operationFingerprint?: string;
   operationFingerprintVersion?: 'canonical_tool_input_v1';
   warningAppliedToOperationId?: string;
+  blockResultPending: boolean;
+  blockResultAppliedToOperationId?: string;
   lastBlockedOperationId?: string;
   lastBlockedPreviousOperationId?: string;
   resultFingerprint?: string;
   resultFingerprintVersion?: 'tool_output_content_hash_v1';
+  terminations: number;
+  lastTerminatedOperationId?: string;
 };
 
 export type ProgressLedger = {
@@ -249,9 +278,13 @@ export function exactToolRepeatGuardSnapshot(
       warningIssued: false,
       warningPending: false,
       blocks: 0,
+      blockResultPending: false,
+      terminations: 0,
     },
   );
   snapshot.blocks ??= 0;
+  snapshot.blockResultPending ??= false;
+  snapshot.terminations ??= 0;
   return snapshot;
 }
 
@@ -309,6 +342,8 @@ function applyBudgetEvent(
             warningIssued: true,
             warningPending: true,
             blocks: 0,
+            blockResultPending: false,
+            terminations: 0,
             previousOperationId: signal.previousOperationId,
             triggeringOperationId: signal.triggeringOperationId,
             operationFingerprint: signal.operationFingerprint,
@@ -321,7 +356,14 @@ function applyBudgetEvent(
     const guard = guards[signal.grantId]?.exactToolRepeat;
     if (!guard?.warningAppliedToOperationId) return true;
     guard.detections += 1;
+    if (signal.action === 'terminate') {
+      if (!guard.blockResultAppliedToOperationId) return true;
+      guard.terminations = (guard.terminations ?? 0) + 1;
+      guard.lastTerminatedOperationId = signal.triggeringOperationId;
+      return true;
+    }
     guard.blocks = (guard.blocks ?? 0) + 1;
+    guard.blockResultPending = true;
     guard.lastBlockedOperationId = signal.triggeringOperationId;
     guard.lastBlockedPreviousOperationId = signal.previousOperationId;
     guard.resultFingerprint = signal.resultFingerprint;
@@ -396,6 +438,16 @@ function consumeBudgetReservation(
     if (guard?.warningPending) {
       guard.warningPending = false;
       guard.warningAppliedToOperationId = operationId;
+    }
+  }
+  if (
+    reservation.bucket === 'normal' &&
+    event.payload.loopGuardBlockResultApplied === true
+  ) {
+    const guard = ledger.loopGuards?.[reservation.grantId]?.exactToolRepeat;
+    if (guard?.blockResultPending) {
+      guard.blockResultPending = false;
+      guard.blockResultAppliedToOperationId = operationId;
     }
   }
 }
