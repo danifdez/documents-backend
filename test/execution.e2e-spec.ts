@@ -271,6 +271,7 @@ describe('execution PostgreSQL integration', () => {
       maxTokensPerInference: 512,
       toolCalls: 1,
       toolCallSoftLimit: 0,
+      exactToolRepeatWarning: true,
     };
     const { grant } = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
@@ -393,6 +394,7 @@ describe('execution PostgreSQL integration', () => {
         maxTokensPerInference: 512,
         toolCalls: 6,
         toolCallSoftLimit: 4,
+        exactToolRepeatWarning: true,
       },
     });
     const reserveTool = (operationId = randomUUID()) =>
@@ -481,6 +483,7 @@ describe('execution PostgreSQL integration', () => {
         maxTokensPerInference: 512,
         toolCalls: 0,
         toolCallSoftLimit: 0,
+        exactToolRepeatWarning: true,
       },
     });
     const reserveInference = (operationId = randomUUID()) =>
@@ -534,6 +537,241 @@ describe('execution PostgreSQL integration', () => {
     });
   });
 
+  it('persists one exact-repeat signal and consumes its warning transactionally', async () => {
+    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const context = await service.createForChat(
+      'assistant_chat',
+      'repeat one exact tool call',
+      scope,
+      {},
+    );
+    const attemptId = randomUUID();
+    await dataSource.query(
+      `UPDATE "${schema}"."executions"
+       SET "status" = 'running', "phase" = 'worker_execution',
+           "attempt_id" = $1
+       WHERE "execution_id" = $2`,
+      [attemptId, context.executionId],
+    );
+    const { grant } = await service.requestProgressGrant(context.executionId, {
+      executionId: context.executionId,
+      turnId: context.turnId,
+      loopId: context.executionId,
+      agentName: 'assistant',
+      loopKind: 'top_level',
+      executionAttemptId: attemptId,
+      requestedPolicy: {
+        normal: 2,
+        normalInferenceSoftLimit: 0,
+        repair: 0,
+        closing: 1,
+        maxTokensPerInference: 512,
+        toolCalls: 3,
+        toolCallSoftLimit: 0,
+        exactToolRepeatWarning: true,
+      },
+    });
+    const fingerprint = `sha256:${'a'.repeat(64)}`;
+    let producerSequence = 0;
+    let causedByEventId = (
+      await dataSource.getRepository(ExecutionEntity).findOneByOrFail({
+        executionId: context.executionId,
+      })
+    ).lastEventId;
+    const accept = async (
+      eventType: string,
+      payloadSchema: string,
+      payload: Record<string, unknown>,
+      identity: Record<string, unknown>,
+    ) => {
+      const eventId = randomUUID();
+      await service.acceptEvents(context.rootExecutionId, [
+        {
+          eventId,
+          rootExecutionId: context.rootExecutionId,
+          executionId: context.executionId,
+          turnId: context.turnId,
+          producerSequence: ++producerSequence,
+          eventType,
+          producer: {
+            component: 'documents-models',
+            instanceId: `mvp10-${attemptId}`,
+            version: 'test',
+          },
+          actor: {
+            type: payload.operationKind === 'inference' ? 'model' : 'tool',
+          },
+          causedByEventId,
+          occurredAt: new Date().toISOString(),
+          payloadSchema,
+          payload,
+          artifactRefs: [],
+          security: {
+            dataClassification: 'workspace',
+            purpose: 'evaluation',
+            allowedDestinations: ['documents', 'ai-train'],
+            redactionApplied: true,
+          },
+          ...identity,
+        } as any,
+      ]);
+      causedByEventId = eventId;
+    };
+    const reserveTool = (
+      operationId: string,
+      toolCallId: string,
+      round: number,
+    ) =>
+      service.reserveOperationBudget(context.executionId, {
+        executionId: context.executionId,
+        loopId: context.executionId,
+        grantId: grant.grantId,
+        operationId,
+        operationKind: 'tool_call',
+        bucket: 'tool',
+        toolCallId,
+        operationFingerprint: fingerprint,
+        operationFingerprintVersion: 'canonical_tool_input_v1',
+        phase: 'agent_loop',
+        round,
+        name: 'folder_read',
+        executionAttemptId: attemptId,
+      });
+    const firstOperationId = randomUUID();
+    const firstToolCallId = randomUUID();
+    const first = await reserveTool(firstOperationId, firstToolCallId, 1);
+    causedByEventId = first.eventId;
+    const firstAttemptId = randomUUID();
+    await accept(
+      'operation.started',
+      'operation.started/1',
+      {
+        operationKind: 'tool_call',
+        status: 'dispatched',
+        name: 'folder_read',
+        loopId: context.executionId,
+        agentName: 'assistant',
+        loopKind: 'top_level',
+        round: 1,
+        maxRounds: 2,
+        phase: 'agent_loop',
+        budgetGrantId: grant.grantId,
+        budgetReservationId: first.reservation.reservationId,
+        budgetBucket: 'tool',
+        executionAttemptId: attemptId,
+        operationFingerprint: fingerprint,
+        operationFingerprintVersion: 'canonical_tool_input_v1',
+      },
+      {
+        operationId: firstOperationId,
+        attemptId: firstAttemptId,
+        toolCallId: firstToolCallId,
+      },
+    );
+    await accept(
+      'operation.finished',
+      'operation.finished/1',
+      {
+        operationKind: 'tool_call',
+        status: 'succeeded',
+        result: { summary: 'Folder read' },
+        error: null,
+      },
+      {
+        operationId: firstOperationId,
+        attemptId: firstAttemptId,
+        toolCallId: firstToolCallId,
+      },
+    );
+
+    const repeatedOperationId = randomUUID();
+    const repeatedToolCallId = randomUUID();
+    const decisions = await Promise.all([
+      reserveTool(repeatedOperationId, repeatedToolCallId, 2),
+      reserveTool(repeatedOperationId, repeatedToolCallId, 2),
+    ]);
+    expect(decisions.every((decision) => decision.granted)).toBe(true);
+    expect(decisions[0].loopGuardSignal).toEqual(decisions[1].loopGuardSignal);
+    expect(decisions[0].guardState).toMatchObject({
+      detections: 1,
+      warningIssued: true,
+      warningPending: true,
+    });
+    const storedSignals = (
+      await dataSource.getRepository(ExecutionEventEntity).find({
+        where: { rootExecutionId: context.rootExecutionId },
+      })
+    ).filter(
+      (event) =>
+        (event.envelope.payload as Record<string, unknown>)?.kind ===
+        'loop_guard_triggered',
+    );
+    expect(storedSignals).toHaveLength(1);
+
+    causedByEventId = decisions[0].eventId;
+    const inferenceOperationId = randomUUID();
+    const inference = await service.reserveOperationBudget(
+      context.executionId,
+      {
+        executionId: context.executionId,
+        loopId: context.executionId,
+        grantId: grant.grantId,
+        operationId: inferenceOperationId,
+        operationKind: 'inference',
+        bucket: 'normal',
+        phase: 'agent_loop',
+        round: 2,
+        name: 'chat_with_tools',
+        executionAttemptId: attemptId,
+      },
+    );
+    causedByEventId = inference.eventId;
+    const inferenceAttemptId = randomUUID();
+    const inferencePayload = {
+      operationKind: 'inference',
+      status: 'dispatched',
+      name: 'chat_with_tools',
+      loopId: context.executionId,
+      agentName: 'assistant',
+      loopKind: 'top_level',
+      round: 2,
+      maxRounds: 2,
+      phase: 'agent_loop',
+      budgetGrantId: grant.grantId,
+      budgetReservationId: inference.reservation.reservationId,
+      budgetBucket: 'normal',
+      executionAttemptId: attemptId,
+    };
+    await expect(
+      accept(
+        'operation.started',
+        'operation.started/1',
+        inferencePayload,
+        {
+          operationId: inferenceOperationId,
+          attemptId: inferenceAttemptId,
+        },
+      ),
+    ).rejects.toThrow('Loop guard warning does not match');
+    await accept(
+      'operation.started',
+      'operation.started/1',
+      { ...inferencePayload, loopGuardWarningApplied: true },
+      {
+        operationId: inferenceOperationId,
+        attemptId: inferenceAttemptId,
+      },
+    );
+    const projected = await service.readProgress(
+      context.rootExecutionId,
+      scope,
+    );
+    expect(projected.ledger.loopGuards[grant.grantId].exactToolRepeat).toMatchObject({
+      warningPending: false,
+      warningAppliedToOperationId: inferenceOperationId,
+    });
+  });
+
   it('validates, fences, finalizes, and replays a deterministic partial', async () => {
     const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
     const context = await service.createForChat(
@@ -558,6 +796,7 @@ describe('execution PostgreSQL integration', () => {
       maxTokensPerInference: 128,
       toolCalls: 1,
       toolCallSoftLimit: 0,
+      exactToolRepeatWarning: true,
     };
     const { grant } = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,

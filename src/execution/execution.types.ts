@@ -47,6 +47,7 @@ export interface ProgressGrantRequest {
     maxTokensPerInference: number;
     toolCalls: number;
     toolCallSoftLimit: number;
+    exactToolRepeatWarning?: boolean;
   };
 }
 
@@ -58,6 +59,8 @@ export interface OperationBudgetReservationRequest {
   operationKind: 'inference' | 'tool_call';
   bucket: 'normal' | 'repair' | 'closing' | 'tool';
   toolCallId?: string;
+  operationFingerprint?: string;
+  operationFingerprintVersion?: 'canonical_tool_input_v1';
   phase: string;
   round: number;
   name: string;

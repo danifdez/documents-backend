@@ -7,6 +7,7 @@ import {
 } from '../../../src/execution/inference-budget-policy';
 import {
   ProgressEvent,
+  exactToolRepeatGuardSnapshot,
   projectExecutionProgress,
 } from '../../../src/execution/execution-progress';
 import {
@@ -30,7 +31,11 @@ describe('ExecutionService operation budget', () => {
     const progress = projectExecutionProgress(
       rows.map((row) => row.envelope as ProgressEvent),
     );
-    assertOperationBudgetProjection(identity, progress.ledger.operationBudget);
+    assertOperationBudgetProjection(
+      identity,
+      progress.ledger.operationBudget,
+      exactToolRepeatGuardSnapshot(progress.ledger, identity.grantId),
+    );
   };
 
   beforeEach(() => {
@@ -100,8 +105,93 @@ describe('ExecutionService operation budget', () => {
       maxTokensPerInference: 1000,
       toolCalls: 6,
       toolCallSoftLimit: 4,
+      exactToolRepeatWarning: true,
     },
   });
+
+  const reserveAndStartTool = async (
+    grantId: string,
+    operationId: string,
+    toolCallId: string,
+    fingerprint: string,
+    round: number,
+    name = 'folder_read',
+  ) => {
+    const decision = await service.reserveOperationBudget(EXECUTION_ID, {
+      executionId: EXECUTION_ID,
+      loopId: EXECUTION_ID,
+      grantId,
+      operationId,
+      operationKind: 'tool_call',
+      bucket: 'tool',
+      toolCallId,
+      operationFingerprint: fingerprint,
+      operationFingerprintVersion: 'canonical_tool_input_v1',
+      phase: 'agent_loop',
+      round,
+      name,
+      executionAttemptId: ATTEMPT_ID,
+    });
+    const attemptId = `018f1d8a-54d7-7d63-a1ee-${String(800 + round).padStart(12, '0')}`;
+    const sequence = Number(execution.lastSequence) + 1;
+    rows.push({
+      sequence: String(sequence),
+      executionId: EXECUTION_ID,
+      operationId,
+      eventType: 'operation.started',
+      envelope: {
+        sequence,
+        eventType: 'operation.started',
+        operationId,
+        attemptId,
+        toolCallId,
+        payload: {
+          operationKind: 'tool_call',
+          loopId: EXECUTION_ID,
+          loopKind: 'top_level',
+          phase: 'agent_loop',
+          name,
+          round,
+          budgetGrantId: grantId,
+          budgetReservationId: decision.reservation.reservationId,
+          budgetBucket: 'tool',
+          executionAttemptId: ATTEMPT_ID,
+          operationFingerprint: fingerprint,
+          operationFingerprintVersion: 'canonical_tool_input_v1',
+        },
+      },
+    });
+    execution.lastSequence = String(sequence);
+    return { decision, attemptId };
+  };
+
+  const finishTool = (
+    operationId: string,
+    attemptId: string,
+    status: 'succeeded' | 'failed' | 'cancelled' | 'unknown',
+    result: Record<string, unknown> = { value: 'fixture' },
+  ) => {
+    const sequence = Number(execution.lastSequence) + 1;
+    rows.push({
+      sequence: String(sequence),
+      executionId: EXECUTION_ID,
+      operationId,
+      eventType: 'operation.finished',
+      envelope: {
+        sequence,
+        eventType: 'operation.finished',
+        operationId,
+        attemptId,
+        payload: {
+          operationKind: 'tool_call',
+          status,
+          result,
+          error: status === 'failed' ? { code: 'tool_failed' } : null,
+        },
+      },
+    });
+    execution.lastSequence = String(sequence);
+  };
 
   it('accepts only durable leaf-tool evidence for a runtime partial', () => {
     const reply = 'Completed work: Document read';
@@ -544,6 +634,8 @@ describe('ExecutionService operation budget', () => {
     delete storedGrant.effectivePolicy.normalInferenceSoftLimit;
     delete storedGrant.requestedPolicy.toolCallSoftLimit;
     delete storedGrant.effectivePolicy.toolCallSoftLimit;
+    delete storedGrant.requestedPolicy.exactToolRepeatWarning;
+    delete storedGrant.effectivePolicy.exactToolRepeatWarning;
 
     const repeated = await service.requestProgressGrant(
       EXECUTION_ID,
@@ -554,6 +646,8 @@ describe('ExecutionService operation budget', () => {
     expect(repeated.grant.effectivePolicy.normalInferenceSoftLimit).toBe(0);
     expect(repeated.grant.requestedPolicy.toolCallSoftLimit).toBe(0);
     expect(repeated.grant.effectivePolicy.toolCallSoftLimit).toBe(0);
+    expect(repeated.grant.requestedPolicy.exactToolRepeatWarning).toBe(false);
+    expect(repeated.grant.effectivePolicy.exactToolRepeatWarning).toBe(false);
     expect(repeated.budgetState.tool).toMatchObject({
       softLimit: 0,
       softLimitReached: false,
@@ -562,6 +656,24 @@ describe('ExecutionService operation budget', () => {
       softLimit: 0,
       softLimitReached: false,
       softLimitWarningPending: false,
+    });
+  });
+
+  it('accepts a grant request from an older worker without the repeat flag', async () => {
+    const request = grantRequest();
+    delete request.requestedPolicy.exactToolRepeatWarning;
+
+    const { grant, guardState } = await service.requestProgressGrant(
+      EXECUTION_ID,
+      request,
+    );
+
+    expect(grant.requestedPolicy.exactToolRepeatWarning).toBeUndefined();
+    expect(grant.effectivePolicy.exactToolRepeatWarning).toBe(false);
+    expect(guardState).toEqual({
+      detections: 0,
+      warningIssued: false,
+      warningPending: false,
     });
   });
 
@@ -638,6 +750,298 @@ describe('ExecutionService operation budget', () => {
         toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca724',
       }),
     ).toThrow(ConflictException);
+  });
+
+  it('records one exact-repeat signal and requires its next normal warning', async () => {
+    (service as any).config.get = jest.fn((name: string) => {
+      if (name === 'PROGRESS_CHAT_MAX_NORMAL_INFERENCES') return '3';
+      if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '3';
+      if (name === 'PROGRESS_CHAT_EXACT_TOOL_REPEAT_WARNING') return '1';
+      return undefined;
+    });
+    const { grant } = await service.requestProgressGrant(
+      EXECUTION_ID,
+      grantRequest(),
+    );
+    const fingerprint = `sha256:${'a'.repeat(64)}`;
+    const firstOperationId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca760';
+    const secondOperationId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca761';
+    const base = {
+      executionId: EXECUTION_ID,
+      loopId: EXECUTION_ID,
+      grantId: grant.grantId,
+      operationKind: 'tool_call' as const,
+      bucket: 'tool' as const,
+      operationFingerprint: fingerprint,
+      operationFingerprintVersion: 'canonical_tool_input_v1' as const,
+      phase: 'agent_loop',
+      name: 'folder_read',
+      executionAttemptId: ATTEMPT_ID,
+    };
+    const first = await service.reserveOperationBudget(EXECUTION_ID, {
+      ...base,
+      operationId: firstOperationId,
+      toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca762',
+      round: 1,
+    });
+    const firstAttemptId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca763';
+    rows.push(
+      {
+        producerComponent: 'documents-models',
+        producerSequence: '1',
+        eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca764',
+        envelope: {
+          sequence: 3,
+          eventType: 'operation.started',
+          operationId: firstOperationId,
+          attemptId: firstAttemptId,
+          payload: {
+            operationKind: 'tool_call',
+            loopId: EXECUTION_ID,
+            loopKind: 'top_level',
+            phase: 'agent_loop',
+            name: 'folder_read',
+            round: 1,
+            budgetGrantId: grant.grantId,
+            budgetReservationId: first.reservation.reservationId,
+            budgetBucket: 'tool',
+            executionAttemptId: ATTEMPT_ID,
+            operationFingerprint: fingerprint,
+            operationFingerprintVersion: 'canonical_tool_input_v1',
+          },
+        },
+      },
+      {
+        producerComponent: 'documents-models',
+        producerSequence: '2',
+        eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca765',
+        envelope: {
+          sequence: 4,
+          eventType: 'operation.finished',
+          operationId: firstOperationId,
+          attemptId: firstAttemptId,
+          payload: {
+            operationKind: 'tool_call',
+            status: 'succeeded',
+            result: { summary: 'Folder read' },
+          },
+        },
+      },
+    );
+    execution.lastSequence = '4';
+
+    const repeated = await service.reserveOperationBudget(EXECUTION_ID, {
+      ...base,
+      operationId: secondOperationId,
+      toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca766',
+      round: 2,
+    });
+    expect(repeated).toMatchObject({
+      granted: true,
+      loopGuardSignal: {
+        previousOperationId: firstOperationId,
+        triggeringOperationId: secondOperationId,
+      },
+      guardState: {
+        detections: 1,
+        warningIssued: true,
+        warningPending: true,
+      },
+    });
+    const idempotent = await service.reserveOperationBudget(EXECUTION_ID, {
+      ...base,
+      operationId: secondOperationId,
+      toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca766',
+      round: 2,
+    });
+    expect(idempotent.loopGuardSignal).toEqual(repeated.loopGuardSignal);
+    expect(
+      rows.filter(
+        (row) => row.envelope.payload.kind === 'loop_guard_triggered',
+      ),
+    ).toHaveLength(1);
+
+    const secondAttemptId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca767';
+    rows.push({
+      producerComponent: 'documents-models',
+      producerSequence: '3',
+      eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca768',
+      envelope: {
+        sequence: 7,
+        eventType: 'operation.started',
+        operationId: secondOperationId,
+        attemptId: secondAttemptId,
+        payload: {
+          operationKind: 'tool_call',
+          loopId: EXECUTION_ID,
+          loopKind: 'top_level',
+          phase: 'agent_loop',
+          name: 'folder_read',
+          round: 2,
+          budgetGrantId: grant.grantId,
+          budgetReservationId: repeated.reservation.reservationId,
+          budgetBucket: 'tool',
+          executionAttemptId: ATTEMPT_ID,
+          operationFingerprint: fingerprint,
+          operationFingerprintVersion: 'canonical_tool_input_v1',
+        },
+      },
+    });
+    execution.lastSequence = '7';
+    const inference = await service.reserveOperationBudget(EXECUTION_ID, {
+      executionId: EXECUTION_ID,
+      loopId: EXECUTION_ID,
+      grantId: grant.grantId,
+      operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca769',
+      operationKind: 'inference',
+      bucket: 'normal',
+      phase: 'agent_loop',
+      round: 3,
+      name: 'chat_with_tools',
+      executionAttemptId: ATTEMPT_ID,
+    });
+    expect(inference.budgetState.normal).toMatchObject({
+      reserved: 1,
+      softLimitWarningPending: false,
+    });
+    const inferenceStart = {
+      eventType: 'operation.started',
+      operationId: inference.reservation.operationId,
+      payload: {
+        operationKind: 'inference',
+        loopId: EXECUTION_ID,
+        loopKind: 'top_level',
+        phase: 'agent_loop',
+        name: 'chat_with_tools',
+        round: 3,
+        budgetGrantId: grant.grantId,
+        budgetReservationId: inference.reservation.reservationId,
+        budgetBucket: 'normal',
+        executionAttemptId: ATTEMPT_ID,
+      },
+    };
+    expect(() => validateBudgetStart(inferenceStart)).toThrow(
+      ConflictException,
+    );
+    expect(() =>
+      validateBudgetStart({
+        ...inferenceStart,
+        payload: {
+          ...inferenceStart.payload,
+          loopGuardWarningApplied: true,
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ['failed result', 'failed', { value: 'fixture' }],
+    ['unknown result', 'unknown', { value: 'fixture' }],
+    ['pending confirmation', 'succeeded', { pendingConfirmation: true }],
+  ] as const)(
+    'does not signal a repeat after a %s',
+    async (_label, status, result) => {
+      (service as any).config.get = jest.fn((name: string) => {
+        if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '3';
+        if (name === 'PROGRESS_CHAT_EXACT_TOOL_REPEAT_WARNING') return '1';
+        return undefined;
+      });
+      const { grant } = await service.requestProgressGrant(
+        EXECUTION_ID,
+        grantRequest(),
+      );
+      const fingerprint = `sha256:${'c'.repeat(64)}`;
+      const first = await reserveAndStartTool(
+        grant.grantId,
+        '018f1d8a-54d7-7d63-a1ee-000000000811',
+        '018f1d8a-54d7-7d63-a1ee-000000000812',
+        fingerprint,
+        1,
+      );
+      finishTool(
+        '018f1d8a-54d7-7d63-a1ee-000000000811',
+        first.attemptId,
+        status,
+        result,
+      );
+
+      const repeated = await service.reserveOperationBudget(EXECUTION_ID, {
+        executionId: EXECUTION_ID,
+        loopId: EXECUTION_ID,
+        grantId: grant.grantId,
+        operationId: '018f1d8a-54d7-7d63-a1ee-000000000813',
+        operationKind: 'tool_call',
+        bucket: 'tool',
+        toolCallId: '018f1d8a-54d7-7d63-a1ee-000000000814',
+        operationFingerprint: fingerprint,
+        operationFingerprintVersion: 'canonical_tool_input_v1',
+        phase: 'agent_loop',
+        round: 2,
+        name: 'folder_read',
+        executionAttemptId: ATTEMPT_ID,
+      });
+
+      expect(repeated.loopGuardSignal).toBeUndefined();
+      expect(repeated.guardState.detections).toBe(0);
+    },
+  );
+
+  it('does not signal when another tool starts between equal calls', async () => {
+    (service as any).config.get = jest.fn((name: string) => {
+      if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '4';
+      if (name === 'PROGRESS_CHAT_EXACT_TOOL_REPEAT_WARNING') return '1';
+      return undefined;
+    });
+    const { grant } = await service.requestProgressGrant(
+      EXECUTION_ID,
+      grantRequest(),
+    );
+    const fingerprint = `sha256:${'d'.repeat(64)}`;
+    const otherFingerprint = `sha256:${'e'.repeat(64)}`;
+    const first = await reserveAndStartTool(
+      grant.grantId,
+      '018f1d8a-54d7-7d63-a1ee-000000000821',
+      '018f1d8a-54d7-7d63-a1ee-000000000822',
+      fingerprint,
+      1,
+    );
+    finishTool(
+      '018f1d8a-54d7-7d63-a1ee-000000000821',
+      first.attemptId,
+      'succeeded',
+    );
+    const intermediate = await reserveAndStartTool(
+      grant.grantId,
+      '018f1d8a-54d7-7d63-a1ee-000000000823',
+      '018f1d8a-54d7-7d63-a1ee-000000000824',
+      otherFingerprint,
+      2,
+      'file_read',
+    );
+    finishTool(
+      '018f1d8a-54d7-7d63-a1ee-000000000823',
+      intermediate.attemptId,
+      'succeeded',
+    );
+
+    const repeated = await service.reserveOperationBudget(EXECUTION_ID, {
+      executionId: EXECUTION_ID,
+      loopId: EXECUTION_ID,
+      grantId: grant.grantId,
+      operationId: '018f1d8a-54d7-7d63-a1ee-000000000825',
+      operationKind: 'tool_call',
+      bucket: 'tool',
+      toolCallId: '018f1d8a-54d7-7d63-a1ee-000000000826',
+      operationFingerprint: fingerprint,
+      operationFingerprintVersion: 'canonical_tool_input_v1',
+      phase: 'agent_loop',
+      round: 3,
+      name: 'folder_read',
+      executionAttemptId: ATTEMPT_ID,
+    });
+
+    expect(repeated.loopGuardSignal).toBeUndefined();
+    expect(repeated.guardState.detections).toBe(0);
   });
 
   it('rejects an incompatible repeated grant and a bucket outside its phase', async () => {

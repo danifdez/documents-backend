@@ -21,7 +21,9 @@ function canonicalValue(value: any): any {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0,
+        )
         .map(([key, child]) => [key, canonicalValue(child)]),
     );
   }
@@ -412,6 +414,7 @@ describe('execution v1 contract', () => {
         maxTokensPerInference: 1000,
         toolCalls: 6,
         toolCallSoftLimit: 4,
+        exactToolRepeatWarning: true,
       },
       effectivePolicy: {
         normal: 2,
@@ -421,6 +424,7 @@ describe('execution v1 contract', () => {
         maxTokensPerInference: 512,
         toolCalls: 2,
         toolCallSoftLimit: 1,
+        exactToolRepeatWarning: true,
       },
       grantedAt: '2026-08-20T10:00:00Z',
     };
@@ -480,6 +484,8 @@ describe('execution v1 contract', () => {
       phase: 'agent_loop',
       round: 1,
       name: 'folder_read',
+      operationFingerprint: `sha256:${'a'.repeat(64)}`,
+      operationFingerprintVersion: 'canonical_tool_input_v1',
     };
     expect(
       validateEvent(
@@ -490,6 +496,40 @@ describe('execution v1 contract', () => {
         }),
       ),
     ).toBe(true);
+    const loopGuardSignal = {
+      version: '1',
+      guardKind: 'immediate_exact_tool_repeat',
+      action: 'warn',
+      grantId: grant.grantId,
+      loopId: grant.loopId,
+      previousOperationId: 'operation-progress-tool-0',
+      triggeringOperationId: toolReservation.operationId,
+      operationFingerprint: toolReservation.operationFingerprint,
+      operationFingerprintVersion: 'canonical_tool_input_v1',
+      executionAttemptId: grant.executionAttemptId,
+      decidedAt: '2026-08-20T10:00:02Z',
+    };
+    expect(
+      validateEvent(
+        event({
+          message: 'Immediate exact tool repeat detected',
+          kind: 'loop_guard_triggered',
+          loopGuardSignal,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid fingerprint version',
+          kind: 'loop_guard_triggered',
+          loopGuardSignal: {
+            ...loopGuardSignal,
+            operationFingerprintVersion: 'unknown',
+          },
+        }),
+      ),
+    ).toBe(false);
     const softLimitSignal = {
       version: '1',
       grantId: grant.grantId,
@@ -638,6 +678,8 @@ describe('execution v1 contract', () => {
         budgetReservationId: toolReservation.reservationId,
         budgetBucket: 'tool',
         executionAttemptId: 'execution-attempt-progress-1',
+        operationFingerprint: toolReservation.operationFingerprint,
+        operationFingerprintVersion: 'canonical_tool_input_v1',
       },
       {
         eventType: 'operation.started',
@@ -664,6 +706,7 @@ describe('execution v1 contract', () => {
         budgetBucket: 'normal',
         executionAttemptId: 'execution-attempt-progress-1',
         budgetSoftLimitWarningApplied: true,
+        loopGuardWarningApplied: true,
       },
       {
         eventType: 'operation.started',
@@ -673,6 +716,16 @@ describe('execution v1 contract', () => {
       },
     );
     expect(validateEvent(budgetedNormalStart)).toBe(true);
+    expect(
+      validateEvent({
+        ...budgetedNormalStart,
+        payload: {
+          ...budgetedNormalStart.payload,
+          operationFingerprint: `sha256:${'b'.repeat(64)}`,
+          operationFingerprintVersion: 'canonical_tool_input_v1',
+        },
+      }),
+    ).toBe(false);
     expect(
       validateEvent({
         ...budgetedToolStart,

@@ -42,6 +42,7 @@ export type OperationBudgetGrant = {
     maxTokensPerInference: number;
     toolCalls: number;
     toolCallSoftLimit?: number;
+    exactToolRepeatWarning?: boolean;
   };
   effectivePolicy: {
     normal: number;
@@ -51,6 +52,7 @@ export type OperationBudgetGrant = {
     maxTokensPerInference: number;
     toolCalls: number;
     toolCallSoftLimit?: number;
+    exactToolRepeatWarning?: boolean;
   };
   grantedAt: string;
 };
@@ -64,6 +66,8 @@ export type OperationBudgetReservation = {
   operationKind: 'inference' | 'tool_call';
   bucket: OperationBudgetBucket;
   toolCallId?: string;
+  operationFingerprint?: string;
+  operationFingerprintVersion?: 'canonical_tool_input_v1';
   phase: string;
   round: number;
   name: string;
@@ -101,6 +105,29 @@ export type BudgetSoftLimitSignal = {
   decidedAt: string;
 };
 
+export type ExactToolRepeatSignal = {
+  version: '1';
+  guardKind: 'immediate_exact_tool_repeat';
+  action: 'warn';
+  grantId: string;
+  loopId: string;
+  previousOperationId: string;
+  triggeringOperationId: string;
+  operationFingerprint: string;
+  operationFingerprintVersion: 'canonical_tool_input_v1';
+  executionAttemptId: string;
+  decidedAt: string;
+};
+
+export type ExactToolRepeatGuardState = {
+  detections: number;
+  warningIssued: boolean;
+  warningPending: boolean;
+  previousOperationId?: string;
+  triggeringOperationId?: string;
+  warningAppliedToOperationId?: string;
+};
+
 export type ProgressLedger = {
   version: '1';
   lastSequence: number;
@@ -126,6 +153,10 @@ export type ProgressLedger = {
   generatedTokens: ProgressTokenUsage;
   completeness: 'complete' | 'partial';
   operationBudget?: OperationBudgetProjection;
+  loopGuards?: Record<
+    string,
+    { exactToolRepeat: ExactToolRepeatGuardState }
+  >;
 };
 
 export type ProgressPolicyProjection = {
@@ -182,6 +213,19 @@ function ensureBudget(ledger: ProgressLedger): OperationBudgetProjection {
   return (ledger.operationBudget ??= { grants: {}, reservations: {} });
 }
 
+export function exactToolRepeatGuardSnapshot(
+  ledger: ProgressLedger,
+  grantId: string,
+): ExactToolRepeatGuardState {
+  return structuredClone(
+    ledger.loopGuards?.[grantId]?.exactToolRepeat ?? {
+      detections: 0,
+      warningIssued: false,
+      warningPending: false,
+    },
+  );
+}
+
 function applyBudgetEvent(
   ledger: ProgressLedger,
   event: ProgressEvent,
@@ -220,6 +264,25 @@ function applyBudgetEvent(
       usage.softLimitReachedAt = signal.decidedAt;
       usage.softLimitTriggeringOperationId = signal.triggeringOperationId;
       if (signal.bucket === 'normal') usage.softLimitWarningPending = true;
+    }
+    return true;
+  }
+  if (event.payload.kind === 'loop_guard_triggered') {
+    const signal = event.payload.loopGuardSignal as
+      | ExactToolRepeatSignal
+      | undefined;
+    if (!signal?.grantId) return true;
+    const guards = (ledger.loopGuards ??= {});
+    if (!guards[signal.grantId]) {
+      guards[signal.grantId] = {
+        exactToolRepeat: {
+          detections: 1,
+          warningIssued: true,
+          warningPending: true,
+          previousOperationId: signal.previousOperationId,
+          triggeringOperationId: signal.triggeringOperationId,
+        },
+      };
     }
     return true;
   }
@@ -282,6 +345,16 @@ function consumeBudgetReservation(
     event.payload.budgetSoftLimitWarningApplied === true
   ) {
     usage.softLimitWarningPending = false;
+  }
+  if (
+    reservation.bucket === 'normal' &&
+    event.payload.loopGuardWarningApplied === true
+  ) {
+    const guard = ledger.loopGuards?.[reservation.grantId]?.exactToolRepeat;
+    if (guard?.warningPending) {
+      guard.warningPending = false;
+      guard.warningAppliedToOperationId = operationId;
+    }
   }
 }
 
