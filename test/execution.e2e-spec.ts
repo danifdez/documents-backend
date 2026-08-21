@@ -262,6 +262,7 @@ describe('execution PostgreSQL integration', () => {
 
     const requestedPolicy = {
       normal: 1,
+      normalInferenceSoftLimit: 0,
       repair: 0,
       closing: 0,
       maxTokensPerInference: 512,
@@ -383,6 +384,7 @@ describe('execution PostgreSQL integration', () => {
       executionAttemptId: attemptId,
       requestedPolicy: {
         normal: 1,
+        normalInferenceSoftLimit: 0,
         repair: 0,
         closing: 1,
         maxTokensPerInference: 512,
@@ -443,5 +445,89 @@ describe('execution PostgreSQL integration', () => {
         'budget_soft_limit_reached',
     );
     expect(storedSignals).toHaveLength(1);
+  });
+
+  it('records one soft-limit signal at the normal inference soft limit', async () => {
+    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const context = await service.createForChat(
+      'assistant_chat',
+      'cross the normal inference soft limit',
+      scope,
+      {},
+    );
+    const attemptId = randomUUID();
+    await dataSource.query(
+      `UPDATE "${schema}"."executions"
+       SET "status" = 'running', "phase" = 'worker_execution',
+           "attempt_id" = $1
+       WHERE "execution_id" = $2`,
+      [attemptId, context.executionId],
+    );
+    const { grant } = await service.requestProgressGrant(context.executionId, {
+      executionId: context.executionId,
+      turnId: context.turnId,
+      loopId: context.executionId,
+      agentName: 'assistant',
+      loopKind: 'top_level',
+      executionAttemptId: attemptId,
+      requestedPolicy: {
+        normal: 3,
+        normalInferenceSoftLimit: 2,
+        repair: 0,
+        closing: 1,
+        maxTokensPerInference: 512,
+        toolCalls: 0,
+        toolCallSoftLimit: 0,
+      },
+    });
+    const reserveInference = (operationId = randomUUID()) =>
+      service.reserveOperationBudget(context.executionId, {
+        executionId: context.executionId,
+        loopId: context.executionId,
+        grantId: grant.grantId,
+        operationId,
+        operationKind: 'inference',
+        bucket: 'normal',
+        phase: 'agent_loop',
+        round: 1,
+        name: 'chat_with_tools',
+        executionAttemptId: attemptId,
+      });
+
+    await reserveInference();
+    const concurrentOperationIds = [randomUUID(), randomUUID()];
+    const decisions = await Promise.all(
+      concurrentOperationIds.map((operationId) =>
+        reserveInference(operationId),
+      ),
+    );
+
+    expect(decisions.every((decision) => decision.granted)).toBe(true);
+    const signals = decisions
+      .map((decision) => decision.softLimitSignal)
+      .filter(Boolean);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      operationKind: 'inference',
+      bucket: 'normal',
+      softLimit: 2,
+      hardLimit: 3,
+    });
+    expect(concurrentOperationIds).toContain(signals[0]?.triggeringOperationId);
+    const projected = await service.readProgress(
+      context.rootExecutionId,
+      scope,
+    );
+    const usage = Object.values(projected.ledger.operationBudget.grants)[0]
+      .usage.normal;
+    expect(usage).toMatchObject({
+      granted: 3,
+      reserved: 3,
+      consumed: 0,
+      available: 0,
+      softLimit: 2,
+      softLimitReached: true,
+      softLimitWarningPending: true,
+    });
   });
 });

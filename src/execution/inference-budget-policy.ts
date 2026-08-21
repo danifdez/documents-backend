@@ -28,6 +28,7 @@ const TOOL_BUDGET_PHASES = new Set(['agent_loop', 'output_repair']);
 
 export type OperationBudgetLimits = {
   normal: number;
+  normalInferenceSoftLimit: number;
   repair: number;
   closing: number;
   maxTokensPerInference: number;
@@ -47,6 +48,7 @@ export type GovernedBudgetStart = {
   phase: string;
   round: number;
   name: string;
+  budgetSoftLimitWarningApplied: boolean;
 };
 
 export function validateProgressGrantRequest(
@@ -72,6 +74,8 @@ export function validateProgressGrantRequest(
     !policy ||
     !Number.isInteger(policy.normal) ||
     policy.normal < 1 ||
+    !Number.isInteger(policy.normalInferenceSoftLimit) ||
+    policy.normalInferenceSoftLimit < 0 ||
     !Number.isInteger(policy.repair) ||
     policy.repair < 0 ||
     !Number.isInteger(policy.closing) ||
@@ -166,6 +170,20 @@ export function resolveEffectivePolicy(
   requested: ProgressGrantRequest['requestedPolicy'],
   limits: OperationBudgetLimits,
 ): ProgressGrantRequest['requestedPolicy'] {
+  const normal = Math.min(requested.normal, limits.normal);
+  const normalInferenceSoftLimit =
+    normal <= 1 ||
+    requested.normalInferenceSoftLimit === 0 ||
+    limits.normalInferenceSoftLimit === 0
+      ? 0
+      : Math.max(
+          1,
+          Math.min(
+            requested.normalInferenceSoftLimit,
+            limits.normalInferenceSoftLimit,
+            normal - 1,
+          ),
+        );
   const toolCalls = Math.min(requested.toolCalls, limits.toolCalls);
   const toolCallSoftLimit =
     toolCalls <= 1 ||
@@ -181,7 +199,8 @@ export function resolveEffectivePolicy(
           ),
         );
   return {
-    normal: Math.min(requested.normal, limits.normal),
+    normal,
+    normalInferenceSoftLimit,
     repair: Math.min(requested.repair, limits.repair),
     closing: Math.min(requested.closing, limits.closing),
     maxTokensPerInference: Math.min(
@@ -222,10 +241,14 @@ export function withoutGrantUsage(
     ...grant,
     requestedPolicy: {
       ...grant.requestedPolicy,
+      normalInferenceSoftLimit:
+        grant.requestedPolicy.normalInferenceSoftLimit ?? 0,
       toolCallSoftLimit: grant.requestedPolicy.toolCallSoftLimit ?? 0,
     },
     effectivePolicy: {
       ...grant.effectivePolicy,
+      normalInferenceSoftLimit:
+        grant.effectivePolicy.normalInferenceSoftLimit ?? 0,
       toolCallSoftLimit: grant.effectivePolicy.toolCallSoftLimit ?? 0,
     },
   };
@@ -347,6 +370,8 @@ export function governedBudgetStart(
     phase,
     round: Number(payload.round),
     name: String(payload.name ?? ''),
+    budgetSoftLimitWarningApplied:
+      payload.budgetSoftLimitWarningApplied === true,
   };
   if (
     !EXECUTION_UUID_PATTERN.test(identity.grantId) ||
@@ -386,6 +411,16 @@ export function assertOperationBudgetProjection(
   ) {
     throw new ConflictException(
       `Top-level ${identity.operationKind} budget reservation is invalid or consumed`,
+    );
+  }
+  const normalUsage = grant.usage.normal;
+  const warningRequired =
+    identity.operationKind === 'inference' &&
+    identity.bucket === 'normal' &&
+    normalUsage.softLimitWarningPending === true;
+  if (identity.budgetSoftLimitWarningApplied !== warningRequired) {
+    throw new ConflictException(
+      'Normal inference soft-limit warning does not match the durable budget state',
     );
   }
 }

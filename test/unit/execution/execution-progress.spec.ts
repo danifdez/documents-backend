@@ -13,6 +13,7 @@ describe('execution progress projection', () => {
       policyVersion: '1' as const,
       requestedPolicy: {
         normal: 2,
+        normalInferenceSoftLimit: 1,
         repair: 1,
         closing: 1,
         maxTokensPerInference: 1000,
@@ -21,6 +22,7 @@ describe('execution progress projection', () => {
       },
       effectivePolicy: {
         normal: 1,
+        normalInferenceSoftLimit: 0,
         repair: 1,
         closing: 1,
         maxTokensPerInference: 512,
@@ -132,7 +134,15 @@ describe('execution progress projection', () => {
     ]);
 
     expect(progress.ledger.operationBudget?.grants['grant-1'].usage).toEqual({
-      normal: { granted: 1, reserved: 0, consumed: 1, available: 0 },
+      normal: {
+        granted: 1,
+        reserved: 0,
+        consumed: 1,
+        available: 0,
+        softLimit: 0,
+        softLimitReached: false,
+        softLimitWarningPending: false,
+      },
       repair: { granted: 1, reserved: 0, consumed: 0, available: 1 },
       closing: { granted: 1, reserved: 0, consumed: 0, available: 1 },
       tool: {

@@ -68,13 +68,20 @@ const MAX_ARTIFACT_BYTES = 1024 * 1024;
 
 function operationBudgetSnapshot(
   grant: OperationBudgetGrant & {
-    usage: { tool: OperationBudgetSnapshot['tool'] };
+    usage: {
+      normal: OperationBudgetSnapshot['normal'];
+      tool: OperationBudgetSnapshot['tool'];
+    };
   },
 ): OperationBudgetSnapshot {
+  const normal = structuredClone(grant.usage.normal);
+  normal.softLimit ??= 0;
+  normal.softLimitReached ??= false;
+  normal.softLimitWarningPending ??= false;
   const tool = structuredClone(grant.usage.tool);
   tool.softLimit ??= 0;
   tool.softLimitReached ??= false;
-  return { tool };
+  return { normal, tool };
 }
 const FORBIDDEN_KEYS = new Set([
   'accesstoken',
@@ -855,6 +862,9 @@ export class ExecutionService {
         const comparableRequest = structuredClone(
           request.requestedPolicy,
         ) as Record<string, unknown>;
+        if (existing.requestedPolicy.normalInferenceSoftLimit === undefined) {
+          delete comparableRequest.normalInferenceSoftLimit;
+        }
         if (existing.requestedPolicy.toolCallSoftLimit === undefined) {
           delete comparableRequest.toolCallSoftLimit;
         }
@@ -884,6 +894,10 @@ export class ExecutionService {
         normal: Math.max(
           1,
           this.progressLimit('PROGRESS_CHAT_MAX_NORMAL_INFERENCES', 3),
+        ),
+        normalInferenceSoftLimit: this.progressLimit(
+          'PROGRESS_CHAT_NORMAL_INFERENCE_SOFT_LIMIT',
+          2,
         ),
         repair: this.progressLimit('PROGRESS_CHAT_MAX_OUTPUT_REPAIRS', 1),
         closing: this.progressLimit('PROGRESS_CHAT_CLOSING_INFERENCES', 1),
@@ -1020,7 +1034,9 @@ export class ExecutionService {
       const committed = usage.reserved + usage.consumed + (granted ? 1 : 0);
       const crossesSoftLimit =
         granted &&
-        request.operationKind === 'tool_call' &&
+        ((request.operationKind === 'tool_call' && request.bucket === 'tool') ||
+          (request.operationKind === 'inference' &&
+            request.bucket === 'normal')) &&
         Number(usage.softLimit ?? 0) > 0 &&
         !usage.softLimitReached &&
         committed >= Number(usage.softLimit);
@@ -1060,8 +1076,8 @@ export class ExecutionService {
         softLimitSignal = {
           version: '1',
           grantId: grant.grantId,
-          operationKind: 'tool_call',
-          bucket: 'tool',
+          operationKind: request.operationKind,
+          bucket: request.bucket as 'normal' | 'tool',
           softLimit: Number(usage.softLimit),
           hardLimit: usage.granted,
           committed,
@@ -1078,7 +1094,10 @@ export class ExecutionService {
             eventType: 'progress.reported',
             payloadSchema: 'progress.reported/1',
             payload: {
-              message: 'Tool budget soft limit reached',
+              message:
+                request.operationKind === 'tool_call'
+                  ? 'Tool budget soft limit reached'
+                  : 'Normal inference budget soft limit reached',
               kind: 'budget_soft_limit_reached',
               signal: softLimitSignal,
             },

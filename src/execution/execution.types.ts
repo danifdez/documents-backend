@@ -41,6 +41,7 @@ export interface ProgressGrantRequest {
   executionAttemptId: string;
   requestedPolicy: {
     normal: number;
+    normalInferenceSoftLimit: number;
     repair: number;
     closing: number;
     maxTokensPerInference: number;

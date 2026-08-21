@@ -233,6 +233,7 @@ describe('execution v1 contract', () => {
         agentName: 'assistant',
         loopKind: 'top_level',
         maxRounds: 3,
+        normalInferenceSoftLimit: 2,
         maxOutputRepairs: 1,
         forcedFinalizationAvailable: true,
         maxTokensPerInference: 1000,
@@ -245,6 +246,14 @@ describe('execution v1 contract', () => {
         event({
           ...payload,
           policy: { ...payload.policy, maxRounds: -1 },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        event({
+          ...payload,
+          policy: { ...payload.policy, normalInferenceSoftLimit: -1 },
         }),
       ),
     ).toBe(false);
@@ -305,6 +314,7 @@ describe('execution v1 contract', () => {
       policyVersion: '1',
       requestedPolicy: {
         normal: 3,
+        normalInferenceSoftLimit: 2,
         repair: 1,
         closing: 1,
         maxTokensPerInference: 1000,
@@ -313,6 +323,7 @@ describe('execution v1 contract', () => {
       },
       effectivePolicy: {
         normal: 2,
+        normalInferenceSoftLimit: 1,
         repair: 1,
         closing: 1,
         maxTokensPerInference: 512,
@@ -335,6 +346,16 @@ describe('execution v1 contract', () => {
       .toolCalls;
     delete (historicalGrant.effectivePolicy as { toolCalls?: number })
       .toolCalls;
+    delete (
+      historicalGrant.requestedPolicy as {
+        normalInferenceSoftLimit?: number;
+      }
+    ).normalInferenceSoftLimit;
+    delete (
+      historicalGrant.effectivePolicy as {
+        normalInferenceSoftLimit?: number;
+      }
+    ).normalInferenceSoftLimit;
     expect(
       validateEvent(
         event({
@@ -344,7 +365,6 @@ describe('execution v1 contract', () => {
         }),
       ),
     ).toBe(true);
-
     const reservation = {
       version: '1',
       reservationId: 'reservation-progress-1',
@@ -397,6 +417,19 @@ describe('execution v1 contract', () => {
           message: 'Tool budget soft limit reached',
           kind: 'budget_soft_limit_reached',
           signal: softLimitSignal,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      validateEvent(
+        event({
+          message: 'Normal inference budget soft limit reached',
+          kind: 'budget_soft_limit_reached',
+          signal: {
+            ...softLimitSignal,
+            operationKind: 'inference',
+            bucket: 'normal',
+          },
         }),
       ),
     ).toBe(true);
@@ -523,6 +556,40 @@ describe('execution v1 contract', () => {
       },
     );
     expect(validateEvent(budgetedToolStart)).toBe(true);
+    const budgetedNormalStart = event(
+      {
+        operationKind: 'inference',
+        status: 'dispatched',
+        name: 'chat_with_tools',
+        loopId: 'loop-progress-1',
+        agentName: 'assistant',
+        loopKind: 'top_level',
+        round: 2,
+        maxRounds: 3,
+        phase: 'agent_loop',
+        budgetGrantId: grant.grantId,
+        budgetReservationId: 'reservation-progress-normal-1',
+        budgetBucket: 'normal',
+        executionAttemptId: 'execution-attempt-progress-1',
+        budgetSoftLimitWarningApplied: true,
+      },
+      {
+        eventType: 'operation.started',
+        payloadSchema: 'operation.started/1',
+        operationId: 'operation-progress-normal-1',
+        attemptId: 'attempt-progress-normal-1',
+      },
+    );
+    expect(validateEvent(budgetedNormalStart)).toBe(true);
+    expect(
+      validateEvent({
+        ...budgetedToolStart,
+        payload: {
+          ...budgetedToolStart.payload,
+          budgetSoftLimitWarningApplied: true,
+        },
+      }),
+    ).toBe(false);
     expect(
       validateEvent({
         ...budgetedToolStart,

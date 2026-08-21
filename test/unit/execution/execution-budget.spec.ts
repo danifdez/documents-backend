@@ -91,6 +91,7 @@ describe('ExecutionService operation budget', () => {
     executionAttemptId: ATTEMPT_ID,
     requestedPolicy: {
       normal: 3,
+      normalInferenceSoftLimit: 2,
       repair: 1,
       closing: 1,
       maxTokensPerInference: 1000,
@@ -144,6 +145,9 @@ describe('ExecutionService operation budget', () => {
       reserved: 1,
       consumed: 0,
       available: 0,
+      softLimit: 0,
+      softLimitReached: false,
+      softLimitWarningPending: false,
     });
 
     const repeatedReservation = await service.reserveOperationBudget(
@@ -258,6 +262,108 @@ describe('ExecutionService operation budget', () => {
     ).toHaveLength(1);
   });
 
+  it('warns on the inference that crosses the normal soft limit', async () => {
+    (service as any).config.get = jest.fn((name: string) => {
+      if (name === 'PROGRESS_CHAT_MAX_NORMAL_INFERENCES') return '3';
+      if (name === 'PROGRESS_CHAT_NORMAL_INFERENCE_SOFT_LIMIT') return '2';
+      if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '0';
+      return undefined;
+    });
+    const { grant, budgetState } = await service.requestProgressGrant(
+      EXECUTION_ID,
+      grantRequest(),
+    );
+    expect(grant.effectivePolicy.normalInferenceSoftLimit).toBe(2);
+    expect(budgetState.normal).toMatchObject({
+      granted: 3,
+      available: 3,
+      softLimit: 2,
+      softLimitReached: false,
+      softLimitWarningPending: false,
+    });
+
+    const reserve = (operationId: string, round: number) =>
+      service.reserveOperationBudget(EXECUTION_ID, {
+        executionId: EXECUTION_ID,
+        loopId: EXECUTION_ID,
+        grantId: grant.grantId,
+        operationId,
+        operationKind: 'inference',
+        bucket: 'normal',
+        phase: 'agent_loop',
+        round,
+        name: 'chat_with_tools',
+        executionAttemptId: ATTEMPT_ID,
+      });
+    const first = await reserve('018f1d8a-54d7-7d63-a1ee-5e9a6adca750', 1);
+    const second = await reserve('018f1d8a-54d7-7d63-a1ee-5e9a6adca751', 2);
+
+    expect(first.softLimitSignal).toBeUndefined();
+    expect(second).toMatchObject({
+      softLimitSignal: {
+        operationKind: 'inference',
+        bucket: 'normal',
+        softLimit: 2,
+        hardLimit: 3,
+        available: 1,
+      },
+      budgetState: {
+        normal: {
+          softLimitReached: true,
+          softLimitWarningPending: true,
+        },
+      },
+    });
+
+    const start = {
+      eventType: 'operation.started',
+      operationId: second.reservation.operationId,
+      payload: {
+        operationKind: 'inference',
+        loopId: EXECUTION_ID,
+        loopKind: 'top_level',
+        phase: 'agent_loop',
+        name: 'chat_with_tools',
+        round: 2,
+        budgetGrantId: grant.grantId,
+        budgetReservationId: second.reservation.reservationId,
+        budgetBucket: 'normal',
+        executionAttemptId: ATTEMPT_ID,
+      },
+    };
+    expect(() => validateBudgetStart(start)).toThrow(ConflictException);
+    expect(() =>
+      validateBudgetStart({
+        ...start,
+        payload: {
+          ...start.payload,
+          budgetSoftLimitWarningApplied: true,
+        },
+      }),
+    ).not.toThrow();
+
+    rows.push({
+      envelope: {
+        sequence: Number(execution.lastSequence) + 1,
+        ...start,
+        attemptId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca752',
+        payload: {
+          ...start.payload,
+          budgetSoftLimitWarningApplied: true,
+        },
+      },
+    });
+    const recovered = await service.requestProgressGrant(
+      EXECUTION_ID,
+      grantRequest(),
+    );
+    expect(recovered.budgetState.normal).toMatchObject({
+      available: 1,
+      softLimitReached: true,
+      softLimitWarningPending: false,
+    });
+  });
+
   it('keeps historical grants compatible with the soft limit disabled', async () => {
     (service as any).config.get = jest.fn((name: string) => {
       if (name === 'PROGRESS_CHAT_MAX_TOOL_CALLS') return '6';
@@ -266,6 +372,8 @@ describe('ExecutionService operation budget', () => {
     });
     await service.requestProgressGrant(EXECUTION_ID, grantRequest());
     const storedGrant = rows[0].envelope.payload.grant;
+    delete storedGrant.requestedPolicy.normalInferenceSoftLimit;
+    delete storedGrant.effectivePolicy.normalInferenceSoftLimit;
     delete storedGrant.requestedPolicy.toolCallSoftLimit;
     delete storedGrant.effectivePolicy.toolCallSoftLimit;
 
@@ -274,11 +382,18 @@ describe('ExecutionService operation budget', () => {
       grantRequest(),
     );
 
+    expect(repeated.grant.requestedPolicy.normalInferenceSoftLimit).toBe(0);
+    expect(repeated.grant.effectivePolicy.normalInferenceSoftLimit).toBe(0);
     expect(repeated.grant.requestedPolicy.toolCallSoftLimit).toBe(0);
     expect(repeated.grant.effectivePolicy.toolCallSoftLimit).toBe(0);
     expect(repeated.budgetState.tool).toMatchObject({
       softLimit: 0,
       softLimitReached: false,
+    });
+    expect(repeated.budgetState.normal).toMatchObject({
+      softLimit: 0,
+      softLimitReached: false,
+      softLimitWarningPending: false,
     });
   });
 
