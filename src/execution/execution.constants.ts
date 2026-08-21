@@ -4,6 +4,7 @@ export const EXECUTION_CONTRACT_SET_HASH =
   'sha256:5de857c99bfac5a0c77100e4f3f4abf0b729392269062eef789d8e6463185240';
 export const EXECUTION_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const EXECUTION_CONTENT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export const EXECUTION_EVENT_PAYLOADS: Record<string, string> = {
   'execution.created': 'execution.created/1',

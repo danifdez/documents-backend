@@ -23,10 +23,16 @@ import {
 import {
   EXECUTION_EVENT_PAYLOADS,
   EXECUTION_BUNDLE_SCHEMA,
+  EXECUTION_CONTENT_HASH_PATTERN,
   EXECUTION_CONTRACT_SET_HASH,
   EXECUTION_EVENT_SCHEMA,
   EXECUTION_UUID_PATTERN,
 } from './execution.constants';
+import {
+  exactToolRepeatBlockSignal,
+  exactToolRepeatTerminateSignal,
+  exactToolRepeatWarningSignal,
+} from './exact-tool-repeat-guard';
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
@@ -59,7 +65,6 @@ import {
 } from './inference-budget-policy';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
-const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const PRIVATE_REASONING_PATTERN = /<think>[\s\S]*?<\/think>/gi;
 const BEARER_PATTERN = /\bbearer\s+[a-z0-9._~+/-]+=*/gi;
 const SECRET_VALUE_PATTERN =
@@ -89,312 +94,6 @@ function operationBudgetSnapshot(
   return { normal, tool };
 }
 
-function exactToolRepeatWarningSignal(
-  rows: ExecutionEventEntity[],
-  request: OperationBudgetReservationRequest,
-  guard: ExactToolRepeatGuardState,
-): ExactToolRepeatSignal | undefined {
-  if (
-    request.operationKind !== 'tool_call' ||
-    !request.operationFingerprint ||
-    request.operationFingerprintVersion !== 'canonical_tool_input_v1' ||
-    guard.warningIssued
-  ) {
-    return undefined;
-  }
-  const previous = [...rows].reverse().find((row) => {
-    const envelope = row.envelope as Record<string, any>;
-    const payload = envelope.payload as Record<string, unknown> | undefined;
-    return (
-      envelope.eventType === 'operation.started' &&
-      payload?.operationKind === 'tool_call' &&
-      payload.loopId === request.loopId &&
-      payload.budgetGrantId === request.grantId
-    );
-  });
-  if (!previous) return undefined;
-  const previousEnvelope = previous.envelope as Record<string, any>;
-  const previousPayload = previousEnvelope.payload as Record<string, unknown>;
-  if (
-    previousPayload.name !== request.name ||
-    previousPayload.operationFingerprint !== request.operationFingerprint ||
-    previousPayload.operationFingerprintVersion !==
-      request.operationFingerprintVersion ||
-    previousPayload.executionAttemptId !== request.executionAttemptId
-  ) {
-    return undefined;
-  }
-  const finish = rows.find((row) => {
-    const envelope = row.envelope as Record<string, any>;
-    const payload = envelope.payload as Record<string, any> | undefined;
-    return (
-      envelope.eventType === 'operation.finished' &&
-      envelope.operationId === previousEnvelope.operationId &&
-      envelope.attemptId === previousEnvelope.attemptId &&
-      payload?.operationKind === 'tool_call' &&
-      payload.status === 'succeeded' &&
-      payload.result?.pendingConfirmation !== true
-    );
-  });
-  if (!finish) return undefined;
-  return {
-    version: '1',
-    guardKind: 'immediate_exact_tool_repeat',
-    action: 'warn',
-    grantId: request.grantId,
-    loopId: request.loopId,
-    previousOperationId: String(previousEnvelope.operationId),
-    triggeringOperationId: request.operationId,
-    operationFingerprint: request.operationFingerprint,
-    operationFingerprintVersion: 'canonical_tool_input_v1',
-    executionAttemptId: request.executionAttemptId,
-    decidedAt: new Date().toISOString(),
-  };
-}
-
-function exactToolRepeatBlockSignal(
-  rows: ExecutionEventEntity[],
-  request: OperationBudgetReservationRequest,
-  guard: ExactToolRepeatGuardState,
-): Extract<ExactToolRepeatSignal, { action: 'block' }> | undefined {
-  if (
-    request.operationKind !== 'tool_call' ||
-    !request.operationFingerprint ||
-    request.operationFingerprintVersion !== 'canonical_tool_input_v1' ||
-    !guard.warningAppliedToOperationId
-  ) {
-    return undefined;
-  }
-  const warningSignal = rows
-    .map(
-      (row) =>
-        (row.envelope.payload as Record<string, any> | undefined)
-          ?.loopGuardSignal as ExactToolRepeatSignal | undefined,
-    )
-    .find(
-      (signal) =>
-        signal?.action === 'warn' &&
-        signal.grantId === request.grantId &&
-        signal.loopId === request.loopId,
-    );
-  if (
-    !warningSignal ||
-    warningSignal.operationFingerprint !== request.operationFingerprint ||
-    warningSignal.operationFingerprintVersion !==
-      request.operationFingerprintVersion ||
-    warningSignal.executionAttemptId !== request.executionAttemptId
-  ) {
-    return undefined;
-  }
-  const warningApplication = rows.find((row) => {
-    const envelope = row.envelope as Record<string, any>;
-    const payload = envelope.payload as Record<string, unknown> | undefined;
-    return (
-      envelope.eventType === 'operation.started' &&
-      envelope.operationId === guard.warningAppliedToOperationId &&
-      payload?.operationKind === 'inference' &&
-      payload.budgetBucket === 'normal' &&
-      payload.budgetGrantId === request.grantId &&
-      payload.loopId === request.loopId &&
-      payload.loopGuardWarningApplied === true &&
-      payload.executionAttemptId === request.executionAttemptId
-    );
-  });
-  if (!warningApplication) return undefined;
-  const lastTool = [...rows].reverse().find((row) => {
-    const envelope = row.envelope as Record<string, any>;
-    const payload = envelope.payload as Record<string, unknown> | undefined;
-    return (
-      envelope.eventType === 'operation.started' &&
-      payload?.operationKind === 'tool_call' &&
-      payload.loopId === request.loopId &&
-      payload.budgetGrantId === request.grantId
-    );
-  });
-  if (!lastTool) return undefined;
-  const lastEnvelope = lastTool.envelope as Record<string, any>;
-  const lastPayload = lastEnvelope.payload as Record<string, unknown>;
-  if (
-    lastEnvelope.operationId !== warningSignal.triggeringOperationId ||
-    lastPayload.name !== request.name ||
-    lastPayload.operationFingerprint !== request.operationFingerprint ||
-    lastPayload.operationFingerprintVersion !==
-      request.operationFingerprintVersion ||
-    lastPayload.executionAttemptId !== request.executionAttemptId
-  ) {
-    return undefined;
-  }
-  const successfulOperations = new Set([
-    warningSignal.previousOperationId,
-    warningSignal.triggeringOperationId,
-  ]);
-  const successfulFinishes: ExecutionEventEntity[] = [];
-  for (const operationId of successfulOperations) {
-    const finished = rows.find((row) => {
-      const envelope = row.envelope as Record<string, any>;
-      const payload = envelope.payload as Record<string, any> | undefined;
-      return (
-        envelope.eventType === 'operation.finished' &&
-        envelope.operationId === operationId &&
-        payload?.operationKind === 'tool_call' &&
-        payload.status === 'succeeded' &&
-        payload.result?.pendingConfirmation !== true
-      );
-    });
-    if (!finished) return undefined;
-    successfulFinishes.push(finished);
-  }
-  const resultSources = [...successfulOperations].map((operationId) => {
-    const source = rows.find((row) => {
-      const envelope = row.envelope as Record<string, any>;
-      const payload = envelope.payload as Record<string, unknown> | undefined;
-      return (
-        envelope.eventType === 'source.observed' &&
-        envelope.operationId === operationId &&
-        payload?.kind === 'tool_output' &&
-        HASH_PATTERN.test(String(payload.contentHash ?? ''))
-      );
-    });
-    return source;
-  });
-  const warningApplicationSequence = Number(warningApplication.sequence);
-  if (
-    successfulFinishes.some(
-      (event) => Number(event.sequence) >= warningApplicationSequence,
-    ) ||
-    resultSources.some(
-      (event) => !event || Number(event.sequence) >= warningApplicationSequence,
-    )
-  ) {
-    return undefined;
-  }
-  const resultHashes = resultSources.map((source) =>
-    source
-      ? String((source.envelope.payload as Record<string, unknown>).contentHash)
-      : undefined,
-  );
-  if (!resultHashes[0] || resultHashes[0] !== resultHashes[1]) {
-    return undefined;
-  }
-  return {
-    version: '1',
-    guardKind: 'immediate_exact_tool_repeat',
-    action: 'block',
-    grantId: request.grantId,
-    loopId: request.loopId,
-    previousOperationId: String(lastEnvelope.operationId),
-    triggeringOperationId: request.operationId,
-    warningAppliedToOperationId: guard.warningAppliedToOperationId,
-    operationFingerprint: request.operationFingerprint,
-    operationFingerprintVersion: 'canonical_tool_input_v1',
-    resultFingerprint: resultHashes[0],
-    resultFingerprintVersion: 'tool_output_content_hash_v1',
-    executionAttemptId: request.executionAttemptId,
-    decidedAt: new Date().toISOString(),
-  };
-}
-
-function exactToolRepeatTerminateSignal(
-  rows: ExecutionEventEntity[],
-  request: OperationBudgetReservationRequest,
-  guard: ExactToolRepeatGuardState,
-): Extract<ExactToolRepeatSignal, { action: 'terminate' }> | undefined {
-  if (
-    request.operationKind !== 'tool_call' ||
-    request.toolBatchSize !== 1 ||
-    request.toolBatchIndex !== 0 ||
-    !request.operationFingerprint ||
-    request.operationFingerprintVersion !== 'canonical_tool_input_v1' ||
-    guard.blockResultPending ||
-    !guard.lastBlockedOperationId ||
-    !guard.warningAppliedToOperationId ||
-    !guard.blockResultAppliedToOperationId
-  ) {
-    return undefined;
-  }
-  const blockEvent = rows.find((row) => {
-    const signal = (row.envelope.payload as Record<string, any> | undefined)
-      ?.loopGuardSignal as ExactToolRepeatSignal | undefined;
-    return (
-      signal?.action === 'block' &&
-      signal.grantId === request.grantId &&
-      signal.loopId === request.loopId &&
-      signal.triggeringOperationId === guard.lastBlockedOperationId
-    );
-  });
-  const blockSignal = (
-    blockEvent?.envelope.payload as Record<string, any> | undefined
-  )?.loopGuardSignal as
-    Extract<ExactToolRepeatSignal, { action: 'block' }> | undefined;
-  const application = rows.find((row) => {
-    const envelope = row.envelope as Record<string, any>;
-    const payload = envelope.payload as Record<string, unknown> | undefined;
-    return (
-      envelope.eventType === 'operation.started' &&
-      envelope.operationId === guard.blockResultAppliedToOperationId &&
-      payload?.operationKind === 'inference' &&
-      payload.budgetBucket === 'normal' &&
-      payload.budgetGrantId === request.grantId &&
-      payload.loopId === request.loopId &&
-      payload.loopGuardBlockResultApplied === true &&
-      payload.executionAttemptId === request.executionAttemptId
-    );
-  });
-  if (
-    !blockEvent ||
-    !blockSignal ||
-    !application ||
-    Number(application.sequence) <= Number(blockEvent.sequence) ||
-    blockSignal.operationFingerprint !== request.operationFingerprint ||
-    blockSignal.operationFingerprintVersion !==
-      request.operationFingerprintVersion ||
-    blockSignal.executionAttemptId !== request.executionAttemptId
-  ) {
-    return undefined;
-  }
-  const lastTool = [...rows].reverse().find((row) => {
-    const envelope = row.envelope as Record<string, any>;
-    const payload = envelope.payload as Record<string, unknown> | undefined;
-    return (
-      envelope.eventType === 'operation.started' &&
-      payload?.operationKind === 'tool_call' &&
-      payload.loopId === request.loopId &&
-      payload.budgetGrantId === request.grantId
-    );
-  });
-  const lastEnvelope = lastTool?.envelope as Record<string, any> | undefined;
-  const lastPayload = lastEnvelope?.payload as
-    Record<string, unknown> | undefined;
-  if (
-    !lastTool ||
-    lastEnvelope?.operationId !== blockSignal.previousOperationId ||
-    lastPayload?.name !== request.name ||
-    lastPayload.operationFingerprint !== request.operationFingerprint ||
-    lastPayload.operationFingerprintVersion !==
-      request.operationFingerprintVersion ||
-    lastPayload.executionAttemptId !== request.executionAttemptId
-  ) {
-    return undefined;
-  }
-  return {
-    version: '1',
-    guardKind: 'immediate_exact_tool_repeat',
-    action: 'terminate',
-    grantId: request.grantId,
-    loopId: request.loopId,
-    previousOperationId: blockSignal.previousOperationId,
-    blockedOperationId: blockSignal.triggeringOperationId,
-    triggeringOperationId: request.operationId,
-    warningAppliedToOperationId: blockSignal.warningAppliedToOperationId,
-    blockResultAppliedToOperationId: guard.blockResultAppliedToOperationId,
-    operationFingerprint: request.operationFingerprint,
-    operationFingerprintVersion: 'canonical_tool_input_v1',
-    resultFingerprint: blockSignal.resultFingerprint,
-    resultFingerprintVersion: 'tool_output_content_hash_v1',
-    executionAttemptId: request.executionAttemptId,
-    decidedAt: new Date().toISOString(),
-  };
-}
 const FORBIDDEN_KEYS = new Set([
   'accesstoken',
   'apikey',
@@ -2600,7 +2299,9 @@ export class ExecutionService {
       throw new BadRequestException('artifactId must be a UUID');
     }
     if (
-      !HASH_PATTERN.test(String(artifact.contentHash ?? '')) ||
+      !EXECUTION_CONTENT_HASH_PATTERN.test(
+        String(artifact.contentHash ?? ''),
+      ) ||
       !Number.isInteger(artifact.size) ||
       artifact.size < 0 ||
       artifact.size > MAX_ARTIFACT_BYTES ||
