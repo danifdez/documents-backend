@@ -415,6 +415,7 @@ describe('execution v1 contract', () => {
         toolCalls: 6,
         toolCallSoftLimit: 4,
         exactToolRepeatWarning: true,
+        exactToolRepeatBlockAfterWarning: true,
       },
       effectivePolicy: {
         normal: 2,
@@ -425,6 +426,7 @@ describe('execution v1 contract', () => {
         toolCalls: 2,
         toolCallSoftLimit: 1,
         exactToolRepeatWarning: true,
+        exactToolRepeatBlockAfterWarning: true,
       },
       grantedAt: '2026-08-20T10:00:00Z',
     };
@@ -526,6 +528,49 @@ describe('execution v1 contract', () => {
           loopGuardSignal: {
             ...loopGuardSignal,
             operationFingerprintVersion: 'unknown',
+          },
+        }),
+      ),
+    ).toBe(false);
+    const blockSignal = {
+      ...loopGuardSignal,
+      action: 'block',
+      triggeringOperationId: 'operation-progress-tool-2',
+      warningAppliedToOperationId: 'operation-progress-inference-1',
+      resultFingerprint: `sha256:${'b'.repeat(64)}`,
+      resultFingerprintVersion: 'tool_output_content_hash_v1',
+    };
+    expect(
+      validateEvent(
+        event({
+          message: 'Immediate exact tool repeat blocked',
+          kind: 'loop_guard_triggered',
+          loopGuardSignal: blockSignal,
+        }),
+      ),
+    ).toBe(true);
+    const blockWithoutEvidence = structuredClone(blockSignal);
+    delete (blockWithoutEvidence as { resultFingerprint?: string })
+      .resultFingerprint;
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid block without durable result evidence',
+          kind: 'loop_guard_triggered',
+          loopGuardSignal: blockWithoutEvidence,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        event({
+          message: 'Invalid warning carrying block-only evidence',
+          kind: 'loop_guard_triggered',
+          loopGuardSignal: {
+            ...loopGuardSignal,
+            warningAppliedToOperationId: 'operation-progress-inference-1',
+            resultFingerprint: `sha256:${'b'.repeat(64)}`,
+            resultFingerprintVersion: 'tool_output_content_hash_v1',
           },
         }),
       ),

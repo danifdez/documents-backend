@@ -36,6 +36,7 @@ export type OperationBudgetLimits = {
   toolCalls: number;
   toolCallSoftLimit: number;
   exactToolRepeatWarning: boolean;
+  exactToolRepeatBlockAfterWarning: boolean;
 };
 
 export type GovernedBudgetStart = {
@@ -94,6 +95,8 @@ export function validateProgressGrantRequest(
     policy.toolCallSoftLimit < 0 ||
     (policy.exactToolRepeatWarning !== undefined &&
       typeof policy.exactToolRepeatWarning !== 'boolean') ||
+    (policy.exactToolRepeatBlockAfterWarning !== undefined &&
+      typeof policy.exactToolRepeatBlockAfterWarning !== 'boolean') ||
     !String(request.agentName ?? '').trim()
   ) {
     throw new BadRequestException('Invalid progress grant request');
@@ -232,6 +235,11 @@ export function resolveEffectivePolicy(
     exactToolRepeatWarning:
       requested.exactToolRepeatWarning === true &&
       limits.exactToolRepeatWarning,
+    exactToolRepeatBlockAfterWarning:
+      requested.exactToolRepeatWarning === true &&
+      requested.exactToolRepeatBlockAfterWarning === true &&
+      limits.exactToolRepeatWarning &&
+      limits.exactToolRepeatBlockAfterWarning,
   };
 }
 
@@ -269,6 +277,8 @@ export function withoutGrantUsage(
       toolCallSoftLimit: grant.requestedPolicy.toolCallSoftLimit ?? 0,
       exactToolRepeatWarning:
         grant.requestedPolicy.exactToolRepeatWarning ?? false,
+      exactToolRepeatBlockAfterWarning:
+        grant.requestedPolicy.exactToolRepeatBlockAfterWarning ?? false,
     },
     effectivePolicy: {
       ...grant.effectivePolicy,
@@ -277,6 +287,8 @@ export function withoutGrantUsage(
       toolCallSoftLimit: grant.effectivePolicy.toolCallSoftLimit ?? 0,
       exactToolRepeatWarning:
         grant.effectivePolicy.exactToolRepeatWarning ?? false,
+      exactToolRepeatBlockAfterWarning:
+        grant.effectivePolicy.exactToolRepeatBlockAfterWarning ?? false,
     },
   };
   delete value.usage;
@@ -343,6 +355,7 @@ export function createOperationBudgetReservation(
   granted: boolean,
   reservationId: string,
   decidedAt: string,
+  deniedReason?: string,
 ): OperationBudgetReservation {
   return {
     version: '1',
@@ -367,9 +380,10 @@ export function createOperationBudgetReservation(
       ? {}
       : {
           reason:
-            request.operationKind === 'tool_call'
+            deniedReason ??
+            (request.operationKind === 'tool_call'
               ? 'tool_budget_hard_limit_reached'
-              : 'budget_hard_limit_reached',
+              : 'budget_hard_limit_reached'),
         }),
     decidedAt,
   };

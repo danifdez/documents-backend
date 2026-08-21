@@ -48,6 +48,7 @@ export interface ProgressGrantRequest {
     toolCalls: number;
     toolCallSoftLimit: number;
     exactToolRepeatWarning?: boolean;
+    exactToolRepeatBlockAfterWarning?: boolean;
   };
 }
 

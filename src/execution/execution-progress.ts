@@ -43,6 +43,7 @@ export type OperationBudgetGrant = {
     toolCalls: number;
     toolCallSoftLimit?: number;
     exactToolRepeatWarning?: boolean;
+    exactToolRepeatBlockAfterWarning?: boolean;
   };
   effectivePolicy: {
     normal: number;
@@ -53,6 +54,7 @@ export type OperationBudgetGrant = {
     toolCalls: number;
     toolCallSoftLimit?: number;
     exactToolRepeatWarning?: boolean;
+    exactToolRepeatBlockAfterWarning?: boolean;
   };
   grantedAt: string;
 };
@@ -105,7 +107,7 @@ export type BudgetSoftLimitSignal = {
   decidedAt: string;
 };
 
-export type ExactToolRepeatSignal = {
+export type ExactToolRepeatWarningSignal = {
   version: '1';
   guardKind: 'immediate_exact_tool_repeat';
   action: 'warn';
@@ -119,13 +121,40 @@ export type ExactToolRepeatSignal = {
   decidedAt: string;
 };
 
+export type ExactToolRepeatBlockSignal = {
+  version: '1';
+  guardKind: 'immediate_exact_tool_repeat';
+  action: 'block';
+  grantId: string;
+  loopId: string;
+  previousOperationId: string;
+  triggeringOperationId: string;
+  warningAppliedToOperationId: string;
+  operationFingerprint: string;
+  operationFingerprintVersion: 'canonical_tool_input_v1';
+  resultFingerprint: string;
+  resultFingerprintVersion: 'tool_output_content_hash_v1';
+  executionAttemptId: string;
+  decidedAt: string;
+};
+
+export type ExactToolRepeatSignal =
+  ExactToolRepeatWarningSignal | ExactToolRepeatBlockSignal;
+
 export type ExactToolRepeatGuardState = {
   detections: number;
   warningIssued: boolean;
   warningPending: boolean;
+  blocks: number;
   previousOperationId?: string;
   triggeringOperationId?: string;
+  operationFingerprint?: string;
+  operationFingerprintVersion?: 'canonical_tool_input_v1';
   warningAppliedToOperationId?: string;
+  lastBlockedOperationId?: string;
+  lastBlockedPreviousOperationId?: string;
+  resultFingerprint?: string;
+  resultFingerprintVersion?: 'tool_output_content_hash_v1';
 };
 
 export type ProgressLedger = {
@@ -153,10 +182,7 @@ export type ProgressLedger = {
   generatedTokens: ProgressTokenUsage;
   completeness: 'complete' | 'partial';
   operationBudget?: OperationBudgetProjection;
-  loopGuards?: Record<
-    string,
-    { exactToolRepeat: ExactToolRepeatGuardState }
-  >;
+  loopGuards?: Record<string, { exactToolRepeat: ExactToolRepeatGuardState }>;
 };
 
 export type ProgressPolicyProjection = {
@@ -217,13 +243,16 @@ export function exactToolRepeatGuardSnapshot(
   ledger: ProgressLedger,
   grantId: string,
 ): ExactToolRepeatGuardState {
-  return structuredClone(
+  const snapshot = structuredClone(
     ledger.loopGuards?.[grantId]?.exactToolRepeat ?? {
       detections: 0,
       warningIssued: false,
       warningPending: false,
+      blocks: 0,
     },
   );
+  snapshot.blocks ??= 0;
+  return snapshot;
 }
 
 function applyBudgetEvent(
@@ -269,21 +298,34 @@ function applyBudgetEvent(
   }
   if (event.payload.kind === 'loop_guard_triggered') {
     const signal = event.payload.loopGuardSignal as
-      | ExactToolRepeatSignal
-      | undefined;
+      ExactToolRepeatSignal | undefined;
     if (!signal?.grantId) return true;
     const guards = (ledger.loopGuards ??= {});
-    if (!guards[signal.grantId]) {
-      guards[signal.grantId] = {
-        exactToolRepeat: {
-          detections: 1,
-          warningIssued: true,
-          warningPending: true,
-          previousOperationId: signal.previousOperationId,
-          triggeringOperationId: signal.triggeringOperationId,
-        },
-      };
+    if (signal.action === 'warn') {
+      if (!guards[signal.grantId]) {
+        guards[signal.grantId] = {
+          exactToolRepeat: {
+            detections: 1,
+            warningIssued: true,
+            warningPending: true,
+            blocks: 0,
+            previousOperationId: signal.previousOperationId,
+            triggeringOperationId: signal.triggeringOperationId,
+            operationFingerprint: signal.operationFingerprint,
+            operationFingerprintVersion: signal.operationFingerprintVersion,
+          },
+        };
+      }
+      return true;
     }
+    const guard = guards[signal.grantId]?.exactToolRepeat;
+    if (!guard?.warningAppliedToOperationId) return true;
+    guard.detections += 1;
+    guard.blocks = (guard.blocks ?? 0) + 1;
+    guard.lastBlockedOperationId = signal.triggeringOperationId;
+    guard.lastBlockedPreviousOperationId = signal.previousOperationId;
+    guard.resultFingerprint = signal.resultFingerprint;
+    guard.resultFingerprintVersion = signal.resultFingerprintVersion;
     return true;
   }
   if (event.payload.kind !== 'budget_reservation') return false;

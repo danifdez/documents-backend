@@ -569,9 +569,11 @@ describe('execution PostgreSQL integration', () => {
         toolCalls: 3,
         toolCallSoftLimit: 0,
         exactToolRepeatWarning: true,
+        exactToolRepeatBlockAfterWarning: true,
       },
     });
     const fingerprint = `sha256:${'a'.repeat(64)}`;
+    const resultFingerprint = `sha256:${'b'.repeat(64)}`;
     let producerSequence = 0;
     let causedByEventId = (
       await dataSource.getRepository(ExecutionEntity).findOneByOrFail({
@@ -668,6 +670,26 @@ describe('execution PostgreSQL integration', () => {
         toolCallId: firstToolCallId,
       },
     );
+    const firstSourceId = randomUUID();
+    await accept(
+      'source.observed',
+      'source.observed/1',
+      {
+        sourceId: firstSourceId,
+        kind: 'tool_output',
+        originComponent: 'documents-models',
+        observedAt: new Date().toISOString(),
+        contentHash: resultFingerprint,
+        trustLevel: 'tool_observation',
+        dataClassification: 'workspace',
+      },
+      {
+        operationId: firstOperationId,
+        attemptId: firstAttemptId,
+        toolCallId: firstToolCallId,
+        sourceId: firstSourceId,
+      },
+    );
     await accept(
       'operation.finished',
       'operation.finished/1',
@@ -709,6 +731,69 @@ describe('execution PostgreSQL integration', () => {
     expect(storedSignals).toHaveLength(1);
 
     causedByEventId = decisions[0].eventId;
+    const repeatedAttemptId = randomUUID();
+    await accept(
+      'operation.started',
+      'operation.started/1',
+      {
+        operationKind: 'tool_call',
+        status: 'dispatched',
+        name: 'folder_read',
+        loopId: context.executionId,
+        agentName: 'assistant',
+        loopKind: 'top_level',
+        round: 2,
+        maxRounds: 3,
+        phase: 'agent_loop',
+        budgetGrantId: grant.grantId,
+        budgetReservationId: decisions[0].reservation.reservationId,
+        budgetBucket: 'tool',
+        executionAttemptId: attemptId,
+        operationFingerprint: fingerprint,
+        operationFingerprintVersion: 'canonical_tool_input_v1',
+      },
+      {
+        operationId: repeatedOperationId,
+        attemptId: repeatedAttemptId,
+        toolCallId: repeatedToolCallId,
+      },
+    );
+    const repeatedSourceId = randomUUID();
+    await accept(
+      'source.observed',
+      'source.observed/1',
+      {
+        sourceId: repeatedSourceId,
+        kind: 'tool_output',
+        originComponent: 'documents-models',
+        observedAt: new Date().toISOString(),
+        contentHash: resultFingerprint,
+        trustLevel: 'tool_observation',
+        dataClassification: 'workspace',
+      },
+      {
+        operationId: repeatedOperationId,
+        attemptId: repeatedAttemptId,
+        toolCallId: repeatedToolCallId,
+        sourceId: repeatedSourceId,
+      },
+    );
+    await accept(
+      'operation.finished',
+      'operation.finished/1',
+      {
+        operationKind: 'tool_call',
+        status: 'succeeded',
+        result: { summary: 'Folder read' },
+        error: null,
+      },
+      {
+        operationId: repeatedOperationId,
+        attemptId: repeatedAttemptId,
+        toolCallId: repeatedToolCallId,
+      },
+    );
+
     const inferenceOperationId = randomUUID();
     const inference = await service.reserveOperationBudget(
       context.executionId,
@@ -743,15 +828,10 @@ describe('execution PostgreSQL integration', () => {
       executionAttemptId: attemptId,
     };
     await expect(
-      accept(
-        'operation.started',
-        'operation.started/1',
-        inferencePayload,
-        {
-          operationId: inferenceOperationId,
-          attemptId: inferenceAttemptId,
-        },
-      ),
+      accept('operation.started', 'operation.started/1', inferencePayload, {
+        operationId: inferenceOperationId,
+        attemptId: inferenceAttemptId,
+      }),
     ).rejects.toThrow('Loop guard warning does not match');
     await accept(
       'operation.started',
@@ -766,10 +846,63 @@ describe('execution PostgreSQL integration', () => {
       context.rootExecutionId,
       scope,
     );
-    expect(projected.ledger.loopGuards[grant.grantId].exactToolRepeat).toMatchObject({
+    expect(
+      projected.ledger.loopGuards[grant.grantId].exactToolRepeat,
+    ).toMatchObject({
       warningPending: false,
       warningAppliedToOperationId: inferenceOperationId,
     });
+
+    const blockedOperationId = randomUUID();
+    const blockedToolCallId = randomUUID();
+    const blockedDecisions = await Promise.all([
+      reserveTool(blockedOperationId, blockedToolCallId, 3),
+      reserveTool(blockedOperationId, blockedToolCallId, 3),
+    ]);
+    expect(blockedDecisions.every((decision) => !decision.granted)).toBe(true);
+    expect(blockedDecisions[0]).toMatchObject({
+      reservation: {
+        operationId: blockedOperationId,
+        status: 'denied',
+        reason: 'immediate_exact_tool_repeat_blocked',
+      },
+      loopGuardSignal: {
+        action: 'block',
+        previousOperationId: repeatedOperationId,
+        triggeringOperationId: blockedOperationId,
+        warningAppliedToOperationId: inferenceOperationId,
+        operationFingerprint: fingerprint,
+        resultFingerprint,
+      },
+      budgetState: {
+        tool: { consumed: 2, available: 1 },
+      },
+      guardState: {
+        detections: 2,
+        blocks: 1,
+        warningPending: false,
+      },
+    });
+    expect(blockedDecisions[0].loopGuardSignal).toEqual(
+      blockedDecisions[1].loopGuardSignal,
+    );
+    const finalEvents = await dataSource
+      .getRepository(ExecutionEventEntity)
+      .find({ where: { rootExecutionId: context.rootExecutionId } });
+    expect(
+      finalEvents.filter(
+        (event) =>
+          (event.envelope.payload as Record<string, unknown>)?.kind ===
+          'loop_guard_triggered',
+      ),
+    ).toHaveLength(2);
+    expect(
+      finalEvents.some(
+        (event) =>
+          event.envelope.eventType === 'operation.started' &&
+          event.envelope.operationId === blockedOperationId,
+      ),
+    ).toBe(false);
   });
 
   it('validates, fences, finalizes, and replays a deterministic partial', async () => {

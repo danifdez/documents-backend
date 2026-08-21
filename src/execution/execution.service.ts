@@ -89,7 +89,7 @@ function operationBudgetSnapshot(
   return { normal, tool };
 }
 
-function exactToolRepeatSignal(
+function exactToolRepeatWarningSignal(
   rows: ExecutionEventEntity[],
   request: OperationBudgetReservationRequest,
   guard: ExactToolRepeatGuardState,
@@ -147,6 +147,148 @@ function exactToolRepeatSignal(
     triggeringOperationId: request.operationId,
     operationFingerprint: request.operationFingerprint,
     operationFingerprintVersion: 'canonical_tool_input_v1',
+    executionAttemptId: request.executionAttemptId,
+    decidedAt: new Date().toISOString(),
+  };
+}
+
+function exactToolRepeatBlockSignal(
+  rows: ExecutionEventEntity[],
+  request: OperationBudgetReservationRequest,
+  guard: ExactToolRepeatGuardState,
+): Extract<ExactToolRepeatSignal, { action: 'block' }> | undefined {
+  if (
+    request.operationKind !== 'tool_call' ||
+    !request.operationFingerprint ||
+    request.operationFingerprintVersion !== 'canonical_tool_input_v1' ||
+    !guard.warningAppliedToOperationId
+  ) {
+    return undefined;
+  }
+  const warningSignal = rows
+    .map(
+      (row) =>
+        (row.envelope.payload as Record<string, any> | undefined)
+          ?.loopGuardSignal as ExactToolRepeatSignal | undefined,
+    )
+    .find(
+      (signal) =>
+        signal?.action === 'warn' &&
+        signal.grantId === request.grantId &&
+        signal.loopId === request.loopId,
+    );
+  if (
+    !warningSignal ||
+    warningSignal.operationFingerprint !== request.operationFingerprint ||
+    warningSignal.operationFingerprintVersion !==
+      request.operationFingerprintVersion ||
+    warningSignal.executionAttemptId !== request.executionAttemptId
+  ) {
+    return undefined;
+  }
+  const warningApplication = rows.find((row) => {
+    const envelope = row.envelope as Record<string, any>;
+    const payload = envelope.payload as Record<string, unknown> | undefined;
+    return (
+      envelope.eventType === 'operation.started' &&
+      envelope.operationId === guard.warningAppliedToOperationId &&
+      payload?.operationKind === 'inference' &&
+      payload.budgetBucket === 'normal' &&
+      payload.budgetGrantId === request.grantId &&
+      payload.loopId === request.loopId &&
+      payload.loopGuardWarningApplied === true &&
+      payload.executionAttemptId === request.executionAttemptId
+    );
+  });
+  if (!warningApplication) return undefined;
+  const lastTool = [...rows].reverse().find((row) => {
+    const envelope = row.envelope as Record<string, any>;
+    const payload = envelope.payload as Record<string, unknown> | undefined;
+    return (
+      envelope.eventType === 'operation.started' &&
+      payload?.operationKind === 'tool_call' &&
+      payload.loopId === request.loopId &&
+      payload.budgetGrantId === request.grantId
+    );
+  });
+  if (!lastTool) return undefined;
+  const lastEnvelope = lastTool.envelope as Record<string, any>;
+  const lastPayload = lastEnvelope.payload as Record<string, unknown>;
+  if (
+    lastEnvelope.operationId !== warningSignal.triggeringOperationId ||
+    lastPayload.name !== request.name ||
+    lastPayload.operationFingerprint !== request.operationFingerprint ||
+    lastPayload.operationFingerprintVersion !==
+      request.operationFingerprintVersion ||
+    lastPayload.executionAttemptId !== request.executionAttemptId
+  ) {
+    return undefined;
+  }
+  const successfulOperations = new Set([
+    warningSignal.previousOperationId,
+    warningSignal.triggeringOperationId,
+  ]);
+  const successfulFinishes: ExecutionEventEntity[] = [];
+  for (const operationId of successfulOperations) {
+    const finished = rows.find((row) => {
+      const envelope = row.envelope as Record<string, any>;
+      const payload = envelope.payload as Record<string, any> | undefined;
+      return (
+        envelope.eventType === 'operation.finished' &&
+        envelope.operationId === operationId &&
+        payload?.operationKind === 'tool_call' &&
+        payload.status === 'succeeded' &&
+        payload.result?.pendingConfirmation !== true
+      );
+    });
+    if (!finished) return undefined;
+    successfulFinishes.push(finished);
+  }
+  const resultSources = [...successfulOperations].map((operationId) => {
+    const source = rows.find((row) => {
+      const envelope = row.envelope as Record<string, any>;
+      const payload = envelope.payload as Record<string, unknown> | undefined;
+      return (
+        envelope.eventType === 'source.observed' &&
+        envelope.operationId === operationId &&
+        payload?.kind === 'tool_output' &&
+        HASH_PATTERN.test(String(payload.contentHash ?? ''))
+      );
+    });
+    return source;
+  });
+  const warningApplicationSequence = Number(warningApplication.sequence);
+  if (
+    successfulFinishes.some(
+      (event) => Number(event.sequence) >= warningApplicationSequence,
+    ) ||
+    resultSources.some(
+      (event) => !event || Number(event.sequence) >= warningApplicationSequence,
+    )
+  ) {
+    return undefined;
+  }
+  const resultHashes = resultSources.map((source) =>
+    source
+      ? String((source.envelope.payload as Record<string, unknown>).contentHash)
+      : undefined,
+  );
+  if (!resultHashes[0] || resultHashes[0] !== resultHashes[1]) {
+    return undefined;
+  }
+  return {
+    version: '1',
+    guardKind: 'immediate_exact_tool_repeat',
+    action: 'block',
+    grantId: request.grantId,
+    loopId: request.loopId,
+    previousOperationId: String(lastEnvelope.operationId),
+    triggeringOperationId: request.operationId,
+    warningAppliedToOperationId: guard.warningAppliedToOperationId,
+    operationFingerprint: request.operationFingerprint,
+    operationFingerprintVersion: 'canonical_tool_input_v1',
+    resultFingerprint: resultHashes[0],
+    resultFingerprintVersion: 'tool_output_content_hash_v1',
     executionAttemptId: request.executionAttemptId,
     decidedAt: new Date().toISOString(),
   };
@@ -967,6 +1109,12 @@ export class ExecutionService {
           delete comparableRequest.exactToolRepeatWarning;
         }
         if (
+          existing.requestedPolicy.exactToolRepeatBlockAfterWarning ===
+          undefined
+        ) {
+          delete comparableRequest.exactToolRepeatBlockAfterWarning;
+        }
+        if (
           existing.loopId !== request.loopId ||
           canonicalJson(existing.requestedPolicy) !==
             canonicalJson(comparableRequest)
@@ -1013,8 +1161,10 @@ export class ExecutionService {
           4,
         ),
         exactToolRepeatWarning:
+          this.progressLimit('PROGRESS_CHAT_EXACT_TOOL_REPEAT_WARNING', 1) > 0,
+        exactToolRepeatBlockAfterWarning:
           this.progressLimit(
-            'PROGRESS_CHAT_EXACT_TOOL_REPEAT_WARNING',
+            'PROGRESS_CHAT_EXACT_TOOL_REPEAT_BLOCK_AFTER_WARNING',
             1,
           ) > 0,
       });
@@ -1145,7 +1295,9 @@ export class ExecutionService {
           ),
           ...(loopGuardSignal ? { loopGuardSignal } : {}),
           eventId:
-            loopGuardEvent?.eventId ?? softLimitEvent?.eventId ?? event!.eventId,
+            loopGuardEvent?.eventId ??
+            softLimitEvent?.eventId ??
+            event!.eventId,
         };
       }
       const grant = progress.ledger.operationBudget?.grants[request.grantId];
@@ -1158,7 +1310,17 @@ export class ExecutionService {
         request.phase,
       );
       const usage = grant.usage[request.bucket];
-      const granted = usage.available > 0;
+      const hasBudget = usage.available > 0;
+      const guardBefore = exactToolRepeatGuardSnapshot(
+        progress.ledger,
+        grant.grantId,
+      );
+      const blockSignal =
+        hasBudget &&
+        grant.effectivePolicy.exactToolRepeatBlockAfterWarning === true
+          ? exactToolRepeatBlockSignal(rows, request, guardBefore)
+          : undefined;
+      const granted = hasBudget && !blockSignal;
       const committed = usage.reserved + usage.consumed + (granted ? 1 : 0);
       const crossesSoftLimit =
         granted &&
@@ -1168,19 +1330,17 @@ export class ExecutionService {
         Number(usage.softLimit ?? 0) > 0 &&
         !usage.softLimitReached &&
         committed >= Number(usage.softLimit);
-      const guardBefore = exactToolRepeatGuardSnapshot(
-        progress.ledger,
-        grant.grantId,
-      );
-      const loopGuardSignal =
+      const warningSignal =
         granted && grant.effectivePolicy.exactToolRepeatWarning === true
-          ? exactToolRepeatSignal(rows, request, guardBefore)
+          ? exactToolRepeatWarningSignal(rows, request, guardBefore)
           : undefined;
+      const loopGuardSignal = blockSignal ?? warningSignal;
       const reservation = createOperationBudgetReservation(
         request,
         granted,
         randomUUID(),
         new Date().toISOString(),
+        blockSignal ? 'immediate_exact_tool_repeat_blocked' : undefined,
       );
       let producerSequence = this.nextBackendProducerSequence(rows);
       let sequence = Number(execution.lastSequence) + 1;
@@ -1194,7 +1354,9 @@ export class ExecutionService {
           payload: {
             message: granted
               ? 'Operation budget reserved'
-              : 'Operation budget reservation denied',
+              : blockSignal
+                ? 'Operation blocked by loop guard'
+                : 'Operation budget reservation denied',
             kind: 'budget_reservation',
             reservation,
           },
@@ -1256,7 +1418,10 @@ export class ExecutionService {
             eventType: 'progress.reported',
             payloadSchema: 'progress.reported/1',
             payload: {
-              message: 'Immediate exact tool repeat detected',
+              message:
+                loopGuardSignal.action === 'block'
+                  ? 'Immediate exact tool repeat blocked'
+                  : 'Immediate exact tool repeat detected',
               kind: 'loop_guard_triggered',
               loopGuardSignal,
             },
