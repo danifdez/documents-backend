@@ -11,6 +11,10 @@ import { AgentEntity } from './agent.entity';
 
 @Entity({ name: 'agent_messages' })
 @Index('IDX_agent_messages_agent_id_created_at', ['agentId', 'createdAt'])
+@Index('UQ_agent_messages_execution_reply', ['agentId', 'executionId'], {
+  unique: true,
+  where: '"execution_id" IS NOT NULL AND "role" = \'assistant\'',
+})
 export class AgentMessageEntity {
   @PrimaryGeneratedColumn()
   id: number;

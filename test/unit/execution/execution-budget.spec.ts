@@ -9,7 +9,10 @@ import {
   ProgressEvent,
   projectExecutionProgress,
 } from '../../../src/execution/execution-progress';
-import { ExecutionService } from '../../../src/execution/execution.service';
+import {
+  contentHash,
+  ExecutionService,
+} from '../../../src/execution/execution.service';
 import { ExecutionStatus } from '../../../src/execution/execution-status.enum';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
@@ -98,6 +101,171 @@ describe('ExecutionService operation budget', () => {
       toolCalls: 6,
       toolCallSoftLimit: 4,
     },
+  });
+
+  it('accepts only durable leaf-tool evidence for a runtime partial', () => {
+    const reply = 'Completed work: Document read';
+    const artifactId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca714';
+    const operationId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca710';
+    const toolCallId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca711';
+    const grantId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca712';
+    rows = [
+      {
+        sequence: '1',
+        executionId: EXECUTION_ID,
+        operationId,
+        eventType: 'operation.started',
+        envelope: {
+          toolCallId,
+          payload: {
+            operationKind: 'tool_call',
+            name: 'folder_read',
+            loopKind: 'top_level',
+            loopId: EXECUTION_ID,
+            budgetGrantId: grantId,
+            executionAttemptId: ATTEMPT_ID,
+          },
+        },
+      },
+      {
+        sequence: '2',
+        executionId: EXECUTION_ID,
+        operationId,
+        eventType: 'operation.finished',
+        envelope: {
+          payload: {
+            operationKind: 'tool_call',
+            status: 'succeeded',
+            result: { value: 'fixture' },
+            resultSummary: 'Document read',
+            resultSummaryKind: 'leaf_tool',
+          },
+        },
+      },
+      {
+        sequence: '3',
+        executionId: EXECUTION_ID,
+        operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca713',
+        eventType: 'operation.started',
+        envelope: {
+          payload: {
+            operationKind: 'inference',
+            phase: 'forced_finalization',
+            loopId: EXECUTION_ID,
+            budgetGrantId: grantId,
+            executionAttemptId: ATTEMPT_ID,
+          },
+        },
+      },
+      {
+        sequence: '4',
+        executionId: EXECUTION_ID,
+        operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca713',
+        eventType: 'operation.finished',
+        envelope: {
+          payload: {
+            operationKind: 'inference',
+            status: 'succeeded',
+            outcome: 'invalid',
+            reason: 'empty_model_response',
+            result: {},
+          },
+        },
+      },
+      {
+        sequence: '5',
+        executionId: EXECUTION_ID,
+        operationId: null,
+        eventType: 'message.recorded',
+        envelope: {
+          actor: { type: 'system' },
+          payload: {
+            messageKind: 'final_response',
+            generationSource: 'runtime_template',
+            contentPreview: reply,
+            contentArtifactId: artifactId,
+          },
+          artifactRefs: [artifactId],
+        },
+      },
+    ];
+    const artifacts = [
+      {
+        artifactId,
+        rootExecutionId: EXECUTION_ID,
+        kind: 'model_response',
+        mediaType: 'text/plain',
+        body: Buffer.from(reply),
+        contentHash: contentHash(reply),
+        size: String(Buffer.byteLength(reply)),
+      },
+    ];
+    const completion = {
+      kind: 'partial' as const,
+      reason: 'budget_exhausted',
+      source: 'runtime_template' as const,
+      partialResult: {
+        version: '1' as const,
+        trigger: 'closing_output_empty' as const,
+        loopId: EXECUTION_ID,
+        grantId,
+        executionAttemptId: ATTEMPT_ID,
+        completedOperations: [
+          {
+            operationId,
+            toolCallId,
+            name: 'folder_read',
+            summary: 'Document read',
+          },
+        ],
+        pending: ['final_synthesis'] as ['final_synthesis'],
+      },
+    };
+
+    expect(() =>
+      (service as any).assertDeterministicPartial(
+        execution,
+        rows,
+        artifacts,
+        reply,
+        null,
+        completion,
+      ),
+    ).not.toThrow();
+    rows[3].envelope.payload.reason = 'transport_error';
+    expect(() =>
+      (service as any).assertDeterministicPartial(
+        execution,
+        rows,
+        artifacts,
+        reply,
+        null,
+        completion,
+      ),
+    ).toThrow(BadRequestException);
+    rows[3].envelope.payload.reason = 'empty_model_response';
+    completion.partialResult.completedOperations[0].summary = 'Invented';
+    expect(() =>
+      (service as any).assertDeterministicPartial(
+        execution,
+        rows,
+        artifacts,
+        reply,
+        null,
+        completion,
+      ),
+    ).toThrow(BadRequestException);
+    completion.partialResult.completedOperations[0].summary = 'Document read';
+    expect(() =>
+      (service as any).assertDeterministicPartial(
+        execution,
+        rows,
+        artifacts,
+        'Different reply',
+        null,
+        completion,
+      ),
+    ).toThrow(BadRequestException);
   });
 
   it('caps the grant and denies a second reservation without resetting saldo', async () => {

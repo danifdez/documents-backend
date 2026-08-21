@@ -3,7 +3,9 @@ import {
   canonicalJson,
   contentHash,
   redactExecutionText,
+  ExecutionService,
 } from '../../../src/execution/execution.service';
+import { BadRequestException } from '@nestjs/common';
 
 describe('ExecutionService primitives', () => {
   it('canonicalizes object keys recursively', () => {
@@ -24,5 +26,43 @@ describe('ExecutionService primitives', () => {
     expect(value).not.toContain('private');
     expect(value).not.toContain('secret');
     expect(value).not.toContain('abc.def');
+    expect(redactExecutionText(value)).toBe(value);
+  });
+
+  it('accepts redaction markers in artifacts but rejects raw secrets', () => {
+    const service = Object.create(ExecutionService.prototype) as {
+      rejectSensitiveArtifactBody: (
+        artifact: { mediaType: string; artifactId: string },
+        body: Buffer,
+      ) => void;
+    };
+    const artifact = {
+      mediaType: 'application/json',
+      artifactId: '00000000-0000-4000-8000-000000000001',
+    };
+
+    expect(() =>
+      service.rejectSensitiveArtifactBody(
+        artifact,
+        Buffer.from(
+          JSON.stringify({
+            accessToken: '[REDACTED]',
+            text: 'Bearer [REDACTED]; accessToken=[REDACTED].',
+          }),
+        ),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      service.rejectSensitiveArtifactBody(
+        artifact,
+        Buffer.from(JSON.stringify({ accessToken: 'raw-secret' })),
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      service.rejectSensitiveArtifactBody(
+        artifact,
+        Buffer.from(JSON.stringify({ text: 'accessToken=raw-secret' })),
+      ),
+    ).toThrow(BadRequestException);
   });
 });

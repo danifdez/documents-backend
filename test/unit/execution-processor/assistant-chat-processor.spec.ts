@@ -18,7 +18,16 @@ describe('AssistantChatProcessor final response', () => {
           reply: string,
           currentExecutionId: string,
           error: string | null,
-        ) => ({ assistantId, reply, currentExecutionId, error }),
+        ) => ({
+          id: 12,
+          assistantId,
+          role: 'assistant',
+          content: reply,
+          executionId: currentExecutionId,
+          error,
+          event: null,
+          createdAt: new Date('2026-08-20T10:00:00Z'),
+        }),
       ),
     };
     const memoryService = {};
@@ -37,6 +46,7 @@ describe('AssistantChatProcessor final response', () => {
     };
     const executionService = {
       completeExecution: jest.fn(async () => undefined),
+      validateDeterministicPartial: jest.fn(async () => undefined),
     };
     const processor = new AssistantChatProcessor(
       notificationGateway as any,
@@ -79,8 +89,36 @@ describe('AssistantChatProcessor final response', () => {
     });
     expect(
       dependencies.notificationGateway.sendAssistantResponse,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({ assistantId: 7, executionId }),
+    ).toHaveBeenCalledWith({
+      assistantId: 7,
+      executionId,
+      eventMessages: [],
+      message: expect.objectContaining({
+        id: 12,
+        content: 'Loop answer',
+        executionId,
+      }),
+    });
+  });
+
+  it('replays the same persisted message identity and exact notification', async () => {
+    const dependencies = build();
+    const execution = {
+      executionId,
+      taskType: 'agent-chat',
+      payload: { kind: 'agent', ownerId: 8 },
+      result: { reply: 'Loop answer' },
+    } as ExecutionEntity;
+
+    await dependencies.processor.process(execution);
+    await dependencies.processor.process(execution);
+
+    const notifications =
+      dependencies.notificationGateway.sendAgentResponse.mock.calls;
+    expect(notifications).toHaveLength(2);
+    expect(notifications[1][0]).toEqual(notifications[0][0]);
+    expect(notifications[0][0].message).toEqual(
+      expect.objectContaining({ id: 11, content: 'Loop answer', executionId }),
     );
   });
 
@@ -149,6 +187,63 @@ describe('AssistantChatProcessor final response', () => {
     expect(
       dependencies.notificationGateway.sendAssistantResponse,
     ).toHaveBeenCalled();
+  });
+
+  it('validates and preserves a runtime deterministic partial', async () => {
+    const dependencies = build();
+    const partialResult = {
+      version: '1',
+      trigger: 'closing_output_empty',
+      loopId: executionId,
+      grantId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
+      executionAttemptId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca703',
+      completedOperations: [
+        {
+          operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+          toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
+          name: 'folder_read',
+          summary: 'Document read',
+        },
+      ],
+      pending: ['final_synthesis'],
+    };
+    const execution = {
+      executionId,
+      taskType: 'assistant-chat',
+      payload: { kind: 'assistant', ownerId: 7 },
+      result: {
+        reply: 'Completed work: Document read',
+        completionKind: 'partial',
+        completionReason: 'budget_exhausted',
+        completionSource: 'runtime_template',
+        partialResult,
+      },
+    } as ExecutionEntity;
+
+    await dependencies.processor.process(execution);
+
+    expect(
+      dependencies.executionService.validateDeterministicPartial,
+    ).toHaveBeenCalledWith(executionId, 'Completed work: Document read', null, {
+      kind: 'partial',
+      reason: 'budget_exhausted',
+      source: 'runtime_template',
+      partialResult,
+    });
+    expect(
+      dependencies.executionService.completeExecution,
+    ).toHaveBeenCalledWith(
+      executionId,
+      'Completed work: Document read',
+      null,
+      undefined,
+      {
+        kind: 'partial',
+        reason: 'budget_exhausted',
+        source: 'runtime_template',
+        partialResult,
+      },
+    );
   });
 
   it('persists and publishes a terminal model error without a final reply', async () => {

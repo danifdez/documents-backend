@@ -16,6 +16,7 @@ import {
   ExecutionTelemetrySummary,
   ExecutionAccessScope,
   ExecutionCompletion,
+  DeterministicPartialResult,
   OperationBudgetReservationRequest,
   ProgressGrantRequest,
 } from './execution.types';
@@ -59,12 +60,13 @@ const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const PRIVATE_REASONING_PATTERN = /<think>[\s\S]*?<\/think>/gi;
 const BEARER_PATTERN = /\bbearer\s+[a-z0-9._~+/-]+=*/gi;
 const SECRET_VALUE_PATTERN =
-  /\b(access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|id[_-]?token|password|refresh[_-]?token|session[_-]?token|token)\s*[:=]\s*([^\s,;]+)/gi;
+  /\b(access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|id[_-]?token|password|refresh[_-]?token|session[_-]?token|token)\s*[:=]\s*(?!\[REDACTED\])([^\s,;]+)/gi;
 const PRIVATE_REASONING_DETECTOR = /<think>[\s\S]*?<\/think>/i;
 const BEARER_DETECTOR = /\bbearer\s+[a-z0-9._~+/-]+=*/i;
 const SECRET_VALUE_DETECTOR =
-  /\b(access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|id[_-]?token|password|refresh[_-]?token|session[_-]?token|token)\s*[:=]\s*([^\s,;]+)/i;
+  /\b(access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|id[_-]?token|password|refresh[_-]?token|session[_-]?token|token)\s*[:=]\s*(?!\[REDACTED\])([^\s,;]+)/i;
 const MAX_ARTIFACT_BYTES = 1024 * 1024;
+const REDACTED_VALUE = '[REDACTED]';
 
 function operationBudgetSnapshot(
   grant: OperationBudgetGrant & {
@@ -150,11 +152,37 @@ function rejectForbiddenData(value: unknown, path = '$'): void {
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (FORBIDDEN_KEYS.has(normalized)) {
+      if (child === REDACTED_VALUE) continue;
       throw new BadRequestException(
         `${path}.${key} is forbidden in execution data`,
       );
     }
     rejectForbiddenData(child, `${path}.${key}`);
+  }
+}
+
+function rejectSensitiveStrings(value: unknown, path = '$'): void {
+  if (typeof value === 'string') {
+    if (
+      PRIVATE_REASONING_DETECTOR.test(value) ||
+      BEARER_DETECTOR.test(value) ||
+      SECRET_VALUE_DETECTOR.test(value)
+    ) {
+      throw new BadRequestException(
+        `${path} contains unredacted sensitive text`,
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((child, index) =>
+      rejectSensitiveStrings(child, `${path}[${index}]`),
+    );
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    rejectSensitiveStrings(child, `${path}.${key}`);
   }
 }
 
@@ -1154,6 +1182,21 @@ export class ExecutionService {
         where: { rootExecutionId: execution.rootExecutionId },
         order: { sequence: 'ASC' },
       });
+      const artifacts =
+        completion?.source === 'runtime_template'
+          ? await this.loadArtifactsWithBody(
+              manager.getRepository(ExecutionArtifactEntity),
+              execution.rootExecutionId,
+            )
+          : [];
+      this.assertDeterministicPartial(
+        execution,
+        rows,
+        artifacts,
+        reply,
+        error,
+        completion,
+      );
       let lastEventId = rows.at(-1)?.eventId ?? execution.lastEventId;
       let sequence = Number(execution.lastSequence);
       const producerSequence = Math.max(
@@ -1208,6 +1251,9 @@ export class ExecutionService {
               contentPreview: safeReply.slice(0, 512),
               contentArtifactId: artifactId,
               format: 'text',
+              ...(completion?.source
+                ? { generationSource: completion.source }
+                : {}),
             },
             actor: { type: 'system' },
             executionId: execution.executionId,
@@ -1277,6 +1323,12 @@ export class ExecutionService {
               to: status,
               completionKind,
               completionReason,
+              ...(completion?.source
+                ? { completionSource: completion.source }
+                : {}),
+              ...(completion?.partialResult
+                ? { partialResult: completion.partialResult }
+                : {}),
               result: finalResult,
               error: error
                 ? { code: 'CHAT_FAILED', message: redactExecutionText(error) }
@@ -1309,6 +1361,317 @@ export class ExecutionService {
       await this.refreshProgressProjection(eventRepo, execution);
       await executionRepo.save(execution);
     });
+  }
+
+  async validateDeterministicPartial(
+    executionId: string,
+    reply: string,
+    error: string | null,
+    completion: ExecutionCompletion,
+  ): Promise<void> {
+    const execution = await this.executionRepo.findOne({
+      where: { executionId },
+    });
+    if (!execution) {
+      throw new NotFoundException(`Execution ${executionId} not found`);
+    }
+    const rows = await this.eventRepo.find({
+      where: { rootExecutionId: execution.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const artifacts = await this.loadArtifactsWithBody(
+      this.artifactRepo,
+      execution.rootExecutionId,
+    );
+    this.assertDeterministicPartial(
+      execution,
+      rows,
+      artifacts,
+      reply,
+      error,
+      completion,
+    );
+  }
+
+  private loadArtifactsWithBody(
+    repository: Repository<ExecutionArtifactEntity>,
+    rootExecutionId: string,
+  ): Promise<ExecutionArtifactEntity[]> {
+    return repository
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.root_execution_id = :rootExecutionId', {
+        rootExecutionId,
+      })
+      .getMany();
+  }
+
+  private assertDeterministicPartial(
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+    artifacts: ExecutionArtifactEntity[],
+    reply: string,
+    error: string | null,
+    completion?: ExecutionCompletion,
+  ): void {
+    if (completion?.source !== 'runtime_template') {
+      if (completion?.partialResult) {
+        throw new BadRequestException(
+          'partialResult requires completionSource=runtime_template',
+        );
+      }
+      return;
+    }
+    if (
+      error ||
+      completion.kind !== 'partial' ||
+      !['budget_exhausted', 'tool_budget_exhausted'].includes(
+        String(completion.reason),
+      )
+    ) {
+      throw new BadRequestException(
+        'Runtime template completion must be a successful budget partial',
+      );
+    }
+    const partial = completion.partialResult;
+    if (!partial) {
+      throw new BadRequestException(
+        'Runtime template completion requires partialResult',
+      );
+    }
+    this.assertPartialShape(partial, execution);
+
+    const finalMessages = rows.filter((row) => {
+      const envelope = row.envelope as Record<string, any>;
+      const payload = envelope['payload'] as Record<string, any> | undefined;
+      return (
+        row.executionId === execution.executionId &&
+        row.eventType === 'message.recorded' &&
+        payload?.['messageKind'] === 'final_response' &&
+        payload?.['generationSource'] === 'runtime_template' &&
+        (envelope['actor'] as Record<string, any> | undefined)?.['type'] ===
+          'system'
+      );
+    });
+    if (finalMessages.length !== 1) {
+      throw new BadRequestException(
+        'Runtime template requires one correctly attributed final message',
+      );
+    }
+    const finalMessage = finalMessages[0];
+    const finalPayload = finalMessage.envelope['payload'] as Record<
+      string,
+      unknown
+    >;
+    const artifactId = finalPayload['contentArtifactId'];
+    const artifactRefs = finalMessage.envelope['artifactRefs'];
+    const artifact = artifacts.find((item) => item.artifactId === artifactId);
+    const safeReply = redactExecutionText(reply);
+    if (
+      typeof artifactId !== 'string' ||
+      !Array.isArray(artifactRefs) ||
+      !artifactRefs.includes(artifactId) ||
+      finalPayload['contentPreview'] !== safeReply.slice(0, 512) ||
+      !artifact ||
+      artifact.rootExecutionId !== execution.rootExecutionId ||
+      artifact.kind !== 'model_response' ||
+      artifact.mediaType !== 'text/plain' ||
+      !artifact.body ||
+      artifact.body.toString('utf8') !== safeReply ||
+      artifact.contentHash !== contentHash(Buffer.from(safeReply, 'utf8')) ||
+      Number(artifact.size) !== Buffer.byteLength(safeReply, 'utf8')
+    ) {
+      throw new BadRequestException(
+        'Runtime template final artifact differs from the completed reply',
+      );
+    }
+
+    const operationIds = new Set<string>();
+    let previousSequence = -1;
+    for (const item of partial.completedOperations) {
+      if (operationIds.has(item.operationId)) {
+        throw new BadRequestException(
+          'Duplicate deterministic partial operation',
+        );
+      }
+      operationIds.add(item.operationId);
+      const finish = rows.find(
+        (row) =>
+          row.executionId === execution.executionId &&
+          row.operationId === item.operationId &&
+          row.eventType === 'operation.finished',
+      );
+      const start = rows.find(
+        (row) =>
+          row.executionId === execution.executionId &&
+          row.operationId === item.operationId &&
+          row.eventType === 'operation.started',
+      );
+      const finishEnvelope = finish?.envelope as
+        Record<string, any> | undefined;
+      const startEnvelope = start?.envelope as Record<string, any> | undefined;
+      const finishPayload = finishEnvelope?.['payload'] as
+        Record<string, any> | undefined;
+      const startPayload = startEnvelope?.['payload'] as
+        Record<string, any> | undefined;
+      if (
+        !finish ||
+        !start ||
+        finishPayload?.['operationKind'] !== 'tool_call' ||
+        finishPayload?.['status'] !== 'succeeded' ||
+        finishPayload?.['resultSummaryKind'] !== 'leaf_tool' ||
+        finishPayload?.['resultSummary'] !== item.summary ||
+        startPayload?.['name'] !== item.name ||
+        startPayload?.['loopKind'] !== 'top_level' ||
+        startPayload?.['loopId'] !== partial.loopId ||
+        startPayload?.['budgetGrantId'] !== partial.grantId ||
+        startPayload?.['executionAttemptId'] !== partial.executionAttemptId ||
+        startEnvelope?.['toolCallId'] !== item.toolCallId
+      ) {
+        throw new BadRequestException(
+          `Invalid deterministic partial operation ${item.operationId}`,
+        );
+      }
+      const sequence = Number(finish.sequence);
+      if (sequence <= previousSequence) {
+        throw new BadRequestException(
+          'Deterministic partial operations are not in durable order',
+        );
+      }
+      previousSequence = sequence;
+    }
+
+    const loopStarts = rows.filter((row) => {
+      const envelope = row.envelope as Record<string, any>;
+      const payload = envelope['payload'] as Record<string, any> | undefined;
+      return (
+        row.executionId === execution.executionId &&
+        row.eventType === 'operation.started' &&
+        payload?.['operationKind'] === 'tool_call' &&
+        payload?.['loopId'] === partial.loopId &&
+        payload?.['budgetGrantId'] === partial.grantId
+      );
+    });
+    for (const start of loopStarts) {
+      const finish = rows.find(
+        (row) =>
+          row.executionId === execution.executionId &&
+          row.operationId === start.operationId &&
+          row.eventType === 'operation.finished',
+      );
+      const payload = finish?.envelope['payload'] as
+        Record<string, any> | undefined;
+      if (
+        !finish ||
+        ['dispatched', 'unknown'].includes(String(payload?.['status']))
+      ) {
+        throw new BadRequestException(
+          'Runtime template completion has an ambiguous tool operation',
+        );
+      }
+      const result = payload?.['result'] as Record<string, any> | undefined;
+      if (result?.['pendingConfirmation']) {
+        throw new BadRequestException(
+          'Runtime template completion has a pending confirmation',
+        );
+      }
+    }
+    if (partial.trigger === 'closing_output_empty') {
+      const closingStart = rows.find((row) => {
+        const payload = row.envelope['payload'] as
+          Record<string, any> | undefined;
+        return (
+          row.executionId === execution.executionId &&
+          row.eventType === 'operation.started' &&
+          payload?.['operationKind'] === 'inference' &&
+          payload?.['phase'] === 'forced_finalization' &&
+          payload?.['loopId'] === partial.loopId &&
+          payload?.['budgetGrantId'] === partial.grantId &&
+          payload?.['executionAttemptId'] === partial.executionAttemptId
+        );
+      });
+      const closingFinish = closingStart
+        ? rows.find((row) => {
+            const payload = row.envelope['payload'] as
+              Record<string, any> | undefined;
+            return (
+              row.executionId === execution.executionId &&
+              row.operationId === closingStart.operationId &&
+              row.eventType === 'operation.finished' &&
+              payload?.['operationKind'] === 'inference' &&
+              payload?.['outcome'] === 'invalid' &&
+              payload?.['reason'] === 'empty_model_response'
+            );
+          })
+        : undefined;
+      if (!closingStart || !closingFinish) {
+        throw new BadRequestException(
+          'Runtime template closing output was not durably invalid',
+        );
+      }
+    } else {
+      const closingUnavailable = rows.some((row) => {
+        const payload = row.envelope['payload'] as
+          Record<string, any> | undefined;
+        const reservation = payload?.['reservation'] as
+          Record<string, any> | undefined;
+        const grant = payload?.['grant'] as Record<string, any> | undefined;
+        return (
+          row.executionId === execution.executionId &&
+          ((row.eventType === 'progress.reported' &&
+            payload?.['kind'] === 'budget_reservation' &&
+            reservation?.['grantId'] === partial.grantId &&
+            reservation?.['bucket'] === 'closing' &&
+            reservation?.['status'] === 'denied') ||
+            (row.eventType === 'progress.reported' &&
+              payload?.['kind'] === 'budget_grant' &&
+              grant?.['grantId'] === partial.grantId &&
+              Number(grant?.['effectivePolicy']?.['closing']) === 0))
+        );
+      });
+      if (!closingUnavailable) {
+        throw new BadRequestException(
+          'Runtime template closing unavailability is not durable',
+        );
+      }
+    }
+  }
+
+  private assertPartialShape(
+    partial: DeterministicPartialResult,
+    execution: ExecutionEntity,
+  ): void {
+    if (
+      partial.version !== '1' ||
+      !['closing_unavailable', 'closing_output_empty'].includes(
+        partial.trigger,
+      ) ||
+      partial.executionAttemptId !== execution.attemptId ||
+      !EXECUTION_UUID_PATTERN.test(partial.loopId) ||
+      !EXECUTION_UUID_PATTERN.test(partial.grantId) ||
+      !EXECUTION_UUID_PATTERN.test(partial.executionAttemptId) ||
+      !Array.isArray(partial.completedOperations) ||
+      partial.completedOperations.length === 0 ||
+      !Array.isArray(partial.pending) ||
+      partial.pending.length !== 1 ||
+      partial.pending[0] !== 'final_synthesis'
+    ) {
+      throw new BadRequestException('Invalid deterministic partial result');
+    }
+    for (const item of partial.completedOperations) {
+      if (
+        !item ||
+        !EXECUTION_UUID_PATTERN.test(item.operationId) ||
+        !EXECUTION_UUID_PATTERN.test(item.toolCallId) ||
+        !item.name ||
+        !item.summary ||
+        item.summary.length > 200
+      ) {
+        throw new BadRequestException(
+          'Invalid deterministic partial operation reference',
+        );
+      }
+    }
   }
 
   async readEvents(
@@ -1741,6 +2104,16 @@ export class ExecutionService {
       return;
     }
     const text = body.toString('utf8');
+    if (/^application\/(json|[^;]+\+json)/.test(artifact.mediaType)) {
+      try {
+        const value = JSON.parse(text);
+        rejectForbiddenData(value, '$artifact');
+        rejectSensitiveStrings(value, '$artifact');
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
+      }
+      return;
+    }
     if (
       PRIVATE_REASONING_DETECTOR.test(text) ||
       BEARER_DETECTOR.test(text) ||
@@ -1749,13 +2122,6 @@ export class ExecutionService {
       throw new BadRequestException(
         `Artifact contains unredacted sensitive text: ${artifact.artifactId}`,
       );
-    }
-    if (/^application\/(json|[^;]+\+json)/.test(artifact.mediaType)) {
-      try {
-        rejectForbiddenData(JSON.parse(text), '$artifact');
-      } catch (error) {
-        if (error instanceof BadRequestException) throw error;
-      }
     }
   }
 

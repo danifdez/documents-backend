@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   Inject,
   forwardRef,
   Logger,
@@ -257,15 +258,40 @@ export class AgentService {
     executionId: string | null,
     error: string | null = null,
   ): Promise<AgentMessageEntity> {
-    const msg = await this.messageRepo.save(
-      this.messageRepo.create({
-        agentId,
-        role: 'assistant',
-        content: reply,
-        executionId,
-        error,
-      }),
-    );
+    const findExisting = () =>
+      executionId
+        ? this.messageRepo.findOne({
+            where: { agentId, executionId, role: 'assistant' },
+          })
+        : Promise.resolve(null);
+    const returnExisting = (existing: AgentMessageEntity | null) => {
+      if (!existing) return null;
+      if (existing.content !== reply || existing.error !== error) {
+        throw new ConflictException(
+          `Execution ${executionId} already has a different agent reply`,
+        );
+      }
+      return existing;
+    };
+    const existing = returnExisting(await findExisting());
+    if (existing) return existing;
+
+    let msg: AgentMessageEntity;
+    try {
+      msg = await this.messageRepo.save(
+        this.messageRepo.create({
+          agentId,
+          role: 'assistant',
+          content: reply,
+          executionId,
+          error,
+        }),
+      );
+    } catch (saveError) {
+      const raced = returnExisting(await findExisting());
+      if (raced) return raced;
+      throw saveError;
+    }
 
     const a = await this.agentRepo.findOne({ where: { id: agentId } });
     if (a) {

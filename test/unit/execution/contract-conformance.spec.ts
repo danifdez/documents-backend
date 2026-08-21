@@ -222,6 +222,98 @@ describe('execution v1 contract', () => {
     expect(contractHash).toBe(EXECUTION_CONTRACT_SET_HASH);
   });
 
+  it('accepts only bounded leaf summaries on successful tool operations', () => {
+    const payload = {
+      operationKind: 'tool_call',
+      status: 'succeeded',
+      result: { summary: '3 matching documents found' },
+      error: null,
+      resultSummary: '3 matching documents found',
+      resultSummaryKind: 'leaf_tool',
+    };
+    const finishedEvent = (value: any) =>
+      event(value, {
+        eventType: 'operation.finished',
+        payloadSchema: 'operation.finished/1',
+        operationId: '00000000-0000-4000-8000-000000000010',
+        attemptId: '00000000-0000-4000-8000-000000000011',
+        toolCallId: '00000000-0000-4000-8000-000000000012',
+      });
+
+    expect(validateEvent(finishedEvent(payload))).toBe(true);
+    expect(validateEvent(finishedEvent({ ...payload, resultSummary: '' }))).toBe(
+      false,
+    );
+    expect(
+      validateEvent(
+        finishedEvent({ ...payload, resultSummary: 'x'.repeat(201) }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        finishedEvent({ ...payload, resultSummaryKind: 'model_summary' }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(finishedEvent({ ...payload, status: 'failed' })),
+    ).toBe(false);
+  });
+
+  it('requires a successful partial result for runtime-authored completion', () => {
+    const payload = {
+      from: 'running',
+      to: 'completed',
+      completionKind: 'partial',
+      completionReason: 'budget_exhausted',
+      completionSource: 'runtime_template',
+      partialResult: {
+        version: '1',
+        trigger: 'closing_output_empty',
+        loopId: '00000000-0000-4000-8000-000000000020',
+        grantId: '00000000-0000-4000-8000-000000000021',
+        executionAttemptId: '00000000-0000-4000-8000-000000000022',
+        completedOperations: [
+          {
+            operationId: '00000000-0000-4000-8000-000000000023',
+            toolCallId: '00000000-0000-4000-8000-000000000024',
+            name: 'workspace_research',
+            summary: '3 matching documents found',
+          },
+        ],
+        pending: ['final_synthesis'],
+      },
+      result: { reply: 'Completed work: 3 matching documents found' },
+      error: null,
+    };
+    const terminalEvent = (value: any) =>
+      event(value, {
+        eventType: 'execution.state_changed',
+        payloadSchema: 'execution.state_changed/1',
+      });
+
+    expect(validateEvent(terminalEvent(payload))).toBe(true);
+    expect(
+      validateEvent(terminalEvent({ ...payload, completionKind: 'full' })),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        terminalEvent({
+          ...payload,
+          partialResult: { ...payload.partialResult, trigger: 'provider_error' },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      validateEvent(
+        terminalEvent({
+          ...payload,
+          to: 'failed',
+          error: { code: 'failed', message: 'failed' },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('accepts a policy snapshot and rejects negative limits', () => {
     const payload = {
       message: 'Effective progress policy recorded',

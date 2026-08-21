@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AgentService } from '../../../src/agent/agent.service';
 import { AgentEntity } from '../../../src/agent/agent.entity';
 import { AgentMessageEntity } from '../../../src/agent/agent-message.entity';
@@ -251,6 +251,29 @@ describe('AgentService', () => {
   });
 
   describe('recordAgentReply', () => {
+    it('reuses the exact agent reply when an execution is replayed', async () => {
+      const a = await service.create({ name: 'A' });
+
+      const first = await service.recordAgentReply(a.id, 'reply', EXECUTION_ID);
+      const replay = await service.recordAgentReply(
+        a.id,
+        'reply',
+        EXECUTION_ID,
+      );
+
+      expect(replay).toBe(first);
+      expect(messageRepo.store.size).toBe(1);
+    });
+
+    it('rejects a different agent reply for the same execution', async () => {
+      const a = await service.create({ name: 'A' });
+      await service.recordAgentReply(a.id, 'reply', EXECUTION_ID);
+
+      await expect(
+        service.recordAgentReply(a.id, 'different', EXECUTION_ID),
+      ).rejects.toThrow(ConflictException);
+    });
+
     it('resets expiresAt to now + 2 days when not pinned', async () => {
       const a = await service.create({ name: 'A' });
       const stale = new Date(Date.now() - 60_000);

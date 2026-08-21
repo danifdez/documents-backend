@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   Inject,
   forwardRef,
   Logger,
@@ -267,15 +268,40 @@ export class AssistantService implements OnApplicationBootstrap {
     executionId: string | null,
     error: string | null = null,
   ): Promise<AssistantMessageEntity> {
-    const msg = await this.messageRepo.save(
-      this.messageRepo.create({
-        assistantId,
-        role: 'assistant',
-        content: reply,
-        executionId,
-        error,
-      }),
-    );
+    const findExisting = () =>
+      executionId
+        ? this.messageRepo.findOne({
+            where: { assistantId, executionId, role: 'assistant' },
+          })
+        : Promise.resolve(null);
+    const returnExisting = (existing: AssistantMessageEntity | null) => {
+      if (!existing) return null;
+      if (existing.content !== reply || existing.error !== error) {
+        throw new ConflictException(
+          `Execution ${executionId} already has a different assistant reply`,
+        );
+      }
+      return existing;
+    };
+    const existing = returnExisting(await findExisting());
+    if (existing) return existing;
+
+    let msg: AssistantMessageEntity;
+    try {
+      msg = await this.messageRepo.save(
+        this.messageRepo.create({
+          assistantId,
+          role: 'assistant',
+          content: reply,
+          executionId,
+          error,
+        }),
+      );
+    } catch (saveError) {
+      const raced = returnExisting(await findExisting());
+      if (raced) return raced;
+      throw saveError;
+    }
 
     // Touch lastSeenAt of the assistant
     const a = await this.assistantRepo.findOne({ where: { id: assistantId } });

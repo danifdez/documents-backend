@@ -1,12 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { AssistantService } from '../../../src/assistant/assistant.service';
 import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { AssistantMessageEntity } from '../../../src/assistant/assistant-message.entity';
 import { ExecutionService } from '../../../src/execution/execution.service';
 import { AssistantMemoryService } from '../../../src/assistant-memory/assistant-memory.service';
 import { IndexedFileService } from '../../../src/indexed-file/indexed-file.service';
+
+const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 
 function createMockRepo() {
   const store = new Map<number, any>();
@@ -85,6 +87,25 @@ describe('AssistantService — remove() protection', () => {
     assistantRepo.store.set(2, { id: 2, name: 'Other', isSystem: false });
     await service.remove(2);
     expect(assistantRepo.store.size).toBe(0);
+  });
+
+  it('reuses the exact assistant reply when an execution is replayed', async () => {
+    assistantRepo.store.set(2, { id: 2, name: 'Other', isSystem: false });
+
+    const first = await service.recordAssistantReply(2, 'reply', EXECUTION_ID);
+    const replay = await service.recordAssistantReply(2, 'reply', EXECUTION_ID);
+
+    expect(replay).toBe(first);
+    expect(messageRepo.store.size).toBe(1);
+  });
+
+  it('rejects a different assistant reply for the same execution', async () => {
+    assistantRepo.store.set(2, { id: 2, name: 'Other', isSystem: false });
+    await service.recordAssistantReply(2, 'reply', EXECUTION_ID);
+
+    await expect(
+      service.recordAssistantReply(2, 'different', EXECUTION_ID),
+    ).rejects.toThrow(ConflictException);
   });
 });
 // A message repo whose `find` honours where.assistantId, the LessThan(id)

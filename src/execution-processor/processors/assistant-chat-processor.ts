@@ -118,6 +118,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     const result = execution.result || {};
     const reply = (result['reply'] as string | undefined) ?? '';
     const error = (result['error'] as string | undefined) ?? null;
+    await this.validateDeterministicPartial(execution, error, result);
 
     const eventMessages: any[] = [];
 
@@ -282,6 +283,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     const result = execution.result || {};
     const reply = (result['reply'] as string | undefined) ?? '';
     const error = (result['error'] as string | undefined) ?? null;
+    await this.validateDeterministicPartial(execution, error, result);
 
     const message = await this.agentService.recordAgentReply(
       agentId,
@@ -316,14 +318,40 @@ export class AssistantChatProcessor implements ExecutionProcessor {
       );
       return;
     }
+    const completion: ExecutionCompletion = {
+      kind: result['completionKind'],
+      reason: result['completionReason'],
+      ...(result['completionSource']
+        ? { source: result['completionSource'] }
+        : {}),
+      ...(result['partialResult']
+        ? { partialResult: result['partialResult'] }
+        : {}),
+    };
     await this.executionService.completeExecution(
       execution.executionId,
       reply,
       error,
       result['executionTelemetry'] as ExecutionTelemetrySummary | undefined,
+      completion,
+    );
+  }
+
+  private async validateDeterministicPartial(
+    execution: ExecutionEntity,
+    error: string | null,
+    result: Record<string, any>,
+  ): Promise<void> {
+    if (result['completionSource'] !== 'runtime_template') return;
+    await this.executionService.validateDeterministicPartial(
+      execution.executionId,
+      String(result['reply'] ?? ''),
+      error,
       {
         kind: result['completionKind'],
         reason: result['completionReason'],
+        source: result['completionSource'],
+        partialResult: result['partialResult'],
       } as ExecutionCompletion,
     );
   }

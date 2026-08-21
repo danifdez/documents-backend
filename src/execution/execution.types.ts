@@ -67,4 +67,23 @@ export interface OperationBudgetReservationRequest {
 export interface ExecutionCompletion {
   kind?: 'full' | 'partial';
   reason?: string;
+  source?: 'model' | 'runtime_template';
+  partialResult?: DeterministicPartialResult;
+}
+
+export interface DeterministicPartialOperation {
+  operationId: string;
+  toolCallId: string;
+  name: string;
+  summary: string;
+}
+
+export interface DeterministicPartialResult {
+  version: '1';
+  trigger: 'closing_unavailable' | 'closing_output_empty';
+  loopId: string;
+  grantId: string;
+  executionAttemptId: string;
+  completedOperations: DeterministicPartialOperation[];
+  pending: ['final_synthesis'];
 }

@@ -10,6 +10,14 @@ import {
 import { AssistantEntity } from './assistant.entity';
 
 @Entity({ name: 'assistant_messages' })
+@Index(
+  'UQ_assistant_messages_execution_reply',
+  ['assistantId', 'executionId'],
+  {
+    unique: true,
+    where: '"execution_id" IS NOT NULL AND "role" = \'assistant\'',
+  },
+)
 export class AssistantMessageEntity {
   @PrimaryGeneratedColumn()
   id: number;
