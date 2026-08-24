@@ -8,6 +8,7 @@ contract schemas must not be edited in those copies.
 
 - `schemas/`: JSON Schema 2020-12 contracts.
 - `schema-manifest.json`: SHA-256 inventory of every schema.
+- `validate.py`: shared fixture and cross-record invariant validator.
 
 Conformance fixtures live in `test/contracts/execution/v1/fixtures/` and are
 validated by `test/unit/execution/contract-conformance.spec.ts`.
@@ -42,11 +43,13 @@ Models copy from the Documents monorepo:
 npm run contracts:check
 npm run contracts:sync:models
 npm run contracts:check:models
+npm run contracts:sync:all
+npm run contracts:check:all
 ```
 
 The sync command updates only the contract schemas, manifest, and shared
-fixtures. Additional consumers require an explicit target with the same pinned
-contract layout.
+fixtures. `contracts:sync:all` publishes the same set to Models, IA Browser,
+and ai-train from the standard sibling-repository layout.
 
 Unknown optional fields are accepted. Unknown schema versions and unknown
 `payloadSchema` values are rejected explicitly.

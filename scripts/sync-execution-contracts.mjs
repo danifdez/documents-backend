@@ -17,7 +17,15 @@ const write = process.argv.includes('--write');
 const targets = process.argv
   .slice(2)
   .filter((argument) => argument !== '--write')
-  .map((target) => resolve(backendRoot, target));
+  .map((target) => {
+    const separator = target.indexOf(':');
+    const layout = separator === -1 ? 'documents' : target.slice(0, separator);
+    const path = separator === -1 ? target : target.slice(separator + 1);
+    if (!['documents', 'ai-train'].includes(layout)) {
+      throw new Error(`Unsupported contract target layout: ${layout}`);
+    }
+    return { layout, root: resolve(backendRoot, path) };
+  });
 
 const walk = (root, predicate = () => true) =>
   readdirSync(root, { withFileTypes: true })
@@ -73,6 +81,7 @@ const manifest = {
   schemas,
 };
 const manifestPath = join(contractRoot, 'schema-manifest.json');
+const validatorPath = join(contractRoot, 'validate.py');
 
 const updateBundle = (path) => {
   const bundle = readJson(path);
@@ -119,10 +128,12 @@ if (write) {
   throw new Error('schema-manifest.json does not match the canonical schemas');
 }
 
-for (const targetRoot of targets) {
-  const targetContractRoot = join(targetRoot, 'contracts/execution/v1');
+for (const target of targets) {
+  const contractPrefix =
+    target.layout === 'ai-train' ? 'harness/contracts' : 'contracts';
+  const targetContractRoot = join(target.root, contractPrefix, 'execution/v1');
   const targetFixturesRoot = join(
-    targetRoot,
+    target.root,
     'tests/contracts/execution/v1/fixtures',
   );
   const copies = [
@@ -131,6 +142,7 @@ for (const targetRoot of targets) {
       join(targetContractRoot, relative(contractRoot, source)),
     ]),
     [manifestPath, join(targetContractRoot, 'schema-manifest.json')],
+    [validatorPath, join(targetContractRoot, 'validate.py')],
     ...walk(fixturesRoot).map((source) => [
       source,
       join(targetFixturesRoot, relative(fixturesRoot, source)),
