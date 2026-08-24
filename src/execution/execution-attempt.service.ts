@@ -26,6 +26,9 @@ import { ExecutionStepStatus } from './execution-step-status.enum';
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { ExecutionEntity } from './execution.entity';
+import { ExecutionOperationEntity } from './execution-operation.entity';
+import { ExecutionOperationRecoveryClass } from './execution-operation-recovery-class.enum';
+import { ExecutionOperationStatus } from './execution-operation-status.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { releaseExecutionStepDependents } from './execution-step.service';
 import { executionStepOutputValue } from './execution-step-result';
@@ -307,20 +310,63 @@ export class ExecutionAttemptService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!step || step.currentAttemptId !== attempt.attemptId) return false;
+      const operationRepo = manager.getRepository(ExecutionOperationEntity);
+      const operation = await operationRepo.findOne({
+        where: { operationId: step.operationId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        !operation ||
+        operation.stepId !== step.stepId ||
+        operation.currentAttemptId !== attempt.attemptId
+      ) {
+        throw new ConflictException('operation_attempt_mismatch');
+      }
 
       assertAttemptTransition(
         attempt.status,
         ExecutionStepAttemptStatus.EXPIRED,
       );
-      assertStepTransition(step.status, ExecutionStepStatus.READY);
       attempt.status = ExecutionStepAttemptStatus.EXPIRED;
       attempt.finishedAt = now;
       attempt.finishReason = 'lease_expired';
-      step.status = ExecutionStepStatus.READY;
       step.currentAttemptId = null;
       step.version += 1;
+      operation.currentAttemptId = null;
+      if (
+        [
+          ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
+          ExecutionOperationRecoveryClass.IDEMPOTENT,
+        ].includes(operation.recoveryClass)
+      ) {
+        assertStepTransition(step.status, ExecutionStepStatus.READY);
+        step.status = ExecutionStepStatus.READY;
+        operation.status = ExecutionOperationStatus.PREPARED;
+      } else {
+        assertStepTransition(step.status, ExecutionStepStatus.FAILED);
+        const error = {
+          code: 'effect_unknown',
+          message: 'The dispatched operation could not be recovered safely',
+          attemptId: attempt.attemptId,
+        };
+        step.status = ExecutionStepStatus.FAILED;
+        step.error = error;
+        operation.status = ExecutionOperationStatus.UNKNOWN;
+        operation.error = error;
+        operation.finishedAt = now;
+        const execution = await manager.getRepository(ExecutionEntity).findOne({
+          where: { executionId: step.executionId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (execution && !this.isTerminalExecution(execution.status)) {
+          execution.phase = 'terminal_pending_failed';
+          execution.error = error;
+          await manager.getRepository(ExecutionEntity).save(execution);
+        }
+      }
       await attemptRepo.save(attempt);
       await stepRepo.save(step);
+      await operationRepo.save(operation);
       return true;
     });
   }
@@ -389,15 +435,25 @@ export class ExecutionAttemptService {
         where: { stepId: input.stepId },
         lock: { mode: 'pessimistic_write' },
       });
+      const operation = await manager
+        .getRepository(ExecutionOperationEntity)
+        .findOne({
+          where: { operationId: input.operationId },
+          lock: { mode: 'pessimistic_write' },
+        });
       const identityMatches =
         attempt.executionId === input.executionId &&
         attempt.stepId === input.stepId &&
         attempt.operationId === input.operationId &&
         attempt.claimedBy === input.workerId &&
-        input.result.stepKind === step?.stepKind;
-      if (!identityMatches || !step) return ack('rejected');
+        input.result.stepKind === step?.stepKind &&
+        operation?.executionId === input.executionId &&
+        operation.stepId === input.stepId;
+      if (!identityMatches || !step || !operation) return ack('rejected');
       if (
         step.currentAttemptId !== attempt.attemptId ||
+        operation.currentAttemptId !== attempt.attemptId ||
+        operation.status !== ExecutionOperationStatus.DISPATCHED ||
         attempt.leaseExpiresAt <= acknowledgedAt ||
         ![
           ExecutionStepAttemptStatus.LEASED,
@@ -469,6 +525,19 @@ export class ExecutionAttemptService {
         if (!attempt || !receipt || !execution) {
           throw new ConflictException('incomplete_result_receipt');
         }
+        const operationRepo = manager.getRepository(ExecutionOperationEntity);
+        const operation = await operationRepo.findOne({
+          where: { operationId: step.operationId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (
+          !operation ||
+          operation.stepId !== step.stepId ||
+          operation.currentAttemptId !== attempt.attemptId ||
+          operation.status !== ExecutionOperationStatus.DISPATCHED
+        ) {
+          throw new ConflictException('operation_attempt_mismatch');
+        }
 
         const result = receipt.result as Record<string, unknown>;
         const status = result.status;
@@ -477,29 +546,37 @@ export class ExecutionAttemptService {
           ExecutionStatus.FAILED,
           ExecutionStatus.CANCELLED,
         ].includes(execution.status);
+        const executionHasTerminalIntent =
+          executionWasTerminal ||
+          ['terminal_pending_failed', 'terminal_pending_cancelled'].includes(
+            execution.phase ?? '',
+          );
+        const finishedAt = new Date();
         if (status === 'succeeded') {
           assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
           step.status = ExecutionStepStatus.COMPLETED;
           step.result = result.output ?? null;
+          operation.status = ExecutionOperationStatus.SUCCEEDED;
+          operation.result = result.output ?? null;
+          operation.error = null;
         } else if (status === 'cancelled') {
           assertStepTransition(step.status, ExecutionStepStatus.CANCELLED);
           step.status = ExecutionStepStatus.CANCELLED;
-          if (!executionWasTerminal) {
-            execution.status = ExecutionStatus.CANCELLED;
-            execution.phase = null;
-            execution.completedAt = new Date();
-            execution.completionReason = 'worker_cancelled';
+          operation.status = ExecutionOperationStatus.CANCELLED;
+          operation.error =
+            (result.error as Record<string, unknown> | undefined) ?? null;
+          if (!executionHasTerminalIntent) {
+            execution.phase = 'terminal_pending_cancelled';
           }
         } else {
           assertStepTransition(step.status, ExecutionStepStatus.FAILED);
           step.status = ExecutionStepStatus.FAILED;
           step.error = result.error as Record<string, unknown>;
-          if (!executionWasTerminal) {
-            execution.status = ExecutionStatus.FAILED;
-            execution.phase = null;
+          operation.status = ExecutionOperationStatus.FAILED;
+          operation.error = result.error as Record<string, unknown>;
+          if (!executionHasTerminalIntent) {
             execution.error = result.error;
-            execution.completedAt = new Date();
-            execution.completionReason = 'worker_failed';
+            execution.phase = 'terminal_pending_failed';
           }
         }
         assertAttemptTransition(
@@ -507,12 +584,15 @@ export class ExecutionAttemptService {
           ExecutionStepAttemptStatus.CLOSED,
         );
         attempt.status = ExecutionStepAttemptStatus.CLOSED;
-        attempt.finishedAt = new Date();
+        attempt.finishedAt = finishedAt;
         attempt.finishReason = String(status);
+        operation.currentAttemptId = null;
+        operation.finishedAt = finishedAt;
         step.version += 1;
         await attemptRepo.save(attempt);
         await stepRepo.save(step);
-        if (status === 'succeeded' && !executionWasTerminal) {
+        await operationRepo.save(operation);
+        if (status === 'succeeded' && !executionHasTerminalIntent) {
           await releaseExecutionStepDependents(manager, step.stepId);
           const remaining = await manager.query(
             `
@@ -647,6 +727,27 @@ export class ExecutionAttemptService {
       resultReceiptId: null,
     });
     await attemptRepo.save(attempt);
+    const operationRepo = manager.getRepository(ExecutionOperationEntity);
+    const operation = await operationRepo.findOne({
+      where: { operationId: step.operationId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!operation || operation.stepId !== step.stepId) {
+      throw new ConflictException('operation_not_found');
+    }
+    if (
+      ![
+        ExecutionOperationStatus.PLANNED,
+        ExecutionOperationStatus.PREPARED,
+      ].includes(operation.status)
+    ) {
+      throw new ConflictException('operation_not_dispatchable');
+    }
+    operation.status = ExecutionOperationStatus.DISPATCHED;
+    operation.currentAttemptId = attempt.attemptId;
+    operation.finishedAt = null;
+    operation.error = null;
+    await operationRepo.save(operation);
     step.status = ExecutionStepStatus.RUNNING;
     step.currentAttemptId = attempt.attemptId;
     step.version += 1;
@@ -656,6 +757,14 @@ export class ExecutionAttemptService {
       await executionRepo.save(execution);
     }
     return attempt;
+  }
+
+  private isTerminalExecution(status: ExecutionStatus): boolean {
+    return [
+      ExecutionStatus.COMPLETED,
+      ExecutionStatus.FAILED,
+      ExecutionStatus.CANCELLED,
+    ].includes(status);
   }
 
   private async lockResourceKeys(

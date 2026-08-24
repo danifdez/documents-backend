@@ -10,6 +10,9 @@ import { ExecutionStepStatus } from '../../../src/execution/execution-step-statu
 import { ExecutionStepEntity } from '../../../src/execution/execution-step.entity';
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
 import { ExecutionStatus } from '../../../src/execution/execution-status.enum';
+import { ExecutionOperationEntity } from '../../../src/execution/execution-operation.entity';
+import { ExecutionOperationRecoveryClass } from '../../../src/execution/execution-operation-recovery-class.enum';
+import { ExecutionOperationStatus } from '../../../src/execution/execution-operation-status.enum';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -24,6 +27,7 @@ describe('ExecutionAttemptService', () => {
   let receiptRepo: Record<string, jest.Mock>;
   let dependencyRepo: Record<string, jest.Mock>;
   let executionRepo: Record<string, jest.Mock>;
+  let operationRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
   const readyStep = () => ({
@@ -47,6 +51,17 @@ describe('ExecutionAttemptService', () => {
     status: ExecutionStepAttemptStatus.RUNNING,
     leaseExpiresAt: new Date(Date.now() + 60_000),
     resultReceiptId: null,
+  });
+
+  const dispatchedOperation = () => ({
+    operationId: OPERATION_ID,
+    executionId: EXECUTION_ID,
+    stepId: STEP_ID,
+    status: ExecutionOperationStatus.DISPATCHED,
+    recoveryClass: ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
+    currentAttemptId: ATTEMPT_ID,
+    error: null,
+    finishedAt: null,
   });
 
   beforeEach(() => {
@@ -77,6 +92,18 @@ describe('ExecutionAttemptService', () => {
       findOneBy: jest.fn(),
       save: jest.fn(async (value) => value),
     };
+    operationRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        ...dispatchedOperation(),
+        status: ExecutionOperationStatus.PREPARED,
+        currentAttemptId: null,
+      }),
+      findOneBy: jest.fn().mockImplementation(async ({ operationId }) => ({
+        operationId,
+        status: ExecutionOperationStatus.PLANNED,
+      })),
+      save: jest.fn(async (value) => value),
+    };
     manager = {
       getRepository: jest.fn((entity) => {
         if (entity === ExecutionStepEntity) return stepRepo;
@@ -84,6 +111,7 @@ describe('ExecutionAttemptService', () => {
         if (entity === ExecutionResultReceiptEntity) return receiptRepo;
         if (entity === ExecutionStepDependencyEntity) return dependencyRepo;
         if (entity === ExecutionEntity) return executionRepo;
+        if (entity === ExecutionOperationEntity) return operationRepo;
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
       query: jest.fn().mockResolvedValue([]),
@@ -119,6 +147,12 @@ describe('ExecutionAttemptService', () => {
     );
     expect(executionRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ status: ExecutionStatus.RUNNING }),
+    );
+    expect(operationRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: ExecutionOperationStatus.DISPATCHED,
+        currentAttemptId: attempt.attemptId,
+      }),
     );
   });
 
@@ -206,11 +240,54 @@ describe('ExecutionAttemptService', () => {
     };
     attemptRepo.findOne.mockResolvedValue(attempt);
     stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
 
     await expect(service.expireAttempt(ATTEMPT_ID)).resolves.toBe(true);
     expect(attempt.status).toBe(ExecutionStepAttemptStatus.EXPIRED);
     expect(step.status).toBe(ExecutionStepStatus.READY);
     expect(step.currentAttemptId).toBeNull();
+  });
+
+  it('does not replay an ambiguous operation after its lease expires', async () => {
+    const attempt = {
+      ...runningAttempt(),
+      leaseExpiresAt: new Date(Date.now() - 1_000),
+    };
+    const step = {
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    const operation = {
+      ...dispatchedOperation(),
+      recoveryClass: ExecutionOperationRecoveryClass.NON_RESUMABLE,
+    };
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: null,
+      error: null,
+    };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(operation);
+    executionRepo.findOne.mockResolvedValue(execution);
+
+    await expect(service.expireAttempt(ATTEMPT_ID)).resolves.toBe(true);
+    expect(step.status).toBe(ExecutionStepStatus.FAILED);
+    expect(operation).toEqual(
+      expect.objectContaining({
+        status: ExecutionOperationStatus.UNKNOWN,
+        currentAttemptId: null,
+        error: expect.objectContaining({ code: 'effect_unknown' }),
+      }),
+    );
+    expect(execution).toEqual(
+      expect.objectContaining({
+        status: ExecutionStatus.RUNNING,
+        phase: 'terminal_pending_failed',
+      }),
+    );
   });
 
   it('stores a result before semantic processing and returns received', async () => {
@@ -222,6 +299,7 @@ describe('ExecutionAttemptService', () => {
     };
     attemptRepo.findOne.mockResolvedValue(attempt);
     stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
 
     const ack = await service.receiveResult({
       executionId: EXECUTION_ID,
@@ -271,6 +349,7 @@ describe('ExecutionAttemptService', () => {
       result: { status: 'succeeded', output: { value: 42 } },
     });
     executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
 
     await expect(service.processReceivedResults()).resolves.toBe(1);
     expect(step.status).toBe(ExecutionStepStatus.COMPLETED);
@@ -315,6 +394,7 @@ describe('ExecutionAttemptService', () => {
       result: { status: 'succeeded', output: { value: 42 } },
     });
     executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
 
     await expect(service.processReceivedResults()).resolves.toBe(1);
     expect(execution).toEqual(
@@ -323,6 +403,48 @@ describe('ExecutionAttemptService', () => {
         phase: 'backend_finalization',
         result: 42,
         error: null,
+      }),
+    );
+  });
+
+  it('persists a failed result as a terminal intent without bypassing the outbox', async () => {
+    const step = {
+      ...readyStep(),
+      status: ExecutionStepStatus.RESULT_RECEIVED,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    const attempt = {
+      ...runningAttempt(),
+      status: ExecutionStepAttemptStatus.RESULT_RECEIVED,
+    };
+    const operation = dispatchedOperation();
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: null,
+      error: null,
+    };
+    manager.query
+      .mockResolvedValueOnce([{ step_id: STEP_ID }])
+      .mockResolvedValueOnce([]);
+    stepRepo.findOneBy.mockResolvedValue(step);
+    attemptRepo.findOneBy.mockResolvedValue(attempt);
+    receiptRepo.findOne.mockResolvedValue({
+      result: {
+        status: 'failed',
+        error: { code: 'MODEL_FAILED', message: 'Model failed' },
+      },
+    });
+    executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(operation);
+
+    await expect(service.processReceivedResults()).resolves.toBe(1);
+    expect(step.status).toBe(ExecutionStepStatus.FAILED);
+    expect(operation.status).toBe(ExecutionOperationStatus.FAILED);
+    expect(execution).toEqual(
+      expect.objectContaining({
+        status: ExecutionStatus.RUNNING,
+        phase: 'terminal_pending_failed',
       }),
     );
   });
@@ -353,12 +475,52 @@ describe('ExecutionAttemptService', () => {
       result: { status: 'succeeded', output: { value: 42 } },
     });
     executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
 
     await expect(service.processReceivedResults()).resolves.toBe(1);
     expect(execution).toEqual(
       expect.objectContaining({
         status: ExecutionStatus.FAILED,
         phase: null,
+        result: null,
+        error: { code: 'WORKER_FAILED' },
+      }),
+    );
+  });
+
+  it('does not overwrite a durable terminal intent with a parallel success', async () => {
+    const step = {
+      ...readyStep(),
+      status: ExecutionStepStatus.RESULT_RECEIVED,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    const attempt = {
+      ...runningAttempt(),
+      status: ExecutionStepAttemptStatus.RESULT_RECEIVED,
+    };
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: 'terminal_pending_failed',
+      result: null,
+      error: { code: 'WORKER_FAILED' },
+    };
+    manager.query
+      .mockResolvedValueOnce([{ step_id: STEP_ID }])
+      .mockResolvedValueOnce([]);
+    stepRepo.findOneBy.mockResolvedValue(step);
+    attemptRepo.findOneBy.mockResolvedValue(attempt);
+    receiptRepo.findOne.mockResolvedValue({
+      result: { status: 'succeeded', output: { value: 42 } },
+    });
+    executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
+
+    await expect(service.processReceivedResults()).resolves.toBe(1);
+    expect(execution).toEqual(
+      expect.objectContaining({
+        status: ExecutionStatus.RUNNING,
+        phase: 'terminal_pending_failed',
         result: null,
         error: { code: 'WORKER_FAILED' },
       }),
@@ -401,6 +563,7 @@ describe('ExecutionAttemptService', () => {
     };
     attemptRepo.findOne.mockResolvedValue(attempt);
     stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
 
     const ack = await service.receiveResult({
       executionId: EXECUTION_ID,

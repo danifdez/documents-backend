@@ -5,22 +5,32 @@ import { ExecutionStepStatus } from '../../../src/execution/execution-step-statu
 import { ExecutionStepEntity } from '../../../src/execution/execution-step.entity';
 import { ExecutionStepService } from '../../../src/execution/execution-step.service';
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
+import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
+import { ExecutionOperationEntity } from '../../../src/execution/execution-operation.entity';
+import { ExecutionOperationStatus } from '../../../src/execution/execution-operation-status.enum';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
 const DEPENDENCY_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
 const SECOND_DEPENDENCY_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca704';
+const EVENT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca705';
 
 describe('ExecutionStepService', () => {
   let service: ExecutionStepService;
   let executionRepo: Record<string, jest.Mock>;
   let stepRepo: Record<string, jest.Mock>;
   let dependencyRepo: Record<string, jest.Mock>;
+  let eventRepo: Record<string, jest.Mock>;
+  let operationRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionRepo = {
-      findOne: jest.fn().mockResolvedValue({ executionId: EXECUTION_ID }),
+      findOne: jest.fn().mockResolvedValue({
+        executionId: EXECUTION_ID,
+        rootExecutionId: EXECUTION_ID,
+        lastEventId: EVENT_ID,
+      }),
     };
     stepRepo = {
       find: jest.fn().mockResolvedValue([]),
@@ -33,11 +43,24 @@ describe('ExecutionStepService', () => {
       save: jest.fn(async (value) => value),
       findOneBy: jest.fn().mockResolvedValue(null),
     };
+    eventRepo = {
+      findOneBy: jest.fn().mockResolvedValue({ eventId: EVENT_ID }),
+    };
+    operationRepo = {
+      create: jest.fn((value) => value),
+      save: jest.fn(async (value) => value),
+      findOneBy: jest.fn().mockImplementation(async ({ operationId }) => ({
+        operationId,
+        status: ExecutionOperationStatus.PLANNED,
+      })),
+    };
     manager = {
       getRepository: jest.fn((entity) => {
         if (entity === ExecutionEntity) return executionRepo;
         if (entity === ExecutionStepEntity) return stepRepo;
         if (entity === ExecutionStepDependencyEntity) return dependencyRepo;
+        if (entity === ExecutionEventEntity) return eventRepo;
+        if (entity === ExecutionOperationEntity) return operationRepo;
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
       query: jest.fn().mockResolvedValue([]),
@@ -65,6 +88,13 @@ describe('ExecutionStepService', () => {
       }),
     );
     expect(stepRepo.save).toHaveBeenCalledTimes(1);
+    expect(operationRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: step.operationId,
+        causedByEventId: EVENT_ID,
+        status: ExecutionOperationStatus.PREPARED,
+      }),
+    );
     expect(dependencyRepo.save).not.toHaveBeenCalled();
   });
 
@@ -86,6 +116,9 @@ describe('ExecutionStepService', () => {
     });
 
     expect(step.status).toBe(ExecutionStepStatus.BLOCKED);
+    expect(operationRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: ExecutionOperationStatus.PLANNED }),
+    );
     expect(dependencyRepo.save).toHaveBeenCalledWith([
       { stepId: STEP_ID, dependsOnStepId: DEPENDENCY_ID },
     ]);
@@ -137,6 +170,7 @@ describe('ExecutionStepService', () => {
     manager.query.mockResolvedValue([{ step_id: STEP_ID }]);
     stepRepo.findOneBy.mockResolvedValue({
       stepId: STEP_ID,
+      operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
       status: ExecutionStepStatus.BLOCKED,
       version: 1,
       work: { taskType: 'next-step' },
@@ -158,6 +192,7 @@ describe('ExecutionStepService', () => {
   it('materializes map results in declared order before releasing reduce', async () => {
     const reduce = {
       stepId: STEP_ID,
+      operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
       status: ExecutionStepStatus.BLOCKED,
       version: 1,
       work: {

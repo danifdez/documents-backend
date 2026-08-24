@@ -6,6 +6,7 @@ import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-A
 import { CreateExecutionControlPlane1757668140370 } from '../migrations/1757668140370-CreateExecutionControlPlane';
 import { AddWorkerCredentials1757668140380 } from '../migrations/1757668140380-AddWorkerCredentials';
 import { CreateExecutionOutbox1757668140400 } from '../migrations/1757668140400-CreateExecutionOutbox';
+import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140410-CreateExecutionOperations';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -27,6 +28,8 @@ import {
 import { WorkerEntity } from '../src/worker/worker.entity';
 import { WorkerService } from '../src/worker/worker.service';
 import { ExecutionOutboxEntity } from '../src/execution-outbox/execution-outbox.entity';
+import { ExecutionOperationEntity } from '../src/execution/execution-operation.entity';
+import { ExecutionOperationStatus } from '../src/execution/execution-operation-status.enum';
 
 loadEnv({ path: '.env' });
 
@@ -57,6 +60,7 @@ describe('execution PostgreSQL integration', () => {
         ExecutionStepAttemptEntity,
         ExecutionResultReceiptEntity,
         ExecutionOutboxEntity,
+        ExecutionOperationEntity,
         WorkerEntity,
       ],
     });
@@ -69,6 +73,7 @@ describe('execution PostgreSQL integration', () => {
     await new AddExecutionProgress1757668140350().up(runner);
     await new CreateExecutionControlPlane1757668140370().up(runner);
     await new CreateExecutionOutbox1757668140400().up(runner);
+    await new CreateExecutionOperations1757668140410().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -200,16 +205,29 @@ describe('execution PostgreSQL integration', () => {
     );
 
     expect(created.schemaVersion).toBe('execution/1');
-    await expect(
-      dataSource.getRepository(ExecutionStepEntity).findOneByOrFail({
+    const initialStep = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({
         executionId: created.executionId,
-      }),
-    ).resolves.toMatchObject({
+      });
+    expect(initialStep).toMatchObject({
       executionId: created.executionId,
       schemaVersion: 'step/1',
       stepKind: ExecutionStepKind.CODE,
       status: 'ready',
       work: { taskType: 'detect-language', content: 'Hello' },
+    });
+    await expect(
+      dataSource.getRepository(ExecutionOperationEntity).findOneByOrFail({
+        operationId: initialStep.operationId,
+      }),
+    ).resolves.toMatchObject({
+      executionId: created.executionId,
+      stepId: initialStep.stepId,
+      operationId: initialStep.operationId,
+      schemaVersion: 'operation/1',
+      status: ExecutionOperationStatus.PREPARED,
+      causedByEventId: created.lastEventId,
     });
 
     const countBeforeRollback = await dataSource
@@ -397,6 +415,16 @@ describe('execution PostgreSQL integration', () => {
       receiptId: expect.any(String),
     });
     await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    await expect(
+      dataSource.getRepository(ExecutionOperationEntity).findOneByOrFail({
+        operationId: attempt.operationId,
+      }),
+    ).resolves.toMatchObject({
+      operationId: attempt.operationId,
+      status: ExecutionOperationStatus.SUCCEEDED,
+      currentAttemptId: null,
+      result: { kind: 'service', value: { language: 'en' } },
+    });
     await expect(
       dataSource.getRepository(ExecutionEntity).findOneByOrFail({
         executionId: attempt.executionId,

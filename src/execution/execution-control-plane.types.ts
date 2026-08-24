@@ -1,4 +1,6 @@
 import { ExecutionArtifactRef } from './execution-step.entity';
+import { ExecutionOperationRecoveryClass } from './execution-operation-recovery-class.enum';
+import { ExecutionOperationKind } from './execution-operation-kind.enum';
 import { ExecutionStepKind } from './execution-step-kind.enum';
 
 export interface CreateExecutionStepInput {
@@ -15,6 +17,9 @@ export interface CreateExecutionStepInput {
   availableAt?: Date;
   deadline?: Date | null;
   operationId?: string;
+  operationKind?: ExecutionOperationKind;
+  recoveryClass?: ExecutionOperationRecoveryClass;
+  causedByEventId?: string;
 }
 
 export interface GrantExecutionStepAttemptInput {

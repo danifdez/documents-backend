@@ -28,6 +28,7 @@ describe('ExecutionCoordinatorService', () => {
       markAsCompleted: jest.fn(),
       markAsFailed: jest.fn(),
       recoverStaleFinalizations: jest.fn(),
+      finalizePendingTerminals: jest.fn().mockResolvedValue(0),
     };
     executionAttemptService = {
       processReceivedResults: jest.fn(),
@@ -53,6 +54,7 @@ describe('ExecutionCoordinatorService', () => {
     expect(executionAttemptService.processReceivedResults).toHaveBeenCalledWith(
       3,
     );
+    expect(executionService.finalizePendingTerminals).toHaveBeenCalledWith(3);
   });
 
   it('runs a claimed domain finalizer and completes the execution', async () => {

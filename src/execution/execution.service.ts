@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'crypto';
-import { DataSource, EntityManager, MoreThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, MoreThan, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
@@ -301,15 +301,6 @@ export class ExecutionService {
           body,
         }),
       );
-      await createExecutionStep(manager, {
-        executionId,
-        stepKind: ExecutionStepKind.INFERENCE,
-        inputArtifactRefs: [{ role: 'user_message', artifactId }],
-        work: { taskType: execution.taskType, payload },
-        requiredCapabilities: [execution.taskType],
-        priority: STEP_PRIORITY[ExecutionPriority.HIGH],
-      });
-
       const createdEvent = await this.appendBackendEvent(
         manager,
         execution,
@@ -380,6 +371,15 @@ export class ExecutionService {
       );
       execution.lastSequence = '3';
       execution.lastEventId = sourceEvent.eventId;
+      await createExecutionStep(manager, {
+        executionId,
+        stepKind: ExecutionStepKind.INFERENCE,
+        inputArtifactRefs: [{ role: 'user_message', artifactId }],
+        work: { taskType: execution.taskType, payload },
+        requiredCapabilities: [execution.taskType],
+        priority: STEP_PRIORITY[ExecutionPriority.HIGH],
+        causedByEventId: sourceEvent.eventId,
+      });
       return manager.save(execution);
     });
   }
@@ -465,6 +465,22 @@ export class ExecutionService {
       if (options?.steps && !options.steps.length) {
         throw new BadRequestException('Execution requires at least one step');
       }
+      const executionEvent = await this.appendBackendEvent(
+        manager,
+        execution,
+        1,
+        {
+          eventType: 'execution.created',
+          payloadSchema: 'execution.created/1',
+          payload: { executionKind: taskType, initialStatus: 'queued' },
+          actor: { type: 'system' },
+          executionId,
+          artifactRefs: inputArtifactRefs.map(({ artifactId }) => artifactId),
+        },
+        1,
+      );
+      execution.lastSequence = '1';
+      execution.lastEventId = executionEvent.eventId;
       const steps = options?.steps ?? [
         {
           stepKind: ExecutionStepKind.SERVICE,
@@ -482,24 +498,9 @@ export class ExecutionService {
             ...(step.inputArtifactRefs ?? []),
           ],
           executionId,
+          causedByEventId: step.causedByEventId ?? executionEvent.eventId,
         });
       }
-      const executionEvent = await this.appendBackendEvent(
-        manager,
-        execution,
-        1,
-        {
-          eventType: 'execution.created',
-          payloadSchema: 'execution.created/1',
-          payload: { executionKind: taskType, initialStatus: 'queued' },
-          actor: { type: 'system' },
-          executionId,
-          artifactRefs: inputArtifactRefs.map(({ artifactId }) => artifactId),
-        },
-        1,
-      );
-      execution.lastSequence = '1';
-      execution.lastEventId = executionEvent.eventId;
       return manager.save(execution);
     });
   }
@@ -551,6 +552,35 @@ export class ExecutionService {
       );
       return rows.length;
     });
+  }
+
+  async finalizePendingTerminals(limit = 20): Promise<number> {
+    const pending = await this.executionRepo.find({
+      where: {
+        status: ExecutionStatus.RUNNING,
+        phase: In(['terminal_pending_failed', 'terminal_pending_cancelled']),
+      },
+      order: { updatedAt: 'ASC' },
+      take: limit,
+    });
+    let finalized = 0;
+    for (const execution of pending) {
+      const cancelled = execution.phase === 'terminal_pending_cancelled';
+      const status = cancelled
+        ? ExecutionStatus.CANCELLED
+        : ExecutionStatus.FAILED;
+      const error = execution.error as Record<string, unknown> | null;
+      await this.updateStatus(
+        execution.executionId,
+        status,
+        typeof error?.message === 'string' ? error.message : undefined,
+        {
+          completionReason: cancelled ? 'worker_cancelled' : 'worker_failed',
+        },
+      );
+      finalized += 1;
+    }
+    return finalized;
   }
 
   async updateStatus(

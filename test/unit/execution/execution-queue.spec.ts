@@ -100,6 +100,28 @@ describe('ExecutionService queue state', () => {
     );
   });
 
+  it('reconciles durable terminal intents through the canonical status writer', async () => {
+    executionRepo.find.mockResolvedValue([
+      {
+        executionId: EXECUTION_ID,
+        status: ExecutionStatus.RUNNING,
+        phase: 'terminal_pending_failed',
+        error: { code: 'MODEL_FAILED', message: 'Model failed' },
+      },
+    ]);
+    const updateStatus = jest
+      .spyOn(service, 'updateStatus')
+      .mockResolvedValue({ executionId: EXECUTION_ID } as ExecutionEntity);
+
+    await expect(service.finalizePendingTerminals()).resolves.toBe(1);
+    expect(updateStatus).toHaveBeenCalledWith(
+      EXECUTION_ID,
+      ExecutionStatus.FAILED,
+      'Model failed',
+      { completionReason: 'worker_failed' },
+    );
+  });
+
   it('marks terminal state and completion time on the same execution', async () => {
     const execution = {
       executionId: EXECUTION_ID,

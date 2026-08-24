@@ -22,8 +22,11 @@ export class ExecutionCoordinatorService {
     private readonly executionOutboxService: ExecutionOutboxService,
   ) {}
 
-  acceptResults(limit = 20): Promise<number> {
-    return this.executionAttemptService.processReceivedResults(limit);
+  async acceptResults(limit = 20): Promise<number> {
+    const processed =
+      await this.executionAttemptService.processReceivedResults(limit);
+    await this.executionService.finalizePendingTerminals(limit);
+    return processed;
   }
 
   publishNotifications(limit = 20): Promise<number> {

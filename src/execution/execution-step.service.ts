@@ -7,8 +7,14 @@ import {
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ExecutionEntity } from './execution.entity';
+import { ExecutionEventEntity } from './execution-event.entity';
+import { ExecutionOperationEntity } from './execution-operation.entity';
+import { ExecutionOperationKind } from './execution-operation-kind.enum';
+import { ExecutionOperationRecoveryClass } from './execution-operation-recovery-class.enum';
+import { ExecutionOperationStatus } from './execution-operation-status.enum';
 import { ExecutionStepDependencyEntity } from './execution-step-dependency.entity';
 import { ExecutionStepEntity } from './execution-step.entity';
+import { ExecutionStepKind } from './execution-step-kind.enum';
 import { ExecutionStepStatus } from './execution-step-status.enum';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
 import { executionStepOutputValue } from './execution-step-result';
@@ -32,6 +38,15 @@ export async function createExecutionStep(
     lock: { mode: 'pessimistic_write' },
   });
   if (!execution) throw new NotFoundException('execution_not_found');
+  const causedByEventId = input.causedByEventId ?? execution.lastEventId;
+  if (!causedByEventId) {
+    throw new BadRequestException('operation_cause_required');
+  }
+  const cause = await manager.getRepository(ExecutionEventEntity).findOneBy({
+    eventId: causedByEventId,
+    rootExecutionId: execution.rootExecutionId,
+  });
+  if (!cause) throw new BadRequestException('invalid_operation_cause');
 
   const dependencies = dependencyIds.length
     ? await manager.getRepository(ExecutionStepEntity).find({
@@ -53,6 +68,7 @@ export async function createExecutionStep(
     ? ExecutionStepStatus.READY
     : ExecutionStepStatus.BLOCKED;
   const stepRepo = manager.getRepository(ExecutionStepEntity);
+  const operationId = input.operationId ?? randomUUID();
   const step = stepRepo.create({
     stepId,
     executionId: input.executionId,
@@ -68,12 +84,35 @@ export async function createExecutionStep(
     priority: input.priority ?? 0,
     availableAt,
     deadline: input.deadline ?? null,
-    operationId: input.operationId ?? randomUUID(),
+    operationId,
     currentAttemptId: null,
     result: null,
     error: null,
   });
   await stepRepo.save(step);
+  const operationRepo = manager.getRepository(ExecutionOperationEntity);
+  await operationRepo.save(
+    operationRepo.create({
+      operationId,
+      executionId: input.executionId,
+      stepId,
+      schemaVersion: 'operation/1',
+      operationKind:
+        input.operationKind ?? defaultOperationKind(input.stepKind),
+      status:
+        status === ExecutionStepStatus.READY
+          ? ExecutionOperationStatus.PREPARED
+          : ExecutionOperationStatus.PLANNED,
+      recoveryClass:
+        input.recoveryClass ?? defaultRecoveryClass(input.stepKind),
+      currentAttemptId: null,
+      causedByEventId,
+      result: null,
+      error: null,
+      startedAt: new Date(),
+      finishedAt: null,
+    }),
+  );
 
   if (dependencyIds.length) {
     const dependencyRepo = manager.getRepository(ExecutionStepDependencyEntity);
@@ -115,6 +154,7 @@ export async function releaseExecutionStepDependents(
     [completedStepId],
   );
   const stepRepo = manager.getRepository(ExecutionStepEntity);
+  const operationRepo = manager.getRepository(ExecutionOperationEntity);
   for (const row of rows) {
     const candidate = await stepRepo.findOneBy({ stepId: row.step_id });
     if (!candidate) continue;
@@ -122,8 +162,39 @@ export async function releaseExecutionStepDependents(
     candidate.status = ExecutionStepStatus.READY;
     candidate.version += 1;
     await stepRepo.save(candidate);
+    const operation = await operationRepo.findOneBy({
+      operationId: candidate.operationId,
+    });
+    if (!operation) throw new ConflictException('operation_not_found');
+    operation.status = ExecutionOperationStatus.PREPARED;
+    await operationRepo.save(operation);
   }
   return rows.length;
+}
+
+function defaultRecoveryClass(
+  stepKind: ExecutionStepKind,
+): ExecutionOperationRecoveryClass {
+  return [
+    ExecutionStepKind.INFERENCE,
+    ExecutionStepKind.SERVICE,
+    ExecutionStepKind.VERIFICATION,
+  ].includes(stepKind)
+    ? ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE
+    : ExecutionOperationRecoveryClass.NON_RESUMABLE;
+}
+
+function defaultOperationKind(
+  stepKind: ExecutionStepKind,
+): ExecutionOperationKind {
+  const byStepKind: Record<ExecutionStepKind, ExecutionOperationKind> = {
+    [ExecutionStepKind.INFERENCE]: ExecutionOperationKind.INFERENCE,
+    [ExecutionStepKind.TOOL]: ExecutionOperationKind.TOOL_CALL,
+    [ExecutionStepKind.SERVICE]: ExecutionOperationKind.ARTIFACT_PROCESSING,
+    [ExecutionStepKind.CODE]: ExecutionOperationKind.TOOL_CALL,
+    [ExecutionStepKind.VERIFICATION]: ExecutionOperationKind.VERIFICATION,
+  };
+  return byStepKind[stepKind];
 }
 
 async function materializeMapReduceInput(
