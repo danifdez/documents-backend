@@ -1,14 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { NotificationGateway } from 'src/notification/notification.gateway';
 import { ExecutionEntity } from 'src/execution/execution.entity';
 
 @Injectable()
 export class RelationshipExtractionProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(RelationshipExtractionProcessor.name);
   private readonly TASK_TYPE = 'relationship-extraction';
-
-  constructor(private readonly notificationGateway: NotificationGateway) {}
 
   canProcess(taskType: string): boolean {
     return taskType === this.TASK_TYPE;
@@ -28,14 +25,14 @@ export class RelationshipExtractionProcessor implements ExecutionProcessor {
       this.logger.warn(
         `Relationship extraction execution ${execution.executionId} returned error: ${result.error}`,
       );
-      this.notificationGateway.sendRelationshipExtractionComplete({
-        resourceId,
-        relationships,
-      });
       return {
         success: false,
         message: result.error,
         relationshipsExtracted: relationships.length,
+        publication: {
+          socketEvent: 'relationshipExtractionComplete',
+          payload: { resourceId, relationships },
+        },
       };
     }
 
@@ -43,14 +40,13 @@ export class RelationshipExtractionProcessor implements ExecutionProcessor {
       `Relationship extraction complete for resource ${resourceId}: ${relationships.length} relationships found`,
     );
 
-    this.notificationGateway.sendRelationshipExtractionComplete({
-      resourceId,
-      relationships,
-    });
-
     return {
       success: true,
       relationshipsExtracted: relationships.length,
+      publication: {
+        socketEvent: 'relationshipExtractionComplete',
+        payload: { resourceId, relationships },
+      },
     };
   }
 }

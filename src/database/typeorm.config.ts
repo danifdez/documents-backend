@@ -47,6 +47,7 @@ import { ExecutionResultReceiptEntity } from '../execution/execution-result-rece
 import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
 import { ExecutionStepDependencyEntity } from '../execution/execution-step-dependency.entity';
 import { ExecutionStepEntity } from '../execution/execution-step.entity';
+import { ExecutionOutboxEntity } from '../execution-outbox/execution-outbox.entity';
 
 export const getTypeOrmConfig = async (
   configService: ConfigService,
@@ -106,6 +107,7 @@ export const getTypeOrmConfig = async (
       ExecutionStepDependencyEntity,
       ExecutionStepAttemptEntity,
       ExecutionResultReceiptEntity,
+      ExecutionOutboxEntity,
     ],
     synchronize: false,
     // Apply pending migrations on every boot so that updates ship their schema

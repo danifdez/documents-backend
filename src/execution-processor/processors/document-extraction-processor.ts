@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionPriority } from 'src/execution/execution-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
-import { NotificationGateway } from 'src/notification/notification.gateway';
 import { ExecutionService } from 'src/execution/execution.service';
 import { ExecutionEntity } from 'src/execution/execution.entity';
 import { FileStorageService } from 'src/file-storage/file-storage.service';
@@ -34,7 +33,6 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
 
   constructor(
     private readonly resourceService: ResourceService,
-    private readonly notificationGateway: NotificationGateway,
     private readonly executionService: ExecutionService,
     private readonly fileStorageService: FileStorageService,
   ) {}
@@ -108,12 +106,18 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
       );
     }
 
-    this.notificationGateway.sendNotification({
-      type: 'document-extraction',
-      message: `Document extraction completed for resource with hash ${hash}. Ready for confirmation.`,
+    return {
+      success: true,
       resourceId,
-    });
-
-    return { success: true, resourceId, status: 'extracted' };
+      status: 'extracted',
+      publication: {
+        socketEvent: 'notification',
+        payload: {
+          type: 'document-extraction',
+          message: `Document extraction completed for resource with hash ${hash}. Ready for confirmation.`,
+          resourceId,
+        },
+      },
+    };
   }
 }

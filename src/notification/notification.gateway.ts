@@ -1,5 +1,9 @@
 import { Logger } from '@nestjs/common';
-import { OnGatewayConnection, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import {
+  OnGatewayConnection,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -19,7 +23,7 @@ export class NotificationGateway implements OnGatewayConnection {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) { }
+  ) {}
 
   handleConnection(client: Socket) {
     const authEnabled = this.configService.get('AUTH_ENABLED') === 'true';
@@ -45,16 +49,25 @@ export class NotificationGateway implements OnGatewayConnection {
     }
   }
 
-  sendNotification(data: any) {
-    this.server.emit('notification', data);
-  }
-
-  sendAskResponse(data: any) {
-    this.server.emit('askResponse', data);
-  }
-
-  sendAssistantResponse(data: any) {
-    this.server.emit('assistantResponse', data);
+  async publishExecution(message: {
+    outboxId: string;
+    socketEvent: string;
+    payload: Record<string, unknown>;
+  }): Promise<boolean> {
+    if (!this.server || this.server.sockets.sockets.size === 0) return false;
+    const deliveries = await Promise.allSettled(
+      Array.from(this.server.sockets.sockets.values()).map((client) =>
+        client.timeout(5_000).emitWithAck('execution:publication', message),
+      ),
+    );
+    return deliveries.some(
+      (delivery) =>
+        delivery.status === 'fulfilled' &&
+        delivery.value &&
+        typeof delivery.value === 'object' &&
+        'accepted' in delivery.value &&
+        delivery.value.accepted === true,
+    );
   }
 
   sendAssistantStreamChunk(data: any) {
@@ -65,32 +78,12 @@ export class NotificationGateway implements OnGatewayConnection {
     this.server.emit('assistantToolEvent', data);
   }
 
-  sendAgentResponse(data: any) {
-    this.server.emit('agentResponse', data);
-  }
-
   sendAgentStreamChunk(data: any) {
     this.server.emit('agentStreamChunk', data);
   }
 
   sendAgentToolEvent(data: any) {
     this.server.emit('agentToolEvent', data);
-  }
-
-  sendRelationshipExtractionComplete(data: any) {
-    this.server.emit('relationshipExtractionComplete', data);
-  }
-
-  sendRelationshipQueryResponse(data: any) {
-    this.server.emit('relationshipQueryResponse', data);
-  }
-
-  sendRelationshipModifyResponse(data: any) {
-    this.server.emit('relationshipModifyResponse', data);
-  }
-
-  sendSearchResponse(data: any) {
-    this.server.emit('searchResponse', data);
   }
 
   sendCalendarAlarm(data: {
@@ -115,7 +108,11 @@ export class NotificationGateway implements OnGatewayConnection {
     this.server.emit('calendar:missed', data);
   }
 
-  sendTaskReminder(data: { taskId: number; title: string; reminderAt: string }) {
+  sendTaskReminder(data: {
+    taskId: number;
+    title: string;
+    reminderAt: string;
+  }) {
     this.server.emit('task:reminder', data);
   }
 

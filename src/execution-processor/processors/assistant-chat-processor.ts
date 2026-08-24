@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { NotificationGateway } from '../../notification/notification.gateway';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { ExecutionService } from '../../execution/execution.service';
 import { ExecutionPriority } from '../../execution/execution-priority.enum';
@@ -14,6 +13,7 @@ import {
   ExecutionCompletion,
   ExecutionTelemetrySummary,
 } from '../../execution/execution.types';
+import { ExecutionPublication } from '../../execution-outbox/execution-publication';
 
 const VALID_MEMORY_TYPES: MemoryEntryType[] = [
   'fact',
@@ -28,7 +28,6 @@ export class AssistantChatProcessor implements ExecutionProcessor {
   private readonly DEDUP_THRESHOLD: number;
 
   constructor(
-    private readonly notificationGateway: NotificationGateway,
     private readonly assistantService: AssistantService,
     private readonly memoryService: AssistantMemoryService,
     private readonly agentService: AgentService,
@@ -259,13 +258,14 @@ export class AssistantChatProcessor implements ExecutionProcessor {
       error,
     );
 
-    await this.finalizeExecution(execution, reply, error, result);
-
-    this.notificationGateway.sendAssistantResponse({
-      assistantId,
-      executionId: execution.executionId,
-      eventMessages,
-      message,
+    await this.finalizeExecution(execution, reply, error, result, {
+      socketEvent: 'assistantResponse',
+      payload: {
+        assistantId,
+        executionId: execution.executionId,
+        eventMessages,
+        message,
+      },
     });
 
     return { success: true };
@@ -292,12 +292,13 @@ export class AssistantChatProcessor implements ExecutionProcessor {
       error,
     );
 
-    await this.finalizeExecution(execution, reply, error, result);
-
-    this.notificationGateway.sendAgentResponse({
-      agentId,
-      executionId: execution.executionId,
-      message: toAgentMessageDto(message),
+    await this.finalizeExecution(execution, reply, error, result, {
+      socketEvent: 'agentResponse',
+      payload: {
+        agentId,
+        executionId: execution.executionId,
+        message: toAgentMessageDto(message),
+      },
     });
 
     return { success: true };
@@ -308,6 +309,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     reply: string,
     error: string | null,
     result: Record<string, any>,
+    publication: ExecutionPublication,
   ): Promise<void> {
     if (!result['completionKind'] && !result['completionReason']) {
       await this.executionService.completeExecution(
@@ -315,6 +317,8 @@ export class AssistantChatProcessor implements ExecutionProcessor {
         reply,
         error,
         result['executionTelemetry'] as ExecutionTelemetrySummary | undefined,
+        undefined,
+        publication,
       );
       return;
     }
@@ -334,6 +338,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
       error,
       result['executionTelemetry'] as ExecutionTelemetrySummary | undefined,
       completion,
+      publication,
     );
   }
 

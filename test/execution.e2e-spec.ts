@@ -5,6 +5,7 @@ import { CreateExecutions1757668140001 } from '../migrations/1757668140001-Creat
 import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-AddExecutionProgress';
 import { CreateExecutionControlPlane1757668140370 } from '../migrations/1757668140370-CreateExecutionControlPlane';
 import { AddWorkerCredentials1757668140380 } from '../migrations/1757668140380-AddWorkerCredentials';
+import { CreateExecutionOutbox1757668140400 } from '../migrations/1757668140400-CreateExecutionOutbox';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -25,6 +26,7 @@ import {
 } from '../src/execution/execution.service';
 import { WorkerEntity } from '../src/worker/worker.entity';
 import { WorkerService } from '../src/worker/worker.service';
+import { ExecutionOutboxEntity } from '../src/execution-outbox/execution-outbox.entity';
 
 loadEnv({ path: '.env' });
 
@@ -54,6 +56,7 @@ describe('execution PostgreSQL integration', () => {
         ExecutionStepDependencyEntity,
         ExecutionStepAttemptEntity,
         ExecutionResultReceiptEntity,
+        ExecutionOutboxEntity,
         WorkerEntity,
       ],
     });
@@ -65,6 +68,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutions1757668140001().up(runner);
     await new AddExecutionProgress1757668140350().up(runner);
     await new CreateExecutionControlPlane1757668140370().up(runner);
+    await new CreateExecutionOutbox1757668140400().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -257,6 +261,34 @@ describe('execution PostgreSQL integration', () => {
     await expect(
       attemptService.readAttemptControl(assignment!.attemptId, workerId),
     ).resolves.toMatchObject({ cancelled: false });
+  });
+
+  it('commits terminal state, event and publication in one transaction', async () => {
+    const created = await service.create('ask', ExecutionPriority.NORMAL, {
+      requestId: 'request-1',
+    });
+
+    await service.markAsCompleted(created.executionId, {
+      publication: {
+        socketEvent: 'askResponse',
+        payload: { response: 'done', requestId: 'request-1' },
+      },
+    });
+
+    const terminal = await dataSource
+      .getRepository(ExecutionEntity)
+      .findOneByOrFail({ executionId: created.executionId });
+    const publication = await dataSource
+      .getRepository(ExecutionOutboxEntity)
+      .findOneByOrFail({ executionId: created.executionId });
+    expect(terminal.status).toBe(ExecutionStatus.COMPLETED);
+    expect(publication).toMatchObject({
+      eventId: terminal.lastEventId,
+      schemaVersion: 'execution-outbox/1',
+      socketEvent: 'askResponse',
+      payload: { response: 'done', requestId: 'request-1' },
+      status: 'pending',
+    });
   });
 
   it('registers and authenticates an isolated Models identity', async () => {

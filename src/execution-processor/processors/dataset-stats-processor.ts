@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { NotificationGateway } from 'src/notification/notification.gateway';
 import { ExecutionEntity } from 'src/execution/execution.entity';
 
 const DATASET_TASK_TYPES = new Set([
@@ -20,8 +19,6 @@ const DATASET_TASK_TYPES = new Set([
 export class DatasetStatsProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(DatasetStatsProcessor.name);
 
-  constructor(private readonly notificationGateway: NotificationGateway) {}
-
   canProcess(taskType: string): boolean {
     return DATASET_TASK_TYPES.has(taskType);
   }
@@ -36,18 +33,19 @@ export class DatasetStatsProcessor implements ExecutionProcessor {
       );
     }
 
-    this.notificationGateway.sendNotification({
+    const payload = {
       type: execution.taskType,
       message: result?.error
         ? `Statistical analysis failed for dataset`
         : `Statistical analysis completed`,
       datasetId,
       executionId: execution.executionId,
-    });
+    };
 
     return {
       success: !result?.error,
       message: 'Dataset stats processed',
+      publication: { socketEvent: 'notification', payload },
     };
   }
 }

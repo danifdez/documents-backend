@@ -2,16 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { DatasetExtractionService } from '../../dataset/dataset-extraction.service';
-import { NotificationGateway } from '../../notification/notification.gateway';
 
 @Injectable()
 export class DatasetExtractionProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(DatasetExtractionProcessor.name);
 
-  constructor(
-    private readonly extractionService: DatasetExtractionService,
-    private readonly notificationGateway: NotificationGateway,
-  ) {}
+  constructor(private readonly extractionService: DatasetExtractionService) {}
 
   canProcess(taskType: string): boolean {
     return taskType === 'dataset.extract-row';
@@ -43,21 +39,25 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
       columns,
     );
 
-    this.notificationGateway.sendNotification({
-      type: execution.taskType,
-      message:
-        status === 'failed'
-          ? `Dataset extraction failed for row ${recordId}`
-          : `Dataset row ${recordId} extracted`,
-      datasetId,
-      recordId,
-      extractionStatus: status,
-      executionId: execution.executionId,
-    });
+    const publication = {
+      socketEvent: 'notification',
+      payload: {
+        type: execution.taskType,
+        message:
+          status === 'failed'
+            ? `Dataset extraction failed for row ${recordId}`
+            : `Dataset row ${recordId} extracted`,
+        datasetId,
+        recordId,
+        extractionStatus: status,
+        executionId: execution.executionId,
+      },
+    };
 
     return {
       success: status !== 'failed',
       message: `record ${recordId} -> ${status}`,
+      publication,
     };
   }
 }

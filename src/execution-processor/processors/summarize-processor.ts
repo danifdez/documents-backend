@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ResourceService } from 'src/resource/resource.service';
-import { NotificationGateway } from 'src/notification/notification.gateway';
 import { ExecutionEntity } from 'src/execution/execution.entity';
 import { DocService } from 'src/doc/doc.service';
 
@@ -12,7 +11,6 @@ export class SummarizeProcessor implements ExecutionProcessor {
 
   constructor(
     private readonly resourceService: ResourceService,
-    private readonly notificationGateway: NotificationGateway,
     private readonly docService: DocService,
   ) {}
 
@@ -33,39 +31,37 @@ export class SummarizeProcessor implements ExecutionProcessor {
       this.logger.warn(
         `Summarization execution ${execution.executionId} returned error: ${result.error}`,
       );
-      this.notificationGateway.sendNotification({
-        type: 'summarization',
-        message: `Document summarization failed: ${result.error}`,
-        resourceId: resourceId ?? undefined,
-        docId: targetDocId ?? undefined,
-      });
-      return { success: false, message: result.error };
+      return {
+        success: false,
+        message: result.error,
+        publication: {
+          socketEvent: 'notification',
+          payload: {
+            type: 'summarization',
+            message: `Document summarization failed: ${result.error}`,
+            resourceId: resourceId ?? undefined,
+            docId: targetDocId ?? undefined,
+          },
+        },
+      };
     }
 
     const summary = result?.response ?? '';
 
-    // If a targetDocId is provided, append the summary to the workspace document content
+    let message: string;
     if (targetDocId) {
-      try {
-        const doc = await this.docService.findOne(targetDocId);
-        if (doc) {
-          const existing = doc.content || '';
-          const appended = existing + '\n\n' + summary;
-          await this.docService.update(targetDocId, { content: appended });
-
-          this.notificationGateway.sendNotification({
-            type: 'summarization',
-            message: `Document summarization appended to workspace document`,
-            resourceId: resourceId ?? undefined,
-            docId: targetDocId,
-          });
-        }
-      } catch (err) {
-        this.logger.error(
-          'Failed to append summary to workspace document',
-          err,
-        );
+      const doc = await this.docService.findOne(targetDocId);
+      if (!doc) {
+        return {
+          success: false,
+          message: `Target document ${targetDocId} not found`,
+        };
       }
+      const existing = doc.content || '';
+      await this.docService.update(targetDocId, {
+        content: `${existing}\n\n${summary}`,
+      });
+      message = 'Document summarization appended to workspace document';
     } else {
       if (resourceId) {
         await this.resourceService.update(resourceId, {
@@ -73,16 +69,21 @@ export class SummarizeProcessor implements ExecutionProcessor {
         });
       }
 
-      this.notificationGateway.sendNotification({
-        type: 'summarization',
-        message: `Document summarization completed${resourceId ? ' for resource' : ''}`,
-        resourceId: resourceId ?? undefined,
-      });
+      message = `Document summarization completed${resourceId ? ' for resource' : ''}`;
     }
 
     return {
       success: true,
       message: 'Summarization processed',
+      publication: {
+        socketEvent: 'notification',
+        payload: {
+          type: 'summarization',
+          message,
+          resourceId: resourceId ?? undefined,
+          docId: targetDocId ?? undefined,
+        },
+      },
     };
   }
 }

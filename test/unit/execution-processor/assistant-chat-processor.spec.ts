@@ -7,10 +7,6 @@ describe('AssistantChatProcessor final response', () => {
   const executionId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 
   function build() {
-    const notificationGateway = {
-      sendAssistantResponse: jest.fn(),
-      sendAgentResponse: jest.fn(),
-    };
     const assistantService = {
       recordAssistantReply: jest.fn(
         async (
@@ -49,7 +45,6 @@ describe('AssistantChatProcessor final response', () => {
       validateDeterministicPartial: jest.fn(async () => undefined),
     };
     const processor = new AssistantChatProcessor(
-      notificationGateway as any,
       assistantService as any,
       memoryService as any,
       agentService as any,
@@ -57,7 +52,6 @@ describe('AssistantChatProcessor final response', () => {
     );
     return {
       processor,
-      notificationGateway,
       assistantService,
       agentService,
       executionService,
@@ -84,21 +78,26 @@ describe('AssistantChatProcessor final response', () => {
     ).toHaveBeenCalledWith(7, 'Loop answer', executionId, null);
     expect(
       dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(executionId, 'Loop answer', null, {
-      attemptedEvents: 3,
-    });
-    expect(
-      dependencies.notificationGateway.sendAssistantResponse,
-    ).toHaveBeenCalledWith({
-      assistantId: 7,
+    ).toHaveBeenCalledWith(
       executionId,
-      eventMessages: [],
-      message: expect.objectContaining({
-        id: 12,
-        content: 'Loop answer',
-        executionId,
-      }),
-    });
+      'Loop answer',
+      null,
+      { attemptedEvents: 3 },
+      undefined,
+      {
+        socketEvent: 'assistantResponse',
+        payload: {
+          assistantId: 7,
+          executionId,
+          eventMessages: [],
+          message: expect.objectContaining({
+            id: 12,
+            content: 'Loop answer',
+            executionId,
+          }),
+        },
+      },
+    );
   });
 
   it('replays the same persisted message identity and exact notification', async () => {
@@ -113,11 +112,14 @@ describe('AssistantChatProcessor final response', () => {
     await dependencies.processor.process(execution);
     await dependencies.processor.process(execution);
 
-    const notifications =
-      dependencies.notificationGateway.sendAgentResponse.mock.calls;
-    expect(notifications).toHaveLength(2);
-    expect(notifications[1][0]).toEqual(notifications[0][0]);
-    expect(notifications[0][0].message).toEqual(
+    const publications = dependencies.executionService.completeExecution.mock
+      .calls as unknown[][];
+    const firstPublication = publications[0][5] as {
+      payload: { message: unknown };
+    };
+    expect(publications).toHaveLength(2);
+    expect(publications[1][5]).toEqual(publications[0][5]);
+    expect(firstPublication.payload.message).toEqual(
       expect.objectContaining({ id: 11, content: 'Loop answer', executionId }),
     );
   });
@@ -141,23 +143,30 @@ describe('AssistantChatProcessor final response', () => {
     );
     expect(
       dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(executionId, 'Loop answer', null, undefined);
-    expect(
-      dependencies.notificationGateway.sendAgentResponse,
-    ).toHaveBeenCalledWith({
-      agentId: 8,
+    ).toHaveBeenCalledWith(
       executionId,
-      message: {
-        id: 11,
-        agentId: 8,
-        role: 'assistant',
-        content: 'Loop answer',
-        executionId,
-        error: null,
-        event: null,
-        createdAt: '2026-08-20T10:00:00.000Z',
+      'Loop answer',
+      null,
+      undefined,
+      undefined,
+      {
+        socketEvent: 'agentResponse',
+        payload: {
+          agentId: 8,
+          executionId,
+          message: {
+            id: 11,
+            agentId: 8,
+            role: 'assistant',
+            content: 'Loop answer',
+            executionId,
+            error: null,
+            event: null,
+            createdAt: '2026-08-20T10:00:00.000Z',
+          },
+        },
       },
-    });
+    );
   });
 
   it('preserves a reserved budget closure as an explicit partial result', async () => {
@@ -183,10 +192,8 @@ describe('AssistantChatProcessor final response', () => {
       null,
       undefined,
       { kind: 'partial', reason: 'budget_exhausted' },
+      expect.objectContaining({ socketEvent: 'assistantResponse' }),
     );
-    expect(
-      dependencies.notificationGateway.sendAssistantResponse,
-    ).toHaveBeenCalled();
   });
 
   it('validates and preserves a runtime deterministic partial', async () => {
@@ -243,6 +250,7 @@ describe('AssistantChatProcessor final response', () => {
         source: 'runtime_template',
         partialResult,
       },
+      expect.objectContaining({ socketEvent: 'assistantResponse' }),
     );
   });
 
@@ -263,11 +271,13 @@ describe('AssistantChatProcessor final response', () => {
     ).toHaveBeenCalledWith(7, '', executionId, error);
     expect(
       dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(executionId, '', error, undefined);
-    expect(
-      dependencies.notificationGateway.sendAssistantResponse,
     ).toHaveBeenCalledWith(
-      expect.objectContaining({ assistantId: 7, executionId }),
+      executionId,
+      '',
+      error,
+      undefined,
+      undefined,
+      expect.objectContaining({ socketEvent: 'assistantResponse' }),
     );
   });
 
@@ -293,9 +303,7 @@ describe('AssistantChatProcessor final response', () => {
       'budget_empty_forced_finalization',
       undefined,
       { kind: undefined, reason: 'budget_exhausted' },
+      expect.objectContaining({ socketEvent: 'assistantResponse' }),
     );
-    expect(
-      dependencies.notificationGateway.sendAssistantResponse,
-    ).toHaveBeenCalled();
   });
 });

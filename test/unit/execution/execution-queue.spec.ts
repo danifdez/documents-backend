@@ -2,6 +2,7 @@ import { ExecutionService } from '../../../src/execution/execution.service';
 import { ExecutionStatus } from '../../../src/execution/execution-status.enum';
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
 import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
+import { ExecutionOutboxEntity } from '../../../src/execution-outbox/execution-outbox.entity';
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 
 describe('ExecutionService queue state', () => {
@@ -9,6 +10,7 @@ describe('ExecutionService queue state', () => {
   let executionRepo: Record<string, jest.Mock>;
   let eventRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
+  let outboxRepo: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionRepo = {
@@ -22,13 +24,19 @@ describe('ExecutionService queue state', () => {
       findOne: jest.fn().mockResolvedValue({ producerSequence: '3' }),
       save: jest.fn(async (value) => value),
     };
+    outboxRepo = {
+      create: jest.fn((value) => value),
+      save: jest.fn(async (value) => value),
+    };
     manager = {
       getRepository: jest.fn((entity) =>
         entity === ExecutionEntity
           ? executionRepo
           : entity === ExecutionEventEntity
             ? eventRepo
-            : undefined,
+            : entity === ExecutionOutboxEntity
+              ? outboxRepo
+              : undefined,
       ),
       query: jest.fn(),
       save: jest.fn(async (value) => value),
@@ -121,6 +129,14 @@ describe('ExecutionService queue state', () => {
       expect.objectContaining({
         eventType: 'execution.state_changed',
         executionId: EXECUTION_ID,
+      }),
+    );
+    expect(outboxRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionId: EXECUTION_ID,
+        schemaVersion: 'execution-outbox/1',
+        socketEvent: 'notification',
+        status: 'pending',
       }),
     );
   });

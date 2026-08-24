@@ -19,6 +19,7 @@ describe('ExecutionCoordinatorService', () => {
   let executionService: Record<string, jest.Mock>;
   let executionAttemptService: Record<string, jest.Mock>;
   let processorFactory: Record<string, jest.Mock>;
+  let outboxService: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionService = {
@@ -34,10 +35,14 @@ describe('ExecutionCoordinatorService', () => {
     processorFactory = {
       getProcessor: jest.fn(),
     };
+    outboxService = {
+      publishPending: jest.fn(),
+    };
     service = new ExecutionCoordinatorService(
       executionService as any,
       executionAttemptService as any,
       processorFactory as any,
+      outboxService as any,
     );
   });
 
@@ -63,7 +68,10 @@ describe('ExecutionCoordinatorService', () => {
 
     await expect(service.finalizeReady()).resolves.toBe(1);
     expect(processor.process).toHaveBeenCalledWith(claimed);
-    expect(executionService.markAsCompleted).toHaveBeenCalledWith(EXECUTION_ID);
+    expect(executionService.markAsCompleted).toHaveBeenCalledWith(
+      EXECUTION_ID,
+      { publication: undefined },
+    );
     expect(executionService.markAsFailed).not.toHaveBeenCalled();
   });
 
@@ -96,8 +104,16 @@ describe('ExecutionCoordinatorService', () => {
     expect(executionService.markAsFailed).toHaveBeenCalledWith(
       EXECUTION_ID,
       'Invalid language result',
+      { publication: undefined },
     );
     expect(executionService.markAsCompleted).not.toHaveBeenCalled();
+  });
+
+  it('publishes durable terminal notifications through the outbox', async () => {
+    outboxService.publishPending.mockResolvedValue(2);
+
+    await expect(service.publishNotifications(2)).resolves.toBe(2);
+    expect(outboxService.publishPending).toHaveBeenCalledWith(2);
   });
 
   it('does not overwrite a terminal state set by the finalizer', async () => {

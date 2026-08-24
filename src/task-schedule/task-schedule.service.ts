@@ -43,6 +43,7 @@ export class TaskScheduleService {
   })
   async handleCron() {
     await this.executionCoordinatorService.acceptResults();
+    await this.executionCoordinatorService.publishNotifications();
     const { cpuUsagePercent, memoryUsagePercent } = this.getCPUAndMemoryUsage();
 
     if (cpuUsagePercent > 80 || memoryUsagePercent > 80) {
@@ -53,6 +54,7 @@ export class TaskScheduleService {
     }
 
     await this.executionCoordinatorService.finalizeReady();
+    await this.executionCoordinatorService.publishNotifications();
   }
 
   @Cron(CronExpression.EVERY_30_SECONDS, {

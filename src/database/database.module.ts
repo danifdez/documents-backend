@@ -50,6 +50,7 @@ import { ExecutionStepEntity } from '../execution/execution-step.entity';
 import { ExecutionStepDependencyEntity } from '../execution/execution-step-dependency.entity';
 import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
 import { ExecutionResultReceiptEntity } from '../execution/execution-result-receipt.entity';
+import { ExecutionOutboxEntity } from '../execution-outbox/execution-outbox.entity';
 
 @Module({
   imports: [
@@ -108,6 +109,7 @@ import { ExecutionResultReceiptEntity } from '../execution/execution-result-rece
       ExecutionStepDependencyEntity,
       ExecutionStepAttemptEntity,
       ExecutionResultReceiptEntity,
+      ExecutionOutboxEntity,
     ]),
   ],
   providers: [...databaseProviders],

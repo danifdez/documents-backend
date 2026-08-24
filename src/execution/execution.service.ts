@@ -68,6 +68,11 @@ import {
   validateReservationRequest,
   withoutGrantUsage,
 } from './inference-budget-policy';
+import {
+  ExecutionOutboxEntity,
+  ExecutionOutboxStatus,
+} from '../execution-outbox/execution-outbox.entity';
+import { ExecutionPublication } from '../execution-outbox/execution-publication';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 const PRIVATE_REASONING_PATTERN = /<think>[\s\S]*?<\/think>/gi;
@@ -552,7 +557,11 @@ export class ExecutionService {
     executionId: string,
     status: ExecutionStatus,
     failureMessage?: string,
-    options?: { completionReason?: string },
+    options?: {
+      completionKind?: string;
+      completionReason?: string;
+      publication?: ExecutionPublication;
+    },
   ): Promise<ExecutionEntity | null> {
     return this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
@@ -587,7 +596,7 @@ export class ExecutionService {
       if (TERMINAL_STATES.has(status)) {
         execution.completedAt = new Date();
         execution.phase = null;
-        execution.completionKind = 'full';
+        execution.completionKind = options?.completionKind ?? 'full';
         execution.completionReason =
           options?.completionReason ??
           (status === ExecutionStatus.FAILED
@@ -644,22 +653,82 @@ export class ExecutionService {
       if (root.executionId !== execution.executionId) {
         await executionRepo.save(root);
       }
+      if (TERMINAL_STATES.has(status)) {
+        await this.appendTerminalPublication(
+          manager,
+          execution,
+          stateEvent.eventId,
+          options?.publication,
+        );
+      }
       return execution;
     });
   }
 
-  async markAsCompleted(executionId: string): Promise<ExecutionEntity | null> {
-    return this.updateStatus(executionId, ExecutionStatus.COMPLETED);
+  async markAsCompleted(
+    executionId: string,
+    options?: {
+      completionKind?: string;
+      completionReason?: string;
+      publication?: ExecutionPublication;
+    },
+  ): Promise<ExecutionEntity | null> {
+    return this.updateStatus(
+      executionId,
+      ExecutionStatus.COMPLETED,
+      undefined,
+      options,
+    );
   }
 
   async markAsFailed(
     executionId: string,
     failureMessage?: string,
+    options?: {
+      completionKind?: string;
+      completionReason?: string;
+      publication?: ExecutionPublication;
+    },
   ): Promise<ExecutionEntity | null> {
     return this.updateStatus(
       executionId,
       ExecutionStatus.FAILED,
       failureMessage,
+      options,
+    );
+  }
+
+  private async appendTerminalPublication(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    eventId: string,
+    publication?: ExecutionPublication,
+  ): Promise<void> {
+    const resolved = publication ?? {
+      socketEvent: 'notification',
+      payload: {
+        type: execution.taskType,
+        message: `Execution ${execution.status}: ${execution.taskType}`,
+        executionId: execution.executionId,
+        status: execution.status,
+      },
+    };
+    const outboxRepo = manager.getRepository(ExecutionOutboxEntity);
+    await outboxRepo.save(
+      outboxRepo.create({
+        outboxId: randomUUID(),
+        executionId: execution.executionId,
+        eventId,
+        schemaVersion: 'execution-outbox/1',
+        socketEvent: resolved.socketEvent,
+        payload: resolved.payload,
+        status: ExecutionOutboxStatus.PENDING,
+        attempts: 0,
+        availableAt: new Date(),
+        leaseExpiresAt: null,
+        publishedAt: null,
+        lastError: null,
+      }),
     );
   }
 
@@ -1345,6 +1414,7 @@ export class ExecutionService {
     error: string | null,
     telemetry?: ExecutionTelemetrySummary,
     completion?: ExecutionCompletion,
+    publication?: ExecutionPublication,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
@@ -1391,6 +1461,7 @@ export class ExecutionService {
         completion,
       );
       let lastEventId = rows.at(-1)?.eventId ?? execution.lastEventId;
+      let terminalEventId: string | null = null;
       let sequence = Number(execution.lastSequence);
       const producerSequence = Math.max(
         2,
@@ -1542,6 +1613,7 @@ export class ExecutionService {
           sequence,
         );
         lastEventId = stateEvent.eventId;
+        terminalEventId = stateEvent.eventId;
         execution.status = status as ExecutionStatus;
         execution.completionKind = completionKind;
         execution.completionReason = completionReason;
@@ -1565,6 +1637,14 @@ export class ExecutionService {
       execution.phase = null;
       await this.refreshProgressProjection(eventRepo, execution);
       await executionRepo.save(execution);
+      if (terminalEventId) {
+        await this.appendTerminalPublication(
+          manager,
+          execution,
+          terminalEventId,
+          publication,
+        );
+      }
     });
   }
 

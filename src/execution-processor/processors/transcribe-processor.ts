@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionPriority } from 'src/execution/execution-priority.enum';
 import { ResourceService } from 'src/resource/resource.service';
-import { NotificationGateway } from 'src/notification/notification.gateway';
 import { ExecutionService } from 'src/execution/execution.service';
 import { ExecutionEntity } from 'src/execution/execution.entity';
 
@@ -13,7 +12,6 @@ export class TranscribeProcessor implements ExecutionProcessor {
 
   constructor(
     private readonly resourceService: ResourceService,
-    private readonly notificationGateway: NotificationGateway,
     private readonly executionService: ExecutionService,
   ) {}
 
@@ -70,17 +68,22 @@ export class TranscribeProcessor implements ExecutionProcessor {
       );
     }
 
-    this.notificationGateway.sendNotification({
-      type: 'transcribe',
-      message: `Transcription completed for resource ${resourceId}.`,
-      resourceId,
-    });
-
     this.logger.log(
       `Transcription completed for resource ${resourceId}: language=${result.language}, duration=${result.duration}s`,
     );
 
-    return { success: true, resourceId };
+    return {
+      success: true,
+      resourceId,
+      publication: {
+        socketEvent: 'notification',
+        payload: {
+          type: 'transcribe',
+          message: `Transcription completed for resource ${resourceId}.`,
+          resourceId,
+        },
+      },
+    };
   }
 
   private escapeHtml(text: string): string {

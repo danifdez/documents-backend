@@ -3,6 +3,7 @@ import { ExecutionProcessorFactory } from '../execution-processor/execution-proc
 import { ExecutionAttemptService } from '../execution/execution-attempt.service';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionService } from '../execution/execution.service';
+import { ExecutionOutboxService } from '../execution-outbox/execution-outbox.service';
 
 const TERMINAL_STATUSES = new Set<ExecutionStatus>([
   ExecutionStatus.COMPLETED,
@@ -18,10 +19,15 @@ export class ExecutionCoordinatorService {
     private readonly executionService: ExecutionService,
     private readonly executionAttemptService: ExecutionAttemptService,
     private readonly executionProcessorFactory: ExecutionProcessorFactory,
+    private readonly executionOutboxService: ExecutionOutboxService,
   ) {}
 
   acceptResults(limit = 20): Promise<number> {
     return this.executionAttemptService.processReceivedResults(limit);
+  }
+
+  publishNotifications(limit = 20): Promise<number> {
+    return this.executionOutboxService.publishPending(limit);
   }
 
   async finalizeReady(limit = 20): Promise<number> {
@@ -62,6 +68,7 @@ export class ExecutionCoordinatorService {
           await this.executionService.markAsFailed(
             execution.executionId,
             message,
+            { publication: result.publication },
           );
           finalized += 1;
           continue;
@@ -71,7 +78,9 @@ export class ExecutionCoordinatorService {
           execution.executionId,
         );
         if (current && !TERMINAL_STATUSES.has(current.status)) {
-          await this.executionService.markAsCompleted(execution.executionId);
+          await this.executionService.markAsCompleted(execution.executionId, {
+            publication: result.publication,
+          });
         }
       } catch (error) {
         const message =
