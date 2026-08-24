@@ -2058,7 +2058,6 @@ describe('execution PostgreSQL integration', () => {
       context.executionId,
       reply,
       null,
-      undefined,
       completion,
     );
     const completed = await service.findOne(context.executionId);
@@ -2076,7 +2075,6 @@ describe('execution PostgreSQL integration', () => {
       context.executionId,
       reply,
       null,
-      undefined,
       completion,
     );
     const eventsAfterReplay = await dataSource

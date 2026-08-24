@@ -208,11 +208,7 @@ export class AssistantService implements OnApplicationBootstrap {
       content,
       accessScope,
       {
-        kind: 'assistant',
-        ownerType: 'main-assistant',
         ownerId: assistantId,
-        name: assistant.name,
-        assistantSystem: assistant.isSystem,
         folderScope: assistant.folderScope,
         conversation,
       },

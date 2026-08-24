@@ -198,10 +198,7 @@ export class AgentService {
       content,
       accessScope,
       {
-        kind: 'agent',
-        ownerType: 'agent',
         ownerId: agent.id,
-        name: agent.name,
         systemPrompt: agent.systemPrompt ?? null,
         folderScope: agent.folderScope,
         conversation,

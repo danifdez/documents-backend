@@ -26,12 +26,6 @@ export interface IncomingExecutionArtifact {
   bodyBase64?: string;
 }
 
-export interface ExecutionTelemetrySummary {
-  attemptedEvents?: number;
-  acceptedEvents?: number;
-  errors?: string[];
-}
-
 export interface ProgressGrantRequest {
   executionId: string;
   turnId: string;

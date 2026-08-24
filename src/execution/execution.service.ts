@@ -13,7 +13,6 @@ import { ExecutionEventEntity } from './execution-event.entity';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import {
   IncomingExecutionArtifact,
-  ExecutionTelemetrySummary,
   ExecutionAccessScope,
   ExecutionCompletion,
   DeterministicPartialResult,
@@ -1411,7 +1410,6 @@ export class ExecutionService {
     executionId: string,
     reply: string,
     error: string | null,
-    telemetry?: ExecutionTelemetrySummary,
     completion?: ExecutionCompletion,
     publication?: ExecutionPublication,
   ): Promise<void> {
@@ -1423,12 +1421,6 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) return;
-      for (const item of telemetry?.errors ?? []) {
-        this.addMissing(
-          execution,
-          `models_telemetry:${String(item).slice(0, 160)}`,
-        );
-      }
       const rows = await eventRepo.find({
         where: { rootExecutionId: execution.rootExecutionId },
         order: { sequence: 'ASC' },
@@ -1618,9 +1610,6 @@ export class ExecutionService {
           : null;
       }
       execution.lastSequence = String(sequence);
-      if ((telemetry?.errors?.length ?? 0) > 0) {
-        execution.completenessStatus = 'evaluable_partial';
-      }
       execution.lastEventId = lastEventId;
       execution.completedAt = new Date();
       execution.phase = null;

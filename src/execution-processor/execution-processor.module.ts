@@ -30,7 +30,6 @@ import { AssistantChatProcessor } from './processors/assistant-chat-processor';
 import { IndexedFileExtractionProcessor } from './processors/indexed-file-extraction-processor';
 import { IndexedFileIngestProcessor } from './processors/indexed-file-ingest-processor';
 import { AssistantModule } from '../assistant/assistant.module';
-import { AssistantMemoryModule } from '../assistant-memory/assistant-memory.module';
 import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 import { AgentModule } from '../agent/agent.module';
 import { readFeaturesFromEnv } from '../common/feature-flags';
@@ -114,7 +113,6 @@ export class ExecutionProcessorModule {
         HttpModule,
         DatabaseModule,
         AssistantModule,
-        AssistantMemoryModule,
         IndexedFileModule,
         AgentModule,
         ...featureImports,

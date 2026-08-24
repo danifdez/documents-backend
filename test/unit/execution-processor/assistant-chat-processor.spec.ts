@@ -7,35 +7,28 @@ describe('AssistantChatProcessor final response', () => {
   const executionId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 
   function build() {
-    const assistantService = {
-      recordAssistantReply: jest.fn(
-        async (
-          assistantId: number,
-          reply: string,
-          currentExecutionId: string,
-          error: string | null,
-        ) => ({
-          id: 12,
-          assistantId,
-          role: 'assistant',
-          content: reply,
-          executionId: currentExecutionId,
-          error,
-          event: null,
-          createdAt: new Date('2026-08-20T10:00:00Z'),
-        }),
-      ),
-    };
-    const memoryService = {};
-    const agentMessage = {
-      id: 11,
-      agentId: 8,
-      role: 'assistant' as const,
-      content: 'Loop answer',
+    const assistantMessage = {
+      id: 12,
+      assistantId: 7,
+      role: 'assistant',
+      content: 'Final answer',
       executionId,
       error: null,
       event: null,
       createdAt: new Date('2026-08-20T10:00:00Z'),
+    };
+    const agentMessage = {
+      id: 11,
+      agentId: 8,
+      role: 'assistant' as const,
+      content: 'Final answer',
+      executionId,
+      error: null,
+      event: null,
+      createdAt: new Date('2026-08-20T10:00:00Z'),
+    };
+    const assistantService = {
+      recordAssistantReply: jest.fn(async () => assistantMessage),
     };
     const agentService = {
       recordAgentReply: jest.fn(async () => agentMessage),
@@ -44,69 +37,83 @@ describe('AssistantChatProcessor final response', () => {
       completeExecution: jest.fn(async () => undefined),
       validateDeterministicPartial: jest.fn(async () => undefined),
     };
-    const processor = new AssistantChatProcessor(
-      assistantService as any,
-      memoryService as any,
-      agentService as any,
-      executionService as any,
-    );
     return {
-      processor,
+      processor: new AssistantChatProcessor(
+        assistantService as any,
+        agentService as any,
+        executionService as any,
+      ),
       assistantService,
       agentService,
       executionService,
-      agentMessage,
     };
   }
 
-  it('persists and publishes the assistant reply exactly as models returned it', async () => {
+  it('persists and publishes the assistant final_text projection', async () => {
     const dependencies = build();
     const execution = {
       executionId,
       taskType: 'assistant-chat',
-      payload: { kind: 'assistant', ownerId: 7 },
-      result: {
-        reply: 'Loop answer',
-        executionTelemetry: { attemptedEvents: 3 },
-      },
+      payload: { ownerId: 7 },
+      result: { reply: 'Final answer', error: null },
     } as ExecutionEntity;
 
-    await dependencies.processor.process(execution);
-
+    await expect(dependencies.processor.process(execution)).resolves.toEqual({
+      success: true,
+    });
     expect(
       dependencies.assistantService.recordAssistantReply,
-    ).toHaveBeenCalledWith(7, 'Loop answer', executionId, null);
+    ).toHaveBeenCalledWith(7, 'Final answer', executionId, null);
     expect(
       dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(
-      executionId,
-      'Loop answer',
-      null,
-      { attemptedEvents: 3 },
-      undefined,
-      {
-        socketEvent: 'assistantResponse',
-        payload: {
-          assistantId: 7,
-          executionId,
-          eventMessages: [],
-          message: expect.objectContaining({
-            id: 12,
-            content: 'Loop answer',
-            executionId,
-          }),
-        },
+    ).toHaveBeenCalledWith(executionId, 'Final answer', null, undefined, {
+      socketEvent: 'assistantResponse',
+      payload: {
+        assistantId: 7,
+        executionId,
+        message: expect.objectContaining({ id: 12, content: 'Final answer' }),
       },
-    );
+    });
   });
 
-  it('replays the same persisted message identity and exact notification', async () => {
+  it('selects agent finalization from taskType instead of payload metadata', async () => {
     const dependencies = build();
     const execution = {
       executionId,
       taskType: 'agent-chat',
-      payload: { kind: 'agent', ownerId: 8 },
-      result: { reply: 'Loop answer' },
+      payload: { ownerId: 8 },
+      result: { reply: 'Final answer', error: null },
+    } as ExecutionEntity;
+
+    await dependencies.processor.process(execution);
+
+    expect(dependencies.agentService.recordAgentReply).toHaveBeenCalledWith(
+      8,
+      'Final answer',
+      executionId,
+      null,
+    );
+    expect(
+      dependencies.assistantService.recordAssistantReply,
+    ).not.toHaveBeenCalled();
+    expect(
+      dependencies.executionService.completeExecution,
+    ).toHaveBeenCalledWith(
+      executionId,
+      'Final answer',
+      null,
+      undefined,
+      expect.objectContaining({ socketEvent: 'agentResponse' }),
+    );
+  });
+
+  it('reuses the persisted message identity during finalizer replay', async () => {
+    const dependencies = build();
+    const execution = {
+      executionId,
+      taskType: 'agent-chat',
+      payload: { ownerId: 8 },
+      result: { reply: 'Final answer' },
     } as ExecutionEntity;
 
     await dependencies.processor.process(execution);
@@ -114,111 +121,26 @@ describe('AssistantChatProcessor final response', () => {
 
     const publications = dependencies.executionService.completeExecution.mock
       .calls as unknown[][];
-    const firstPublication = publications[0][5] as {
-      payload: { message: unknown };
-    };
     expect(publications).toHaveLength(2);
-    expect(publications[1][5]).toEqual(publications[0][5]);
-    expect(firstPublication.payload.message).toEqual(
-      expect.objectContaining({ id: 11, content: 'Loop answer', executionId }),
-    );
+    expect(publications[1][4]).toEqual(publications[0][4]);
   });
 
-  it('persists and publishes the agent reply without requiring stream chunks', async () => {
-    const dependencies = build();
-    const execution = {
-      executionId,
-      taskType: 'agent-chat',
-      payload: { kind: 'agent', ownerId: 8 },
-      result: { reply: 'Loop answer' },
-    } as ExecutionEntity;
-
-    await dependencies.processor.process(execution);
-
-    expect(dependencies.agentService.recordAgentReply).toHaveBeenCalledWith(
-      8,
-      'Loop answer',
-      executionId,
-      null,
-    );
-    expect(
-      dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(
-      executionId,
-      'Loop answer',
-      null,
-      undefined,
-      undefined,
-      {
-        socketEvent: 'agentResponse',
-        payload: {
-          agentId: 8,
-          executionId,
-          message: {
-            id: 11,
-            agentId: 8,
-            role: 'assistant',
-            content: 'Loop answer',
-            executionId,
-            error: null,
-            event: null,
-            createdAt: '2026-08-20T10:00:00.000Z',
-          },
-        },
-      },
-    );
-  });
-
-  it('preserves a reserved budget closure as an explicit partial result', async () => {
-    const dependencies = build();
-    const execution = {
-      executionId,
-      taskType: 'assistant-chat',
-      payload: { kind: 'assistant', ownerId: 7 },
-      result: {
-        reply: 'Partial answer from completed tools',
-        completionKind: 'partial',
-        completionReason: 'budget_exhausted',
-      },
-    } as ExecutionEntity;
-
-    await dependencies.processor.process(execution);
-
-    expect(
-      dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(
-      executionId,
-      'Partial answer from completed tools',
-      null,
-      undefined,
-      { kind: 'partial', reason: 'budget_exhausted' },
-      expect.objectContaining({ socketEvent: 'assistantResponse' }),
-    );
-  });
-
-  it('validates and preserves a runtime deterministic partial', async () => {
+  it('validates a Backend-generated deterministic partial before publishing', async () => {
     const dependencies = build();
     const partialResult = {
-      version: '1',
-      trigger: 'closing_output_empty',
+      version: '1' as const,
+      trigger: 'closing_output_empty' as const,
       loopId: executionId,
       grantId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
-      completedOperations: [
-        {
-          operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
-          toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
-          name: 'folder_read',
-          summary: 'Document read',
-        },
-      ],
-      pending: ['final_synthesis'],
+      completedOperations: [],
+      pending: ['final_synthesis'] as ['final_synthesis'],
     };
     const execution = {
       executionId,
       taskType: 'assistant-chat',
-      payload: { kind: 'assistant', ownerId: 7 },
+      payload: { ownerId: 7 },
       result: {
-        reply: 'Completed work: Document read',
+        reply: 'Completed work',
         completionKind: 'partial',
         completionReason: 'budget_exhausted',
         completionSource: 'runtime_template',
@@ -228,81 +150,40 @@ describe('AssistantChatProcessor final response', () => {
 
     await dependencies.processor.process(execution);
 
-    expect(
-      dependencies.executionService.validateDeterministicPartial,
-    ).toHaveBeenCalledWith(executionId, 'Completed work: Document read', null, {
+    const completion = {
       kind: 'partial',
       reason: 'budget_exhausted',
       source: 'runtime_template',
       partialResult,
+    };
+    expect(
+      dependencies.executionService.validateDeterministicPartial,
+    ).toHaveBeenCalledWith(executionId, 'Completed work', null, completion);
+    expect(
+      dependencies.executionService.completeExecution,
+    ).toHaveBeenCalledWith(
+      executionId,
+      'Completed work',
+      null,
+      completion,
+      expect.objectContaining({ socketEvent: 'assistantResponse' }),
+    );
+  });
+
+  it('rejects finalization without the owner identity', async () => {
+    const dependencies = build();
+    const execution = {
+      executionId,
+      taskType: 'assistant-chat',
+      payload: {},
+      result: { reply: 'Final answer' },
+    } as ExecutionEntity;
+
+    await expect(dependencies.processor.process(execution)).resolves.toEqual({
+      success: false,
     });
     expect(
       dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(
-      executionId,
-      'Completed work: Document read',
-      null,
-      undefined,
-      {
-        kind: 'partial',
-        reason: 'budget_exhausted',
-        source: 'runtime_template',
-        partialResult,
-      },
-      expect.objectContaining({ socketEvent: 'assistantResponse' }),
-    );
-  });
-
-  it('persists and publishes a terminal model error without a final reply', async () => {
-    const dependencies = build();
-    const error = 'Model returned an empty response';
-    const execution = {
-      executionId,
-      taskType: 'assistant-chat',
-      payload: { kind: 'assistant', ownerId: 7 },
-      result: { error },
-    } as ExecutionEntity;
-
-    await dependencies.processor.process(execution);
-
-    expect(
-      dependencies.assistantService.recordAssistantReply,
-    ).toHaveBeenCalledWith(7, '', executionId, error);
-    expect(
-      dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(
-      executionId,
-      '',
-      error,
-      undefined,
-      undefined,
-      expect.objectContaining({ socketEvent: 'assistantResponse' }),
-    );
-  });
-
-  it('preserves the explicit budget reason on a failed execution', async () => {
-    const dependencies = build();
-    const execution = {
-      executionId,
-      taskType: 'assistant-chat',
-      payload: { kind: 'assistant', ownerId: 7 },
-      result: {
-        error: 'budget_empty_forced_finalization',
-        completionReason: 'budget_exhausted',
-      },
-    } as ExecutionEntity;
-
-    await dependencies.processor.process(execution);
-
-    expect(
-      dependencies.executionService.completeExecution,
-    ).toHaveBeenCalledWith(
-      executionId,
-      '',
-      'budget_empty_forced_finalization',
-      undefined,
-      { kind: undefined, reason: 'budget_exhausted' },
-      expect.objectContaining({ socketEvent: 'assistantResponse' }),
-    );
+    ).not.toHaveBeenCalled();
   });
 });

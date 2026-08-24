@@ -223,10 +223,7 @@ describe('AgentService', () => {
       expect(kind).toBe('agent_chat');
       expect(message).toBe('hi');
       expect(payload).toMatchObject({
-        kind: 'agent',
-        ownerType: 'agent',
         ownerId: a.id,
-        name: a.name,
       });
     });
 

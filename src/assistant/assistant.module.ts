@@ -2,7 +2,6 @@ import { Module, forwardRef } from '@nestjs/common';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
 import { DatabaseModule } from '../database/database.module';
-import { AssistantMemoryModule } from '../assistant-memory/assistant-memory.module';
 import { NotificationModule } from '../notification/notification.module';
 import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 import { ExecutionModule } from '../execution/execution.module';
@@ -11,7 +10,6 @@ import { ExecutionModule } from '../execution/execution.module';
   imports: [
     DatabaseModule,
     ExecutionModule,
-    AssistantMemoryModule,
     NotificationModule,
     forwardRef(() => IndexedFileModule),
   ],
