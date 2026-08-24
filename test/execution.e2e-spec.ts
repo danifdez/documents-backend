@@ -8,6 +8,7 @@ import { AddWorkerCredentials1757668140380 } from '../migrations/1757668140380-A
 import { CreateExecutionOutbox1757668140400 } from '../migrations/1757668140400-CreateExecutionOutbox';
 import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140410-CreateExecutionOperations';
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
+import { AddExecutionStepContinuation1757668140430 } from '../migrations/1757668140430-AddExecutionStepContinuation';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -35,6 +36,7 @@ import { ExecutionToolInvocationEntity } from '../src/execution/execution-tool-i
 import { ExecutionToolPlanEntity } from '../src/execution/execution-tool-plan.entity';
 import { ExecutionToolPlanService } from '../src/execution/execution-tool-plan.service';
 import { ExecutionToolRuntimeService } from '../src/execution-coordinator/execution-tool-runtime.service';
+import { ExecutionAgentLoopService } from '../src/execution-coordinator/execution-agent-loop.service';
 import {
   assertOperationBudgetProjection,
   governedBudgetStart,
@@ -54,6 +56,7 @@ describe('execution PostgreSQL integration', () => {
   let attemptService: ExecutionAttemptService;
   let workerService: WorkerService;
   let toolPlanService: ExecutionToolPlanService;
+  let agentLoopService: ExecutionAgentLoopService;
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -92,6 +95,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionOutbox1757668140400().up(runner);
     await new CreateExecutionOperations1757668140410().up(runner);
     await new CreateExecutionToolPlans1757668140420().up(runner);
+    await new AddExecutionStepContinuation1757668140430().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -122,6 +126,11 @@ describe('execution PostgreSQL integration', () => {
     toolPlanService = new ExecutionToolPlanService(
       dataSource,
       new ExecutionContractValidator(),
+    );
+    agentLoopService = new ExecutionAgentLoopService(
+      dataSource,
+      service,
+      toolPlanService,
     );
   });
 
@@ -418,7 +427,6 @@ describe('execution PostgreSQL integration', () => {
       loopId: created.executionId,
       agentName: 'assistant',
       loopKind: 'top_level',
-      executionAttemptId: sourceAttemptId,
       requestedPolicy: {
         normal: 1,
         normalInferenceSoftLimit: 1,
@@ -443,7 +451,6 @@ describe('execution PostgreSQL integration', () => {
       phase: 'agent_loop',
       round: 1,
       name: 'documents.search',
-      executionAttemptId: sourceAttemptId,
     });
     const step = await toolPlanService.materialize(
       prepared.plan.toolCallId,
@@ -540,7 +547,6 @@ describe('execution PostgreSQL integration', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: reserved.reservation.reservationId,
         budgetBucket: 'tool',
-        executionAttemptId: sourceAttemptId,
       },
     });
     expect(finished).toMatchObject({
@@ -590,6 +596,105 @@ describe('execution PostgreSQL integration', () => {
         ),
       ),
     ).not.toThrow();
+  });
+
+  it('turns an accepted tool_requests outcome into governed tool work', async () => {
+    const created = await service.createForChat(
+      'assistant_chat',
+      'Find the harness plan',
+      { ownerPrincipal: 'agent-loop-e2e', workspaceId: 'default' },
+      {},
+    );
+    await expect(agentLoopService.prepareReadyInferences()).resolves.toBe(1);
+    const governedStep = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ executionId: created.executionId });
+    expect(governedStep.budgetReservationId).toEqual(expect.any(String));
+
+    const workerId = randomUUID();
+    const assignment = await attemptService.claimReadyStep({
+      workerId,
+      stepKinds: [ExecutionStepKind.INFERENCE],
+      capabilities: ['assistant-chat'],
+      leaseDurationMs: 30_000,
+    });
+    expect(assignment).not.toBeNull();
+    await attemptService.startAttempt(assignment!.attemptId, workerId);
+    const toolCallId = randomUUID();
+    await attemptService.receiveResult({
+      executionId: assignment!.executionId,
+      stepId: assignment!.stepId,
+      operationId: assignment!.operationId,
+      attemptId: assignment!.attemptId,
+      workerId,
+      result: {
+        schemaVersion: 'step-result/1',
+        executionId: assignment!.executionId,
+        stepId: assignment!.stepId,
+        operationId: assignment!.operationId,
+        attemptId: assignment!.attemptId,
+        stepKind: ExecutionStepKind.INFERENCE,
+        status: 'succeeded',
+        output: {
+          kind: ExecutionStepKind.INFERENCE,
+          outcome: {
+            kind: 'tool_requests',
+            calls: [
+              {
+                toolCallId,
+                name: 'documents.search',
+                arguments: { query: 'harness', limit: 2 },
+              },
+            ],
+          },
+        },
+        usage: {
+          promptTokens: 10,
+          completionTokens: 5,
+          totalTokens: 15,
+        },
+        inference: {
+          effectiveModel: 'e2e-model',
+          effectiveAdapter: null,
+          finishReason: 'tool_calls',
+          inferenceMs: 1,
+          cacheOutcome: 'miss',
+          warnings: [],
+        },
+        artifactRefs: [],
+        error: null,
+      },
+    });
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    await expect(
+      agentLoopService.materializeAcceptedToolRequests(),
+    ).resolves.toBe(1);
+
+    const plan = await dataSource
+      .getRepository(ExecutionToolPlanEntity)
+      .findOneByOrFail({ toolCallId });
+    expect(plan.stepId).toEqual(expect.any(String));
+    await expect(
+      dataSource
+        .getRepository(ExecutionStepEntity)
+        .findOneByOrFail({ stepId: plan.stepId! }),
+    ).resolves.toMatchObject({
+      status: ExecutionStepStatus.READY,
+      stepKind: ExecutionStepKind.TOOL,
+      budgetReservationId: expect.any(String),
+      work: {
+        taskType: 'documents.search',
+        toolPlan: { toolCallId, operationId: plan.operationId },
+      },
+    });
+    await expect(
+      agentLoopService.materializeAcceptedToolRequests(),
+    ).resolves.toBe(0);
+    await expect(
+      dataSource
+        .getRepository(ExecutionStepEntity)
+        .findOneByOrFail({ stepId: assignment!.stepId }),
+    ).resolves.toMatchObject({ continuationProcessedAt: expect.any(Date) });
   });
 
   it('registers and authenticates an isolated Models identity', async () => {
@@ -993,10 +1098,9 @@ describe('execution PostgreSQL integration', () => {
       loopId: context.executionId,
       agentName: 'assistant',
       loopKind: 'top_level',
-      executionAttemptId: attemptId,
       requestedPolicy,
     });
-    const reserve = (operationId: string, executionAttemptId = attemptId) =>
+    const reserve = (operationId: string) =>
       service.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
@@ -1007,7 +1111,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'direct_response',
         round: 1,
         name: 'direct_response',
-        executionAttemptId,
       });
 
     const decisions = await Promise.all([
@@ -1017,11 +1120,7 @@ describe('execution PostgreSQL integration', () => {
     expect(decisions.filter((decision) => decision.granted)).toHaveLength(1);
     expect(decisions.filter((decision) => !decision.granted)).toHaveLength(1);
 
-    const reserveTool = (
-      operationId: string,
-      toolCallId: string,
-      executionAttemptId = attemptId,
-    ) =>
+    const reserveTool = (operationId: string, toolCallId: string) =>
       service.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
@@ -1033,7 +1132,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'agent_loop',
         round: 1,
         name: 'folder_read',
-        executionAttemptId,
       });
     const toolDecisions = await Promise.all([
       reserveTool(randomUUID(), randomUUID()),
@@ -1048,25 +1146,21 @@ describe('execution PostgreSQL integration', () => {
 
     const nextAttemptId = randomUUID();
     await activateStepAttempt(context.executionId, nextAttemptId);
-    await expect(reserve(randomUUID())).rejects.toThrow(
-      'Execution attempt is not active',
-    );
     const repeated = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
       loopId: context.executionId,
       agentName: 'assistant',
       loopKind: 'top_level',
-      executionAttemptId: nextAttemptId,
       requestedPolicy,
     });
     expect(repeated.grant.grantId).toBe(grant.grantId);
-    await expect(reserve(randomUUID(), nextAttemptId)).resolves.toMatchObject({
+    await expect(reserve(randomUUID())).resolves.toMatchObject({
       granted: false,
       reservation: { reason: 'budget_hard_limit_reached' },
     });
     await expect(
-      reserveTool(randomUUID(), randomUUID(), nextAttemptId),
+      reserveTool(randomUUID(), randomUUID()),
     ).resolves.toMatchObject({
       granted: false,
       reservation: { reason: 'tool_budget_hard_limit_reached' },
@@ -1089,7 +1183,6 @@ describe('execution PostgreSQL integration', () => {
       loopId: context.executionId,
       agentName: 'assistant',
       loopKind: 'top_level',
-      executionAttemptId: attemptId,
       requestedPolicy: {
         normal: 1,
         normalInferenceSoftLimit: 0,
@@ -1113,7 +1206,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'agent_loop',
         round: 1,
         name: 'folder_read',
-        executionAttemptId: attemptId,
       });
 
     await reserveTool();
@@ -1172,7 +1264,6 @@ describe('execution PostgreSQL integration', () => {
       loopId: context.executionId,
       agentName: 'assistant',
       loopKind: 'top_level',
-      executionAttemptId: attemptId,
       requestedPolicy: {
         normal: 3,
         normalInferenceSoftLimit: 2,
@@ -1195,7 +1286,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'agent_loop',
         round: 1,
         name: 'chat_with_tools',
-        executionAttemptId: attemptId,
       });
 
     await reserveInference();
@@ -1251,7 +1341,6 @@ describe('execution PostgreSQL integration', () => {
       loopId: context.executionId,
       agentName: 'assistant',
       loopKind: 'top_level',
-      executionAttemptId: attemptId,
       requestedPolicy: {
         normal: 2,
         normalInferenceSoftLimit: 0,
@@ -1329,7 +1418,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'agent_loop',
         round,
         name: 'folder_read',
-        executionAttemptId: attemptId,
       });
     const firstOperationId = randomUUID();
     const firstToolCallId = randomUUID();
@@ -1352,7 +1440,6 @@ describe('execution PostgreSQL integration', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: first.reservation.reservationId,
         budgetBucket: 'tool',
-        executionAttemptId: attemptId,
         operationFingerprint: fingerprint,
         operationFingerprintVersion: 'canonical_tool_input_v1',
       },
@@ -1440,7 +1527,6 @@ describe('execution PostgreSQL integration', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: decisions[0].reservation.reservationId,
         budgetBucket: 'tool',
-        executionAttemptId: attemptId,
         operationFingerprint: fingerprint,
         operationFingerprintVersion: 'canonical_tool_input_v1',
       },
@@ -1499,7 +1585,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'agent_loop',
         round: 2,
         name: 'chat_with_tools',
-        executionAttemptId: attemptId,
       },
     );
     causedByEventId = inference.eventId;
@@ -1517,7 +1602,6 @@ describe('execution PostgreSQL integration', () => {
       budgetGrantId: grant.grantId,
       budgetReservationId: inference.reservation.reservationId,
       budgetBucket: 'normal',
-      executionAttemptId: attemptId,
     };
     await expect(
       accept('operation.started', 'operation.started/1', inferencePayload, {
@@ -1623,7 +1707,6 @@ describe('execution PostgreSQL integration', () => {
       loopId: context.executionId,
       agentName: 'assistant',
       loopKind: 'top_level',
-      executionAttemptId: attemptId,
       requestedPolicy,
     });
     const repository = dataSource.getRepository(ExecutionEntity);
@@ -1693,7 +1776,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'agent_loop',
         round: 1,
         name: 'chat_with_tools',
-        executionAttemptId: attemptId,
       },
     );
     await refreshCause();
@@ -1713,7 +1795,6 @@ describe('execution PostgreSQL integration', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: normalReservation.reservation.reservationId,
         budgetBucket: 'normal',
-        executionAttemptId: attemptId,
       },
       { operationId: normalOperationId, attemptId: normalAttemptId },
       { type: 'model' },
@@ -1748,7 +1829,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'agent_loop',
         round: 1,
         name: 'folder_read',
-        executionAttemptId: attemptId,
       },
     );
     await refreshCause();
@@ -1769,7 +1849,6 @@ describe('execution PostgreSQL integration', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: toolReservation.reservation.reservationId,
         budgetBucket: 'tool',
-        executionAttemptId: attemptId,
       },
       {
         operationId: toolOperationId,
@@ -1809,7 +1888,6 @@ describe('execution PostgreSQL integration', () => {
         phase: 'forced_finalization',
         round: 1,
         name: 'forced_finalization',
-        executionAttemptId: attemptId,
       },
     );
     await refreshCause();
@@ -1829,7 +1907,6 @@ describe('execution PostgreSQL integration', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: closingReservation.reservation.reservationId,
         budgetBucket: 'closing',
-        executionAttemptId: attemptId,
       },
       { operationId: closingOperationId, attemptId: closingAttemptId },
       { type: 'model' },
@@ -1898,7 +1975,6 @@ describe('execution PostgreSQL integration', () => {
         trigger: 'closing_output_empty' as const,
         loopId: context.executionId,
         grantId: grant.grantId,
-        executionAttemptId: attemptId,
         completedOperations: [
           {
             operationId: toolOperationId,
@@ -1919,19 +1995,6 @@ describe('execution PostgreSQL integration', () => {
         completion,
       ),
     ).resolves.toBeUndefined();
-    const staleAttemptId = randomUUID();
-    await activateStepAttempt(context.executionId, staleAttemptId);
-    await expect(
-      service.completeExecution(
-        context.executionId,
-        reply,
-        null,
-        undefined,
-        completion,
-      ),
-    ).rejects.toThrow('Execution attempt is not active');
-    await activateStepAttempt(context.executionId, attemptId);
-
     await service.completeExecution(
       context.executionId,
       reply,

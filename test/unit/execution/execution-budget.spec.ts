@@ -119,7 +119,6 @@ describe('ExecutionService operation budget', () => {
     loopId: EXECUTION_ID,
     agentName: 'assistant',
     loopKind: 'top_level' as const,
-    executionAttemptId: ATTEMPT_ID,
     requestedPolicy: {
       normal: 3,
       normalInferenceSoftLimit: 2,
@@ -157,7 +156,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round,
       name,
-      executionAttemptId: ATTEMPT_ID,
     });
     const attemptId = `018f1d8a-54d7-7d63-a1ee-${String(800 + round).padStart(12, '0')}`;
     const sequence = Number(execution.lastSequence) + 1;
@@ -182,7 +180,6 @@ describe('ExecutionService operation budget', () => {
           budgetGrantId: grantId,
           budgetReservationId: decision.reservation.reservationId,
           budgetBucket: 'tool',
-          executionAttemptId: ATTEMPT_ID,
           operationFingerprint: fingerprint,
           operationFingerprintVersion: 'canonical_tool_input_v1',
           toolBatchSize: 1,
@@ -263,7 +260,6 @@ describe('ExecutionService operation budget', () => {
             loopKind: 'top_level',
             loopId: EXECUTION_ID,
             budgetGrantId: grantId,
-            executionAttemptId: ATTEMPT_ID,
           },
         },
       },
@@ -293,7 +289,6 @@ describe('ExecutionService operation budget', () => {
             phase: 'forced_finalization',
             loopId: EXECUTION_ID,
             budgetGrantId: grantId,
-            executionAttemptId: ATTEMPT_ID,
           },
         },
       },
@@ -349,7 +344,6 @@ describe('ExecutionService operation budget', () => {
         trigger: 'closing_output_empty' as const,
         loopId: EXECUTION_ID,
         grantId,
-        executionAttemptId: ATTEMPT_ID,
         completedOperations: [
           {
             operationId,
@@ -418,7 +412,6 @@ describe('ExecutionService operation budget', () => {
           kind: 'loop_guard_triggered',
           loopGuardSignal: {
             action: 'terminate',
-            executionAttemptId: ATTEMPT_ID,
           },
         },
       },
@@ -456,7 +449,6 @@ describe('ExecutionService operation budget', () => {
       trigger: 'exact_tool_repeat_persisted',
       loopId: EXECUTION_ID,
       grantId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
-      executionAttemptId: ATTEMPT_ID,
       completedOperations: [
         {
           operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
@@ -505,7 +497,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 1,
       name: 'chat_with_tools',
-      executionAttemptId: ATTEMPT_ID,
     };
     const first = await service.reserveOperationBudget(EXECUTION_ID, {
       ...baseReservation,
@@ -578,7 +569,6 @@ describe('ExecutionService operation budget', () => {
           phase: 'agent_loop',
           round: index + 1,
           name: 'folder_read',
-          executionAttemptId: ATTEMPT_ID,
         }),
       );
     }
@@ -632,7 +622,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 4,
       name: 'folder_read',
-      executionAttemptId: ATTEMPT_ID,
     });
     expect(repeated.softLimitSignal?.triggeringOperationId).toBe(
       '018f1d8a-54d7-7d63-a1ee-5e9a6adca733',
@@ -675,7 +664,6 @@ describe('ExecutionService operation budget', () => {
         phase: 'agent_loop',
         round,
         name: 'chat_with_tools',
-        executionAttemptId: ATTEMPT_ID,
       });
     const first = await reserve('018f1d8a-54d7-7d63-a1ee-5e9a6adca750', 1);
     const second = await reserve('018f1d8a-54d7-7d63-a1ee-5e9a6adca751', 2);
@@ -710,7 +698,6 @@ describe('ExecutionService operation budget', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: second.reservation.reservationId,
         budgetBucket: 'normal',
-        executionAttemptId: ATTEMPT_ID,
       },
     };
     expect(() => validateBudgetStart(start)).toThrow(ConflictException);
@@ -843,7 +830,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 1,
       name: 'folder_read',
-      executionAttemptId: ATTEMPT_ID,
     };
     const accepted = await service.reserveOperationBudget(EXECUTION_ID, {
       ...base,
@@ -874,7 +860,6 @@ describe('ExecutionService operation budget', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: accepted.reservation.reservationId,
         budgetBucket: 'tool',
-        executionAttemptId: ATTEMPT_ID,
       },
     };
 
@@ -913,7 +898,6 @@ describe('ExecutionService operation budget', () => {
       toolBatchIndex: 0,
       phase: 'agent_loop',
       name: 'folder_read',
-      executionAttemptId: ATTEMPT_ID,
     };
     const first = await service.reserveOperationBudget(EXECUTION_ID, {
       ...base,
@@ -942,7 +926,6 @@ describe('ExecutionService operation budget', () => {
             budgetGrantId: grant.grantId,
             budgetReservationId: first.reservation.reservationId,
             budgetBucket: 'tool',
-            executionAttemptId: ATTEMPT_ID,
             operationFingerprint: fingerprint,
             operationFingerprintVersion: 'canonical_tool_input_v1',
           },
@@ -1018,7 +1001,6 @@ describe('ExecutionService operation budget', () => {
           budgetGrantId: grant.grantId,
           budgetReservationId: repeated.reservation.reservationId,
           budgetBucket: 'tool',
-          executionAttemptId: ATTEMPT_ID,
           operationFingerprint: fingerprint,
           operationFingerprintVersion: 'canonical_tool_input_v1',
         },
@@ -1035,7 +1017,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 3,
       name: 'chat_with_tools',
-      executionAttemptId: ATTEMPT_ID,
     });
     expect(inference.budgetState.normal).toMatchObject({
       reserved: 1,
@@ -1054,7 +1035,6 @@ describe('ExecutionService operation budget', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: inference.reservation.reservationId,
         budgetBucket: 'normal',
-        executionAttemptId: ATTEMPT_ID,
       },
     };
     expect(() => validateBudgetStart(inferenceStart)).toThrow(
@@ -1132,7 +1112,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 3,
       name: 'chat_with_tools',
-      executionAttemptId: ATTEMPT_ID,
     });
     const inferenceSequence = Number(execution.lastSequence) + 1;
     rows.push({
@@ -1155,7 +1134,6 @@ describe('ExecutionService operation budget', () => {
           budgetGrantId: grant.grantId,
           budgetReservationId: inference.reservation.reservationId,
           budgetBucket: 'normal',
-          executionAttemptId: ATTEMPT_ID,
           loopGuardWarningApplied: true,
         },
       },
@@ -1177,7 +1155,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 3,
       name: 'folder_read',
-      executionAttemptId: ATTEMPT_ID,
     };
     const blocked = await service.reserveOperationBudget(
       EXECUTION_ID,
@@ -1236,7 +1213,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 4,
       name: 'chat_with_tools',
-      executionAttemptId: ATTEMPT_ID,
     });
     const applyingSequence = Number(execution.lastSequence) + 1;
     const applyingStart = {
@@ -1259,7 +1235,6 @@ describe('ExecutionService operation budget', () => {
           budgetGrantId: grant.grantId,
           budgetReservationId: applying.reservation.reservationId,
           budgetBucket: 'normal',
-          executionAttemptId: ATTEMPT_ID,
           budgetSoftLimitWarningApplied: true,
           loopGuardBlockResultApplied: true,
         },
@@ -1295,7 +1270,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 5,
       name: 'chat_with_tools',
-      executionAttemptId: ATTEMPT_ID,
     });
     const secondApplyingSequence = Number(execution.lastSequence) + 1;
     const secondApplyingStart = {
@@ -1318,7 +1292,6 @@ describe('ExecutionService operation budget', () => {
           budgetGrantId: grant.grantId,
           budgetReservationId: secondApplying.reservation.reservationId,
           budgetBucket: 'normal',
-          executionAttemptId: ATTEMPT_ID,
           loopGuardBlockResultApplied: true,
         },
       },
@@ -1426,7 +1399,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 3,
       name: 'chat_with_tools',
-      executionAttemptId: ATTEMPT_ID,
     });
     const sequence = Number(execution.lastSequence) + 1;
     rows.push({
@@ -1448,7 +1420,6 @@ describe('ExecutionService operation budget', () => {
           budgetGrantId: grant.grantId,
           budgetReservationId: inference.reservation.reservationId,
           budgetBucket: 'normal',
-          executionAttemptId: ATTEMPT_ID,
           loopGuardWarningApplied: true,
         },
       },
@@ -1468,7 +1439,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 3,
       name: 'folder_read',
-      executionAttemptId: ATTEMPT_ID,
     });
 
     expect(second.decision.loopGuardSignal).toMatchObject({ action: 'warn' });
@@ -1521,7 +1491,6 @@ describe('ExecutionService operation budget', () => {
         phase: 'agent_loop',
         round: 2,
         name: 'folder_read',
-        executionAttemptId: ATTEMPT_ID,
       });
 
       expect(repeated.loopGuardSignal).toBeUndefined();
@@ -1580,7 +1549,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 3,
       name: 'folder_read',
-      executionAttemptId: ATTEMPT_ID,
     });
 
     expect(repeated.loopGuardSignal).toBeUndefined();
@@ -1613,7 +1581,6 @@ describe('ExecutionService operation budget', () => {
         phase: 'agent_loop',
         round: 1,
         name: 'chat_with_tools',
-        executionAttemptId: ATTEMPT_ID,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
@@ -1629,7 +1596,6 @@ describe('ExecutionService operation budget', () => {
         phase: 'forced_finalization',
         round: 1,
         name: 'folder_read',
-        executionAttemptId: ATTEMPT_ID,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
@@ -1645,7 +1611,6 @@ describe('ExecutionService operation budget', () => {
         phase: 'agent_loop',
         round: 1,
         name: 'chat_with_tools',
-        executionAttemptId: ATTEMPT_ID,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -1706,7 +1671,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'agent_loop',
       round: 1,
       name: 'chat_with_tools',
-      executionAttemptId: ATTEMPT_ID,
     };
     await service.reserveOperationBudget(EXECUTION_ID, request);
     rows.push({
@@ -1775,7 +1739,6 @@ describe('ExecutionService operation budget', () => {
       phase: 'direct_response',
       round: 1,
       name: 'direct_response',
-      executionAttemptId: ATTEMPT_ID,
     });
     const payload = {
       operationKind: 'inference',
@@ -1787,7 +1750,6 @@ describe('ExecutionService operation budget', () => {
       budgetGrantId: grant.grantId,
       budgetReservationId: decision.reservation.reservationId,
       budgetBucket: 'normal',
-      executionAttemptId: ATTEMPT_ID,
     };
     expect(() =>
       validateBudgetStart({
@@ -1805,16 +1767,7 @@ describe('ExecutionService operation budget', () => {
     ).toThrow(ConflictException);
   });
 
-  it('rejects a stale execution attempt before granting or reserving', async () => {
-    const stale = {
-      ...grantRequest(),
-      executionAttemptId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca799',
-    };
-
-    await expect(
-      service.requestProgressGrant(EXECUTION_ID, stale),
-    ).rejects.toBeInstanceOf(ConflictException);
-
+  it('rejects budget work for a terminal execution', async () => {
     execution.status = ExecutionStatus.COMPLETED;
     await expect(
       service.requestProgressGrant(EXECUTION_ID, grantRequest()),
@@ -1829,7 +1782,6 @@ describe('ExecutionService operation budget', () => {
           phase: 'direct_response',
           name: 'direct_response',
           round: 1,
-          executionAttemptId: stale.executionAttemptId,
         },
       }),
     ).toThrow(ConflictException);

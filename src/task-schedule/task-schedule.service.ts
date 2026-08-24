@@ -42,6 +42,7 @@ export class TaskScheduleService {
     waitForCompletion: true,
   })
   async handleCron() {
+    await this.executionCoordinatorService.prepareAgentWork();
     await this.executionCoordinatorService.acceptResults();
     await this.executionCoordinatorService.publishNotifications();
     const { cpuUsagePercent, memoryUsagePercent } = this.getCPUAndMemoryUsage();

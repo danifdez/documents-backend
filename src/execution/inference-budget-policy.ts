@@ -45,7 +45,6 @@ export type GovernedBudgetStart = {
   toolCallId?: string;
   grantId: string;
   reservationId: string;
-  executionAttemptId: string;
   bucket: string;
   loopId: string;
   phase: string;
@@ -69,7 +68,6 @@ export function validateProgressGrantRequest(
     executionId: request?.executionId,
     turnId: request?.turnId,
     loopId: request?.loopId,
-    executionAttemptId: request?.executionAttemptId,
   })) {
     if (!EXECUTION_UUID_PATTERN.test(String(value ?? ''))) {
       throw new BadRequestException(`${name} must be a UUID`);
@@ -118,7 +116,6 @@ export function validateReservationRequest(
     loopId: request?.loopId,
     grantId: request?.grantId,
     operationId: request?.operationId,
-    executionAttemptId: request?.executionAttemptId,
   })) {
     if (!EXECUTION_UUID_PATTERN.test(String(value ?? ''))) {
       throw new BadRequestException(`${name} must be a UUID`);
@@ -183,6 +180,9 @@ export function assertGrantScope(
   execution: ExecutionEntity,
   request: ProgressGrantRequest,
 ): void {
+  if (!['queued', 'running'].includes(execution.status)) {
+    throw new ConflictException('Execution is not active');
+  }
   if (!CHAT_TASK_TYPES.has(execution.taskType)) {
     throw new BadRequestException(
       'Progress grants are only available for chat executions',
@@ -271,7 +271,6 @@ export function createOperationBudgetGrant(
     executionId: execution.executionId,
     turnId: execution.turnId,
     loopId: request.loopId,
-    executionAttemptId: request.executionAttemptId,
     profileId: 'documents_chat_v1',
     policyVersion: '1',
     requestedPolicy: structuredClone(request.requestedPolicy),
@@ -318,6 +317,9 @@ export function assertReservationScope(
   execution: ExecutionEntity,
   request: OperationBudgetReservationRequest,
 ): void {
+  if (!['queued', 'running'].includes(execution.status)) {
+    throw new ConflictException('Execution is not active');
+  }
   if (
     request.executionId !== execution.executionId ||
     request.loopId !== execution.executionId
@@ -335,7 +337,6 @@ export function assertReservationMatches(
   if (
     reservation.grantId !== request.grantId ||
     reservation.operationId !== request.operationId ||
-    reservation.executionAttemptId !== request.executionAttemptId ||
     reservation.operationKind !== request.operationKind ||
     reservation.bucket !== request.bucket ||
     reservation.toolCallId !== request.toolCallId ||
@@ -383,7 +384,6 @@ export function createOperationBudgetReservation(
     reservationId,
     grantId: request.grantId,
     operationId: request.operationId,
-    executionAttemptId: request.executionAttemptId,
     operationKind: request.operationKind,
     bucket: request.bucket,
     ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
@@ -441,7 +441,6 @@ export function governedBudgetStart(
     ...(event.toolCallId ? { toolCallId: String(event.toolCallId) } : {}),
     grantId: String(payload.budgetGrantId ?? ''),
     reservationId: String(payload.budgetReservationId ?? ''),
-    executionAttemptId: String(payload.executionAttemptId ?? ''),
     bucket: String(payload.budgetBucket ?? ''),
     loopId: String(payload.loopId ?? ''),
     phase,
@@ -469,7 +468,6 @@ export function governedBudgetStart(
   if (
     !EXECUTION_UUID_PATTERN.test(identity.grantId) ||
     !EXECUTION_UUID_PATTERN.test(identity.reservationId) ||
-    !EXECUTION_UUID_PATTERN.test(identity.executionAttemptId) ||
     (operationKind === 'tool_call' &&
       !EXECUTION_UUID_PATTERN.test(identity.toolCallId ?? ''))
   ) {
@@ -494,7 +492,6 @@ export function assertOperationBudgetProjection(
     reservation.status !== 'reserved' ||
     reservation.grantId !== identity.grantId ||
     reservation.reservationId !== identity.reservationId ||
-    reservation.executionAttemptId !== identity.executionAttemptId ||
     reservation.operationKind !== identity.operationKind ||
     reservation.toolCallId !== identity.toolCallId ||
     reservation.bucket !== identity.bucket ||

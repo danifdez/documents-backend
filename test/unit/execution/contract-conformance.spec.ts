@@ -402,7 +402,6 @@ describe('execution v1 contract', () => {
         trigger: 'closing_output_empty',
         loopId: '00000000-0000-4000-8000-000000000020',
         grantId: '00000000-0000-4000-8000-000000000021',
-        executionAttemptId: '00000000-0000-4000-8000-000000000022',
         completedOperations: [
           {
             operationId: '00000000-0000-4000-8000-000000000023',
@@ -560,7 +559,6 @@ describe('execution v1 contract', () => {
       executionId: 'execution-progress-1',
       turnId: 'turn-progress-1',
       loopId: 'loop-progress-1',
-      executionAttemptId: 'execution-attempt-progress-1',
       profileId: 'documents_chat_v1',
       policyVersion: '1',
       requestedPolicy: {
@@ -627,7 +625,6 @@ describe('execution v1 contract', () => {
       reservationId: 'reservation-progress-1',
       grantId: grant.grantId,
       operationId: 'operation-progress-1',
-      executionAttemptId: 'execution-attempt-progress-1',
       bucket: 'closing',
       phase: 'forced_finalization',
       round: 2,
@@ -669,7 +666,6 @@ describe('execution v1 contract', () => {
       triggeringOperationId: toolReservation.operationId,
       operationFingerprint: toolReservation.operationFingerprint,
       operationFingerprintVersion: 'canonical_tool_input_v1',
-      executionAttemptId: grant.executionAttemptId,
       decidedAt: '2026-08-20T10:00:02Z',
     };
     expect(
@@ -777,7 +773,6 @@ describe('execution v1 contract', () => {
       committed: 1,
       available: 1,
       triggeringOperationId: toolReservation.operationId,
-      executionAttemptId: 'execution-attempt-progress-1',
       decidedAt: '2026-08-20T10:00:02Z',
     };
     expect(
@@ -914,7 +909,6 @@ describe('execution v1 contract', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: toolReservation.reservationId,
         budgetBucket: 'tool',
-        executionAttemptId: 'execution-attempt-progress-1',
         operationFingerprint: toolReservation.operationFingerprint,
         operationFingerprintVersion: 'canonical_tool_input_v1',
       },
@@ -941,7 +935,6 @@ describe('execution v1 contract', () => {
         budgetGrantId: grant.grantId,
         budgetReservationId: 'reservation-progress-normal-1',
         budgetBucket: 'normal',
-        executionAttemptId: 'execution-attempt-progress-1',
         budgetSoftLimitWarningApplied: true,
         loopGuardWarningApplied: true,
         loopGuardBlockResultApplied: true,

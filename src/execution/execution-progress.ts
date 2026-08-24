@@ -31,7 +31,6 @@ export type OperationBudgetGrant = {
   executionId: string;
   turnId: string | null;
   loopId: string;
-  executionAttemptId: string;
   profileId: 'documents_chat_v1';
   policyVersion: '1';
   requestedPolicy: {
@@ -66,7 +65,6 @@ export type OperationBudgetReservation = {
   reservationId: string;
   grantId: string;
   operationId: string;
-  executionAttemptId: string;
   operationKind: 'inference' | 'tool_call';
   bucket: OperationBudgetBucket;
   toolCallId?: string;
@@ -107,7 +105,6 @@ export type BudgetSoftLimitSignal = {
   committed: number;
   available: number;
   triggeringOperationId: string;
-  executionAttemptId: string;
   decidedAt: string;
 };
 
@@ -121,7 +118,6 @@ export type ExactToolRepeatWarningSignal = {
   triggeringOperationId: string;
   operationFingerprint: string;
   operationFingerprintVersion: 'canonical_tool_input_v1';
-  executionAttemptId: string;
   decidedAt: string;
 };
 
@@ -138,7 +134,6 @@ export type ExactToolRepeatBlockSignal = {
   operationFingerprintVersion: 'canonical_tool_input_v1';
   resultFingerprint: string;
   resultFingerprintVersion: 'tool_output_content_hash_v1';
-  executionAttemptId: string;
   decidedAt: string;
 };
 
@@ -157,7 +152,6 @@ export type ExactToolRepeatTerminateSignal = {
   operationFingerprintVersion: 'canonical_tool_input_v1';
   resultFingerprint: string;
   resultFingerprintVersion: 'tool_output_content_hash_v1';
-  executionAttemptId: string;
   decidedAt: string;
 };
 

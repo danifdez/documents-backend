@@ -9,6 +9,7 @@ import {
   DOCUMENT_SEARCH_PROVIDER,
   ExecutionToolRuntimeService,
 } from './execution-tool-runtime.service';
+import { ExecutionAgentLoopService } from './execution-agent-loop.service';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import {
   ],
   providers: [
     ExecutionCoordinatorService,
+    ExecutionAgentLoopService,
     ExecutionToolRuntimeService,
     { provide: DOCUMENT_SEARCH_PROVIDER, useExisting: SearchService },
   ],

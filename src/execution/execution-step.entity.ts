@@ -88,6 +88,13 @@ export class ExecutionStepEntity {
   @Column({ type: 'jsonb', nullable: true })
   error: Record<string, unknown> | null;
 
+  @Column({
+    name: 'continuation_processed_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  continuationProcessedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

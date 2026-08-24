@@ -8,7 +8,6 @@ describe('execution progress projection', () => {
       executionId: 'execution-1',
       turnId: 'turn-1',
       loopId: 'loop-1',
-      executionAttemptId: 'execution-attempt-1',
       profileId: 'documents_chat_v1' as const,
       policyVersion: '1' as const,
       requestedPolicy: {
@@ -36,7 +35,6 @@ describe('execution progress projection', () => {
       reservationId: 'reservation-1',
       grantId: 'grant-1',
       operationId: 'operation-1',
-      executionAttemptId: 'execution-attempt-1',
       operationKind: 'inference' as const,
       bucket: 'normal' as const,
       phase: 'agent_loop',

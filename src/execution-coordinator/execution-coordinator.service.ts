@@ -5,6 +5,7 @@ import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionOutboxService } from '../execution-outbox/execution-outbox.service';
 import { ExecutionToolRuntimeService } from './execution-tool-runtime.service';
+import { ExecutionAgentLoopService } from './execution-agent-loop.service';
 
 const TERMINAL_STATUSES = new Set<ExecutionStatus>([
   ExecutionStatus.COMPLETED,
@@ -22,7 +23,12 @@ export class ExecutionCoordinatorService {
     private readonly executionProcessorFactory: ExecutionProcessorFactory,
     private readonly executionOutboxService: ExecutionOutboxService,
     private readonly executionToolRuntime: ExecutionToolRuntimeService,
+    private readonly agentLoop: ExecutionAgentLoopService,
   ) {}
+
+  prepareAgentWork(limit = 20): Promise<number> {
+    return this.agentLoop.prepareReadyInferences(limit);
+  }
 
   executeReadyTools(limit = 20): Promise<number> {
     return this.executionToolRuntime.executeReady(limit);
@@ -31,6 +37,7 @@ export class ExecutionCoordinatorService {
   async acceptResults(limit = 20): Promise<number> {
     const processed =
       await this.executionAttemptService.processReceivedResults(limit);
+    await this.agentLoop.materializeAcceptedToolRequests(limit);
     await this.executionService.finalizePendingTerminals(limit);
     return processed;
   }

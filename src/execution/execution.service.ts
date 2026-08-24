@@ -31,9 +31,6 @@ import {
 } from './execution.constants';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
 import { ExecutionStepKind } from './execution-step-kind.enum';
-import { ExecutionStepEntity } from './execution-step.entity';
-import { ExecutionStepAttemptEntity } from './execution-step-attempt.entity';
-import { ExecutionStepAttemptStatus } from './execution-step-attempt-status.enum';
 import { createExecutionStep } from './execution-step.service';
 import {
   exactToolRepeatBlockSignal,
@@ -1002,11 +999,6 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) throw new NotFoundException('Execution not found');
-      await this.assertCurrentStepAttempt(
-        manager,
-        execution,
-        request.executionAttemptId,
-      );
       assertGrantScope(execution, request);
 
       const rows = await eventRepo.find({
@@ -1173,11 +1165,6 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) throw new NotFoundException('Execution not found');
-      await this.assertCurrentStepAttempt(
-        manager,
-        execution,
-        request.executionAttemptId,
-      );
       assertReservationScope(execution, request);
 
       const rows = await eventRepo.find({
@@ -1342,7 +1329,6 @@ export class ExecutionService {
           committed,
           available: Math.max(0, usage.granted - committed),
           triggeringOperationId: request.operationId,
-          executionAttemptId: request.executionAttemptId,
           decidedAt: new Date().toISOString(),
         };
         const signalEvent = await this.appendBackendEvent(
@@ -1454,16 +1440,6 @@ export class ExecutionService {
               execution.rootExecutionId,
             )
           : [];
-      if (
-        completion?.partialResult?.executionAttemptId &&
-        !TERMINAL_STATES.has(execution.status)
-      ) {
-        await this.assertCurrentStepAttempt(
-          manager,
-          execution,
-          completion.partialResult.executionAttemptId,
-        );
-      }
       this.assertLoopDetectedCompletion(execution, rows, error, completion);
       this.assertDeterministicPartial(
         execution,
@@ -1681,13 +1657,6 @@ export class ExecutionService {
       this.artifactRepo,
       execution.rootExecutionId,
     );
-    if (completion.partialResult?.executionAttemptId) {
-      await this.assertCurrentStepAttempt(
-        this.dataSource.manager,
-        execution,
-        completion.partialResult.executionAttemptId,
-      );
-    }
     this.assertLoopDetectedCompletion(execution, rows, error, completion);
     this.assertDeterministicPartial(
       execution,
@@ -1831,7 +1800,6 @@ export class ExecutionService {
         startPayload?.['loopKind'] !== 'top_level' ||
         startPayload?.['loopId'] !== partial.loopId ||
         startPayload?.['budgetGrantId'] !== partial.grantId ||
-        startPayload?.['executionAttemptId'] !== partial.executionAttemptId ||
         startEnvelope?.['toolCallId'] !== item.toolCallId
       ) {
         throw new BadRequestException(
@@ -1894,8 +1862,7 @@ export class ExecutionService {
           payload?.['kind'] === 'loop_guard_triggered' &&
           signal?.['action'] === 'terminate' &&
           signal?.['grantId'] === partial.grantId &&
-          signal?.['loopId'] === partial.loopId &&
-          signal?.['executionAttemptId'] === partial.executionAttemptId
+          signal?.['loopId'] === partial.loopId
         );
       });
       if (!termination) {
@@ -1913,8 +1880,7 @@ export class ExecutionService {
           payload?.['operationKind'] === 'inference' &&
           payload?.['phase'] === 'forced_finalization' &&
           payload?.['loopId'] === partial.loopId &&
-          payload?.['budgetGrantId'] === partial.grantId &&
-          payload?.['executionAttemptId'] === partial.executionAttemptId
+          payload?.['budgetGrantId'] === partial.grantId
         );
       });
       const closingFinish = closingStart
@@ -1974,7 +1940,6 @@ export class ExecutionService {
       ].includes(partial.trigger) ||
       !EXECUTION_UUID_PATTERN.test(partial.loopId) ||
       !EXECUTION_UUID_PATTERN.test(partial.grantId) ||
-      !EXECUTION_UUID_PATTERN.test(partial.executionAttemptId) ||
       !Array.isArray(partial.completedOperations) ||
       partial.completedOperations.length === 0 ||
       !Array.isArray(partial.pending) ||
@@ -2025,8 +1990,7 @@ export class ExecutionService {
         row.executionId === execution.executionId &&
         row.eventType === 'progress.reported' &&
         payload?.kind === 'loop_guard_triggered' &&
-        signal?.action === 'terminate' &&
-        EXECUTION_UUID_PATTERN.test(String(signal?.executionAttemptId ?? ''))
+        signal?.action === 'terminate'
       );
     });
     if (!hasTermination) {
@@ -2309,35 +2273,6 @@ export class ExecutionService {
       progress.ledger.operationBudget,
       exactToolRepeatGuardSnapshot(progress.ledger, identity.grantId),
     );
-  }
-
-  private async assertCurrentStepAttempt(
-    manager: EntityManager,
-    execution: ExecutionEntity,
-    attemptId: string,
-  ): Promise<void> {
-    if (execution.status !== ExecutionStatus.RUNNING) {
-      throw new ConflictException('Execution attempt is not active');
-    }
-    const attempt = await manager
-      .getRepository(ExecutionStepAttemptEntity)
-      .findOneBy({ attemptId, executionId: execution.executionId });
-    if (
-      !attempt ||
-      attempt.leaseExpiresAt <= new Date() ||
-      ![
-        ExecutionStepAttemptStatus.LEASED,
-        ExecutionStepAttemptStatus.RUNNING,
-      ].includes(attempt.status)
-    ) {
-      throw new ConflictException('Execution attempt is not active');
-    }
-    const step = await manager
-      .getRepository(ExecutionStepEntity)
-      .findOneBy({ stepId: attempt.stepId });
-    if (step?.currentAttemptId !== attempt.attemptId) {
-      throw new ConflictException('Execution attempt is not active');
-    }
   }
 
   private validateIncomingEvent(

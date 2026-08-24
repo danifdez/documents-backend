@@ -12,9 +12,6 @@ describe('ExecutionService primitives', () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe(
       '{"a":{"b":3,"y":2},"z":1}',
     );
-    expect(
-      canonicalJson({ executionId: 'root', executionAttemptId: 'attempt' }),
-    ).toBe('{"executionAttemptId":"attempt","executionId":"root"}');
     expect(canonicalJson({ 'ä': 1, z: 2, a: 3, A: 4 })).toBe(
       '{"A":4,"a":3,"z":2,"ä":1}',
     );

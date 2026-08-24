@@ -78,9 +78,7 @@ function repeatsSameTool(
   return (
     payload?.name === request.name &&
     payload.operationFingerprint === request.operationFingerprint &&
-    payload.operationFingerprintVersion ===
-      request.operationFingerprintVersion &&
-    payload.executionAttemptId === request.executionAttemptId
+    payload.operationFingerprintVersion === request.operationFingerprintVersion
   );
 }
 
@@ -99,8 +97,7 @@ function guardApplication(
       event.payload.budgetBucket === 'normal' &&
       event.payload.budgetGrantId === request.grantId &&
       event.payload.loopId === request.loopId &&
-      event.payload[appliedFlag] === true &&
-      event.payload.executionAttemptId === request.executionAttemptId
+      event.payload[appliedFlag] === true
     );
   });
 }
@@ -145,7 +142,6 @@ export function exactToolRepeatWarningSignal(
     triggeringOperationId: request.operationId,
     operationFingerprint: request.operationFingerprint,
     operationFingerprintVersion: 'canonical_tool_input_v1',
-    executionAttemptId: request.executionAttemptId,
     decidedAt: new Date().toISOString(),
   };
 }
@@ -173,8 +169,7 @@ export function exactToolRepeatBlockSignal(
     !warningSignal ||
     warningSignal.operationFingerprint !== request.operationFingerprint ||
     warningSignal.operationFingerprintVersion !==
-      request.operationFingerprintVersion ||
-    warningSignal.executionAttemptId !== request.executionAttemptId
+      request.operationFingerprintVersion
   ) {
     return undefined;
   }
@@ -237,7 +232,6 @@ export function exactToolRepeatBlockSignal(
     operationFingerprintVersion: 'canonical_tool_input_v1',
     resultFingerprint: resultHashes[0],
     resultFingerprintVersion: 'tool_output_content_hash_v1',
-    executionAttemptId: request.executionAttemptId,
     decidedAt: new Date().toISOString(),
   };
 }
@@ -282,8 +276,7 @@ export function exactToolRepeatTerminateSignal(
     Number(application.sequence) <= Number(blockEvent.sequence) ||
     blockSignal.operationFingerprint !== request.operationFingerprint ||
     blockSignal.operationFingerprintVersion !==
-      request.operationFingerprintVersion ||
-    blockSignal.executionAttemptId !== request.executionAttemptId
+      request.operationFingerprintVersion
   ) {
     return undefined;
   }
@@ -311,7 +304,6 @@ export function exactToolRepeatTerminateSignal(
     operationFingerprintVersion: 'canonical_tool_input_v1',
     resultFingerprint: blockSignal.resultFingerprint,
     resultFingerprintVersion: 'tool_output_content_hash_v1',
-    executionAttemptId: request.executionAttemptId,
     decidedAt: new Date().toISOString(),
   };
 }

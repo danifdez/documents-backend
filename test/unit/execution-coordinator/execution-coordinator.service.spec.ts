@@ -21,6 +21,7 @@ describe('ExecutionCoordinatorService', () => {
   let processorFactory: Record<string, jest.Mock>;
   let outboxService: Record<string, jest.Mock>;
   let toolRuntime: Record<string, jest.Mock>;
+  let agentLoop: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionService = {
@@ -43,13 +44,25 @@ describe('ExecutionCoordinatorService', () => {
     toolRuntime = {
       executeReady: jest.fn(),
     };
+    agentLoop = {
+      prepareReadyInferences: jest.fn(),
+      materializeAcceptedToolRequests: jest.fn().mockResolvedValue(0),
+    };
     service = new ExecutionCoordinatorService(
       executionService as any,
       executionAttemptService as any,
       processorFactory as any,
       outboxService as any,
       toolRuntime as any,
+      agentLoop as any,
     );
+  });
+
+  it('prepares governed inference work before workers can claim it', async () => {
+    agentLoop.prepareReadyInferences.mockResolvedValue(2);
+
+    await expect(service.prepareAgentWork(2)).resolves.toBe(2);
+    expect(agentLoop.prepareReadyInferences).toHaveBeenCalledWith(2);
   });
 
   it('executes ready local tools through the canonical runtime', async () => {
@@ -66,6 +79,7 @@ describe('ExecutionCoordinatorService', () => {
     expect(executionAttemptService.processReceivedResults).toHaveBeenCalledWith(
       3,
     );
+    expect(agentLoop.materializeAcceptedToolRequests).toHaveBeenCalledWith(3);
     expect(executionService.finalizePendingTerminals).toHaveBeenCalledWith(3);
   });
 

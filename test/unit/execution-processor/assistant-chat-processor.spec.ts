@@ -203,7 +203,6 @@ describe('AssistantChatProcessor final response', () => {
       trigger: 'closing_output_empty',
       loopId: executionId,
       grantId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
-      executionAttemptId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca703',
       completedOperations: [
         {
           operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',

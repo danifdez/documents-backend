@@ -38,7 +38,6 @@ export interface ProgressGrantRequest {
   loopId: string;
   agentName: string;
   loopKind: 'top_level';
-  executionAttemptId: string;
   requestedPolicy: {
     normal: number;
     normalInferenceSoftLimit: number;
@@ -68,7 +67,6 @@ export interface OperationBudgetReservationRequest {
   phase: string;
   round: number;
   name: string;
-  executionAttemptId: string;
 }
 
 export interface ExecutionCompletion {
@@ -93,7 +91,6 @@ export interface DeterministicPartialResult {
     | 'exact_tool_repeat_persisted';
   loopId: string;
   grantId: string;
-  executionAttemptId: string;
   completedOperations: DeterministicPartialOperation[];
   pending: ['final_synthesis'] | ['strategy_change'];
   continuation?: {

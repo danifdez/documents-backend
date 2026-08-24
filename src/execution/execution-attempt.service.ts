@@ -157,6 +157,16 @@ export class ExecutionAttemptService {
             AND ("deadline" IS NULL OR "deadline" > now())
             AND "step_kind" = ANY($1::text[])
             AND "required_capabilities" <@ $2::text[]
+            AND (
+              "step_kind" <> 'inference'
+              OR "budget_reservation_id" IS NOT NULL
+              OR NOT EXISTS (
+                SELECT 1
+                FROM "executions" governed_execution
+                WHERE governed_execution."execution_id" = "execution_steps"."execution_id"
+                  AND governed_execution."task_type" IN ('assistant-chat', 'agent-chat')
+              )
+            )
             AND EXISTS (
               SELECT 1
               FROM "executions"
@@ -807,6 +817,13 @@ export class ExecutionAttemptService {
     ) {
       throw new ConflictException('execution_not_active');
     }
+    if (
+      step.stepKind === ExecutionStepKind.INFERENCE &&
+      ['assistant-chat', 'agent-chat'].includes(execution.taskType) &&
+      !step.budgetReservationId
+    ) {
+      throw new ConflictException('operation_budget_not_reserved');
+    }
     await this.lockResourceKeys(manager, step.resourceKeys);
     if (await this.hasResourceConflict(manager, step)) {
       throw new ConflictException('resource_conflict');
@@ -969,7 +986,7 @@ export class ExecutionAttemptService {
       loopId: grant.loopId,
       agentName: String(
         work.agentName ??
-          (execution.taskType === 'agent_chat' ? 'agent' : 'assistant'),
+          (execution.taskType === 'agent-chat' ? 'agent' : 'assistant'),
       ),
       loopKind: 'top_level',
       round: reservation.round,
@@ -978,7 +995,6 @@ export class ExecutionAttemptService {
       budgetGrantId: reservation.grantId,
       budgetReservationId: reservation.reservationId,
       budgetBucket: reservation.bucket,
-      executionAttemptId: reservation.executionAttemptId,
       ...(isNormalInference &&
       grant.usage.normal.softLimitWarningPending === true
         ? { budgetSoftLimitWarningApplied: true }
