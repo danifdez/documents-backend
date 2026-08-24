@@ -26,8 +26,12 @@ import {
   EXECUTION_CONTENT_HASH_PATTERN,
   EXECUTION_CONTRACT_SET_HASH,
   EXECUTION_EVENT_SCHEMA,
+  EXECUTION_SCHEMA,
   EXECUTION_UUID_PATTERN,
 } from './execution.constants';
+import { CreateExecutionStepInput } from './execution-control-plane.types';
+import { ExecutionStepKind } from './execution-step-kind.enum';
+import { createExecutionStep } from './execution-step.service';
 import {
   exactToolRepeatBlockSignal,
   exactToolRepeatTerminateSignal,
@@ -75,6 +79,12 @@ const SECRET_VALUE_DETECTOR =
   /\b(access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|id[_-]?token|password|refresh[_-]?token|session[_-]?token|token)\s*[:=]\s*(?!\[REDACTED\])([^\s,;]+)/i;
 const MAX_ARTIFACT_BYTES = 1024 * 1024;
 const REDACTED_VALUE = '[REDACTED]';
+
+const STEP_PRIORITY: Record<ExecutionPriority, number> = {
+  [ExecutionPriority.HIGH]: 100,
+  [ExecutionPriority.NORMAL]: 0,
+  [ExecutionPriority.BACKGROUND]: -100,
+};
 
 function operationBudgetSnapshot(
   grant: OperationBudgetGrant & {
@@ -244,7 +254,7 @@ export class ExecutionService {
         turnId,
         ownerPrincipal: scope.ownerPrincipal,
         workspaceId: scope.workspaceId,
-        schemaVersion: EXECUTION_EVENT_SCHEMA,
+        schemaVersion: EXECUTION_SCHEMA,
         taskType:
           executionKind === 'assistant_chat' ? 'assistant-chat' : 'agent-chat',
         origin: 'root',
@@ -295,6 +305,14 @@ export class ExecutionService {
           body,
         }),
       );
+      await createExecutionStep(manager, {
+        executionId,
+        stepKind: ExecutionStepKind.INFERENCE,
+        inputArtifactRefs: [{ role: 'user_message', artifactId }],
+        work: { taskType: execution.taskType, payload },
+        requiredCapabilities: [execution.taskType],
+        priority: STEP_PRIORITY[ExecutionPriority.HIGH],
+      });
 
       const createdEvent = await this.appendBackendEvent(
         manager,
@@ -381,6 +399,7 @@ export class ExecutionService {
       parentExecutionId?: string;
       ownerPrincipal?: string;
       workspaceId?: string;
+      initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
     },
     inputBlob?: Buffer | null,
   ): Promise<ExecutionEntity> {
@@ -394,7 +413,7 @@ export class ExecutionService {
         turnId: null,
         ownerPrincipal: options?.ownerPrincipal ?? 'system',
         workspaceId: options?.workspaceId ?? 'default',
-        schemaVersion: EXECUTION_EVENT_SCHEMA,
+        schemaVersion: EXECUTION_SCHEMA,
         taskType,
         origin: options?.origin ?? 'root',
         priority,
@@ -426,6 +445,14 @@ export class ExecutionService {
         missingEvidence: [],
       });
       await manager.save(execution);
+      await createExecutionStep(manager, {
+        stepKind: ExecutionStepKind.SERVICE,
+        work: { taskType, payload },
+        requiredCapabilities: [taskType],
+        priority: STEP_PRIORITY[priority],
+        ...options?.initialStep,
+        executionId,
+      });
       const executionEvent = await this.appendBackendEvent(
         manager,
         execution,

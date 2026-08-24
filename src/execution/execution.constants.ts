@@ -1,3 +1,4 @@
+export const EXECUTION_SCHEMA = 'execution/1';
 export const EXECUTION_EVENT_SCHEMA = 'execution-event/1';
 export const EXECUTION_BUNDLE_SCHEMA = 'execution-bundle/1';
 export const EXECUTION_CONTRACT_SET_HASH =

@@ -1,12 +1,20 @@
 import { randomUUID } from 'crypto';
 import { config as loadEnv } from 'dotenv';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
 import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-AddExecutionProgress';
+import { CreateExecutionControlPlane1757668140370 } from '../migrations/1757668140370-CreateExecutionControlPlane';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
 import { ExecutionEntity } from '../src/execution/execution.entity';
+import { ExecutionResultReceiptEntity } from '../src/execution/execution-result-receipt.entity';
+import { ExecutionAttemptService } from '../src/execution/execution-attempt.service';
+import { ExecutionStepAttemptEntity } from '../src/execution/execution-step-attempt.entity';
+import { ExecutionStepDependencyEntity } from '../src/execution/execution-step-dependency.entity';
+import { ExecutionStepEntity } from '../src/execution/execution-step.entity';
+import { ExecutionStepKind } from '../src/execution/execution-step-kind.enum';
+import { ExecutionPriority } from '../src/execution/execution-priority.enum';
 import {
   contentHash,
   ExecutionService,
@@ -19,6 +27,7 @@ describe('execution PostgreSQL integration', () => {
   const schema = `execution_test_${randomUUID().replaceAll('-', '_')}`;
   let dataSource: DataSource;
   let service: ExecutionService;
+  let attemptService: ExecutionAttemptService;
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -34,6 +43,10 @@ describe('execution PostgreSQL integration', () => {
         ExecutionEntity,
         ExecutionEventEntity,
         ExecutionArtifactEntity,
+        ExecutionStepEntity,
+        ExecutionStepDependencyEntity,
+        ExecutionStepAttemptEntity,
+        ExecutionResultReceiptEntity,
         WorkerEntity,
       ],
     });
@@ -44,6 +57,7 @@ describe('execution PostgreSQL integration', () => {
     await runner.query(`SET search_path TO "${schema}"`);
     await new CreateExecutions1757668140001().up(runner);
     await new AddExecutionProgress1757668140350().up(runner);
+    await new CreateExecutionControlPlane1757668140370().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -65,6 +79,7 @@ describe('execution PostgreSQL integration', () => {
       { get: (_key: string, fallback?: unknown) => fallback } as any,
       new ExecutionContractValidator(),
     );
+    attemptService = new ExecutionAttemptService(dataSource);
   });
 
   afterAll(async () => {
@@ -93,6 +108,134 @@ describe('execution PostgreSQL integration', () => {
       allowedDestinations: ['documents', 'ai-train'],
       redactionApplied: false,
     },
+  });
+
+  it('commits an execution and its initial step atomically', async () => {
+    const created = await service.create(
+      'detect-language',
+      ExecutionPriority.NORMAL,
+      { content: 'Hello' },
+      {
+        initialStep: {
+          stepKind: ExecutionStepKind.CODE,
+          work: { taskType: 'detect-language', content: 'Hello' },
+          requiredCapabilities: ['detect-language'],
+          resourceKeys: ['resource:language-detection'],
+        },
+      },
+    );
+
+    expect(created.schemaVersion).toBe('execution/1');
+    await expect(
+      dataSource.getRepository(ExecutionStepEntity).findOneByOrFail({
+        executionId: created.executionId,
+      }),
+    ).resolves.toMatchObject({
+      executionId: created.executionId,
+      schemaVersion: 'step/1',
+      stepKind: ExecutionStepKind.CODE,
+      status: 'ready',
+      work: { taskType: 'detect-language', content: 'Hello' },
+    });
+
+    const countBeforeRollback = await dataSource
+      .getRepository(ExecutionEntity)
+      .count();
+    await expect(
+      service.create(
+        'invalid-step',
+        ExecutionPriority.NORMAL,
+        {},
+        {
+          initialStep: {
+            stepKind: ExecutionStepKind.CODE,
+            work: {},
+            availableAt: new Date('2026-08-19T10:00:00Z'),
+            deadline: new Date('2026-08-19T09:00:00Z'),
+          },
+        },
+      ),
+    ).rejects.toThrow('invalid_step_deadline');
+    await expect(
+      dataSource.getRepository(ExecutionEntity).count(),
+    ).resolves.toBe(countBeforeRollback);
+
+    await expect(
+      attemptService.claimReadyStep({
+        workerId: randomUUID(),
+        stepKinds: [ExecutionStepKind.CODE],
+        capabilities: ['detect-language'],
+        leaseDurationMs: 30_000,
+      }),
+    ).resolves.toMatchObject({
+      schemaVersion: 'step-assignment/1',
+      executionId: created.executionId,
+      stepKind: ExecutionStepKind.CODE,
+      work: { taskType: 'detect-language', content: 'Hello' },
+    });
+  });
+
+  it('serializes resource claims and acknowledges result retries', async () => {
+    const resourceKey = `resource:${randomUUID()}`;
+    const executions = await Promise.all(
+      ['first', 'second'].map((name) =>
+        service.create(
+          name,
+          ExecutionPriority.NORMAL,
+          {},
+          {
+            initialStep: {
+              stepKind: ExecutionStepKind.SERVICE,
+              work: { taskType: name },
+              resourceKeys: [resourceKey],
+            },
+          },
+        ),
+      ),
+    );
+    const steps = await dataSource.getRepository(ExecutionStepEntity).findBy({
+      executionId: In(executions.map((execution) => execution.executionId)),
+    });
+    expect(steps).toHaveLength(2);
+
+    const claims = await Promise.allSettled(
+      steps.map((step) =>
+        attemptService.grantAttempt({
+          stepId: step.stepId,
+          workerId: randomUUID(),
+          leaseDurationMs: 30_000,
+        }),
+      ),
+    );
+    const granted = claims.filter(
+      (claim): claim is PromiseFulfilledResult<ExecutionStepAttemptEntity> =>
+        claim.status === 'fulfilled',
+    );
+    const rejected = claims.filter(
+      (claim): claim is PromiseRejectedResult => claim.status === 'rejected',
+    );
+    expect(granted).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0].reason)).toContain('resource_conflict');
+
+    const attempt = granted[0].value;
+    await attemptService.startAttempt(attempt.attemptId, attempt.claimedBy);
+    const result = {
+      executionId: attempt.executionId,
+      stepId: attempt.stepId,
+      operationId: attempt.operationId,
+      attemptId: attempt.attemptId,
+      workerId: attempt.claimedBy,
+      result: { kind: 'service', language: 'en' },
+    };
+    await expect(attemptService.receiveResult(result)).resolves.toMatchObject({
+      code: 'received',
+      receiptId: expect.any(String),
+    });
+    await expect(attemptService.receiveResult(result)).resolves.toMatchObject({
+      code: 'duplicate',
+      receiptId: expect.any(String),
+    });
   });
 
   it('keeps assistant and agent chat as distinct execution types', async () => {

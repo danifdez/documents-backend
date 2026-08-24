@@ -46,6 +46,10 @@ import { AppStateEntity } from '../app-state/app-state.entity';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionEventEntity } from '../execution/execution-event.entity';
 import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
+import { ExecutionStepEntity } from '../execution/execution-step.entity';
+import { ExecutionStepDependencyEntity } from '../execution/execution-step-dependency.entity';
+import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
+import { ExecutionResultReceiptEntity } from '../execution/execution-result-receipt.entity';
 
 @Module({
   imports: [
@@ -100,6 +104,10 @@ import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity'
       AppStateEntity,
       ExecutionEventEntity,
       ExecutionArtifactEntity,
+      ExecutionStepEntity,
+      ExecutionStepDependencyEntity,
+      ExecutionStepAttemptEntity,
+      ExecutionResultReceiptEntity,
     ]),
   ],
   providers: [...databaseProviders],
