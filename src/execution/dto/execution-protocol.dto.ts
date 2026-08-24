@@ -57,6 +57,13 @@ export class ClaimExecutionStepDto {
   leaseDurationMs: number;
 }
 
+export class RenewExecutionStepLeaseDto {
+  @IsInt()
+  @Min(1_000)
+  @Max(900_000)
+  leaseDurationMs: number;
+}
+
 export class ReceiveExecutionStepResultDto {
   @Equals('step-result/1')
   schemaVersion: 'step-result/1';

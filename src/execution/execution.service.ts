@@ -31,6 +31,9 @@ import {
 } from './execution.constants';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
 import { ExecutionStepKind } from './execution-step-kind.enum';
+import { ExecutionStepEntity } from './execution-step.entity';
+import { ExecutionStepAttemptEntity } from './execution-step-attempt.entity';
+import { ExecutionStepAttemptStatus } from './execution-step-attempt-status.enum';
 import { createExecutionStep } from './execution-step.service';
 import {
   exactToolRepeatBlockSignal,
@@ -40,7 +43,6 @@ import {
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
-import { WorkerEntity } from '../worker/worker.entity';
 import {
   BudgetSoftLimitSignal,
   ExactToolRepeatGuardState,
@@ -53,7 +55,6 @@ import {
   projectExecutionProgress,
 } from './execution-progress';
 import {
-  assertActiveBudgetAttempt,
   assertBucketMatchesOperation,
   assertGrantScope,
   assertOperationBudgetProjection,
@@ -270,17 +271,7 @@ export class ExecutionService {
         checkpoint: null,
         progressPolicy: null,
         progressLedger: null,
-        step: 0,
-        maxSteps: 1,
-        availableAt: new Date(),
-        claimedBy: null,
-        attemptId: null,
-        retryCount: 0,
-        maxAttempts: 3,
-        startedAt: null,
         completedAt: null,
-        inputBlob: null,
-        resultBlob: null,
         lastSequence: '0',
         lastEventId: null,
         completenessStatus: 'reproducible',
@@ -393,15 +384,21 @@ export class ExecutionService {
     priority: ExecutionPriority,
     payload: Record<string, unknown>,
     options?: {
-      maxSteps?: number;
       origin?: string;
       rootExecutionId?: string;
       parentExecutionId?: string;
       ownerPrincipal?: string;
       workspaceId?: string;
       initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
+      inputArtifacts?: Array<{
+        role: string;
+        kind: string;
+        mediaType: string;
+        body: Buffer;
+        dataClassification?: string;
+        retentionClass?: string;
+      }>;
     },
-    inputBlob?: Buffer | null,
   ): Promise<ExecutionEntity> {
     const executionId = randomUUID();
     const rootExecutionId = options?.rootExecutionId ?? executionId;
@@ -428,29 +425,47 @@ export class ExecutionService {
         checkpoint: null,
         progressPolicy: null,
         progressLedger: null,
-        step: 0,
-        maxSteps: options?.maxSteps ?? 1,
-        availableAt: new Date(),
-        claimedBy: null,
-        attemptId: null,
-        retryCount: 0,
-        maxAttempts: 3,
-        startedAt: null,
         completedAt: null,
-        inputBlob: inputBlob ?? null,
-        resultBlob: null,
         lastSequence: '0',
         lastEventId: null,
         completenessStatus: 'reproducible',
         missingEvidence: [],
       });
       await manager.save(execution);
+      const inputArtifactRefs = await Promise.all(
+        (options?.inputArtifacts ?? []).map(async (input) => {
+          const artifactId = randomUUID();
+          await manager.save(
+            manager.getRepository(ExecutionArtifactEntity).create({
+              artifactId,
+              rootExecutionId,
+              kind: input.kind,
+              contentHash: contentHash(input.body),
+              size: String(input.body.length),
+              mediaType: input.mediaType,
+              encoding: 'identity',
+              dataClassification: input.dataClassification ?? 'workspace',
+              redaction: { applied: false },
+              retentionClass: input.retentionClass ?? 'execution',
+              createdByEventId: null,
+              inputSourceIds: [],
+              storageRef: `execution:${rootExecutionId}:artifact:${artifactId}`,
+              body: input.body,
+            }),
+          );
+          return { role: input.role, artifactId };
+        }),
+      );
       await createExecutionStep(manager, {
         stepKind: ExecutionStepKind.SERVICE,
         work: { taskType, payload },
         requiredCapabilities: [taskType],
         priority: STEP_PRIORITY[priority],
         ...options?.initialStep,
+        inputArtifactRefs: [
+          ...inputArtifactRefs,
+          ...(options?.initialStep?.inputArtifactRefs ?? []),
+        ],
         executionId,
       });
       const executionEvent = await this.appendBackendEvent(
@@ -463,7 +478,7 @@ export class ExecutionService {
           payload: { executionKind: taskType, initialStatus: 'queued' },
           actor: { type: 'system' },
           executionId,
-          artifactRefs: [],
+          artifactRefs: inputArtifactRefs.map(({ artifactId }) => artifactId),
         },
         1,
       );
@@ -492,11 +507,7 @@ export class ExecutionService {
     executionId: string,
     status: ExecutionStatus,
     failureMessage?: string,
-    options?: {
-      completionReason?: string;
-      expectedAttemptId?: string | null;
-      incrementRetry?: boolean;
-    },
+    options?: { completionReason?: string },
   ): Promise<ExecutionEntity | null> {
     return this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
@@ -506,12 +517,6 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) return null;
-      if (
-        options?.expectedAttemptId !== undefined &&
-        execution.attemptId !== options.expectedAttemptId
-      ) {
-        return null;
-      }
       if (execution.status === status) return execution;
 
       const root =
@@ -527,18 +532,7 @@ export class ExecutionService {
       if (!root) throw new NotFoundException('Root execution not found');
 
       const previousStatus = execution.status;
-      const activeAttemptId = execution.attemptId;
       execution.status = status;
-      if (options?.incrementRetry) execution.retryCount += 1;
-      if (
-        status === ExecutionStatus.QUEUED ||
-        status === ExecutionStatus.WAITING ||
-        TERMINAL_STATES.has(status)
-      ) {
-        execution.claimedBy = null;
-        execution.attemptId = null;
-        execution.startedAt = null;
-      }
       if (
         status === ExecutionStatus.QUEUED ||
         status === ExecutionStatus.WAITING
@@ -595,7 +589,6 @@ export class ExecutionService {
           actor: { type: 'system' },
           executionId: execution.executionId,
           turnId: execution.turnId,
-          attemptId: activeAttemptId,
           causedByEventId: root.lastEventId,
           artifactRefs: [],
         },
@@ -623,34 +616,6 @@ export class ExecutionService {
       ExecutionStatus.FAILED,
       failureMessage,
     );
-  }
-
-  async requeueStaleExecutions(heartbeatThresholdDate: Date): Promise<number> {
-    const stale = await this.executionRepo
-      .createQueryBuilder('execution')
-      .innerJoin(WorkerEntity, 'worker', 'worker.id = execution.claimed_by')
-      .where('execution.status = :status', { status: ExecutionStatus.RUNNING })
-      .andWhere('execution.phase = :phase', { phase: 'worker_execution' })
-      .andWhere('worker.last_heartbeat < :threshold', {
-        threshold: heartbeatThresholdDate,
-      })
-      .getMany();
-    let recovered = 0;
-    for (const execution of stale) {
-      const exhausted = execution.retryCount + 1 >= execution.maxAttempts;
-      const updated = await this.updateStatus(
-        execution.executionId,
-        exhausted ? ExecutionStatus.FAILED : ExecutionStatus.QUEUED,
-        exhausted ? 'Execution attempts exhausted' : undefined,
-        {
-          completionReason: exhausted ? 'attempts_exhausted' : undefined,
-          expectedAttemptId: execution.attemptId,
-          incrementRetry: true,
-        },
-      );
-      if (updated) recovered += 1;
-    }
-    return recovered;
   }
 
   async acceptArtifacts(
@@ -910,7 +875,11 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) throw new NotFoundException('Execution not found');
-      assertActiveBudgetAttempt(execution, request.executionAttemptId);
+      await this.assertCurrentStepAttempt(
+        manager,
+        execution,
+        request.executionAttemptId,
+      );
       assertGrantScope(execution, request);
 
       const rows = await eventRepo.find({
@@ -1077,7 +1046,11 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) throw new NotFoundException('Execution not found');
-      assertActiveBudgetAttempt(execution, request.executionAttemptId);
+      await this.assertCurrentStepAttempt(
+        manager,
+        execution,
+        request.executionAttemptId,
+      );
       assertReservationScope(execution, request);
 
       const rows = await eventRepo.find({
@@ -1353,6 +1326,16 @@ export class ExecutionService {
               execution.rootExecutionId,
             )
           : [];
+      if (
+        completion?.partialResult?.executionAttemptId &&
+        !TERMINAL_STATES.has(execution.status)
+      ) {
+        await this.assertCurrentStepAttempt(
+          manager,
+          execution,
+          completion.partialResult.executionAttemptId,
+        );
+      }
       this.assertLoopDetectedCompletion(execution, rows, error, completion);
       this.assertDeterministicPartial(
         execution,
@@ -1560,6 +1543,13 @@ export class ExecutionService {
       this.artifactRepo,
       execution.rootExecutionId,
     );
+    if (completion.partialResult?.executionAttemptId) {
+      await this.assertCurrentStepAttempt(
+        this.dataSource.manager,
+        execution,
+        completion.partialResult.executionAttemptId,
+      );
+    }
     this.assertLoopDetectedCompletion(execution, rows, error, completion);
     this.assertDeterministicPartial(
       execution,
@@ -1617,7 +1607,7 @@ export class ExecutionService {
         'Runtime template completion requires partialResult',
       );
     }
-    this.assertPartialShape(partial, execution);
+    this.assertPartialShape(partial);
 
     const finalMessages = rows.filter((row) => {
       const envelope = row.envelope as Record<string, any>;
@@ -1836,10 +1826,7 @@ export class ExecutionService {
     }
   }
 
-  private assertPartialShape(
-    partial: DeterministicPartialResult,
-    execution: ExecutionEntity,
-  ): void {
+  private assertPartialShape(partial: DeterministicPartialResult): void {
     if (
       partial.version !== '1' ||
       ![
@@ -1847,7 +1834,6 @@ export class ExecutionService {
         'closing_output_empty',
         'exact_tool_repeat_persisted',
       ].includes(partial.trigger) ||
-      partial.executionAttemptId !== execution.attemptId ||
       !EXECUTION_UUID_PATTERN.test(partial.loopId) ||
       !EXECUTION_UUID_PATTERN.test(partial.grantId) ||
       !EXECUTION_UUID_PATTERN.test(partial.executionAttemptId) ||
@@ -1902,7 +1888,7 @@ export class ExecutionService {
         row.eventType === 'progress.reported' &&
         payload?.kind === 'loop_guard_triggered' &&
         signal?.action === 'terminate' &&
-        signal?.executionAttemptId === execution.attemptId
+        EXECUTION_UUID_PATTERN.test(String(signal?.executionAttemptId ?? ''))
       );
     });
     if (!hasTermination) {
@@ -2238,6 +2224,35 @@ export class ExecutionService {
       progress.ledger.operationBudget,
       exactToolRepeatGuardSnapshot(progress.ledger, identity.grantId),
     );
+  }
+
+  private async assertCurrentStepAttempt(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    attemptId: string,
+  ): Promise<void> {
+    if (execution.status !== ExecutionStatus.RUNNING) {
+      throw new ConflictException('Execution attempt is not active');
+    }
+    const attempt = await manager
+      .getRepository(ExecutionStepAttemptEntity)
+      .findOneBy({ attemptId, executionId: execution.executionId });
+    if (
+      !attempt ||
+      attempt.leaseExpiresAt <= new Date() ||
+      ![
+        ExecutionStepAttemptStatus.LEASED,
+        ExecutionStepAttemptStatus.RUNNING,
+      ].includes(attempt.status)
+    ) {
+      throw new ConflictException('Execution attempt is not active');
+    }
+    const step = await manager
+      .getRepository(ExecutionStepEntity)
+      .findOneBy({ stepId: attempt.stepId });
+    if (step?.currentAttemptId !== attempt.attemptId) {
+      throw new ConflictException('Execution attempt is not active');
+    }
   }
 
   private validateIncomingEvent(

@@ -12,8 +12,10 @@ import { ExecutionEntity } from '../src/execution/execution.entity';
 import { ExecutionResultReceiptEntity } from '../src/execution/execution-result-receipt.entity';
 import { ExecutionAttemptService } from '../src/execution/execution-attempt.service';
 import { ExecutionStepAttemptEntity } from '../src/execution/execution-step-attempt.entity';
+import { ExecutionStepAttemptStatus } from '../src/execution/execution-step-attempt-status.enum';
 import { ExecutionStepDependencyEntity } from '../src/execution/execution-step-dependency.entity';
 import { ExecutionStepEntity } from '../src/execution/execution-step.entity';
+import { ExecutionStepStatus } from '../src/execution/execution-step-status.enum';
 import { ExecutionStepKind } from '../src/execution/execution-step-kind.enum';
 import { ExecutionPriority } from '../src/execution/execution-priority.enum';
 import { ExecutionStatus } from '../src/execution/execution-status.enum';
@@ -119,12 +121,70 @@ describe('execution PostgreSQL integration', () => {
     },
   });
 
+  const activateStepAttempt = async (
+    executionId: string,
+    attemptId: string,
+  ): Promise<void> => {
+    await dataSource.transaction(async (manager) => {
+      const executionRepo = manager.getRepository(ExecutionEntity);
+      const execution = await executionRepo.findOneByOrFail({ executionId });
+      const stepRepo = manager.getRepository(ExecutionStepEntity);
+      const step = await stepRepo.findOneByOrFail({ executionId });
+      if (step.currentAttemptId) {
+        const previous = await manager
+          .getRepository(ExecutionStepAttemptEntity)
+          .findOneByOrFail({ attemptId: step.currentAttemptId });
+        step.currentAttemptId = null;
+        step.status = ExecutionStepStatus.READY;
+        await stepRepo.save(step);
+        previous.status = ExecutionStepAttemptStatus.EXPIRED;
+        previous.finishedAt = new Date();
+        previous.finishReason = 'superseded_by_test_attempt';
+        await manager.save(previous);
+      }
+      const now = new Date();
+      await manager.save(
+        manager.getRepository(ExecutionStepAttemptEntity).create({
+          attemptId,
+          executionId,
+          stepId: step.stepId,
+          operationId: step.operationId,
+          schemaVersion: 'step-attempt/1',
+          claimedBy: randomUUID(),
+          status: ExecutionStepAttemptStatus.RUNNING,
+          leaseGrantedAt: now,
+          leaseExpiresAt: new Date(now.getTime() + 60 * 60 * 1_000),
+          heartbeatAt: now,
+          startedAt: now,
+          finishedAt: null,
+          finishReason: null,
+          resultReceiptId: null,
+        }),
+      );
+      step.currentAttemptId = attemptId;
+      step.status = ExecutionStepStatus.RUNNING;
+      await stepRepo.save(step);
+      execution.status = ExecutionStatus.RUNNING;
+      execution.phase = 'worker_execution';
+      await executionRepo.save(execution);
+    });
+  };
+
   it('commits an execution and its initial step atomically', async () => {
+    const inputBody = Buffer.from('Hello artifact', 'utf8');
     const created = await service.create(
       'detect-language',
       ExecutionPriority.NORMAL,
       { content: 'Hello' },
       {
+        inputArtifacts: [
+          {
+            role: 'source',
+            kind: 'language_sample',
+            mediaType: 'text/plain',
+            body: inputBody,
+          },
+        ],
         initialStep: {
           stepKind: ExecutionStepKind.CODE,
           work: { taskType: 'detect-language', content: 'Hello' },
@@ -169,19 +229,33 @@ describe('execution PostgreSQL integration', () => {
       dataSource.getRepository(ExecutionEntity).count(),
     ).resolves.toBe(countBeforeRollback);
 
-    await expect(
-      attemptService.claimReadyStep({
-        workerId: randomUUID(),
-        stepKinds: [ExecutionStepKind.CODE],
-        capabilities: ['detect-language'],
-        leaseDurationMs: 30_000,
-      }),
-    ).resolves.toMatchObject({
+    const workerId = randomUUID();
+    const assignment = await attemptService.claimReadyStep({
+      workerId,
+      stepKinds: [ExecutionStepKind.CODE],
+      capabilities: ['detect-language'],
+      leaseDurationMs: 30_000,
+    });
+    expect(assignment).toMatchObject({
       schemaVersion: 'step-assignment/1',
       executionId: created.executionId,
       stepKind: ExecutionStepKind.CODE,
       work: { taskType: 'detect-language', content: 'Hello' },
     });
+    expect(assignment!.inputArtifactRefs).toHaveLength(1);
+    await expect(
+      attemptService.getInputArtifact(
+        assignment!.attemptId,
+        workerId,
+        assignment!.inputArtifactRefs[0].artifactId,
+      ),
+    ).resolves.toMatchObject({ body: inputBody, mediaType: 'text/plain' });
+    await expect(
+      attemptService.renewAttemptLease(assignment!.attemptId, workerId, 60_000),
+    ).resolves.toMatchObject({ cancelled: false });
+    await expect(
+      attemptService.readAttemptControl(assignment!.attemptId, workerId),
+    ).resolves.toMatchObject({ cancelled: false });
   });
 
   it('registers and authenticates an isolated Models identity', async () => {
@@ -387,71 +461,6 @@ describe('execution PostgreSQL integration', () => {
     expect(stored.eventType).toBe('progress.reported');
   });
 
-  it('recovers stale attempts and fails executions that exhausted retries', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
-    const workerId = randomUUID();
-    const recoverable = await service.createForChat(
-      'assistant_chat',
-      'recover me',
-      scope,
-      {},
-    );
-    const exhausted = await service.createForChat(
-      'assistant_chat',
-      'fail me',
-      scope,
-      {},
-    );
-    const recoverableAttempt = randomUUID();
-    const exhaustedAttempt = randomUUID();
-
-    await dataSource.query(
-      `INSERT INTO "${schema}"."workers"
-       ("id", "name", "last_heartbeat") VALUES ($1, 'stale-worker', $2)`,
-      [workerId, new Date('2026-08-19T09:00:00Z')],
-    );
-    await dataSource.query(
-      `UPDATE "${schema}"."executions"
-       SET "status" = 'running', "phase" = 'worker_execution',
-           "claimed_by" = $1, "attempt_id" = $2, "max_attempts" = $3
-       WHERE "execution_id" = $4`,
-      [workerId, recoverableAttempt, 3, recoverable.executionId],
-    );
-    await dataSource.query(
-      `UPDATE "${schema}"."executions"
-       SET "status" = 'running', "phase" = 'worker_execution',
-           "claimed_by" = $1, "attempt_id" = $2, "max_attempts" = $3
-       WHERE "execution_id" = $4`,
-      [workerId, exhaustedAttempt, 1, exhausted.executionId],
-    );
-
-    await expect(
-      service.requeueStaleExecutions(new Date('2026-08-19T10:00:00Z')),
-    ).resolves.toBe(2);
-
-    const recovered = await service.findOne(recoverable.executionId);
-    const failed = await service.findOne(exhausted.executionId);
-    expect(recovered).toMatchObject({
-      status: 'queued',
-      phase: null,
-      claimedBy: null,
-      attemptId: null,
-      retryCount: 1,
-    });
-    expect(failed).toMatchObject({
-      status: 'failed',
-      phase: null,
-      claimedBy: null,
-      attemptId: null,
-      retryCount: 1,
-      completionReason: 'attempts_exhausted',
-    });
-    expect(failed?.error).toEqual({
-      code: 'EXECUTION_FAILED',
-      message: 'Execution attempts exhausted',
-    });
-  });
-
   it('serializes the last operation budget slots and fences stale attempts', async () => {
     const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
     const context = await service.createForChat(
@@ -461,13 +470,7 @@ describe('execution PostgreSQL integration', () => {
       {},
     );
     const attemptId = randomUUID();
-    await dataSource.query(
-      `UPDATE "${schema}"."executions"
-       SET "status" = 'running', "phase" = 'worker_execution',
-           "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [attemptId, context.executionId],
-    );
+    await activateStepAttempt(context.executionId, attemptId);
 
     const requestedPolicy = {
       normal: 1,
@@ -539,11 +542,7 @@ describe('execution PostgreSQL integration', () => {
     );
 
     const nextAttemptId = randomUUID();
-    await dataSource.query(
-      `UPDATE "${schema}"."executions" SET "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [nextAttemptId, context.executionId],
-    );
+    await activateStepAttempt(context.executionId, nextAttemptId);
     await expect(reserve(randomUUID())).rejects.toThrow(
       'Execution attempt is not active',
     );
@@ -578,13 +577,7 @@ describe('execution PostgreSQL integration', () => {
       {},
     );
     const attemptId = randomUUID();
-    await dataSource.query(
-      `UPDATE "${schema}"."executions"
-       SET "status" = 'running', "phase" = 'worker_execution',
-           "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [attemptId, context.executionId],
-    );
+    await activateStepAttempt(context.executionId, attemptId);
     const { grant } = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
@@ -667,13 +660,7 @@ describe('execution PostgreSQL integration', () => {
       {},
     );
     const attemptId = randomUUID();
-    await dataSource.query(
-      `UPDATE "${schema}"."executions"
-       SET "status" = 'running', "phase" = 'worker_execution',
-           "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [attemptId, context.executionId],
-    );
+    await activateStepAttempt(context.executionId, attemptId);
     const { grant } = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
@@ -752,13 +739,7 @@ describe('execution PostgreSQL integration', () => {
       {},
     );
     const attemptId = randomUUID();
-    await dataSource.query(
-      `UPDATE "${schema}"."executions"
-       SET "status" = 'running', "phase" = 'worker_execution',
-           "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [attemptId, context.executionId],
-    );
+    await activateStepAttempt(context.executionId, attemptId);
     const { grant } = await service.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
@@ -1120,13 +1101,7 @@ describe('execution PostgreSQL integration', () => {
       {},
     );
     const attemptId = randomUUID();
-    await dataSource.query(
-      `UPDATE "${schema}"."executions"
-       SET "status" = 'running', "phase" = 'worker_execution',
-           "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [attemptId, context.executionId],
-    );
+    await activateStepAttempt(context.executionId, attemptId);
     const requestedPolicy = {
       normal: 1,
       normalInferenceSoftLimit: 0,
@@ -1440,11 +1415,7 @@ describe('execution PostgreSQL integration', () => {
       ),
     ).resolves.toBeUndefined();
     const staleAttemptId = randomUUID();
-    await dataSource.query(
-      `UPDATE "${schema}"."executions" SET "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [staleAttemptId, context.executionId],
-    );
+    await activateStepAttempt(context.executionId, staleAttemptId);
     await expect(
       service.completeExecution(
         context.executionId,
@@ -1453,12 +1424,8 @@ describe('execution PostgreSQL integration', () => {
         undefined,
         completion,
       ),
-    ).rejects.toThrow('Invalid deterministic partial result');
-    await dataSource.query(
-      `UPDATE "${schema}"."executions" SET "attempt_id" = $1
-       WHERE "execution_id" = $2`,
-      [attemptId, context.executionId],
-    );
+    ).rejects.toThrow('Execution attempt is not active');
+    await activateStepAttempt(context.executionId, attemptId);
 
     await service.completeExecution(
       context.executionId,

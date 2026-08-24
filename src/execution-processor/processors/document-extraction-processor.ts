@@ -95,8 +95,16 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
           extension,
           resourceId,
         },
-        undefined,
-        buffer,
+        {
+          inputArtifacts: [
+            {
+              role: 'media',
+              kind: 'source_media',
+              mediaType: 'application/octet-stream',
+              body: buffer,
+            },
+          ],
+        },
       );
     }
 

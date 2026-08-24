@@ -1,13 +1,17 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   Param,
   Post,
+  Res,
+  StreamableFile,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
+import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { WorkerService } from '../worker/worker.service';
 import {
@@ -15,6 +19,7 @@ import {
   ModelsWorkerHeartbeatDto,
   ReceiveExecutionStepResultDto,
   RegisterModelsWorkerDto,
+  RenewExecutionStepLeaseDto,
 } from './dto/execution-protocol.dto';
 import { ExecutionAttemptService } from './execution-attempt.service';
 
@@ -71,6 +76,51 @@ export class ExecutionProtocolController {
   ) {
     await this.workers.authenticate(workerId, credential);
     return this.attempts.startAttempt(attemptId, workerId);
+  }
+
+  @Post('attempts/:attemptId/lease')
+  async renewLease(
+    @Param('attemptId') attemptId: string,
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+    @Body() body: RenewExecutionStepLeaseDto,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    return this.attempts.renewAttemptLease(
+      attemptId,
+      workerId,
+      body.leaseDurationMs,
+    );
+  }
+
+  @Get('attempts/:attemptId/control')
+  async control(
+    @Param('attemptId') attemptId: string,
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    return this.attempts.readAttemptControl(attemptId, workerId);
+  }
+
+  @Get('attempts/:attemptId/artifacts/:artifactId')
+  async artifact(
+    @Param('attemptId') attemptId: string,
+    @Param('artifactId') artifactId: string,
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    const artifact = await this.attempts.getInputArtifact(
+      attemptId,
+      workerId,
+      artifactId,
+    );
+    response.setHeader('content-type', artifact.mediaType);
+    response.setHeader('content-length', artifact.size);
+    response.setHeader('etag', `"${artifact.contentHash}"`);
+    return new StreamableFile(artifact.body!);
   }
 
   @Post('results')

@@ -1,4 +1,10 @@
-import { HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ResourceEntity } from './resource.entity';
@@ -20,11 +26,34 @@ export class ResourceService {
     private readonly repo: Repository<ResourceEntity>,
     private readonly fileStorageService: FileStorageService,
     private readonly executionService: ExecutionService,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<ResourceEntity | null> {
     return await this.repo.findOne({
-      select: ['id', 'name', 'title', 'path', 'project', 'summary', 'keyPoints', 'keywords', 'originalName', 'publicationDate', 'type', 'license', 'fileSize', 'pages', 'uploadDate', 'url', 'language', 'mimeType', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
+      select: [
+        'id',
+        'name',
+        'title',
+        'path',
+        'project',
+        'summary',
+        'keyPoints',
+        'keywords',
+        'originalName',
+        'publicationDate',
+        'type',
+        'license',
+        'fileSize',
+        'pages',
+        'uploadDate',
+        'url',
+        'language',
+        'mimeType',
+        'status',
+        'archivedAt',
+        'createdAt',
+        'updatedAt',
+      ],
       where: { id },
       relations: ['project', 'authors'],
     });
@@ -54,7 +83,17 @@ export class ResourceService {
   async findAllWithProjects(): Promise<ResourceEntity[]> {
     return await this.repo
       .createQueryBuilder('resource')
-      .select(['resource.id', 'resource.name', 'resource.title', 'resource.mimeType', 'resource.type', 'resource.status', 'resource.publicationDate', 'resource.url', 'resource.createdAt'])
+      .select([
+        'resource.id',
+        'resource.name',
+        'resource.title',
+        'resource.mimeType',
+        'resource.type',
+        'resource.status',
+        'resource.publicationDate',
+        'resource.url',
+        'resource.createdAt',
+      ])
       .leftJoinAndSelect('resource.project', 'project')
       .where('resource.projectId IS NOT NULL')
       .orderBy('project.name', 'ASC')
@@ -64,30 +103,58 @@ export class ResourceService {
 
   async findByProject(projectId: number): Promise<ResourceEntity[]> {
     return await this.repo.find({
-      select: ['id', 'name', 'title', 'mimeType', 'originalName', 'type', 'status', 'createdAt'],
+      select: [
+        'id',
+        'name',
+        'title',
+        'mimeType',
+        'originalName',
+        'type',
+        'status',
+        'createdAt',
+      ],
       where: { project: { id: projectId } },
-      order: { createdAt: 'DESC' }
+      order: { createdAt: 'DESC' },
     });
   }
 
-  async findByIds(ids: number[]): Promise<Pick<ResourceEntity, 'id' | 'name' | 'title' | 'mimeType'>[]> {
+  async findByIds(
+    ids: number[],
+  ): Promise<Pick<ResourceEntity, 'id' | 'name' | 'title' | 'mimeType'>[]> {
     if (!ids.length) return [];
     return await this.repo
       .createQueryBuilder('resource')
-      .select(['resource.id', 'resource.name', 'resource.title', 'resource.mimeType'])
+      .select([
+        'resource.id',
+        'resource.name',
+        'resource.title',
+        'resource.mimeType',
+      ])
       .whereInIds(ids)
       .getMany();
   }
 
   async findByThread(threadId: number): Promise<ResourceEntity[]> {
     return await this.repo.find({
-      select: ['id', 'name', 'title', 'mimeType', 'originalName', 'type', 'status', 'createdAt'],
+      select: [
+        'id',
+        'name',
+        'title',
+        'mimeType',
+        'originalName',
+        'type',
+        'status',
+        'createdAt',
+      ],
       where: { thread: { id: threadId } },
-      order: { createdAt: 'DESC' }
+      order: { createdAt: 'DESC' },
     });
   }
 
-  async assignToThread(resourceId: number, threadId: number): Promise<ResourceEntity | null> {
+  async assignToThread(
+    resourceId: number,
+    threadId: number,
+  ): Promise<ResourceEntity | null> {
     const resource = await this.repo.findOneBy({ id: resourceId });
     if (!resource) return null;
     resource.thread = { id: threadId } as any;
@@ -95,14 +162,27 @@ export class ResourceService {
   }
 
   async findPending(): Promise<ResourceEntity[]> {
-    return await this.repo.createQueryBuilder('resource')
-      .select(['resource.id', 'resource.name', 'resource.title', 'resource.mimeType', 'resource.originalName', 'resource.type', 'resource.status', 'resource.createdAt'])
+    return await this.repo
+      .createQueryBuilder('resource')
+      .select([
+        'resource.id',
+        'resource.name',
+        'resource.title',
+        'resource.mimeType',
+        'resource.originalName',
+        'resource.type',
+        'resource.status',
+        'resource.createdAt',
+      ])
       .where('resource.projectId IS NULL')
       .orderBy('resource.createdAt', 'DESC')
       .getMany();
   }
 
-  async assignToProject(resourceId: number, projectId: number): Promise<ResourceEntity | null> {
+  async assignToProject(
+    resourceId: number,
+    projectId: number,
+  ): Promise<ResourceEntity | null> {
     const resource = await this.repo.findOneBy({ id: resourceId });
     if (!resource) return null;
     resource.project = { id: projectId } as any;
@@ -111,7 +191,12 @@ export class ResourceService {
 
   async search(query: string): Promise<ResourceEntity[]> {
     if (!query || !query.trim()) return [];
-    return await this.repo.createQueryBuilder('r').where('r.name ILIKE :q', { q: `%${query}%` }).orderBy('r.createdAt', 'DESC').limit(10).getMany();
+    return await this.repo
+      .createQueryBuilder('r')
+      .where('r.name ILIKE :q', { q: `%${query}%` })
+      .orderBy('r.createdAt', 'DESC')
+      .limit(10)
+      .getMany();
   }
 
   async findByHash(hash: string): Promise<ResourceEntity | null> {
@@ -119,26 +204,38 @@ export class ResourceService {
   }
 
   async findByEntityId(entityId: number): Promise<ResourceEntity[]> {
-    return await this.repo.createQueryBuilder('resource')
+    return await this.repo
+      .createQueryBuilder('resource')
       .innerJoin('resource.entities', 'entity')
       .where('entity.id = :entityId', { entityId })
       .getMany();
   }
 
   async findByEntityName(entityName: string): Promise<ResourceEntity[]> {
-    return await this.repo.createQueryBuilder('resource')
+    return await this.repo
+      .createQueryBuilder('resource')
       .innerJoin('resource.entities', 'entity')
       .where('entity.name ILIKE :entityName', { entityName: `%${entityName}%` })
       .getMany();
   }
 
-  async update(id: number, resource: Partial<any>): Promise<ResourceEntity | null> {
+  async update(
+    id: number,
+    resource: Partial<any>,
+  ): Promise<ResourceEntity | null> {
     let anchorChanged = false;
     let newAnchor: string | null = null;
     if (Object.prototype.hasOwnProperty.call(resource, 'publicationDate')) {
-      const before = await this.repo.findOne({ select: ['id', 'publicationDate'], where: { id } });
-      const oldAnchor = before?.publicationDate ? String(before.publicationDate).slice(0, 10) : null;
-      newAnchor = resource.publicationDate ? String(resource.publicationDate).slice(0, 10) : null;
+      const before = await this.repo.findOne({
+        select: ['id', 'publicationDate'],
+        where: { id },
+      });
+      const oldAnchor = before?.publicationDate
+        ? String(before.publicationDate).slice(0, 10)
+        : null;
+      newAnchor = resource.publicationDate
+        ? String(resource.publicationDate).slice(0, 10)
+        : null;
       anchorChanged = oldAnchor !== newAnchor;
     }
 
@@ -149,12 +246,16 @@ export class ResourceService {
     if (anchorChanged) {
       const content = await this.getContentById(id);
       if (content) {
-        await this.executionService.create('date-extraction', ExecutionPriority.NORMAL, {
-          resourceId: id,
-          text: content,
-          language: saved.language || null,
-          anchorDate: newAnchor,
-        });
+        await this.executionService.create(
+          'date-extraction',
+          ExecutionPriority.NORMAL,
+          {
+            resourceId: id,
+            text: content,
+            language: saved.language || null,
+            anchorDate: newAnchor,
+          },
+        );
       }
     }
 
@@ -181,28 +282,34 @@ export class ResourceService {
   async clearResourceEntities(resourceId: number): Promise<void> {
     await this.repo.query(
       'DELETE FROM resource_entities WHERE resource_id = $1',
-      [resourceId]
+      [resourceId],
     );
   }
 
-  async addEntityToResource(resourceId: number, entity: EntityEntity): Promise<void> {
+  async addEntityToResource(
+    resourceId: number,
+    entity: EntityEntity,
+  ): Promise<void> {
     const existing = await this.repo.query(
       'SELECT 1 FROM resource_entities WHERE resource_id = $1 AND entity_id = $2',
-      [resourceId, entity.id]
+      [resourceId, entity.id],
     );
 
     if (existing.length === 0) {
       await this.repo.query(
         'INSERT INTO resource_entities (resource_id, entity_id, created_at) VALUES ($1, $2, NOW())',
-        [resourceId, entity.id]
+        [resourceId, entity.id],
       );
     }
   }
 
-  async removeEntityFromResource(resourceId: number, entityId: number): Promise<void> {
+  async removeEntityFromResource(
+    resourceId: number,
+    entityId: number,
+  ): Promise<void> {
     await this.repo.query(
       'DELETE FROM resource_entities WHERE resource_id = $1 AND entity_id = $2',
-      [resourceId, entityId]
+      [resourceId, entityId],
     );
   }
 
@@ -211,43 +318,51 @@ export class ResourceService {
     return count > 0;
   }
 
-  async addAuthorToResource(resourceId: number, author: AuthorEntity): Promise<void> {
+  async addAuthorToResource(
+    resourceId: number,
+    author: AuthorEntity,
+  ): Promise<void> {
     const existing = await this.repo.query(
       'SELECT 1 FROM resource_authors WHERE resource_id = $1 AND author_id = $2',
-      [resourceId, author.id]
+      [resourceId, author.id],
     );
 
     if (existing.length === 0) {
       await this.repo.query(
         'INSERT INTO resource_authors (resource_id, author_id, created_at) VALUES ($1, $2, NOW())',
-        [resourceId, author.id]
+        [resourceId, author.id],
       );
     }
   }
 
-  async removeAuthorFromResource(resourceId: number, authorId: number): Promise<void> {
+  async removeAuthorFromResource(
+    resourceId: number,
+    authorId: number,
+  ): Promise<void> {
     await this.repo.query(
       'DELETE FROM resource_authors WHERE resource_id = $1 AND author_id = $2',
-      [resourceId, authorId]
+      [resourceId, authorId],
     );
   }
 
   async clearResourceAuthors(resourceId: number): Promise<void> {
     await this.repo.query(
       'DELETE FROM resource_authors WHERE resource_id = $1',
-      [resourceId]
+      [resourceId],
     );
   }
 
   async findByAuthorId(authorId: number): Promise<ResourceEntity[]> {
-    return await this.repo.createQueryBuilder('resource')
+    return await this.repo
+      .createQueryBuilder('resource')
       .innerJoin('resource.authors', 'author')
       .where('author.id = :authorId', { authorId })
       .getMany();
   }
 
   async findByAuthorName(authorName: string): Promise<ResourceEntity[]> {
-    return await this.repo.createQueryBuilder('resource')
+    return await this.repo
+      .createQueryBuilder('resource')
       .innerJoin('resource.authors', 'author')
       .where('author.name ILIKE :authorName', { authorName: `%${authorName}%` })
       .getMany();
@@ -255,47 +370,72 @@ export class ResourceService {
 
   async getEntitiesByResourceId(resourceId: number): Promise<any[]> {
     const entityRepo = this.repo.manager.getRepository(EntityEntity);
-    return await entityRepo.createQueryBuilder('entity')
+    return await entityRepo
+      .createQueryBuilder('entity')
       .innerJoin('resource_entities', 're', 're.entity_id = entity.id')
       .where('re.resource_id = :resourceId', { resourceId })
       .leftJoinAndSelect('entity.entityType', 'entityType')
-      .select(['entity.id', 'entity.name', 'entity.description', 'entity.translations', 'entity.aliases', 'entityType.id', 'entityType.name'])
+      .select([
+        'entity.id',
+        'entity.name',
+        'entity.description',
+        'entity.translations',
+        'entity.aliases',
+        'entityType.id',
+        'entityType.name',
+      ])
       .getMany();
   }
 
-  async confirmExtraction(id: number): Promise<{ success: boolean; message: string }> {
+  async confirmExtraction(
+    id: number,
+  ): Promise<{ success: boolean; message: string }> {
     const resource = await this.findOne(id);
     if (!resource) {
       throw new NotFoundException('Resource not found');
     }
     if (resource.status !== 'extracted') {
-      throw new HttpException('Resource is not in extracted state', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'Resource is not in extracted state',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     await this.update(id, { status: 'confirmed_extraction' });
 
     const content = await this.getContentById(id);
     const samples = this.extractTextSamples(content);
-    await this.executionService.create('detect-language', ExecutionPriority.NORMAL, {
-      resourceId: id,
-      samples,
-    });
+    await this.executionService.create(
+      'detect-language',
+      ExecutionPriority.NORMAL,
+      {
+        resourceId: id,
+        samples,
+      },
+    );
 
     return {
       success: true,
-      message: 'Resource extraction confirmed and language detection execution created',
+      message:
+        'Resource extraction confirmed and language detection execution created',
     };
   }
 
   async uploadAndProcess(
     file: Express.Multer.File,
-    resourceData: Partial<ResourceEntity> & { projectId?: string; threadId?: string },
+    resourceData: Partial<ResourceEntity> & {
+      projectId?: string;
+      threadId?: string;
+    },
   ): Promise<{ success: boolean }> {
     const hash = this.fileStorageService.calculateHash(file.buffer);
 
     const existingResource = await this.findByHash(hash);
     if (existingResource) {
-      throw new AlreadyExistException('File', 'File with the same content already exists');
+      throw new AlreadyExistException(
+        'File',
+        'File with the same content already exists',
+      );
     }
 
     const result = await this.fileStorageService.storeFile(
@@ -306,8 +446,12 @@ export class ResourceService {
 
     const resourceToCreate: any = {
       name: resourceData.name || file.originalname,
-      project: resourceData.projectId ? { id: Number(resourceData.projectId) } : null,
-      thread: resourceData.threadId ? { id: Number(resourceData.threadId) } : null,
+      project: resourceData.projectId
+        ? { id: Number(resourceData.projectId) }
+        : null,
+      thread: resourceData.threadId
+        ? { id: Number(resourceData.threadId) }
+        : null,
       hash: hash,
       mimeType: file.mimetype,
       originalName: resourceData.originalName || file.originalname,
@@ -338,15 +482,25 @@ export class ResourceService {
           extension: result.extension,
           resourceId: resourceCreated.id,
         },
-        undefined,
-        file.buffer,
+        {
+          inputArtifacts: [
+            {
+              role: 'document',
+              kind: 'source_document',
+              mediaType: file.mimetype,
+              body: file.buffer,
+            },
+          ],
+        },
       );
     }
 
     return { success: true };
   }
 
-  async getFileBuffer(id: number): Promise<{ buffer: Buffer; resource: ResourceEntity }> {
+  async getFileBuffer(
+    id: number,
+  ): Promise<{ buffer: Buffer; resource: ResourceEntity }> {
     const resource = await this.findOne(id);
     if (!resource || !resource.path) {
       throw new NotFoundException('File not found');
@@ -369,10 +523,14 @@ export class ResourceService {
     }
     // Cleanup graph relationships for this resource
     try {
-      await this.executionService.create('relationship-modify', ExecutionPriority.BACKGROUND, {
-        action: 'delete-by-resource',
-        resourceId: id,
-      });
+      await this.executionService.create(
+        'relationship-modify',
+        ExecutionPriority.BACKGROUND,
+        {
+          action: 'delete-by-resource',
+          resourceId: id,
+        },
+      );
     } catch {
       // Relationship cleanup is best-effort; don't fail the delete
     }
@@ -408,7 +566,7 @@ export class ResourceService {
       }
 
       return samples;
-    } catch (error) {
+    } catch {
       return [];
     }
   }

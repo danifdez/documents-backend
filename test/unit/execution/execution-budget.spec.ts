@@ -1,6 +1,9 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
 import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
+import { ExecutionStepAttemptEntity } from '../../../src/execution/execution-step-attempt.entity';
+import { ExecutionStepAttemptStatus } from '../../../src/execution/execution-step-attempt-status.enum';
+import { ExecutionStepEntity } from '../../../src/execution/execution-step.entity';
 import {
   assertOperationBudgetProjection,
   governedBudgetStart,
@@ -64,13 +67,33 @@ describe('ExecutionService operation budget', () => {
         return value;
       }),
     };
+    const attemptRepo = {
+      findOneBy: jest.fn(async ({ attemptId, executionId }) =>
+        attemptId === ATTEMPT_ID && executionId === EXECUTION_ID
+          ? {
+              attemptId: ATTEMPT_ID,
+              executionId: EXECUTION_ID,
+              stepId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+              status: ExecutionStepAttemptStatus.RUNNING,
+              leaseExpiresAt: new Date(Date.now() + 60_000),
+            }
+          : null,
+      ),
+    };
+    const stepRepo = {
+      findOneBy: jest.fn(async () => ({ currentAttemptId: ATTEMPT_ID })),
+    };
     const manager = {
       getRepository: jest.fn((entity) =>
         entity === ExecutionEntity
           ? executionRepo
           : entity === ExecutionEventEntity
             ? eventRepo
-            : undefined,
+            : entity === ExecutionStepAttemptEntity
+              ? attemptRepo
+              : entity === ExecutionStepEntity
+                ? stepRepo
+                : undefined,
       ),
       save: jest.fn(async (value) => {
         if (value?.eventId) rows.push(value);

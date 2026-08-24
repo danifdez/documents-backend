@@ -56,7 +56,6 @@ describe('ModelService execution identities', () => {
       taskType,
       expect.any(String),
       expect.any(Object),
-      ...(taskType === 'entity-extraction' ? [undefined] : []),
     );
   });
 });

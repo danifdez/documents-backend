@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { ExecutionEntity } from './execution.entity';
-import { ExecutionStatus } from './execution-status.enum';
 import { EXECUTION_UUID_PATTERN } from './execution.constants';
 import type {
   OperationBudgetBucket,
@@ -177,19 +176,6 @@ export function validateReservationRequest(
         request.toolBatchIndex! >= request.toolBatchSize!))
   ) {
     throw new BadRequestException('Invalid tool batch identity');
-  }
-}
-
-export function assertActiveBudgetAttempt(
-  execution: ExecutionEntity,
-  attemptId: string,
-): void {
-  if (
-    execution.status !== ExecutionStatus.RUNNING ||
-    !execution.attemptId ||
-    execution.attemptId !== attemptId
-  ) {
-    throw new ConflictException('Execution attempt is not active');
   }
 }
 
@@ -485,8 +471,7 @@ export function governedBudgetStart(
     !EXECUTION_UUID_PATTERN.test(identity.reservationId) ||
     !EXECUTION_UUID_PATTERN.test(identity.executionAttemptId) ||
     (operationKind === 'tool_call' &&
-      !EXECUTION_UUID_PATTERN.test(identity.toolCallId ?? '')) ||
-    execution.attemptId !== identity.executionAttemptId
+      !EXECUTION_UUID_PATTERN.test(identity.toolCallId ?? ''))
   ) {
     throw new ConflictException(
       `Top-level ${operationKind} has no valid budget reservation`,

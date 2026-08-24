@@ -113,14 +113,6 @@ export class ModelService {
 
     const extractedTexts = extractTextFromHtml(content);
 
-    // Create execution for entity extraction. When AGENT_ENTITY_EXTRACTION=true,
-    // the worker routes the execution through the agent loop instead of the
-    // one-shot LLM handler.
-    const agentEnabled = process.env.AGENT_ENTITY_EXTRACTION === 'true';
-    const maxSteps = parseInt(
-      process.env.AGENT_ENTITY_EXTRACTION_MAX_STEPS || '6',
-      10,
-    );
     const execution = await this.executionService.create(
       'entity-extraction',
       ExecutionPriority.NORMAL,
@@ -128,9 +120,8 @@ export class ModelService {
         resourceId: resourceId,
         from: 'content',
         texts: extractedTexts,
-        kind: agentEnabled ? 'agent' : 'one_shot',
+        kind: 'one_shot',
       },
-      agentEnabled ? { maxSteps } : undefined,
     );
     return { executionId: execution.executionId };
   }

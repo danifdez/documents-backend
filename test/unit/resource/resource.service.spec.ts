@@ -172,8 +172,16 @@ describe('ResourceService', () => {
         'document-extraction',
         expect.any(String),
         expect.objectContaining({ resourceId: 5 }),
-        undefined,
-        mockFile.buffer,
+        {
+          inputArtifacts: [
+            {
+              role: 'document',
+              kind: 'source_document',
+              mediaType: mockFile.mimetype,
+              body: mockFile.buffer,
+            },
+          ],
+        },
       );
     });
 

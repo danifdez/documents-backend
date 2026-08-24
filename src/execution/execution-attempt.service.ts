@@ -24,6 +24,7 @@ import { ExecutionStepDependencyEntity } from './execution-step-dependency.entit
 import { ExecutionStepEntity } from './execution-step.entity';
 import { ExecutionStepStatus } from './execution-step-status.enum';
 import { ExecutionContractValidator } from './execution-contract-validator';
+import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionStatus } from './execution-status.enum';
 
@@ -155,6 +156,124 @@ export class ExecutionAttemptService {
       attempt.heartbeatAt = now;
       return manager.getRepository(ExecutionStepAttemptEntity).save(attempt);
     });
+  }
+
+  async getInputArtifact(
+    attemptId: string,
+    workerId: string,
+    artifactId: string,
+  ): Promise<ExecutionArtifactEntity> {
+    const attempt = await this.dataSource
+      .getRepository(ExecutionStepAttemptEntity)
+      .findOneBy({ attemptId });
+    if (!attempt) throw new NotFoundException('attempt_not_found');
+    const step = await this.dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneBy({ stepId: attempt.stepId });
+    const canRead =
+      step &&
+      attempt.claimedBy === workerId &&
+      step.currentAttemptId === attempt.attemptId &&
+      attempt.leaseExpiresAt > new Date() &&
+      [
+        ExecutionStepAttemptStatus.LEASED,
+        ExecutionStepAttemptStatus.RUNNING,
+      ].includes(attempt.status) &&
+      step.inputArtifactRefs.some((ref) => ref.artifactId === artifactId);
+    if (!canRead) throw new ConflictException('artifact_not_authorized');
+
+    const execution = await this.dataSource
+      .getRepository(ExecutionEntity)
+      .findOneBy({ executionId: attempt.executionId });
+    if (!execution) throw new NotFoundException('execution_not_found');
+    const artifact = await this.dataSource
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.artifact_id = :artifactId', { artifactId })
+      .andWhere('artifact.root_execution_id = :rootExecutionId', {
+        rootExecutionId: execution.rootExecutionId,
+      })
+      .getOne();
+    if (!artifact?.body) throw new NotFoundException('artifact_unavailable');
+    return artifact;
+  }
+
+  async renewAttemptLease(
+    attemptId: string,
+    workerId: string,
+    leaseDurationMs: number,
+  ): Promise<{ leaseExpiresAt: Date; cancelled: boolean }> {
+    this.assertLeaseDuration(leaseDurationMs);
+    return this.dataSource.transaction(async (manager) => {
+      const { attempt, step } = await this.lockCurrentAttempt(
+        manager,
+        attemptId,
+        workerId,
+      );
+      const now = new Date();
+      if (
+        attempt.leaseExpiresAt <= now ||
+        ![
+          ExecutionStepAttemptStatus.LEASED,
+          ExecutionStepAttemptStatus.RUNNING,
+        ].includes(attempt.status)
+      ) {
+        throw new ConflictException('lease_expired');
+      }
+      const execution = await manager
+        .getRepository(ExecutionEntity)
+        .findOneBy({ executionId: attempt.executionId });
+      const cancelled =
+        execution?.status === ExecutionStatus.CANCELLED ||
+        step.status === ExecutionStepStatus.CANCELLED;
+      if (cancelled)
+        return { leaseExpiresAt: attempt.leaseExpiresAt, cancelled };
+
+      const requestedExpiry = new Date(now.getTime() + leaseDurationMs);
+      attempt.leaseExpiresAt =
+        step.deadline && step.deadline < requestedExpiry
+          ? step.deadline
+          : requestedExpiry;
+      if (attempt.leaseExpiresAt <= now) {
+        throw new ConflictException('step_deadline_reached');
+      }
+      attempt.heartbeatAt = now;
+      await manager.getRepository(ExecutionStepAttemptEntity).save(attempt);
+      return { leaseExpiresAt: attempt.leaseExpiresAt, cancelled: false };
+    });
+  }
+
+  async readAttemptControl(
+    attemptId: string,
+    workerId: string,
+  ): Promise<{
+    cancelled: boolean;
+    leaseExpiresAt: Date;
+    deadline: Date | null;
+  }> {
+    const attempt = await this.dataSource
+      .getRepository(ExecutionStepAttemptEntity)
+      .findOneBy({ attemptId });
+    if (!attempt || attempt.claimedBy !== workerId) {
+      throw new NotFoundException('attempt_not_found');
+    }
+    const step = await this.dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneBy({ stepId: attempt.stepId });
+    const execution = await this.dataSource
+      .getRepository(ExecutionEntity)
+      .findOneBy({ executionId: attempt.executionId });
+    if (!step || !execution || step.currentAttemptId !== attempt.attemptId) {
+      throw new ConflictException('attempt_not_current');
+    }
+    return {
+      cancelled:
+        execution.status === ExecutionStatus.CANCELLED ||
+        step.status === ExecutionStepStatus.CANCELLED,
+      leaseExpiresAt: attempt.leaseExpiresAt,
+      deadline: step.deadline,
+    };
   }
 
   async expireAttempt(attemptId: string, now = new Date()): Promise<boolean> {

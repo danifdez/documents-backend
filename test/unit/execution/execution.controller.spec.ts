@@ -1,12 +1,7 @@
-import { UnauthorizedException } from '@nestjs/common';
 import { ExecutionController } from '../../../src/execution/execution.controller';
 
 describe('ExecutionController', () => {
   const service = {
-    acceptArtifacts: jest.fn(),
-    acceptEvents: jest.fn(),
-    requestProgressGrant: jest.fn(),
-    reserveOperationBudget: jest.fn(),
     resolveAccessScope: jest.fn(() => ({
       ownerPrincipal: 'user-1',
       workspaceId: 'workspace-1',
@@ -15,61 +10,9 @@ describe('ExecutionController', () => {
     readProgress: jest.fn(),
     exportBundle: jest.fn(),
   };
-  const config = { get: jest.fn(() => 'internal-secret') };
-  const controller = new ExecutionController(service as any, config as any);
+  const controller = new ExecutionController(service as any);
 
   beforeEach(() => jest.clearAllMocks());
-
-  it('rejects absent and incorrect internal ingestion tokens', async () => {
-    await expect(
-      controller.ingestEvents('run-1', undefined, { events: [] }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-    await expect(
-      controller.ingestEvents('run-1', 'wrong', { events: [] }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(service.acceptEvents).not.toHaveBeenCalled();
-  });
-
-  it('accepts the configured internal token without exposing it to the service', async () => {
-    service.acceptEvents.mockResolvedValue({ accepted: 1, duplicates: 0 });
-    const events = [{ eventId: 'event-1' }];
-
-    await expect(
-      controller.ingestEvents('run-1', 'internal-secret', { events }),
-    ).resolves.toEqual({ accepted: 1, duplicates: 0 });
-    expect(config.get).toHaveBeenCalledWith('EXECUTION_INGEST_TOKEN');
-    expect(service.acceptEvents).toHaveBeenCalledWith('run-1', events);
-  });
-
-  it('protects and forwards progress grant and reservation requests', async () => {
-    const grant = { executionId: 'execution-1' } as any;
-    const reservation = { operationId: 'operation-1' } as any;
-    service.requestProgressGrant.mockResolvedValue({ grant: {} });
-    service.reserveOperationBudget.mockResolvedValue({ granted: true });
-
-    await expect(
-      controller.requestProgressGrant('execution-1', 'wrong', grant),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-    await controller.requestProgressGrant(
-      'execution-1',
-      'internal-secret',
-      grant,
-    );
-    await controller.reserveOperationBudget(
-      'execution-1',
-      'internal-secret',
-      reservation,
-    );
-
-    expect(service.requestProgressGrant).toHaveBeenCalledWith(
-      'execution-1',
-      grant,
-    );
-    expect(service.reserveOperationBudget).toHaveBeenCalledWith(
-      'execution-1',
-      reservation,
-    );
-  });
 
   it('derives the read scope from the authenticated principal and workspace header', async () => {
     service.exportBundle.mockResolvedValue({

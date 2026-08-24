@@ -25,17 +25,7 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         "result" jsonb,
         "error" jsonb,
         "checkpoint" jsonb,
-        "step" integer NOT NULL DEFAULT 0,
-        "max_steps" integer NOT NULL DEFAULT 1,
-        "available_at" timestamptz NOT NULL DEFAULT now(),
-        "claimed_by" uuid,
-        "attempt_id" uuid,
-        "retry_count" integer NOT NULL DEFAULT 0,
-        "max_attempts" integer NOT NULL DEFAULT 3,
-        "started_at" timestamptz,
         "completed_at" timestamptz,
-        "input_blob" bytea,
-        "result_blob" bytea,
         "last_sequence" bigint NOT NULL DEFAULT 0,
         "last_event_id" uuid,
         "completeness_status" varchar(30) NOT NULL DEFAULT 'reproducible',
@@ -56,13 +46,6 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
     await queryRunner.query(
       `CREATE INDEX "IDX_executions_parent" ON "executions" ("parent_execution_id")`,
     );
-    await queryRunner.query(
-      `CREATE INDEX "IDX_executions_queue" ON "executions" ("status", "priority", "available_at")`,
-    );
-    await queryRunner.query(
-      `CREATE INDEX "IDX_executions_claimed_by" ON "executions" ("claimed_by")`,
-    );
-
     await queryRunner.query(`
       CREATE TABLE "execution_events" (
         "event_id" uuid NOT NULL,

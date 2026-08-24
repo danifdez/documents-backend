@@ -217,8 +217,16 @@ export class IndexedFileService {
           extension,
           checksum: file.checksum,
         },
-        undefined,
-        buffer,
+        {
+          inputArtifacts: [
+            {
+              role: 'document',
+              kind: 'indexed_file',
+              mediaType: 'application/octet-stream',
+              body: buffer,
+            },
+          ],
+        },
       );
     } catch (e: any) {
       this.logger.warn(
