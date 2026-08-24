@@ -14,6 +14,8 @@ import { ExecutionOperationEntity } from '../../../src/execution/execution-opera
 import { ExecutionOperationRecoveryClass } from '../../../src/execution/execution-operation-recovery-class.enum';
 import { ExecutionOperationStatus } from '../../../src/execution/execution-operation-status.enum';
 import { ExecutionToolPlanEntity } from '../../../src/execution/execution-tool-plan.entity';
+import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
+import { ExecutionOperationKind } from '../../../src/execution/execution-operation-kind.enum';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -31,6 +33,7 @@ describe('ExecutionAttemptService', () => {
   let executionRepo: Record<string, jest.Mock>;
   let operationRepo: Record<string, jest.Mock>;
   let toolPlanRepo: Record<string, jest.Mock>;
+  let eventRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
   const readyStep = () => ({
@@ -40,6 +43,8 @@ describe('ExecutionAttemptService', () => {
     status: ExecutionStepStatus.READY,
     version: 1,
     currentAttemptId: null,
+    stepKind: ExecutionStepKind.SERVICE,
+    work: { taskType: 'detect-language' },
     resourceKeys: [],
     availableAt: new Date(Date.now() - 1_000),
     deadline: new Date(Date.now() + 60_000),
@@ -63,6 +68,8 @@ describe('ExecutionAttemptService', () => {
     status: ExecutionOperationStatus.DISPATCHED,
     recoveryClass: ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
     currentAttemptId: ATTEMPT_ID,
+    operationKind: ExecutionOperationKind.ARTIFACT_PROCESSING,
+    causedByEventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca707',
     error: null,
     finishedAt: null,
   });
@@ -90,6 +97,10 @@ describe('ExecutionAttemptService', () => {
     executionRepo = {
       findOne: jest.fn().mockResolvedValue({
         executionId: EXECUTION_ID,
+        rootExecutionId: EXECUTION_ID,
+        turnId: null,
+        lastSequence: '1',
+        lastEventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca707',
         status: ExecutionStatus.QUEUED,
       }),
       findOneBy: jest.fn(),
@@ -114,6 +125,32 @@ describe('ExecutionAttemptService', () => {
         toolCallId: TOOL_CALL_ID,
       }),
     };
+    eventRepo = {
+      find: jest.fn().mockResolvedValue([
+        {
+          eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca708',
+          rootExecutionId: EXECUTION_ID,
+          sequence: '1',
+          producerComponent: 'documents-backend',
+          producerSequence: '1',
+          eventType: 'operation.started',
+          operationId: OPERATION_ID,
+          attemptId: ATTEMPT_ID,
+          envelope: {
+            sequence: 1,
+            eventType: 'operation.started',
+            operationId: OPERATION_ID,
+            attemptId: ATTEMPT_ID,
+            payload: {
+              operationKind: 'artifact_processing',
+              status: 'dispatched',
+              name: 'detect-language',
+            },
+          },
+        },
+      ]),
+      create: jest.fn((value) => value),
+    };
     manager = {
       getRepository: jest.fn((entity) => {
         if (entity === ExecutionStepEntity) return stepRepo;
@@ -123,9 +160,11 @@ describe('ExecutionAttemptService', () => {
         if (entity === ExecutionEntity) return executionRepo;
         if (entity === ExecutionOperationEntity) return operationRepo;
         if (entity === ExecutionToolPlanEntity) return toolPlanRepo;
+        if (entity === ExecutionEventEntity) return eventRepo;
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
       query: jest.fn().mockResolvedValue([]),
+      save: jest.fn(async (value) => value),
     };
     service = new ExecutionAttemptService({
       transaction: jest.fn(async (callback) => callback(manager)),
@@ -163,6 +202,23 @@ describe('ExecutionAttemptService', () => {
       expect.objectContaining({
         status: ExecutionOperationStatus.DISPATCHED,
         currentAttemptId: attempt.attemptId,
+      }),
+    );
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'operation.started',
+        operationId: OPERATION_ID,
+        attemptId: attempt.attemptId,
+        envelope: expect.objectContaining({
+          stepId: STEP_ID,
+          operationId: OPERATION_ID,
+          attemptId: attempt.attemptId,
+          payload: expect.objectContaining({
+            operationKind: 'artifact_processing',
+            status: 'dispatched',
+            name: 'detect-language',
+          }),
+        }),
       }),
     );
   });
@@ -318,7 +374,10 @@ describe('ExecutionAttemptService', () => {
       operationId: OPERATION_ID,
       attemptId: ATTEMPT_ID,
       workerId: WORKER_ID,
-      result: { status: 'succeeded' },
+      result: {
+        status: 'succeeded',
+        stepKind: ExecutionStepKind.SERVICE,
+      },
     });
 
     expect(ack.code).toBe('received');
@@ -416,7 +475,10 @@ describe('ExecutionAttemptService', () => {
       ...runningAttempt(),
       status: ExecutionStepAttemptStatus.RESULT_RECEIVED,
     };
-    const operation = dispatchedOperation();
+    const operation = {
+      ...dispatchedOperation(),
+      operationKind: ExecutionOperationKind.TOOL_CALL,
+    };
     const execution = {
       executionId: EXECUTION_ID,
       status: ExecutionStatus.RUNNING,
@@ -459,6 +521,25 @@ describe('ExecutionAttemptService', () => {
         status: ExecutionOperationStatus.SUCCEEDED,
         result: toolResult,
         error: null,
+      }),
+    );
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'operation.finished',
+        operationId: OPERATION_ID,
+        attemptId: ATTEMPT_ID,
+        envelope: expect.objectContaining({
+          stepId: STEP_ID,
+          operationId: OPERATION_ID,
+          toolCallId: TOOL_CALL_ID,
+          attemptId: ATTEMPT_ID,
+          payload: expect.objectContaining({
+            operationKind: 'tool_call',
+            status: 'succeeded',
+            result: toolResult,
+            error: null,
+          }),
+        }),
       }),
     );
   });
@@ -717,7 +798,10 @@ describe('ExecutionAttemptService', () => {
       operationId: OPERATION_ID,
       attemptId: ATTEMPT_ID,
       workerId: WORKER_ID,
-      result: { status: 'succeeded' },
+      result: {
+        status: 'succeeded',
+        stepKind: ExecutionStepKind.SERVICE,
+      },
     });
 
     expect(ack.code).toBe('stale_attempt');

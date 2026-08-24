@@ -35,6 +35,15 @@ import { ExecutionToolInvocationEntity } from '../src/execution/execution-tool-i
 import { ExecutionToolPlanEntity } from '../src/execution/execution-tool-plan.entity';
 import { ExecutionToolPlanService } from '../src/execution/execution-tool-plan.service';
 import { ExecutionToolRuntimeService } from '../src/execution-coordinator/execution-tool-runtime.service';
+import {
+  assertOperationBudgetProjection,
+  governedBudgetStart,
+} from '../src/execution/inference-budget-policy';
+import {
+  exactToolRepeatGuardSnapshot,
+  ProgressEvent,
+  projectExecutionProgress,
+} from '../src/execution/execution-progress';
 
 loadEnv({ path: '.env' });
 
@@ -489,6 +498,98 @@ describe('execution PostgreSQL integration', () => {
         status: 'succeeded',
       },
     });
+    const persistedExecution = await dataSource
+      .getRepository(ExecutionEntity)
+      .findOneByOrFail({ executionId: created.executionId });
+    expect(
+      persistedExecution.progressLedger.operationBudget?.reservations[
+        prepared.plan.operationId
+      ],
+    ).toMatchObject({
+      reservationId: reserved.reservation.reservationId,
+      status: 'consumed',
+    });
+    const operationEvents = await dataSource
+      .getRepository(ExecutionEventEntity)
+      .find({
+        where: {
+          rootExecutionId: created.rootExecutionId,
+          operationId: prepared.plan.operationId,
+        },
+        order: { sequence: 'ASC' },
+      });
+    expect(operationEvents.map((event) => event.eventType)).toEqual([
+      'operation.started',
+      'operation.finished',
+    ]);
+    const [started, finished] = operationEvents;
+    expect(started.attemptId).toEqual(expect.any(String));
+    expect(started.envelope).toMatchObject({
+      stepId: step.stepId,
+      operationId: prepared.plan.operationId,
+      toolCallId: prepared.plan.toolCallId,
+      attemptId: started.attemptId,
+      payload: {
+        operationKind: 'tool_call',
+        status: 'dispatched',
+        name: 'documents.search',
+        loopId: created.executionId,
+        loopKind: 'top_level',
+        round: 1,
+        phase: 'agent_loop',
+        budgetGrantId: grant.grantId,
+        budgetReservationId: reserved.reservation.reservationId,
+        budgetBucket: 'tool',
+        executionAttemptId: sourceAttemptId,
+      },
+    });
+    expect(finished).toMatchObject({
+      attemptId: started.attemptId,
+      causedByEventId: started.eventId,
+    });
+    expect(finished.envelope).toMatchObject({
+      stepId: step.stepId,
+      operationId: prepared.plan.operationId,
+      toolCallId: prepared.plan.toolCallId,
+      attemptId: started.attemptId,
+      payload: {
+        operationKind: 'tool_call',
+        status: 'succeeded',
+        result: {
+          schemaVersion: 'tool-result/1',
+          operationId: prepared.plan.operationId,
+          toolCallId: prepared.plan.toolCallId,
+          status: 'succeeded',
+        },
+        error: null,
+      },
+    });
+    const eventsBeforeStart = await dataSource
+      .getRepository(ExecutionEventEntity)
+      .find({
+        where: { rootExecutionId: created.rootExecutionId },
+        order: { sequence: 'ASC' },
+      });
+    const budgetStateBeforeStart = projectExecutionProgress(
+      eventsBeforeStart
+        .filter((event) => Number(event.sequence) < Number(started.sequence))
+        .map((event) => event.envelope as unknown as ProgressEvent),
+    );
+    const governedStart = governedBudgetStart(
+      persistedExecution,
+      started.envelope,
+    );
+    expect(governedStart).not.toBeNull();
+    expect(() =>
+      assertOperationBudgetProjection(
+        governedStart!,
+        budgetStateBeforeStart.ledger.operationBudget,
+        exactToolRepeatGuardSnapshot(
+          budgetStateBeforeStart.ledger,
+          grant.grantId,
+        ),
+      ),
+    ).not.toThrow();
   });
 
   it('registers and authenticates an isolated Models identity', async () => {

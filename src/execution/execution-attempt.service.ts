@@ -35,6 +35,13 @@ import { executionStepOutputValue } from './execution-step-result';
 import { ExecutionStepKind } from './execution-step-kind.enum';
 import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
 import { ToolResultContract } from './execution-tool.types';
+import { ExecutionEventEntity } from './execution-event.entity';
+import {
+  appendBackendExecutionEvent,
+  nextBackendProducerSequence,
+} from './execution-event.writer';
+import { ProgressEvent, projectExecutionProgress } from './execution-progress';
+import { ExecutionOperationKind } from './execution-operation-kind.enum';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -89,6 +96,24 @@ function operationStatusForToolResult(
     not_executed: ExecutionOperationStatus.NOT_EXECUTED,
   };
   return statuses[toolStatus];
+}
+
+function operationKindForStep(
+  stepKind: ExecutionStepKind,
+): ExecutionOperationKind {
+  if (stepKind === ExecutionStepKind.INFERENCE) {
+    return ExecutionOperationKind.INFERENCE;
+  }
+  if (
+    stepKind === ExecutionStepKind.TOOL ||
+    stepKind === ExecutionStepKind.CODE
+  ) {
+    return ExecutionOperationKind.TOOL_CALL;
+  }
+  if (stepKind === ExecutionStepKind.VERIFICATION) {
+    return ExecutionOperationKind.VERIFICATION;
+  }
+  return ExecutionOperationKind.ARTIFACT_PROCESSING;
 }
 
 @Injectable()
@@ -661,6 +686,16 @@ export class ExecutionAttemptService {
         await attemptRepo.save(attempt);
         await stepRepo.save(step);
         await operationRepo.save(operation);
+        await this.appendOperationFinished(
+          manager,
+          execution,
+          step,
+          attempt,
+          operation,
+          canonicalToolResult,
+          result,
+          acceptedError ?? null,
+        );
         if (acceptedStatus === 'succeeded' && !executionHasTerminalIntent) {
           await releaseExecutionStepDependents(manager, step.stepId);
           const remaining = await manager.query(
@@ -829,9 +864,219 @@ export class ExecutionAttemptService {
     await manager.getRepository(ExecutionStepEntity).save(step);
     if (execution.status === ExecutionStatus.QUEUED) {
       execution.status = ExecutionStatus.RUNNING;
-      await executionRepo.save(execution);
     }
+    await this.appendOperationStarted(
+      manager,
+      execution,
+      step,
+      attempt,
+      operation,
+    );
+    await executionRepo.save(execution);
     return attempt;
+  }
+
+  private async appendOperationStarted(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    step: ExecutionStepEntity,
+    attempt: ExecutionStepAttemptEntity,
+    operation: ExecutionOperationEntity,
+  ): Promise<void> {
+    const eventRepo = manager.getRepository(ExecutionEventEntity);
+    const rows = await eventRepo.find({
+      where: { rootExecutionId: execution.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const work = (step.work ?? {}) as Record<string, unknown>;
+    const plan = work.toolPlan as Record<string, unknown> | undefined;
+    const operationKind =
+      operation.operationKind ?? operationKindForStep(step.stepKind);
+    const projected = projectExecutionProgress(
+      rows.map((row) => row.envelope as unknown as ProgressEvent),
+    );
+    const budgetPayload = this.operationBudgetStartPayload(
+      execution,
+      step,
+      operation,
+      operationKind,
+      projected.ledger,
+      work,
+    );
+    const event = await appendBackendExecutionEvent(
+      manager,
+      execution,
+      nextBackendProducerSequence(rows),
+      {
+        eventType: 'operation.started',
+        payloadSchema: 'operation.started/1',
+        payload: {
+          operationKind,
+          status: 'dispatched',
+          name: String(work.taskType ?? operationKind),
+          ...budgetPayload,
+        },
+        actor: { type: 'system' },
+        executionId: execution.executionId,
+        turnId: execution.turnId,
+        stepId: step.stepId,
+        operationId: operation.operationId,
+        toolCallId:
+          typeof plan?.toolCallId === 'string' ? plan.toolCallId : null,
+        attemptId: attempt.attemptId,
+        causedByEventId: operation.causedByEventId,
+        artifactRefs: [],
+      },
+    );
+    this.contractValidator?.assertEvent(event.envelope);
+    this.applyProgressProjection(execution, [...rows, event]);
+    execution.lastSequence = event.sequence;
+    execution.lastEventId = event.eventId;
+  }
+
+  private operationBudgetStartPayload(
+    execution: ExecutionEntity,
+    step: ExecutionStepEntity,
+    operation: ExecutionOperationEntity,
+    operationKind: ExecutionOperationKind,
+    ledger: ReturnType<typeof projectExecutionProgress>['ledger'],
+    work: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (!step.budgetReservationId) return {};
+    const reservation =
+      ledger.operationBudget?.reservations[operation.operationId];
+    if (
+      !reservation ||
+      reservation.reservationId !== step.budgetReservationId ||
+      reservation.status !== 'reserved' ||
+      reservation.operationKind !== operationKind
+    ) {
+      throw new ConflictException('operation_budget_not_reserved');
+    }
+    const grant = ledger.operationBudget?.grants[reservation.grantId];
+    if (!grant) throw new ConflictException('operation_budget_grant_not_found');
+    const guard = ledger.loopGuards?.[reservation.grantId]?.exactToolRepeat;
+    const isNormalInference =
+      operationKind === ExecutionOperationKind.INFERENCE &&
+      reservation.bucket === 'normal';
+    const maxRounds = Math.max(
+      reservation.round,
+      grant.effectivePolicy.normal +
+        grant.effectivePolicy.repair +
+        grant.effectivePolicy.closing,
+    );
+    return {
+      loopId: grant.loopId,
+      agentName: String(
+        work.agentName ??
+          (execution.taskType === 'agent_chat' ? 'agent' : 'assistant'),
+      ),
+      loopKind: 'top_level',
+      round: reservation.round,
+      maxRounds,
+      phase: reservation.phase,
+      budgetGrantId: reservation.grantId,
+      budgetReservationId: reservation.reservationId,
+      budgetBucket: reservation.bucket,
+      executionAttemptId: reservation.executionAttemptId,
+      ...(isNormalInference &&
+      grant.usage.normal.softLimitWarningPending === true
+        ? { budgetSoftLimitWarningApplied: true }
+        : {}),
+      ...(reservation.operationFingerprint
+        ? {
+            operationFingerprint: reservation.operationFingerprint,
+            operationFingerprintVersion:
+              reservation.operationFingerprintVersion,
+          }
+        : {}),
+      ...(reservation.toolBatchSize !== undefined
+        ? {
+            toolBatchSize: reservation.toolBatchSize,
+            toolBatchIndex: reservation.toolBatchIndex,
+          }
+        : {}),
+      ...(isNormalInference && guard?.warningPending === true
+        ? { loopGuardWarningApplied: true }
+        : {}),
+      ...(isNormalInference && guard?.blockResultPending === true
+        ? { loopGuardBlockResultApplied: true }
+        : {}),
+    };
+  }
+
+  private async appendOperationFinished(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    step: ExecutionStepEntity,
+    attempt: ExecutionStepAttemptEntity,
+    operation: ExecutionOperationEntity,
+    toolResult: ToolResultContract | null,
+    stepResult: Record<string, unknown>,
+    error: Record<string, unknown> | null,
+  ): Promise<void> {
+    const eventRepo = manager.getRepository(ExecutionEventEntity);
+    const rows = await eventRepo.find({
+      where: { rootExecutionId: execution.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const started = rows.find(
+      (row) =>
+        row.eventType === 'operation.started' &&
+        row.operationId === operation.operationId &&
+        row.attemptId === attempt.attemptId,
+    );
+    if (!started) throw new ConflictException('operation_start_not_found');
+    const operationKind =
+      operation.operationKind ?? operationKindForStep(step.stepKind);
+    const output = stepResult.output as Record<string, unknown> | undefined;
+    const outcome = output?.outcome as Record<string, unknown> | undefined;
+    const eventStatus =
+      operation.status === ExecutionOperationStatus.NOT_EXECUTED
+        ? ExecutionOperationStatus.FAILED
+        : operation.status;
+    const event = await appendBackendExecutionEvent(
+      manager,
+      execution,
+      nextBackendProducerSequence(rows),
+      {
+        eventType: 'operation.finished',
+        payloadSchema: 'operation.finished/1',
+        payload: {
+          operationKind,
+          status: eventStatus,
+          ...(operationKind === ExecutionOperationKind.INFERENCE
+            ? { outcome: String(outcome?.kind ?? 'invalid') }
+            : {}),
+          result: toolResult ?? output ?? null,
+          error,
+        },
+        actor: { type: 'system' },
+        executionId: execution.executionId,
+        turnId: execution.turnId,
+        stepId: step.stepId,
+        operationId: operation.operationId,
+        toolCallId: toolResult?.toolCallId ?? null,
+        attemptId: attempt.attemptId,
+        causedByEventId: started.eventId,
+        artifactRefs: [],
+      },
+    );
+    this.contractValidator?.assertEvent(event.envelope);
+    this.applyProgressProjection(execution, [...rows, event]);
+    execution.lastSequence = event.sequence;
+    execution.lastEventId = event.eventId;
+  }
+
+  private applyProgressProjection(
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+  ): void {
+    const progress = projectExecutionProgress(
+      rows.map((row) => row.envelope as unknown as ProgressEvent),
+    );
+    execution.progressPolicy = progress.policy;
+    execution.progressLedger = progress.ledger;
   }
 
   private isTerminalExecution(status: ExecutionStatus): boolean {

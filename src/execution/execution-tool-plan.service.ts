@@ -25,7 +25,7 @@ import {
   ToolInvocationContract,
   ToolPlanContract,
 } from './execution-tool.types';
-import { canonicalHash } from './execution.service';
+import { canonicalHash } from './execution-canonical';
 import {
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,

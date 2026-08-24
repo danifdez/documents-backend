@@ -1,4 +1,4 @@
-import { canonicalHash } from '../../../src/execution/execution.service';
+import { canonicalHash } from '../../../src/execution/execution-canonical';
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
 import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
 import { ExecutionOperationEntity } from '../../../src/execution/execution-operation.entity';

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, In, MoreThan, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ExecutionEntity } from './execution.entity';
@@ -73,6 +73,22 @@ import {
   ExecutionOutboxStatus,
 } from '../execution-outbox/execution-outbox.entity';
 import { ExecutionPublication } from '../execution-outbox/execution-publication';
+import {
+  canonicalHash,
+  canonicalJson,
+  contentHash,
+} from './execution-canonical';
+import {
+  appendBackendExecutionEvent,
+  BackendExecutionEventData,
+  nextBackendProducerSequence,
+} from './execution-event.writer';
+
+export {
+  canonicalHash,
+  canonicalJson,
+  contentHash,
+} from './execution-canonical';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 const PRIVATE_REASONING_PATTERN = /<think>[\s\S]*?<\/think>/gi;
@@ -125,39 +141,6 @@ const FORBIDDEN_KEYS = new Set([
   'sessiontoken',
   'thoughts',
 ]);
-
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, child]) => child !== undefined)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, child]) => [key, canonicalize(child)]),
-    );
-  }
-  if (
-    typeof value === 'number' &&
-    (!Number.isFinite(value) || !Number.isInteger(value))
-  ) {
-    throw new BadRequestException(
-      'Canonical execution values must use finite integers',
-    );
-  }
-  return value;
-}
-
-export function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalize(value));
-}
-
-export function contentHash(value: Buffer | string): string {
-  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
-}
-
-export function canonicalHash(value: unknown): string {
-  return contentHash(canonicalJson(value));
-}
 
 export function redactExecutionText(value: string): string {
   return value
@@ -2286,62 +2269,16 @@ export class ExecutionService {
     manager: EntityManager,
     execution: ExecutionEntity,
     producerSequence: number,
-    data: Record<string, any>,
+    data: BackendExecutionEventData,
     assignedSequence?: number,
   ): Promise<ExecutionEventEntity> {
-    const sequence = assignedSequence ?? Number(execution.lastSequence) + 1;
-    const now = new Date().toISOString();
-    const eventId = randomUUID();
-    const envelope: Record<string, unknown> = {
-      schemaVersion: EXECUTION_EVENT_SCHEMA,
-      eventId,
-      rootExecutionId: execution.rootExecutionId,
-      executionId: data.executionId,
-      turnId: data.turnId,
-      sequence,
+    return appendBackendExecutionEvent(
+      manager,
+      execution,
       producerSequence,
-      eventType: data.eventType,
-      producer: {
-        component: 'documents-backend',
-        instanceId: process.env.HOSTNAME ?? 'backend',
-        version: process.env.npm_package_version ?? 'development',
-      },
-      actor: data.actor,
-      sourceId: data.sourceId,
-      attemptId: data.attemptId,
-      occurredAt: now,
-      ingestedAt: now,
-      causedByEventId: data.causedByEventId,
-      payloadSchema: data.payloadSchema,
-      payload: data.payload,
-      artifactRefs: data.artifactRefs ?? [],
-      security: {
-        dataClassification: 'workspace',
-        purpose: 'evaluation',
-        allowedDestinations: ['documents', 'ai-train'],
-        redactionApplied: data.redactionApplied ?? false,
-      },
-    };
-    const cleanEnvelope = JSON.parse(JSON.stringify(envelope));
-    cleanEnvelope.contentHash = canonicalHash(cleanEnvelope);
-    const row = manager.getRepository(ExecutionEventEntity).create({
-      eventId,
-      rootExecutionId: execution.rootExecutionId,
-      sequence: String(sequence),
-      producerComponent: 'documents-backend',
-      producerInstanceId: String((cleanEnvelope.producer as any).instanceId),
-      producerSequence: String(producerSequence),
-      eventType: data.eventType,
-      executionId: data.executionId,
-      operationId: data.operationId ?? null,
-      attemptId: data.attemptId ?? null,
-      causedByEventId: data.causedByEventId ?? null,
-      occurredAt: new Date(now),
-      ingestedAt: new Date(now),
-      contentHash: cleanEnvelope.contentHash,
-      envelope: cleanEnvelope,
-    });
-    return manager.save(row);
+      data,
+      assignedSequence,
+    );
   }
 
   private progressLimit(name: string, fallback: number): number {
@@ -2350,14 +2287,7 @@ export class ExecutionService {
   }
 
   private nextBackendProducerSequence(rows: ExecutionEventEntity[]): number {
-    return (
-      Math.max(
-        1,
-        ...rows
-          .filter((row) => row.producerComponent === 'documents-backend')
-          .map((row) => Number(row.producerSequence)),
-      ) + 1
-    );
+    return nextBackendProducerSequence(rows);
   }
 
   private async validateOperationBudgetStart(
