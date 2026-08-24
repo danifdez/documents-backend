@@ -85,6 +85,38 @@ export async function createExecutionStep(
   return step;
 }
 
+export async function releaseExecutionStepDependents(
+  manager: EntityManager,
+  completedStepId: string,
+): Promise<number> {
+  const rows = await manager.query(
+    `
+      UPDATE "execution_steps" candidate
+      SET "status" = 'ready',
+          "version" = candidate."version" + 1,
+          "updated_at" = now()
+      WHERE candidate."status" = 'blocked'
+        AND EXISTS (
+          SELECT 1
+          FROM "execution_step_dependencies" direct_dependency
+          WHERE direct_dependency."step_id" = candidate."step_id"
+            AND direct_dependency."depends_on_step_id" = $1
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "execution_step_dependencies" unresolved_dependency
+          INNER JOIN "execution_steps" required_step
+            ON required_step."step_id" = unresolved_dependency."depends_on_step_id"
+          WHERE unresolved_dependency."step_id" = candidate."step_id"
+            AND required_step."status" <> 'completed'
+        )
+      RETURNING candidate."step_id"
+    `,
+    [completedStepId],
+  );
+  return rows.length;
+}
+
 @Injectable()
 export class ExecutionStepService {
   constructor(private readonly dataSource: DataSource) {}
@@ -171,33 +203,8 @@ export class ExecutionStepService {
   }
 
   async releaseDependents(completedStepId: string): Promise<number> {
-    return this.dataSource.transaction(async (manager) => {
-      const rows = await manager.query(
-        `
-          UPDATE "execution_steps" candidate
-          SET "status" = 'ready',
-              "version" = candidate."version" + 1,
-              "updated_at" = now()
-          WHERE candidate."status" = 'blocked'
-            AND EXISTS (
-              SELECT 1
-              FROM "execution_step_dependencies" direct_dependency
-              WHERE direct_dependency."step_id" = candidate."step_id"
-                AND direct_dependency."depends_on_step_id" = $1
-            )
-            AND NOT EXISTS (
-              SELECT 1
-              FROM "execution_step_dependencies" unresolved_dependency
-              INNER JOIN "execution_steps" required_step
-                ON required_step."step_id" = unresolved_dependency."depends_on_step_id"
-              WHERE unresolved_dependency."step_id" = candidate."step_id"
-                AND required_step."status" <> 'completed'
-            )
-          RETURNING candidate."step_id"
-        `,
-        [completedStepId],
-      );
-      return rows.length;
-    });
+    return this.dataSource.transaction((manager) =>
+      releaseExecutionStepDependents(manager, completedStepId),
+    );
   }
 }

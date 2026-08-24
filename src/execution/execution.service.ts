@@ -496,10 +496,44 @@ export class ExecutionService {
     return this.executionRepo.findOneBy({ executionId });
   }
 
-  async findReadyForFinalization(): Promise<ExecutionEntity[]> {
-    return this.executionRepo.find({
-      where: { status: ExecutionStatus.RUNNING, phase: 'backend_finalization' },
-      order: { updatedAt: 'ASC' },
+  async claimReadyForFinalization(): Promise<ExecutionEntity | null> {
+    return this.dataSource.transaction(async (manager) => {
+      const rows = await manager.query(`
+        SELECT "execution_id"
+        FROM "executions"
+        WHERE "status" = 'running'
+          AND "phase" = 'backend_finalization'
+        ORDER BY "updated_at"
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      `);
+      if (!rows.length) return null;
+
+      const executionRepo = manager.getRepository(ExecutionEntity);
+      const execution = await executionRepo.findOneBy({
+        executionId: rows[0].execution_id,
+      });
+      if (!execution) return null;
+
+      execution.phase = 'domain_finalization';
+      return executionRepo.save(execution);
+    });
+  }
+
+  async recoverStaleFinalizations(staleBefore: Date): Promise<number> {
+    return this.dataSource.transaction(async (manager) => {
+      const rows = await manager.query(
+        `
+          UPDATE "executions"
+          SET "phase" = 'backend_finalization', "updated_at" = now()
+          WHERE "status" = 'running'
+            AND "phase" = 'domain_finalization'
+            AND "updated_at" <= $1
+          RETURNING "execution_id"
+        `,
+        [staleBefore],
+      );
+      return rows.length;
     });
   }
 

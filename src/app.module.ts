@@ -11,7 +11,6 @@ import { ResourceTypeModule } from './resource-type/resource-type.module';
 import { FileStorageModule } from './file-storage/file-storage.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TaskScheduleModule } from './task-schedule/task-schedule.module';
-import { ExecutionProcessorModule } from './execution-processor/execution-processor.module';
 import { NotificationModule } from './notification/notification.module';
 import { VoiceModule } from './voice/voice.module';
 import { ConfigModule } from '@nestjs/config';
@@ -84,7 +83,6 @@ export class AppModule {
       ResourceTypeModule,
       FileStorageModule,
       ExecutionModule,
-      ExecutionProcessorModule.register(),
       TaskScheduleModule,
       NotificationModule,
       VoiceModule,

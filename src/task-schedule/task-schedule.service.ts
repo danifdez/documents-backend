@@ -2,19 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import * as os from 'os';
 import * as process from 'process';
-import { ExecutionService } from 'src/execution/execution.service';
-import { ExecutionStatus } from 'src/execution/execution-status.enum';
-import { ExecutionProcessorFactory } from 'src/execution-processor/execution-processor.factory';
+import { ExecutionCoordinatorService } from 'src/execution-coordinator/execution-coordinator.service';
 import { WorkerService } from 'src/worker/worker.service';
 import { ExecutionAttemptService } from 'src/execution/execution-attempt.service';
+
+const FINALIZATION_STALE_AFTER_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class TaskScheduleService {
   private readonly logger = new Logger(TaskScheduleService.name);
 
   constructor(
-    private readonly executionService: ExecutionService,
-    private readonly executionProcessorFactory: ExecutionProcessorFactory,
+    private readonly executionCoordinatorService: ExecutionCoordinatorService,
     private readonly workerService: WorkerService,
     private readonly executionAttemptService: ExecutionAttemptService,
   ) {}
@@ -43,7 +42,7 @@ export class TaskScheduleService {
     waitForCompletion: true,
   })
   async handleCron() {
-    await this.executionAttemptService.processReceivedResults();
+    await this.executionCoordinatorService.acceptResults();
     const { cpuUsagePercent, memoryUsagePercent } = this.getCPUAndMemoryUsage();
 
     if (cpuUsagePercent > 80 || memoryUsagePercent > 80) {
@@ -53,55 +52,7 @@ export class TaskScheduleService {
       return;
     }
 
-    const pendingExecutions =
-      await this.executionService.findReadyForFinalization();
-
-    const firstExecution = pendingExecutions[0];
-    if (
-      !firstExecution ||
-      !firstExecution.payload ||
-      typeof firstExecution.payload !== 'object'
-    ) {
-      return;
-    }
-
-    try {
-      const processor = this.executionProcessorFactory.getProcessor(
-        firstExecution.taskType,
-      );
-
-      if (!processor) {
-        await this.executionService.markAsCompleted(firstExecution.executionId);
-        return;
-      }
-
-      this.logger.log(
-        `Processing execution ${firstExecution.executionId} of type ${firstExecution.taskType}`,
-      );
-      await processor.process(firstExecution);
-
-      const current = await this.executionService.findOne(
-        firstExecution.executionId,
-      );
-      if (
-        current &&
-        ![
-          ExecutionStatus.COMPLETED,
-          ExecutionStatus.FAILED,
-          ExecutionStatus.CANCELLED,
-        ].includes(current.status)
-      ) {
-        await this.executionService.markAsCompleted(firstExecution.executionId);
-      }
-    } catch (error) {
-      this.logger.error(
-        `Error processing execution ${firstExecution.executionId}: ${error.message}`,
-      );
-      await this.executionService.markAsFailed(
-        firstExecution.executionId,
-        error.message,
-      );
-    }
+    await this.executionCoordinatorService.finalizeReady();
   }
 
   @Cron(CronExpression.EVERY_30_SECONDS, {
@@ -112,6 +63,13 @@ export class TaskScheduleService {
       const expired = await this.executionAttemptService.expireStaleAttempts();
       if (expired > 0) {
         this.logger.log(`Expired ${expired} stale step attempt(s)`);
+      }
+      const recovered =
+        await this.executionCoordinatorService.recoverStaleFinalizations(
+          FINALIZATION_STALE_AFTER_MS,
+        );
+      if (recovered > 0) {
+        this.logger.log(`Recovered ${recovered} stale finalization(s)`);
       }
       const offlined = await this.workerService.markStaleOffline(60);
       if (offlined > 0) {

@@ -8,6 +8,7 @@ describe('ExecutionService queue state', () => {
   let service: ExecutionService;
   let executionRepo: Record<string, jest.Mock>;
   let eventRepo: Record<string, jest.Mock>;
+  let manager: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionRepo = {
@@ -21,7 +22,7 @@ describe('ExecutionService queue state', () => {
       findOne: jest.fn().mockResolvedValue({ producerSequence: '3' }),
       save: jest.fn(async (value) => value),
     };
-    const manager = {
+    manager = {
       getRepository: jest.fn((entity) =>
         entity === ExecutionEntity
           ? executionRepo
@@ -29,6 +30,7 @@ describe('ExecutionService queue state', () => {
             ? eventRepo
             : undefined,
       ),
+      query: jest.fn(),
       save: jest.fn(async (value) => value),
     };
     service = Object.create(ExecutionService.prototype);
@@ -46,6 +48,48 @@ describe('ExecutionService queue state', () => {
     expect(executionRepo.findOneBy).toHaveBeenCalledWith({
       executionId: EXECUTION_ID,
     });
+  });
+
+  it('claims one finalization atomically', async () => {
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: 'backend_finalization',
+    };
+    manager.query.mockResolvedValue([{ execution_id: EXECUTION_ID }]);
+    executionRepo.findOneBy.mockResolvedValue(execution);
+    executionRepo.save.mockImplementation(async (value) => value);
+
+    await expect(service.claimReadyForFinalization()).resolves.toEqual(
+      expect.objectContaining({ phase: 'domain_finalization' }),
+    );
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('FOR UPDATE SKIP LOCKED'),
+    );
+    expect(executionRepo.save).toHaveBeenCalledWith(execution);
+  });
+
+  it('returns null when there is no finalization to claim', async () => {
+    manager.query.mockResolvedValue([]);
+
+    await expect(service.claimReadyForFinalization()).resolves.toBeNull();
+    expect(executionRepo.findOneBy).not.toHaveBeenCalled();
+  });
+
+  it('makes abandoned finalizations claimable again', async () => {
+    const staleBefore = new Date('2026-08-24T10:00:00.000Z');
+    manager.query.mockResolvedValue([
+      { execution_id: EXECUTION_ID },
+      { execution_id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca703' },
+    ]);
+
+    await expect(service.recoverStaleFinalizations(staleBefore)).resolves.toBe(
+      2,
+    );
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining(`SET "phase" = 'backend_finalization'`),
+      [staleBefore],
+    );
   });
 
   it('marks terminal state and completion time on the same execution', async () => {

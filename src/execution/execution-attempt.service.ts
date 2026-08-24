@@ -27,6 +27,7 @@ import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionStatus } from './execution-status.enum';
+import { releaseExecutionStepDependents } from './execution-step.service';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -92,6 +93,12 @@ export class ExecutionAttemptService {
             AND ("deadline" IS NULL OR "deadline" > now())
             AND "step_kind" = ANY($1::text[])
             AND "required_capabilities" <@ $2::text[]
+            AND EXISTS (
+              SELECT 1
+              FROM "executions"
+              WHERE "executions"."execution_id" = "execution_steps"."execution_id"
+                AND "executions"."status" IN ('queued', 'running')
+            )
           ORDER BY "priority" DESC, "available_at", "created_at"
           LIMIT 1
           FOR UPDATE SKIP LOCKED
@@ -454,8 +461,9 @@ export class ExecutionAttemptService {
             order: { receivedAt: 'DESC' },
           });
         const executionRepo = manager.getRepository(ExecutionEntity);
-        const execution = await executionRepo.findOneBy({
-          executionId: step.executionId,
+        const execution = await executionRepo.findOne({
+          where: { executionId: step.executionId },
+          lock: { mode: 'pessimistic_write' },
         });
         if (!attempt || !receipt || !execution) {
           throw new ConflictException('incomplete_result_receipt');
@@ -463,34 +471,35 @@ export class ExecutionAttemptService {
 
         const result = receipt.result as Record<string, unknown>;
         const status = result.status;
+        const executionWasTerminal = [
+          ExecutionStatus.COMPLETED,
+          ExecutionStatus.FAILED,
+          ExecutionStatus.CANCELLED,
+        ].includes(execution.status);
         if (status === 'succeeded') {
           assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
           step.status = ExecutionStepStatus.COMPLETED;
           step.result = result.output ?? null;
-          execution.status = ExecutionStatus.RUNNING;
-          execution.phase = 'backend_finalization';
-          const output = result.output as Record<string, unknown> | undefined;
-          execution.result =
-            output && Object.prototype.hasOwnProperty.call(output, 'value')
-              ? output.value
-              : (output ?? null);
-          execution.error = null;
         } else if (status === 'cancelled') {
           assertStepTransition(step.status, ExecutionStepStatus.CANCELLED);
           step.status = ExecutionStepStatus.CANCELLED;
-          execution.status = ExecutionStatus.CANCELLED;
-          execution.phase = null;
-          execution.completedAt = new Date();
-          execution.completionReason = 'worker_cancelled';
+          if (!executionWasTerminal) {
+            execution.status = ExecutionStatus.CANCELLED;
+            execution.phase = null;
+            execution.completedAt = new Date();
+            execution.completionReason = 'worker_cancelled';
+          }
         } else {
           assertStepTransition(step.status, ExecutionStepStatus.FAILED);
           step.status = ExecutionStepStatus.FAILED;
           step.error = result.error as Record<string, unknown>;
-          execution.status = ExecutionStatus.FAILED;
-          execution.phase = null;
-          execution.error = result.error;
-          execution.completedAt = new Date();
-          execution.completionReason = 'worker_failed';
+          if (!executionWasTerminal) {
+            execution.status = ExecutionStatus.FAILED;
+            execution.phase = null;
+            execution.error = result.error;
+            execution.completedAt = new Date();
+            execution.completionReason = 'worker_failed';
+          }
         }
         assertAttemptTransition(
           attempt.status,
@@ -502,6 +511,29 @@ export class ExecutionAttemptService {
         step.version += 1;
         await attemptRepo.save(attempt);
         await stepRepo.save(step);
+        if (status === 'succeeded' && !executionWasTerminal) {
+          await releaseExecutionStepDependents(manager, step.stepId);
+          const remaining = await manager.query(
+            `
+              SELECT 1
+              FROM "execution_steps"
+              WHERE "execution_id" = $1
+                AND "status" NOT IN ('completed', 'failed', 'cancelled')
+              LIMIT 1
+            `,
+            [execution.executionId],
+          );
+          execution.status = ExecutionStatus.RUNNING;
+          execution.phase = remaining.length ? null : 'backend_finalization';
+          if (!remaining.length) {
+            const output = result.output as Record<string, unknown> | undefined;
+            execution.result =
+              output && Object.prototype.hasOwnProperty.call(output, 'value')
+                ? output.value
+                : (output ?? null);
+            execution.error = null;
+          }
+        }
         await executionRepo.save(execution);
         return true;
       });
@@ -581,6 +613,19 @@ export class ExecutionAttemptService {
     if (step.availableAt > now || (step.deadline && step.deadline <= now)) {
       throw new ConflictException('step_not_available');
     }
+    const executionRepo = manager.getRepository(ExecutionEntity);
+    const execution = await executionRepo.findOne({
+      where: { executionId: step.executionId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!execution) throw new NotFoundException('execution_not_found');
+    if (
+      ![ExecutionStatus.QUEUED, ExecutionStatus.RUNNING].includes(
+        execution.status,
+      )
+    ) {
+      throw new ConflictException('execution_not_active');
+    }
     await this.lockResourceKeys(manager, step.resourceKeys);
     if (await this.hasResourceConflict(manager, step)) {
       throw new ConflictException('resource_conflict');
@@ -609,6 +654,10 @@ export class ExecutionAttemptService {
     step.currentAttemptId = attempt.attemptId;
     step.version += 1;
     await manager.getRepository(ExecutionStepEntity).save(step);
+    if (execution.status === ExecutionStatus.QUEUED) {
+      execution.status = ExecutionStatus.RUNNING;
+      await executionRepo.save(execution);
+    }
     return attempt;
   }
 
