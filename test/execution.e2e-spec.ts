@@ -9,6 +9,7 @@ import { CreateExecutionOutbox1757668140400 } from '../migrations/1757668140400-
 import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140410-CreateExecutionOperations';
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
 import { AddExecutionStepContinuation1757668140430 } from '../migrations/1757668140430-AddExecutionStepContinuation';
+import { AddExecutionStepContinuationTarget1757668140440 } from '../migrations/1757668140440-AddExecutionStepContinuationTarget';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -96,6 +97,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionOperations1757668140410().up(runner);
     await new CreateExecutionToolPlans1757668140420().up(runner);
     await new AddExecutionStepContinuation1757668140430().up(runner);
+    await new AddExecutionStepContinuationTarget1757668140440().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -695,6 +697,63 @@ describe('execution PostgreSQL integration', () => {
         .getRepository(ExecutionStepEntity)
         .findOneByOrFail({ stepId: assignment!.stepId }),
     ).resolves.toMatchObject({ continuationProcessedAt: expect.any(Date) });
+
+    const runtime = new ExecutionToolRuntimeService(
+      attemptService,
+      new ExecutionContractValidator(),
+      {
+        globalSearch: async () => [
+          {
+            id: 23,
+            name: 'Harness plan',
+            score: 0.9,
+            collection: 'docs',
+          },
+        ],
+      },
+    );
+    await expect(runtime.executeReady()).resolves.toBe(1);
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    await expect(
+      agentLoopService.materializeReadyToolContinuations(),
+    ).resolves.toBe(1);
+
+    const source = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ stepId: assignment!.stepId });
+    expect(source.continuationStepId).toEqual(expect.any(String));
+    await expect(
+      dataSource
+        .getRepository(ExecutionStepEntity)
+        .findOneByOrFail({ stepId: source.continuationStepId! }),
+    ).resolves.toMatchObject({
+      status: ExecutionStepStatus.READY,
+      stepKind: ExecutionStepKind.INFERENCE,
+      budgetReservationId: null,
+      work: {
+        taskType: 'assistant-chat',
+        agentName: 'assistant',
+        payload: {
+          toolHistory: [
+            {
+              round: 1,
+              calls: [{ toolCallId, name: 'documents.search' }],
+              results: [
+                {
+                  toolCallId,
+                  status: 'succeeded',
+                  structuredContent: { count: 1 },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    await expect(
+      agentLoopService.materializeReadyToolContinuations(),
+    ).resolves.toBe(0);
+    await expect(agentLoopService.prepareReadyInferences()).resolves.toBe(1);
   });
 
   it('registers and authenticates an isolated Models identity', async () => {

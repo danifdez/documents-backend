@@ -89,6 +89,7 @@ export async function createExecutionStep(
     result: null,
     error: null,
     continuationProcessedAt: null,
+    continuationStepId: null,
   });
   await stepRepo.save(step);
   const operationRepo = manager.getRepository(ExecutionOperationEntity);

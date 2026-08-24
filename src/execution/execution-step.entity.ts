@@ -95,6 +95,9 @@ export class ExecutionStepEntity {
   })
   continuationProcessedAt: Date | null;
 
+  @Column({ name: 'continuation_step_id', type: 'uuid', nullable: true })
+  continuationStepId: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

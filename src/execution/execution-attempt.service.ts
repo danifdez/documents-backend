@@ -721,7 +721,10 @@ export class ExecutionAttemptService {
           execution.status = ExecutionStatus.RUNNING;
           execution.phase = remaining.length ? null : 'backend_finalization';
           if (!remaining.length) {
-            execution.result = executionStepOutputValue(result.output);
+            execution.result = executionStepOutputValue(
+              result.output,
+              execution.taskType,
+            );
             execution.error = null;
           }
         }

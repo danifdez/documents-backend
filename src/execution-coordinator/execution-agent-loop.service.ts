@@ -1,11 +1,15 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { canonicalHash } from '../execution/execution-canonical';
 import { ExecutionEventEntity } from '../execution/execution-event.entity';
 import { ExecutionResultReceiptEntity } from '../execution/execution-result-receipt.entity';
 import { ExecutionStepEntity } from '../execution/execution-step.entity';
+import { createExecutionStep } from '../execution/execution-step.service';
+import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { ExecutionStepStatus } from '../execution/execution-step-status.enum';
+import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity';
 import { ExecutionToolPlanService } from '../execution/execution-tool-plan.service';
+import { ToolResultContract } from '../execution/execution-tool.types';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionService } from '../execution/execution.service';
 
@@ -27,6 +31,12 @@ type ToolRequest = {
   toolCallId: string;
   name: string;
   arguments: Record<string, unknown>;
+};
+
+type ToolRound = {
+  round: number;
+  calls: ToolRequest[];
+  results: ToolResultContract[];
 };
 
 @Injectable()
@@ -88,6 +98,34 @@ export class ExecutionAgentLoopService {
     let materialized = 0;
     for (const row of rows) {
       materialized += await this.materializeToolBatch(String(row.step_id));
+    }
+    return materialized;
+  }
+
+  async materializeReadyToolContinuations(limit = 20): Promise<number> {
+    const rows = await this.dataSource.query(
+      `
+        SELECT step."step_id"
+        FROM "execution_steps" step
+        INNER JOIN "executions" execution
+          ON execution."execution_id" = step."execution_id"
+        WHERE step."status" = 'completed'
+          AND step."step_kind" = 'inference'
+          AND step."continuation_processed_at" IS NOT NULL
+          AND step."continuation_step_id" IS NULL
+          AND step."result" #>> '{outcome,kind}' = 'tool_requests'
+          AND execution."status" IN ('queued', 'running')
+          AND COALESCE(execution."phase", '') NOT LIKE 'terminal_pending_%'
+        ORDER BY step."updated_at"
+        LIMIT $1
+      `,
+      [limit],
+    );
+    let materialized = 0;
+    for (const row of rows) {
+      if (await this.materializeToolContinuation(String(row.step_id))) {
+        materialized += 1;
+      }
     }
     return materialized;
   }
@@ -258,5 +296,114 @@ export class ExecutionAgentLoopService {
       await manager.save(locked);
     });
     return materialized;
+  }
+
+  private async materializeToolContinuation(stepId: string): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      const stepRepo = manager.getRepository(ExecutionStepEntity);
+      const source = await stepRepo.findOne({
+        where: { stepId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!source || source.continuationStepId) return false;
+
+      const outcome = (source.result as Record<string, unknown> | null)
+        ?.outcome as Record<string, unknown> | undefined;
+      const calls = outcome?.calls as ToolRequest[] | undefined;
+      if (!Array.isArray(calls) || !calls.length) {
+        throw new ConflictException('invalid_tool_request_outcome');
+      }
+      const plans = await manager.getRepository(ExecutionToolPlanEntity).find({
+        where: { toolCallId: In(calls.map((call) => call.toolCallId)) },
+      });
+      const planByCall = new Map(plans.map((plan) => [plan.toolCallId, plan]));
+      const toolStepIds = calls.map(
+        (call) => planByCall.get(call.toolCallId)?.stepId ?? null,
+      );
+      if (toolStepIds.some((toolStepId) => !toolStepId)) return false;
+
+      const toolSteps = await stepRepo.find({
+        where: { stepId: In(toolStepIds as string[]) },
+      });
+      const toolStepById = new Map(
+        toolSteps.map((toolStep) => [toolStep.stepId, toolStep]),
+      );
+      const orderedToolSteps = (toolStepIds as string[]).map((toolStepId) =>
+        toolStepById.get(toolStepId),
+      );
+      if (
+        orderedToolSteps.some(
+          (toolStep) => toolStep?.status !== ExecutionStepStatus.COMPLETED,
+        )
+      ) {
+        return false;
+      }
+
+      const results = orderedToolSteps.map((toolStep) => {
+        const output = toolStep!.result as Record<string, unknown> | null;
+        const result = output?.toolResult as ToolResultContract | undefined;
+        if (!result) throw new ConflictException('tool_result_missing');
+        return result;
+      });
+      const execution = await manager.getRepository(ExecutionEntity).findOne({
+        where: { executionId: source.executionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!execution) throw new ConflictException('execution_not_found');
+      const sourceReservation =
+        execution.progressLedger?.operationBudget?.reservations[
+          source.operationId
+        ];
+      if (!sourceReservation) {
+        throw new ConflictException('tool_request_source_budget_missing');
+      }
+      const finish = await manager.getRepository(ExecutionEventEntity).findOne({
+        where: {
+          rootExecutionId: execution.rootExecutionId,
+          operationId: In(
+            orderedToolSteps.map((toolStep) => toolStep!.operationId),
+          ),
+          eventType: 'operation.finished',
+        },
+        order: { sequence: 'DESC' },
+      });
+      if (!finish) throw new ConflictException('tool_batch_finish_missing');
+
+      const work = source.work ?? {};
+      const payload =
+        work.payload && typeof work.payload === 'object'
+          ? (work.payload as Record<string, unknown>)
+          : {};
+      const history = Array.isArray(payload.toolHistory)
+        ? (payload.toolHistory as ToolRound[])
+        : [];
+      const continuation = await createExecutionStep(manager, {
+        executionId: execution.executionId,
+        stepKind: ExecutionStepKind.INFERENCE,
+        dependsOnStepIds: toolStepIds as string[],
+        inputArtifactRefs: source.inputArtifactRefs,
+        work: {
+          taskType: execution.taskType,
+          agentName:
+            execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
+          payload: {
+            ...payload,
+            toolHistory: [
+              ...history,
+              { round: sourceReservation.round, calls, results },
+            ],
+          },
+        },
+        requiredCapabilities: [execution.taskType],
+        priority: source.priority,
+        causedByEventId: finish.eventId,
+      });
+      source.continuationStepId = continuation.stepId;
+      await stepRepo.save(source);
+      execution.phase = null;
+      execution.result = null;
+      await manager.getRepository(ExecutionEntity).save(execution);
+      return true;
+    });
   }
 }

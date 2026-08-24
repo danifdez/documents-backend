@@ -38,6 +38,7 @@ export class ExecutionCoordinatorService {
     const processed =
       await this.executionAttemptService.processReceivedResults(limit);
     await this.agentLoop.materializeAcceptedToolRequests(limit);
+    await this.agentLoop.materializeReadyToolContinuations(limit);
     await this.executionService.finalizePendingTerminals(limit);
     return processed;
   }

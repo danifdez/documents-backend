@@ -47,6 +47,7 @@ describe('ExecutionCoordinatorService', () => {
     agentLoop = {
       prepareReadyInferences: jest.fn(),
       materializeAcceptedToolRequests: jest.fn().mockResolvedValue(0),
+      materializeReadyToolContinuations: jest.fn().mockResolvedValue(0),
     };
     service = new ExecutionCoordinatorService(
       executionService as any,
@@ -80,6 +81,7 @@ describe('ExecutionCoordinatorService', () => {
       3,
     );
     expect(agentLoop.materializeAcceptedToolRequests).toHaveBeenCalledWith(3);
+    expect(agentLoop.materializeReadyToolContinuations).toHaveBeenCalledWith(3);
     expect(executionService.finalizePendingTerminals).toHaveBeenCalledWith(3);
   });
 
