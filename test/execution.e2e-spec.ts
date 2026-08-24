@@ -4,6 +4,7 @@ import { DataSource, In } from 'typeorm';
 import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
 import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-AddExecutionProgress';
 import { CreateExecutionControlPlane1757668140370 } from '../migrations/1757668140370-CreateExecutionControlPlane';
+import { AddWorkerCredentials1757668140380 } from '../migrations/1757668140380-AddWorkerCredentials';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -15,11 +16,13 @@ import { ExecutionStepDependencyEntity } from '../src/execution/execution-step-d
 import { ExecutionStepEntity } from '../src/execution/execution-step.entity';
 import { ExecutionStepKind } from '../src/execution/execution-step-kind.enum';
 import { ExecutionPriority } from '../src/execution/execution-priority.enum';
+import { ExecutionStatus } from '../src/execution/execution-status.enum';
 import {
   contentHash,
   ExecutionService,
 } from '../src/execution/execution.service';
 import { WorkerEntity } from '../src/worker/worker.entity';
+import { WorkerService } from '../src/worker/worker.service';
 
 loadEnv({ path: '.env' });
 
@@ -28,6 +31,7 @@ describe('execution PostgreSQL integration', () => {
   let dataSource: DataSource;
   let service: ExecutionService;
   let attemptService: ExecutionAttemptService;
+  let workerService: WorkerService;
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -69,6 +73,7 @@ describe('execution PostgreSQL integration', () => {
         "metadata" jsonb
       )
     `);
+    await new AddWorkerCredentials1757668140380().up(runner);
     await runner.release();
 
     service = new ExecutionService(
@@ -79,7 +84,11 @@ describe('execution PostgreSQL integration', () => {
       { get: (_key: string, fallback?: unknown) => fallback } as any,
       new ExecutionContractValidator(),
     );
-    attemptService = new ExecutionAttemptService(dataSource);
+    attemptService = new ExecutionAttemptService(
+      dataSource,
+      new ExecutionContractValidator(),
+    );
+    workerService = new WorkerService(dataSource.getRepository(WorkerEntity));
   });
 
   afterAll(async () => {
@@ -175,6 +184,38 @@ describe('execution PostgreSQL integration', () => {
     });
   });
 
+  it('registers and authenticates an isolated Models identity', async () => {
+    const workerId = randomUUID();
+    const registration = await workerService.register(
+      workerId,
+      'models-e2e',
+      ['detect-language'],
+      { runtime: 'test' },
+    );
+
+    expect(registration.worker.id).toBe(workerId);
+    expect(registration.credential).not.toContain(workerId);
+    await expect(
+      workerService.authenticate(workerId, registration.credential),
+    ).resolves.toBeUndefined();
+    await expect(
+      workerService.authenticate(workerId, 'wrong-credential'),
+    ).rejects.toThrow('invalid_worker_credential');
+    const rotation = await workerService.register(
+      workerId,
+      'models-e2e',
+      [],
+      {},
+    );
+    expect(rotation.credential).not.toBe(registration.credential);
+    await expect(
+      workerService.authenticate(workerId, registration.credential),
+    ).rejects.toThrow('invalid_worker_credential');
+    await expect(
+      workerService.authenticate(workerId, rotation.credential),
+    ).resolves.toBeUndefined();
+  });
+
   it('serializes resource claims and acknowledges result retries', async () => {
     const resourceKey = `resource:${randomUUID()}`;
     const executions = await Promise.all(
@@ -220,13 +261,25 @@ describe('execution PostgreSQL integration', () => {
 
     const attempt = granted[0].value;
     await attemptService.startAttempt(attempt.attemptId, attempt.claimedBy);
-    const result = {
+    const resultEnvelope = {
+      schemaVersion: 'step-result/1',
       executionId: attempt.executionId,
       stepId: attempt.stepId,
       operationId: attempt.operationId,
       attemptId: attempt.attemptId,
+      stepKind: ExecutionStepKind.SERVICE,
+      status: 'succeeded',
+      output: { kind: 'service', value: { language: 'en' } },
+      artifactRefs: [],
+      error: null,
+    } as const;
+    const result = {
+      executionId: resultEnvelope.executionId,
+      stepId: resultEnvelope.stepId,
+      operationId: resultEnvelope.operationId,
+      attemptId: resultEnvelope.attemptId,
       workerId: attempt.claimedBy,
-      result: { kind: 'service', language: 'en' },
+      result: resultEnvelope,
     };
     await expect(attemptService.receiveResult(result)).resolves.toMatchObject({
       code: 'received',
@@ -235,6 +288,16 @@ describe('execution PostgreSQL integration', () => {
     await expect(attemptService.receiveResult(result)).resolves.toMatchObject({
       code: 'duplicate',
       receiptId: expect.any(String),
+    });
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    await expect(
+      dataSource.getRepository(ExecutionEntity).findOneByOrFail({
+        executionId: attempt.executionId,
+      }),
+    ).resolves.toMatchObject({
+      status: ExecutionStatus.RUNNING,
+      phase: 'backend_finalization',
+      result: { language: 'en' },
     });
   });
 

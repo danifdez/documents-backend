@@ -9,6 +9,8 @@ export class ExecutionContractValidator {
   private readonly eventValidator: ValidateFunction;
   private readonly artifactValidator: ValidateFunction;
   private readonly bundleValidator: ValidateFunction;
+  private readonly assignmentValidator: ValidateFunction;
+  private readonly resultValidator: ValidateFunction;
 
   constructor() {
     const root = this.resolveSchemaRoot();
@@ -26,10 +28,18 @@ export class ExecutionContractValidator {
     this.bundleValidator = ajv.getSchema(
       'https://documents.local/harness/v1/schemas/execution-bundle.schema.json',
     );
+    this.assignmentValidator = ajv.getSchema(
+      'https://documents.local/harness/v1/schemas/step-assignment.schema.json',
+    );
+    this.resultValidator = ajv.getSchema(
+      'https://documents.local/harness/v1/schemas/step-result.schema.json',
+    );
     if (
       !this.eventValidator ||
       !this.artifactValidator ||
-      !this.bundleValidator
+      !this.bundleValidator ||
+      !this.assignmentValidator ||
+      !this.resultValidator
     ) {
       throw new Error('Canonical execution v1 schemas are incomplete');
     }
@@ -45,6 +55,14 @@ export class ExecutionContractValidator {
 
   assertBundle(value: Record<string, unknown>): void {
     this.assert(this.bundleValidator, value, 'bundle');
+  }
+
+  assertStepAssignment(value: Record<string, unknown>): void {
+    this.assert(this.assignmentValidator, value, 'step assignment');
+  }
+
+  assertStepResult(value: Record<string, unknown>): void {
+    this.assert(this.resultValidator, value, 'step result');
   }
 
   private assert(

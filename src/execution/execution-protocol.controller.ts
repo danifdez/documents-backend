@@ -1,0 +1,104 @@
+import {
+  Body,
+  Controller,
+  Headers,
+  Param,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
+import { Public } from '../auth/decorators/public.decorator';
+import { WorkerService } from '../worker/worker.service';
+import {
+  ClaimExecutionStepDto,
+  ModelsWorkerHeartbeatDto,
+  ReceiveExecutionStepResultDto,
+  RegisterModelsWorkerDto,
+} from './dto/execution-protocol.dto';
+import { ExecutionAttemptService } from './execution-attempt.service';
+
+@Controller('models-work')
+@Public()
+export class ExecutionProtocolController {
+  constructor(
+    private readonly attempts: ExecutionAttemptService,
+    private readonly workers: WorkerService,
+    private readonly config: ConfigService,
+  ) {}
+
+  @Post('register')
+  async register(
+    @Headers('x-models-enrollment-token') enrollmentToken: string | undefined,
+    @Body() body: RegisterModelsWorkerDto,
+  ) {
+    this.assertEnrollmentToken(enrollmentToken);
+    const { worker, credential } = await this.workers.register(
+      body.workerId,
+      body.name,
+      body.capabilities,
+      body.metadata,
+    );
+    return { workerId: worker.id, credential };
+  }
+
+  @Post('heartbeat')
+  async heartbeat(
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+    @Body() body: ModelsWorkerHeartbeatDto,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    await this.workers.heartbeat(workerId, body.capabilities, body.metadata);
+    return { acknowledgedAt: new Date() };
+  }
+
+  @Post('claim')
+  async claim(
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+    @Body() body: ClaimExecutionStepDto,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    return this.attempts.claimReadyStep({ workerId, ...body });
+  }
+
+  @Post('attempts/:attemptId/start')
+  async start(
+    @Param('attemptId') attemptId: string,
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    return this.attempts.startAttempt(attemptId, workerId);
+  }
+
+  @Post('results')
+  async result(
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+    @Body() body: ReceiveExecutionStepResultDto,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    return this.attempts.receiveResult({
+      executionId: body.executionId,
+      stepId: body.stepId,
+      operationId: body.operationId,
+      attemptId: body.attemptId,
+      workerId,
+      result: body as unknown as Record<string, unknown>,
+    });
+  }
+
+  private assertEnrollmentToken(actual: string | undefined): void {
+    const expected = this.config.get<string>('MODELS_ENROLLMENT_TOKEN') ?? '';
+    if (!expected || !actual) {
+      throw new UnauthorizedException('invalid_models_enrollment_token');
+    }
+    const left = Buffer.from(actual);
+    const right = Buffer.from(expected);
+    if (left.length !== right.length || !timingSafeEqual(left, right)) {
+      throw new UnauthorizedException('invalid_models_enrollment_token');
+    }
+  }
+}

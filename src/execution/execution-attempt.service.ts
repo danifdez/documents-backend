@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In, LessThanOrEqual } from 'typeorm';
 import {
   ClaimExecutionStepInput,
   GrantExecutionStepAttemptInput,
@@ -23,6 +23,9 @@ import { ExecutionStepAttemptEntity } from './execution-step-attempt.entity';
 import { ExecutionStepDependencyEntity } from './execution-step-dependency.entity';
 import { ExecutionStepEntity } from './execution-step.entity';
 import { ExecutionStepStatus } from './execution-step-status.enum';
+import { ExecutionContractValidator } from './execution-contract-validator';
+import { ExecutionEntity } from './execution.entity';
+import { ExecutionStatus } from './execution-status.enum';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -49,7 +52,10 @@ function resultHash(result: Record<string, unknown>): string {
 
 @Injectable()
 export class ExecutionAttemptService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly contractValidator?: ExecutionContractValidator,
+  ) {}
 
   async grantAttempt(
     input: GrantExecutionStepAttemptInput,
@@ -101,7 +107,7 @@ export class ExecutionAttemptService {
       const dependencies = await manager
         .getRepository(ExecutionStepDependencyEntity)
         .findBy({ stepId: step.stepId });
-      return {
+      const assignment: StepAssignment = {
         schemaVersion: 'step-assignment/1',
         executionId: step.executionId,
         stepId: step.stepId,
@@ -114,11 +120,15 @@ export class ExecutionAttemptService {
         inputArtifactRefs: step.inputArtifactRefs,
         work: step.work,
         limits: { maxDurationMs: input.leaseDurationMs },
-        deadline:
-          step.deadline && step.deadline < attempt.leaseExpiresAt
-            ? step.deadline
-            : attempt.leaseExpiresAt,
+        deadline: (step.deadline && step.deadline < attempt.leaseExpiresAt
+          ? step.deadline
+          : attempt.leaseExpiresAt
+        ).toISOString(),
       };
+      this.contractValidator?.assertStepAssignment(
+        assignment as unknown as Record<string, unknown>,
+      );
+      return assignment;
     });
   }
 
@@ -188,9 +198,31 @@ export class ExecutionAttemptService {
     });
   }
 
+  async expireStaleAttempts(now = new Date()): Promise<number> {
+    const attempts = await this.dataSource
+      .getRepository(ExecutionStepAttemptEntity)
+      .find({
+        where: {
+          status: In([
+            ExecutionStepAttemptStatus.LEASED,
+            ExecutionStepAttemptStatus.RUNNING,
+          ]),
+          leaseExpiresAt: LessThanOrEqual(now),
+        },
+        order: { leaseExpiresAt: 'ASC' },
+        take: 100,
+      });
+    let expired = 0;
+    for (const attempt of attempts) {
+      if (await this.expireAttempt(attempt.attemptId, now)) expired += 1;
+    }
+    return expired;
+  }
+
   async receiveResult(
     input: ReceiveExecutionStepResultInput,
   ): Promise<StepResultReceiptAck> {
+    this.contractValidator?.assertStepResult(input.result);
     const hash = resultHash(input.result);
     const acknowledgedAt = new Date();
     const ack = (
@@ -234,7 +266,8 @@ export class ExecutionAttemptService {
         attempt.executionId === input.executionId &&
         attempt.stepId === input.stepId &&
         attempt.operationId === input.operationId &&
-        attempt.claimedBy === input.workerId;
+        attempt.claimedBy === input.workerId &&
+        input.result.stepKind === step?.stepKind;
       if (!identityMatches || !step) return ack('rejected');
       if (
         step.currentAttemptId !== attempt.attemptId ||
@@ -272,6 +305,91 @@ export class ExecutionAttemptService {
       await stepRepo.save(step);
       return ack('received', receipt.receiptId);
     });
+  }
+
+  async processReceivedResults(limit = 20): Promise<number> {
+    let processed = 0;
+    while (processed < limit) {
+      const found = await this.dataSource.transaction(async (manager) => {
+        const rows = await manager.query(`
+          SELECT "step_id"
+          FROM "execution_steps"
+          WHERE "status" = 'result_received'
+          ORDER BY "updated_at"
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        `);
+        if (!rows.length) return false;
+
+        const stepRepo = manager.getRepository(ExecutionStepEntity);
+        const step = await stepRepo.findOneBy({ stepId: rows[0].step_id });
+        if (!step?.currentAttemptId) return false;
+        const attemptRepo = manager.getRepository(ExecutionStepAttemptEntity);
+        const attempt = await attemptRepo.findOneBy({
+          attemptId: step.currentAttemptId,
+        });
+        const receipt = await manager
+          .getRepository(ExecutionResultReceiptEntity)
+          .findOne({
+            where: { attemptId: step.currentAttemptId },
+            order: { receivedAt: 'DESC' },
+          });
+        const executionRepo = manager.getRepository(ExecutionEntity);
+        const execution = await executionRepo.findOneBy({
+          executionId: step.executionId,
+        });
+        if (!attempt || !receipt || !execution) {
+          throw new ConflictException('incomplete_result_receipt');
+        }
+
+        const result = receipt.result as Record<string, unknown>;
+        const status = result.status;
+        if (status === 'succeeded') {
+          assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
+          step.status = ExecutionStepStatus.COMPLETED;
+          step.result = result.output ?? null;
+          execution.status = ExecutionStatus.RUNNING;
+          execution.phase = 'backend_finalization';
+          const output = result.output as Record<string, unknown> | undefined;
+          execution.result =
+            output && Object.prototype.hasOwnProperty.call(output, 'value')
+              ? output.value
+              : (output ?? null);
+          execution.error = null;
+        } else if (status === 'cancelled') {
+          assertStepTransition(step.status, ExecutionStepStatus.CANCELLED);
+          step.status = ExecutionStepStatus.CANCELLED;
+          execution.status = ExecutionStatus.CANCELLED;
+          execution.phase = null;
+          execution.completedAt = new Date();
+          execution.completionReason = 'worker_cancelled';
+        } else {
+          assertStepTransition(step.status, ExecutionStepStatus.FAILED);
+          step.status = ExecutionStepStatus.FAILED;
+          step.error = result.error as Record<string, unknown>;
+          execution.status = ExecutionStatus.FAILED;
+          execution.phase = null;
+          execution.error = result.error;
+          execution.completedAt = new Date();
+          execution.completionReason = 'worker_failed';
+        }
+        assertAttemptTransition(
+          attempt.status,
+          ExecutionStepAttemptStatus.CLOSED,
+        );
+        attempt.status = ExecutionStepAttemptStatus.CLOSED;
+        attempt.finishedAt = new Date();
+        attempt.finishReason = String(status);
+        step.version += 1;
+        await attemptRepo.save(attempt);
+        await stepRepo.save(step);
+        await executionRepo.save(execution);
+        return true;
+      });
+      if (!found) break;
+      processed += 1;
+    }
+    return processed;
   }
 
   private async lockCurrentAttempt(

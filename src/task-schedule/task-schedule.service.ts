@@ -6,6 +6,7 @@ import { ExecutionService } from 'src/execution/execution.service';
 import { ExecutionStatus } from 'src/execution/execution-status.enum';
 import { ExecutionProcessorFactory } from 'src/execution-processor/execution-processor.factory';
 import { WorkerService } from 'src/worker/worker.service';
+import { ExecutionAttemptService } from 'src/execution/execution-attempt.service';
 
 @Injectable()
 export class TaskScheduleService {
@@ -15,6 +16,7 @@ export class TaskScheduleService {
     private readonly executionService: ExecutionService,
     private readonly executionProcessorFactory: ExecutionProcessorFactory,
     private readonly workerService: WorkerService,
+    private readonly executionAttemptService: ExecutionAttemptService,
   ) {}
 
   private getCPUAndMemoryUsage() {
@@ -41,6 +43,7 @@ export class TaskScheduleService {
     waitForCompletion: true,
   })
   async handleCron() {
+    await this.executionAttemptService.processReceivedResults();
     const { cpuUsagePercent, memoryUsagePercent } = this.getCPUAndMemoryUsage();
 
     if (cpuUsagePercent > 80 || memoryUsagePercent > 80) {
@@ -106,11 +109,9 @@ export class TaskScheduleService {
   })
   async handleStaleRecovery() {
     try {
-      const thresholdDate = new Date(Date.now() - 60 * 1000);
-      const requeued =
-        await this.executionService.requeueStaleExecutions(thresholdDate);
-      if (requeued > 0) {
-        this.logger.log(`Requeued ${requeued} stale execution(s)`);
+      const expired = await this.executionAttemptService.expireStaleAttempts();
+      if (expired > 0) {
+        this.logger.log(`Expired ${expired} stale step attempt(s)`);
       }
       const offlined = await this.workerService.markStaleOffline(60);
       if (offlined > 0) {

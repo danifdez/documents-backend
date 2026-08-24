@@ -22,4 +22,13 @@ export class WorkerEntity {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata: any;
+
+  @Column({
+    name: 'credential_hash',
+    type: 'varchar',
+    length: 71,
+    nullable: true,
+    select: false,
+  })
+  credentialHash: string | null;
 }

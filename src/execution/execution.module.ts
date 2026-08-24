@@ -5,10 +5,12 @@ import { ExecutionService } from './execution.service';
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionStepService } from './execution-step.service';
 import { ExecutionAttemptService } from './execution-attempt.service';
+import { ExecutionProtocolController } from './execution-protocol.controller';
+import { WorkerModule } from '../worker/worker.module';
 
 @Module({
-  imports: [DatabaseModule],
-  controllers: [ExecutionController],
+  imports: [DatabaseModule, WorkerModule],
+  controllers: [ExecutionController, ExecutionProtocolController],
   providers: [
     ExecutionService,
     ExecutionContractValidator,

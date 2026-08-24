@@ -41,7 +41,7 @@ export interface StepAssignment {
   inputArtifactRefs: ExecutionArtifactRef[];
   work: Record<string, unknown>;
   limits: { maxDurationMs: number };
-  deadline: Date;
+  deadline: string;
 }
 
 export interface ReceiveExecutionStepResultInput {
