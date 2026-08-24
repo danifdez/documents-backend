@@ -3,6 +3,7 @@ import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { ExecutionService } from '../execution/execution.service';
 import { ResourceService } from '../resource/resource.service';
 import { extractTextFromHtml } from '../utils/text';
+import { buildSummarizeWorkflowSteps } from './summarize-workflow';
 
 @Injectable()
 export class ModelService {
@@ -53,18 +54,25 @@ export class ModelService {
     } else if (type === 'workspace-selection' && text) {
       content = text;
     }
+    if (!content) throw new Error('Summarization content is required');
+
+    const steps = buildSummarizeWorkflowSteps(
+      content,
+      targetLanguage,
+      sourceLanguage,
+    );
 
     const execution = await this.executionService.create(
       'summarize',
       ExecutionPriority.NORMAL,
       {
-        content: content,
         sourceLanguage: sourceLanguage,
         targetLanguage: targetLanguage,
         resourceId: resourceId,
         targetDocId: targetDocId,
         type: type || 'resource',
       },
+      { steps },
     );
     return { executionId: execution.executionId };
   }

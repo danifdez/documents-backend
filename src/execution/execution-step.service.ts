@@ -5,12 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { DataSource, EntityManager, In } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionStepDependencyEntity } from './execution-step-dependency.entity';
 import { ExecutionStepEntity } from './execution-step.entity';
 import { ExecutionStepStatus } from './execution-step-status.enum';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
+import { executionStepOutputValue } from './execution-step-result';
 
 export async function createExecutionStep(
   manager: EntityManager,
@@ -91,10 +92,8 @@ export async function releaseExecutionStepDependents(
 ): Promise<number> {
   const rows = await manager.query(
     `
-      UPDATE "execution_steps" candidate
-      SET "status" = 'ready',
-          "version" = candidate."version" + 1,
-          "updated_at" = now()
+      SELECT candidate."step_id"
+      FROM "execution_steps" candidate
       WHERE candidate."status" = 'blocked'
         AND EXISTS (
           SELECT 1
@@ -110,11 +109,67 @@ export async function releaseExecutionStepDependents(
           WHERE unresolved_dependency."step_id" = candidate."step_id"
             AND required_step."status" <> 'completed'
         )
-      RETURNING candidate."step_id"
+      ORDER BY candidate."created_at", candidate."step_id"
+      FOR UPDATE OF candidate
     `,
     [completedStepId],
   );
+  const stepRepo = manager.getRepository(ExecutionStepEntity);
+  for (const row of rows) {
+    const candidate = await stepRepo.findOneBy({ stepId: row.step_id });
+    if (!candidate) continue;
+    await materializeMapReduceInput(stepRepo, candidate);
+    candidate.status = ExecutionStepStatus.READY;
+    candidate.version += 1;
+    await stepRepo.save(candidate);
+  }
   return rows.length;
+}
+
+async function materializeMapReduceInput(
+  stepRepo: Repository<ExecutionStepEntity>,
+  candidate: ExecutionStepEntity,
+): Promise<void> {
+  const work = (candidate.work ?? {}) as Record<string, unknown>;
+  const coordination = work.coordination as Record<string, unknown> | undefined;
+  if (coordination?.kind !== 'map-reduce-reduce/1') return;
+
+  const mapStepIds = coordination.mapStepIds;
+  const resultKey = coordination.resultKey;
+  if (
+    !Array.isArray(mapStepIds) ||
+    !mapStepIds.length ||
+    mapStepIds.some((stepId) => typeof stepId !== 'string') ||
+    typeof resultKey !== 'string'
+  ) {
+    throw new ConflictException('invalid_map_reduce_coordination');
+  }
+
+  const mapSteps = await stepRepo.find({
+    where: { stepId: In(mapStepIds) },
+  });
+  const byId = new Map(mapSteps.map((step) => [step.stepId, step]));
+  const partials = mapStepIds.map((stepId) => {
+    const step = byId.get(stepId);
+    const value = executionStepOutputValue(step?.result) as
+      Record<string, unknown> | undefined;
+    const partial = value?.[resultKey];
+    if (
+      step?.status !== ExecutionStepStatus.COMPLETED ||
+      typeof partial !== 'string'
+    ) {
+      throw new ConflictException('invalid_map_reduce_dependency_result');
+    }
+    return partial;
+  });
+  const payload =
+    work.payload && typeof work.payload === 'object'
+      ? (work.payload as Record<string, unknown>)
+      : {};
+  candidate.work = {
+    ...work,
+    payload: { ...payload, partials },
+  };
 }
 
 @Injectable()

@@ -390,6 +390,7 @@ export class ExecutionService {
       ownerPrincipal?: string;
       workspaceId?: string;
       initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
+      steps?: Array<Omit<CreateExecutionStepInput, 'executionId'>>;
       inputArtifacts?: Array<{
         role: string;
         kind: string;
@@ -456,18 +457,28 @@ export class ExecutionService {
           return { role: input.role, artifactId };
         }),
       );
-      await createExecutionStep(manager, {
-        stepKind: ExecutionStepKind.SERVICE,
-        work: { taskType, payload },
-        requiredCapabilities: [taskType],
-        priority: STEP_PRIORITY[priority],
-        ...options?.initialStep,
-        inputArtifactRefs: [
-          ...inputArtifactRefs,
-          ...(options?.initialStep?.inputArtifactRefs ?? []),
-        ],
-        executionId,
-      });
+      if (options?.steps && !options.steps.length) {
+        throw new BadRequestException('Execution requires at least one step');
+      }
+      const steps = options?.steps ?? [
+        {
+          stepKind: ExecutionStepKind.SERVICE,
+          work: { taskType, payload },
+          requiredCapabilities: [taskType],
+          priority: STEP_PRIORITY[priority],
+          ...options?.initialStep,
+        },
+      ];
+      for (const [index, step] of steps.entries()) {
+        await createExecutionStep(manager, {
+          ...step,
+          inputArtifactRefs: [
+            ...(index === 0 ? inputArtifactRefs : []),
+            ...(step.inputArtifactRefs ?? []),
+          ],
+          executionId,
+        });
+      }
       const executionEvent = await this.appendBackendEvent(
         manager,
         execution,

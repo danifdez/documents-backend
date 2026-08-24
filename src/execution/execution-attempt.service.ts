@@ -28,6 +28,7 @@ import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionStatus } from './execution-status.enum';
 import { releaseExecutionStepDependents } from './execution-step.service';
+import { executionStepOutputValue } from './execution-step-result';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -526,11 +527,7 @@ export class ExecutionAttemptService {
           execution.status = ExecutionStatus.RUNNING;
           execution.phase = remaining.length ? null : 'backend_finalization';
           if (!remaining.length) {
-            const output = result.output as Record<string, unknown> | undefined;
-            execution.result =
-              output && Object.prototype.hasOwnProperty.call(output, 'value')
-                ? output.value
-                : (output ?? null);
+            execution.result = executionStepOutputValue(result.output);
             execution.error = null;
           }
         }

@@ -44,6 +44,7 @@ describe('execution PostgreSQL integration', () => {
       password: process.env.POSTGRES_PASSWORD,
       database: process.env.POSTGRES_DB,
       schema,
+      extra: { options: `-c search_path=${schema}` },
       synchronize: false,
       entities: [
         ExecutionEntity,
@@ -372,6 +373,167 @@ describe('execution PostgreSQL integration', () => {
       status: ExecutionStatus.RUNNING,
       phase: 'backend_finalization',
       result: { language: 'en' },
+    });
+  });
+
+  it('runs summarize fan-out and fan-in on the canonical step graph', async () => {
+    const firstMapId = randomUUID();
+    const secondMapId = randomUUID();
+    const created = await service.create(
+      'summarize',
+      ExecutionPriority.NORMAL,
+      { targetLanguage: 'en' },
+      {
+        steps: [
+          {
+            stepId: firstMapId,
+            stepKind: ExecutionStepKind.INFERENCE,
+            work: {
+              taskType: 'summarize-map',
+              payload: { content: 'first', chunkIndex: 0 },
+            },
+            requiredCapabilities: ['summarize-map'],
+          },
+          {
+            stepId: secondMapId,
+            stepKind: ExecutionStepKind.INFERENCE,
+            work: {
+              taskType: 'summarize-map',
+              payload: { content: 'second', chunkIndex: 1 },
+            },
+            requiredCapabilities: ['summarize-map'],
+          },
+          {
+            stepKind: ExecutionStepKind.INFERENCE,
+            dependsOnStepIds: [firstMapId, secondMapId],
+            work: {
+              taskType: 'summarize-reduce',
+              payload: { targetLanguage: 'en' },
+              coordination: {
+                kind: 'map-reduce-reduce/1',
+                mapStepIds: [firstMapId, secondMapId],
+                resultKey: 'response',
+              },
+            },
+            requiredCapabilities: ['summarize-reduce'],
+          },
+        ],
+      },
+    );
+    const workerId = randomUUID();
+    const inferenceMetadata = {
+      usage: {
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+      },
+      inference: {
+        effectiveModel: 'e2e-model',
+        effectiveAdapter: null,
+        finishReason: 'completed',
+        inferenceMs: 1,
+        cacheOutcome: 'unknown',
+        warnings: [],
+      },
+    };
+    const assignments = await Promise.all([
+      attemptService.claimReadyStep({
+        workerId,
+        stepKinds: [ExecutionStepKind.INFERENCE],
+        capabilities: ['summarize-map'],
+        leaseDurationMs: 30_000,
+      }),
+      attemptService.claimReadyStep({
+        workerId,
+        stepKinds: [ExecutionStepKind.INFERENCE],
+        capabilities: ['summarize-map'],
+        leaseDurationMs: 30_000,
+      }),
+    ]);
+    expect(assignments.every(Boolean)).toBe(true);
+
+    for (const assignment of assignments.reverse()) {
+      await attemptService.startAttempt(assignment!.attemptId, workerId);
+      const chunkIndex = Number(
+        (assignment!.work.payload as Record<string, unknown>).chunkIndex,
+      );
+      await attemptService.receiveResult({
+        executionId: assignment!.executionId,
+        stepId: assignment!.stepId,
+        operationId: assignment!.operationId,
+        attemptId: assignment!.attemptId,
+        workerId,
+        result: {
+          schemaVersion: 'step-result/1',
+          executionId: assignment!.executionId,
+          stepId: assignment!.stepId,
+          operationId: assignment!.operationId,
+          attemptId: assignment!.attemptId,
+          stepKind: ExecutionStepKind.INFERENCE,
+          status: 'succeeded',
+          output: {
+            kind: ExecutionStepKind.INFERENCE,
+            outcome: {
+              kind: 'structured_result',
+              schemaId: 'summarize-map-output/1',
+              value: { response: chunkIndex === 0 ? 'first' : 'second' },
+            },
+          },
+          ...inferenceMetadata,
+          artifactRefs: [],
+          error: null,
+        },
+      });
+    }
+    await expect(attemptService.processReceivedResults()).resolves.toBe(2);
+
+    const reduceAssignment = await attemptService.claimReadyStep({
+      workerId,
+      stepKinds: [ExecutionStepKind.INFERENCE],
+      capabilities: ['summarize-reduce'],
+      leaseDurationMs: 30_000,
+    });
+    expect(reduceAssignment?.work).toMatchObject({
+      taskType: 'summarize-reduce',
+      payload: { partials: ['first', 'second'] },
+    });
+    await attemptService.startAttempt(reduceAssignment!.attemptId, workerId);
+    await attemptService.receiveResult({
+      executionId: reduceAssignment!.executionId,
+      stepId: reduceAssignment!.stepId,
+      operationId: reduceAssignment!.operationId,
+      attemptId: reduceAssignment!.attemptId,
+      workerId,
+      result: {
+        schemaVersion: 'step-result/1',
+        executionId: reduceAssignment!.executionId,
+        stepId: reduceAssignment!.stepId,
+        operationId: reduceAssignment!.operationId,
+        attemptId: reduceAssignment!.attemptId,
+        stepKind: ExecutionStepKind.INFERENCE,
+        status: 'succeeded',
+        output: {
+          kind: ExecutionStepKind.INFERENCE,
+          outcome: {
+            kind: 'structured_result',
+            schemaId: 'summarize-reduce-output/1',
+            value: { response: 'merged' },
+          },
+        },
+        ...inferenceMetadata,
+        artifactRefs: [],
+        error: null,
+      },
+    });
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    await expect(
+      dataSource.getRepository(ExecutionEntity).findOneByOrFail({
+        executionId: created.executionId,
+      }),
+    ).resolves.toMatchObject({
+      status: ExecutionStatus.RUNNING,
+      phase: 'backend_finalization',
+      result: { response: 'merged' },
     });
   });
 

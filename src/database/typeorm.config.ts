@@ -43,6 +43,10 @@ import { AppStateEntity } from '../app-state/app-state.entity';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionEventEntity } from '../execution/execution-event.entity';
 import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
+import { ExecutionResultReceiptEntity } from '../execution/execution-result-receipt.entity';
+import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
+import { ExecutionStepDependencyEntity } from '../execution/execution-step-dependency.entity';
+import { ExecutionStepEntity } from '../execution/execution-step.entity';
 
 export const getTypeOrmConfig = async (
   configService: ConfigService,
@@ -98,6 +102,10 @@ export const getTypeOrmConfig = async (
       AppStateEntity,
       ExecutionEventEntity,
       ExecutionArtifactEntity,
+      ExecutionStepEntity,
+      ExecutionStepDependencyEntity,
+      ExecutionStepAttemptEntity,
+      ExecutionResultReceiptEntity,
     ],
     synchronize: false,
     // Apply pending migrations on every boot so that updates ship their schema

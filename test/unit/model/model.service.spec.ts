@@ -1,4 +1,5 @@
 import { ModelService } from '../../../src/model/model.service';
+import { buildSummarizeWorkflowSteps } from '../../../src/model/summarize-workflow';
 
 describe('ModelService execution identities', () => {
   const executionIds = {
@@ -32,18 +33,6 @@ describe('ModelService execution identities', () => {
   });
 
   it.each([
-    [
-      'summarize',
-      () =>
-        service.summarize(
-          'en',
-          undefined,
-          undefined,
-          'Hola',
-          'es',
-          'workspace-selection',
-        ),
-    ],
     ['translate', () => service.translate(7, 'en')],
     ['entity-extraction', () => service.extractEntities(7)],
     ['key-point', () => service.keyPoints(7, 'en')],
@@ -56,6 +45,62 @@ describe('ModelService execution identities', () => {
       taskType,
       expect.any(String),
       expect.any(Object),
+    );
+  });
+
+  it('creates summarize as a durable map-reduce step graph', async () => {
+    await expect(
+      service.summarize(
+        'en',
+        undefined,
+        undefined,
+        'Hola',
+        'es',
+        'workspace-selection',
+      ),
+    ).resolves.toEqual({ executionId: executionIds.summarize });
+
+    expect(executionService.create).toHaveBeenCalledWith(
+      'summarize',
+      expect.any(String),
+      expect.objectContaining({
+        targetLanguage: 'en',
+        sourceLanguage: 'es',
+      }),
+      {
+        steps: [
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['summarize-map'],
+          }),
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['summarize-reduce'],
+          }),
+        ],
+      },
+    );
+  });
+
+  it('fans long summaries out into parallel map steps and one reduce', () => {
+    const content = Array.from(
+      { length: 1_501 },
+      (_, index) => `word-${index}`,
+    ).join(' ');
+
+    const steps = buildSummarizeWorkflowSteps(content, 'en', 'es');
+
+    expect(steps).toHaveLength(3);
+    expect(steps.slice(0, 2)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ requiredCapabilities: ['summarize-map'] }),
+      ]),
+    );
+    expect(steps[2]).toEqual(
+      expect.objectContaining({
+        dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
+        requiredCapabilities: ['summarize-reduce'],
+      }),
     );
   });
 });

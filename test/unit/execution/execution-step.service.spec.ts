@@ -9,6 +9,7 @@ import { ExecutionEntity } from '../../../src/execution/execution.entity';
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
 const DEPENDENCY_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
+const SECOND_DEPENDENCY_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca704';
 
 describe('ExecutionStepService', () => {
   let service: ExecutionStepService;
@@ -23,6 +24,7 @@ describe('ExecutionStepService', () => {
     };
     stepRepo = {
       find: jest.fn().mockResolvedValue([]),
+      findOneBy: jest.fn(),
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
     };
@@ -133,11 +135,73 @@ describe('ExecutionStepService', () => {
 
   it('releases every blocked dependent whose requirements completed', async () => {
     manager.query.mockResolvedValue([{ step_id: STEP_ID }]);
+    stepRepo.findOneBy.mockResolvedValue({
+      stepId: STEP_ID,
+      status: ExecutionStepStatus.BLOCKED,
+      version: 1,
+      work: { taskType: 'next-step' },
+    });
 
     await expect(service.releaseDependents(DEPENDENCY_ID)).resolves.toBe(1);
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining('required_step."status" <> \'completed\''),
       [DEPENDENCY_ID],
     );
+    expect(stepRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: ExecutionStepStatus.READY,
+        version: 2,
+      }),
+    );
+  });
+
+  it('materializes map results in declared order before releasing reduce', async () => {
+    const reduce = {
+      stepId: STEP_ID,
+      status: ExecutionStepStatus.BLOCKED,
+      version: 1,
+      work: {
+        taskType: 'summarize-reduce',
+        payload: { targetLanguage: 'en' },
+        coordination: {
+          kind: 'map-reduce-reduce/1',
+          mapStepIds: [DEPENDENCY_ID, SECOND_DEPENDENCY_ID],
+          resultKey: 'response',
+        },
+      },
+    };
+    manager.query.mockResolvedValue([{ step_id: STEP_ID }]);
+    stepRepo.findOneBy.mockResolvedValue(reduce);
+    stepRepo.find.mockResolvedValue([
+      {
+        stepId: SECOND_DEPENDENCY_ID,
+        status: ExecutionStepStatus.COMPLETED,
+        result: {
+          kind: 'inference',
+          outcome: {
+            kind: 'structured_result',
+            value: { response: 'second' },
+          },
+        },
+      },
+      {
+        stepId: DEPENDENCY_ID,
+        status: ExecutionStepStatus.COMPLETED,
+        result: {
+          kind: 'inference',
+          outcome: {
+            kind: 'structured_result',
+            value: { response: 'first' },
+          },
+        },
+      },
+    ]);
+
+    await expect(service.releaseDependents(DEPENDENCY_ID)).resolves.toBe(1);
+    expect(reduce.work.payload).toEqual({
+      targetLanguage: 'en',
+      partials: ['first', 'second'],
+    });
+    expect(reduce.status).toBe(ExecutionStepStatus.READY);
   });
 });

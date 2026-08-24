@@ -260,7 +260,12 @@ describe('ExecutionAttemptService', () => {
       .mockResolvedValueOnce([{ step_id: 'dependent-step' }])
       .mockResolvedValueOnce([{ pending: 1 }])
       .mockResolvedValueOnce([]);
-    stepRepo.findOneBy.mockResolvedValue(step);
+    stepRepo.findOneBy.mockResolvedValueOnce(step).mockResolvedValueOnce({
+      stepId: 'dependent-step',
+      status: ExecutionStepStatus.BLOCKED,
+      version: 1,
+      work: { taskType: 'next-step' },
+    });
     attemptRepo.findOneBy.mockResolvedValue(attempt);
     receiptRepo.findOne.mockResolvedValue({
       result: { status: 'succeeded', output: { value: 42 } },
