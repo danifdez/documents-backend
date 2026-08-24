@@ -7,6 +7,7 @@ import { CreateExecutionControlPlane1757668140370 } from '../migrations/17576681
 import { AddWorkerCredentials1757668140380 } from '../migrations/1757668140380-AddWorkerCredentials';
 import { CreateExecutionOutbox1757668140400 } from '../migrations/1757668140400-CreateExecutionOutbox';
 import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140410-CreateExecutionOperations';
+import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -30,6 +31,9 @@ import { WorkerService } from '../src/worker/worker.service';
 import { ExecutionOutboxEntity } from '../src/execution-outbox/execution-outbox.entity';
 import { ExecutionOperationEntity } from '../src/execution/execution-operation.entity';
 import { ExecutionOperationStatus } from '../src/execution/execution-operation-status.enum';
+import { ExecutionToolInvocationEntity } from '../src/execution/execution-tool-invocation.entity';
+import { ExecutionToolPlanEntity } from '../src/execution/execution-tool-plan.entity';
+import { ExecutionToolPlanService } from '../src/execution/execution-tool-plan.service';
 
 loadEnv({ path: '.env' });
 
@@ -39,6 +43,7 @@ describe('execution PostgreSQL integration', () => {
   let service: ExecutionService;
   let attemptService: ExecutionAttemptService;
   let workerService: WorkerService;
+  let toolPlanService: ExecutionToolPlanService;
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -61,6 +66,8 @@ describe('execution PostgreSQL integration', () => {
         ExecutionResultReceiptEntity,
         ExecutionOutboxEntity,
         ExecutionOperationEntity,
+        ExecutionToolInvocationEntity,
+        ExecutionToolPlanEntity,
         WorkerEntity,
       ],
     });
@@ -74,6 +81,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionControlPlane1757668140370().up(runner);
     await new CreateExecutionOutbox1757668140400().up(runner);
     await new CreateExecutionOperations1757668140410().up(runner);
+    await new CreateExecutionToolPlans1757668140420().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -101,6 +109,10 @@ describe('execution PostgreSQL integration', () => {
       new ExecutionContractValidator(),
     );
     workerService = new WorkerService(dataSource.getRepository(WorkerEntity));
+    toolPlanService = new ExecutionToolPlanService(
+      dataSource,
+      new ExecutionContractValidator(),
+    );
   });
 
   afterAll(async () => {
@@ -306,6 +318,61 @@ describe('execution PostgreSQL integration', () => {
       socketEvent: 'askResponse',
       payload: { response: 'done', requestId: 'request-1' },
       status: 'pending',
+    });
+  });
+
+  it('prepares a durable tool plan without creating executable work', async () => {
+    const created = await service.create(
+      'tool-plan-test',
+      ExecutionPriority.NORMAL,
+      {},
+    );
+    const stepsBefore = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .countBy({ executionId: created.executionId });
+    const toolCallId = randomUUID();
+    const request = {
+      schemaVersion: 'tool-invocation/1' as const,
+      toolCallId,
+      name: 'documents.search',
+      arguments: { query: '  harness  ', limit: 5 },
+      requester: {
+        kind: 'deterministic' as const,
+        component: 'documents-backend',
+      },
+      executionContext: {
+        executionId: created.executionId,
+        causedByEventId: created.lastEventId!,
+        phase: 'tool',
+        dataClassification: 'workspace' as const,
+      },
+    };
+
+    const prepared = await toolPlanService.prepare(request);
+    const repeated = await toolPlanService.prepare(request);
+
+    expect(prepared.duplicate).toBe(false);
+    expect(repeated).toMatchObject({
+      duplicate: true,
+      plan: { operationId: prepared.plan.operationId, stepId: null },
+    });
+    await expect(
+      dataSource.getRepository(ExecutionStepEntity).countBy({
+        executionId: created.executionId,
+      }),
+    ).resolves.toBe(stepsBefore);
+    await expect(
+      dataSource.getRepository(ExecutionToolPlanEntity).findOneByOrFail({
+        toolCallId,
+      }),
+    ).resolves.toMatchObject({
+      operationId: prepared.plan.operationId,
+      schemaVersion: 'tool-plan/1',
+      stepId: null,
+      plan: {
+        normalizedArguments: { query: 'harness', limit: 5 },
+        policyDecision: { decision: 'allowed', rule: 'workspace_read' },
+      },
     });
   });
 

@@ -11,6 +11,9 @@ export class ExecutionContractValidator {
   private readonly bundleValidator: ValidateFunction;
   private readonly assignmentValidator: ValidateFunction;
   private readonly resultValidator: ValidateFunction;
+  private readonly toolInvocationValidator: ValidateFunction;
+  private readonly toolPlanValidator: ValidateFunction;
+  private readonly toolResultValidator: ValidateFunction;
 
   constructor() {
     const root = this.resolveSchemaRoot();
@@ -34,12 +37,24 @@ export class ExecutionContractValidator {
     this.resultValidator = ajv.getSchema(
       'https://documents.local/harness/v1/schemas/step-result.schema.json',
     );
+    this.toolInvocationValidator = ajv.getSchema(
+      'https://documents.local/harness/v1/schemas/tool-invocation.schema.json',
+    );
+    this.toolPlanValidator = ajv.getSchema(
+      'https://documents.local/harness/v1/schemas/tool-plan.schema.json',
+    );
+    this.toolResultValidator = ajv.getSchema(
+      'https://documents.local/harness/v1/schemas/tool-result.schema.json',
+    );
     if (
       !this.eventValidator ||
       !this.artifactValidator ||
       !this.bundleValidator ||
       !this.assignmentValidator ||
-      !this.resultValidator
+      !this.resultValidator ||
+      !this.toolInvocationValidator ||
+      !this.toolPlanValidator ||
+      !this.toolResultValidator
     ) {
       throw new Error('Canonical execution v1 schemas are incomplete');
     }
@@ -63,6 +78,18 @@ export class ExecutionContractValidator {
 
   assertStepResult(value: Record<string, unknown>): void {
     this.assert(this.resultValidator, value, 'step result');
+  }
+
+  assertToolInvocation(value: Record<string, unknown>): void {
+    this.assert(this.toolInvocationValidator, value, 'tool invocation');
+  }
+
+  assertToolPlan(value: Record<string, unknown>): void {
+    this.assert(this.toolPlanValidator, value, 'tool plan');
+  }
+
+  assertToolResult(value: Record<string, unknown>): void {
+    this.assert(this.toolResultValidator, value, 'tool result');
   }
 
   private assert(

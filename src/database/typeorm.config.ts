@@ -49,6 +49,8 @@ import { ExecutionStepDependencyEntity } from '../execution/execution-step-depen
 import { ExecutionStepEntity } from '../execution/execution-step.entity';
 import { ExecutionOutboxEntity } from '../execution-outbox/execution-outbox.entity';
 import { ExecutionOperationEntity } from '../execution/execution-operation.entity';
+import { ExecutionToolInvocationEntity } from '../execution/execution-tool-invocation.entity';
+import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity';
 
 export const getTypeOrmConfig = async (
   configService: ConfigService,
@@ -110,6 +112,8 @@ export const getTypeOrmConfig = async (
       ExecutionResultReceiptEntity,
       ExecutionOutboxEntity,
       ExecutionOperationEntity,
+      ExecutionToolInvocationEntity,
+      ExecutionToolPlanEntity,
     ],
     synchronize: false,
     // Apply pending migrations on every boot so that updates ship their schema

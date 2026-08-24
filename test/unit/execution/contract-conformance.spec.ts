@@ -202,6 +202,9 @@ function validateProtocolFixture(ajv: Ajv2020, fixture: any): string | null {
   const assignment = schema('step-assignment.schema.json');
   const result = schema('step-result.schema.json');
   const ack = schema('step-result-ack.schema.json');
+  const toolInvocation = schema('tool-invocation.schema.json');
+  const toolPlan = schema('tool-plan.schema.json');
+  const toolResult = schema('tool-result.schema.json');
   if (!execution || !step || !attempt || !assignment || !result || !ack)
     return 'invalid_contract';
 
@@ -225,6 +228,19 @@ function validateProtocolFixture(ajv: Ajv2020, fixture: any): string | null {
     step.operationId !== assignment.operationId ||
     step.stepKind !== assignment.stepKind ||
     result.stepKind !== assignment.stepKind
+  )
+    return 'invalid_protocol_identity';
+
+  const toolRecords = [toolInvocation, toolPlan, toolResult];
+  if (toolRecords.some(Boolean) && !toolRecords.every(Boolean))
+    return 'invalid_contract';
+  if (
+    toolInvocation &&
+    (toolInvocation.executionContext.executionId !== execution.executionId ||
+      toolInvocation.toolCallId !== toolPlan.toolCallId ||
+      toolPlan.toolCallId !== toolResult.toolCallId ||
+      toolPlan.operationId !== toolResult.operationId ||
+      toolInvocation.name !== toolPlan.toolName)
   )
     return 'invalid_protocol_identity';
 
