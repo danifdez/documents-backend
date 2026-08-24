@@ -11,6 +11,7 @@ const fixturesRoot = resolve(
   __dirname,
   '../../contracts/execution/v1/fixtures',
 );
+const protocolFixturesRoot = join(fixturesRoot, 'protocol');
 
 const readJson = (path: string): any => JSON.parse(readFileSync(path, 'utf8'));
 const sha256 = (value: Buffer | string) =>
@@ -177,6 +178,59 @@ function assertInvariants(
   expect(manifestHash).toBe(canonicalHash(withoutManifestHash));
 }
 
+function validateProtocolFixture(ajv: Ajv2020, fixture: any): string | null {
+  const records = new Map<string, any>();
+  for (const record of fixture.records ?? []) {
+    const validateRecord = ajv.getSchema(record.schemaId);
+    if (!validateRecord || !validateRecord(record.instance)) {
+      const unsupportedVersion = validateRecord?.errors?.some(
+        (error) =>
+          error.instancePath === '/schemaVersion' && error.keyword === 'const',
+      );
+      return unsupportedVersion
+        ? 'unsupported_schema_version'
+        : 'invalid_contract';
+    }
+    records.set(record.schemaId, record.instance);
+  }
+
+  const schema = (name: string) =>
+    records.get(`https://documents.local/harness/v1/schemas/${name}`);
+  const execution = schema('execution.schema.json');
+  const step = schema('step.schema.json');
+  const attempt = schema('step-attempt.schema.json');
+  const assignment = schema('step-assignment.schema.json');
+  const result = schema('step-result.schema.json');
+  const ack = schema('step-result-ack.schema.json');
+  if (!execution || !step || !attempt || !assignment || !result || !ack)
+    return 'invalid_contract';
+
+  if (
+    (!execution.parentExecutionId &&
+      execution.rootExecutionId !== execution.executionId) ||
+    step.executionId !== execution.executionId ||
+    step.currentAttemptId !== attempt.attemptId
+  )
+    return 'invalid_protocol_identity';
+
+  const identityFields = ['executionId', 'stepId', 'operationId', 'attemptId'];
+  for (const field of identityFields) {
+    const expected = assignment[field];
+    for (const record of [attempt, result, ack]) {
+      if (record[field] !== expected) return 'invalid_protocol_identity';
+    }
+  }
+  if (
+    step.stepId !== assignment.stepId ||
+    step.operationId !== assignment.operationId ||
+    step.stepKind !== assignment.stepKind ||
+    result.stepKind !== assignment.stepKind
+  )
+    return 'invalid_protocol_identity';
+
+  return null;
+}
+
 describe('execution v1 contract', () => {
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   addFormats(ajv);
@@ -220,6 +274,27 @@ describe('execution v1 contract', () => {
 
   it('keeps the runtime adapter pinned to the copied schema set', () => {
     expect(contractHash).toBe(EXECUTION_CONTRACT_SET_HASH);
+  });
+
+  it.each(
+    readdirSync(join(protocolFixturesRoot, 'valid'))
+      .sort()
+      .map((name) => [name]),
+  )('accepts shared step protocol fixture %s', (name) => {
+    const fixture = readJson(join(protocolFixturesRoot, 'valid', name));
+    expect(validateProtocolFixture(ajv, fixture)).toBeNull();
+  });
+
+  it.each(
+    readdirSync(join(protocolFixturesRoot, 'invalid'))
+      .sort()
+      .map((name) => [name]),
+  )('rejects shared step protocol fixture %s with its stable code', (name) => {
+    const path = join(protocolFixturesRoot, 'invalid', name);
+    const fixture = readJson(path);
+    const base = resolve(protocolFixturesRoot, 'invalid', fixture.base);
+    const value = applyMutations(readJson(base), fixture.mutations);
+    expect(validateProtocolFixture(ajv, value)).toBe(fixture.expectedError);
   });
 
   it('accepts only bounded leaf summaries on successful tool operations', () => {

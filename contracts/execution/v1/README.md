@@ -1,7 +1,8 @@
 # Canonical execution contract v1
 
-This directory contains the backend's pinned copy of the language-neutral
-contract for durable executions.
+This directory is the canonical source of the language-neutral contract for
+durable executions. Consumers keep pinned copies generated from this source;
+contract schemas must not be edited in those copies.
 
 ## Layout
 
@@ -33,6 +34,19 @@ Run the backend conformance suite:
 ```bash
 npm test -- --runInBand test/unit/execution/contract-conformance.spec.ts
 ```
+
+Verify the manifest after an edit, then regenerate hashes and synchronize the
+Models copy from the Documents monorepo:
+
+```bash
+npm run contracts:check
+npm run contracts:sync:models
+npm run contracts:check:models
+```
+
+The sync command updates only the contract schemas, manifest, and shared
+fixtures. Additional consumers require an explicit target with the same pinned
+contract layout.
 
 Unknown optional fields are accepted. Unknown schema versions and unknown
 `payloadSchema` values are rejected explicitly.
