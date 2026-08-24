@@ -33,5 +33,6 @@ import { ProjectModule } from 'src/project/project.module';
   ],
   controllers: [SearchController],
   providers: [SearchService],
+  exports: [SearchService],
 })
-export class SearchModule { }
+export class SearchModule {}

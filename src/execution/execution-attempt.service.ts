@@ -32,6 +32,9 @@ import { ExecutionOperationStatus } from './execution-operation-status.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { releaseExecutionStepDependents } from './execution-step.service';
 import { executionStepOutputValue } from './execution-step-result';
+import { ExecutionStepKind } from './execution-step-kind.enum';
+import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
+import { ToolResultContract } from './execution-tool.types';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -54,6 +57,38 @@ function canonicalValue(value: unknown): unknown {
 function resultHash(result: Record<string, unknown>): string {
   const canonical = JSON.stringify(canonicalValue(result));
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
+}
+
+function toolResultFromStepResult(
+  result: Record<string, unknown>,
+): ToolResultContract | null {
+  if (result.stepKind !== ExecutionStepKind.TOOL) return null;
+  const output = result.output as Record<string, unknown> | undefined;
+  return (output?.toolResult as ToolResultContract | undefined) ?? null;
+}
+
+function expectedStepResultStatus(
+  toolStatus: ToolResultContract['status'],
+): 'succeeded' | 'failed' | 'cancelled' {
+  if (toolStatus === 'succeeded') return 'succeeded';
+  if (toolStatus === 'cancelled') return 'cancelled';
+  return 'failed';
+}
+
+function operationStatusForToolResult(
+  toolStatus: ToolResultContract['status'],
+): ExecutionOperationStatus {
+  const statuses: Record<
+    ToolResultContract['status'],
+    ExecutionOperationStatus
+  > = {
+    succeeded: ExecutionOperationStatus.SUCCEEDED,
+    failed: ExecutionOperationStatus.FAILED,
+    cancelled: ExecutionOperationStatus.CANCELLED,
+    unknown: ExecutionOperationStatus.UNKNOWN,
+    not_executed: ExecutionOperationStatus.NOT_EXECUTED,
+  };
+  return statuses[toolStatus];
 }
 
 @Injectable()
@@ -396,6 +431,21 @@ export class ExecutionAttemptService {
     input: ReceiveExecutionStepResultInput,
   ): Promise<StepResultReceiptAck> {
     this.contractValidator?.assertStepResult(input.result);
+    const canonicalToolResult = toolResultFromStepResult(input.result);
+    if (input.result.stepKind === ExecutionStepKind.TOOL) {
+      if (!canonicalToolResult) {
+        throw new BadRequestException('canonical_tool_result_required');
+      }
+      this.contractValidator?.assertToolResult(
+        canonicalToolResult as unknown as Record<string, unknown>,
+      );
+      if (
+        input.result.status !==
+        expectedStepResultStatus(canonicalToolResult.status)
+      ) {
+        throw new BadRequestException('tool_result_status_mismatch');
+      }
+    }
     const hash = resultHash(input.result);
     const acknowledgedAt = new Date();
     const ack = (
@@ -441,6 +491,16 @@ export class ExecutionAttemptService {
           where: { operationId: input.operationId },
           lock: { mode: 'pessimistic_write' },
         });
+      const toolPlan = canonicalToolResult
+        ? await manager.getRepository(ExecutionToolPlanEntity).findOneBy({
+            operationId: input.operationId,
+          })
+        : null;
+      const toolIdentityMatches = canonicalToolResult
+        ? toolPlan?.stepId === input.stepId &&
+          toolPlan.toolCallId === canonicalToolResult.toolCallId &&
+          canonicalToolResult.operationId === input.operationId
+        : true;
       const identityMatches =
         attempt.executionId === input.executionId &&
         attempt.stepId === input.stepId &&
@@ -448,7 +508,8 @@ export class ExecutionAttemptService {
         attempt.claimedBy === input.workerId &&
         input.result.stepKind === step?.stepKind &&
         operation?.executionId === input.executionId &&
-        operation.stepId === input.stepId;
+        operation.stepId === input.stepId &&
+        toolIdentityMatches;
       if (!identityMatches || !step || !operation) return ack('rejected');
       if (
         step.currentAttemptId !== attempt.attemptId ||
@@ -541,6 +602,11 @@ export class ExecutionAttemptService {
 
         const result = receipt.result as Record<string, unknown>;
         const status = result.status;
+        const canonicalToolResult = toolResultFromStepResult(result);
+        const acceptedStatus = canonicalToolResult?.status ?? status;
+        const acceptedError = canonicalToolResult
+          ? canonicalToolResult.error
+          : (result.error as Record<string, unknown> | null | undefined);
         const executionWasTerminal = [
           ExecutionStatus.COMPLETED,
           ExecutionStatus.FAILED,
@@ -552,30 +618,33 @@ export class ExecutionAttemptService {
             execution.phase ?? '',
           );
         const finishedAt = new Date();
-        if (status === 'succeeded') {
+        if (acceptedStatus === 'succeeded') {
           assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
           step.status = ExecutionStepStatus.COMPLETED;
           step.result = result.output ?? null;
           operation.status = ExecutionOperationStatus.SUCCEEDED;
-          operation.result = result.output ?? null;
+          operation.result = canonicalToolResult ?? result.output ?? null;
           operation.error = null;
-        } else if (status === 'cancelled') {
+        } else if (acceptedStatus === 'cancelled') {
           assertStepTransition(step.status, ExecutionStepStatus.CANCELLED);
           step.status = ExecutionStepStatus.CANCELLED;
           operation.status = ExecutionOperationStatus.CANCELLED;
-          operation.error =
-            (result.error as Record<string, unknown> | undefined) ?? null;
+          operation.result = canonicalToolResult;
+          operation.error = acceptedError ?? null;
           if (!executionHasTerminalIntent) {
             execution.phase = 'terminal_pending_cancelled';
           }
         } else {
           assertStepTransition(step.status, ExecutionStepStatus.FAILED);
           step.status = ExecutionStepStatus.FAILED;
-          step.error = result.error as Record<string, unknown>;
-          operation.status = ExecutionOperationStatus.FAILED;
-          operation.error = result.error as Record<string, unknown>;
+          step.error = acceptedError as Record<string, unknown>;
+          operation.status = canonicalToolResult
+            ? operationStatusForToolResult(canonicalToolResult.status)
+            : ExecutionOperationStatus.FAILED;
+          operation.result = canonicalToolResult;
+          operation.error = acceptedError as Record<string, unknown>;
           if (!executionHasTerminalIntent) {
-            execution.error = result.error;
+            execution.error = acceptedError;
             execution.phase = 'terminal_pending_failed';
           }
         }
@@ -585,14 +654,14 @@ export class ExecutionAttemptService {
         );
         attempt.status = ExecutionStepAttemptStatus.CLOSED;
         attempt.finishedAt = finishedAt;
-        attempt.finishReason = String(status);
+        attempt.finishReason = String(acceptedStatus);
         operation.currentAttemptId = null;
         operation.finishedAt = finishedAt;
         step.version += 1;
         await attemptRepo.save(attempt);
         await stepRepo.save(step);
         await operationRepo.save(operation);
-        if (status === 'succeeded' && !executionHasTerminalIntent) {
+        if (acceptedStatus === 'succeeded' && !executionHasTerminalIntent) {
           await releaseExecutionStepDependents(manager, step.stepId);
           const remaining = await manager.query(
             `
@@ -710,6 +779,9 @@ export class ExecutionAttemptService {
 
     assertStepTransition(step.status, ExecutionStepStatus.RUNNING);
     const attemptRepo = manager.getRepository(ExecutionStepAttemptEntity);
+    const requestedLeaseExpiry = new Date(
+      now.getTime() + input.leaseDurationMs,
+    );
     const attempt = attemptRepo.create({
       attemptId: randomUUID(),
       executionId: step.executionId,
@@ -719,7 +791,10 @@ export class ExecutionAttemptService {
       claimedBy: input.workerId,
       status: ExecutionStepAttemptStatus.LEASED,
       leaseGrantedAt: now,
-      leaseExpiresAt: new Date(now.getTime() + input.leaseDurationMs),
+      leaseExpiresAt:
+        step.deadline && step.deadline < requestedLeaseExpiry
+          ? step.deadline
+          : requestedLeaseExpiry,
       heartbeatAt: null,
       startedAt: null,
       finishedAt: null,

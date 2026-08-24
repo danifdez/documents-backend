@@ -34,6 +34,7 @@ import { ExecutionOperationStatus } from '../src/execution/execution-operation-s
 import { ExecutionToolInvocationEntity } from '../src/execution/execution-tool-invocation.entity';
 import { ExecutionToolPlanEntity } from '../src/execution/execution-tool-plan.entity';
 import { ExecutionToolPlanService } from '../src/execution/execution-tool-plan.service';
+import { ExecutionToolRuntimeService } from '../src/execution-coordinator/execution-tool-runtime.service';
 
 loadEnv({ path: '.env' });
 
@@ -372,6 +373,120 @@ describe('execution PostgreSQL integration', () => {
       plan: {
         normalizedArguments: { query: 'harness', limit: 5 },
         policyDecision: { decision: 'allowed', rule: 'workspace_read' },
+      },
+    });
+  });
+
+  it('executes documents.search and accepts its canonical ToolResult', async () => {
+    const created = await service.createForChat(
+      'assistant_chat',
+      'Find the harness plan',
+      { ownerPrincipal: 'tool-e2e', workspaceId: 'default' },
+      {},
+    );
+    const sourceAttemptId = randomUUID();
+    await activateStepAttempt(created.executionId, sourceAttemptId);
+    const prepared = await toolPlanService.prepare({
+      schemaVersion: 'tool-invocation/1',
+      toolCallId: randomUUID(),
+      name: 'documents.search',
+      arguments: { query: 'harness', limit: 2 },
+      requester: {
+        kind: 'deterministic',
+        component: 'documents-backend',
+      },
+      executionContext: {
+        executionId: created.executionId,
+        turnId: created.turnId!,
+        causedByEventId: created.lastEventId!,
+        phase: 'agent_loop',
+        dataClassification: 'workspace',
+      },
+    });
+    const { grant } = await service.requestProgressGrant(created.executionId, {
+      executionId: created.executionId,
+      turnId: created.turnId!,
+      loopId: created.executionId,
+      agentName: 'assistant',
+      loopKind: 'top_level',
+      executionAttemptId: sourceAttemptId,
+      requestedPolicy: {
+        normal: 1,
+        normalInferenceSoftLimit: 1,
+        repair: 0,
+        closing: 0,
+        maxTokensPerInference: 128,
+        toolCalls: 1,
+        toolCallSoftLimit: 1,
+        exactToolRepeatWarning: false,
+        exactToolRepeatBlockAfterWarning: false,
+        exactToolRepeatTerminateAfterBlock: false,
+      },
+    });
+    const reserved = await service.reserveOperationBudget(created.executionId, {
+      executionId: created.executionId,
+      loopId: created.executionId,
+      grantId: grant.grantId,
+      operationId: prepared.plan.operationId,
+      operationKind: 'tool_call',
+      bucket: 'tool',
+      toolCallId: prepared.plan.toolCallId,
+      phase: 'agent_loop',
+      round: 1,
+      name: 'documents.search',
+      executionAttemptId: sourceAttemptId,
+    });
+    const step = await toolPlanService.materialize(
+      prepared.plan.toolCallId,
+      reserved.reservation.reservationId,
+    );
+    const runtime = new ExecutionToolRuntimeService(
+      attemptService,
+      new ExecutionContractValidator(),
+      {
+        globalSearch: async () => [
+          {
+            id: 17,
+            name: 'Harness implementation plan',
+            score: 0.95,
+            collection: 'docs',
+          },
+        ],
+      },
+    );
+
+    await expect(runtime.executeReady()).resolves.toBe(1);
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+
+    await expect(
+      dataSource.getRepository(ExecutionStepEntity).findOneByOrFail({
+        stepId: step.stepId,
+      }),
+    ).resolves.toMatchObject({
+      status: ExecutionStepStatus.COMPLETED,
+      result: {
+        kind: 'tool',
+        toolResult: {
+          operationId: prepared.plan.operationId,
+          toolCallId: prepared.plan.toolCallId,
+          status: 'succeeded',
+          structuredContent: { count: 1 },
+          effects: [],
+          error: null,
+        },
+      },
+    });
+    await expect(
+      dataSource.getRepository(ExecutionOperationEntity).findOneByOrFail({
+        operationId: prepared.plan.operationId,
+      }),
+    ).resolves.toMatchObject({
+      status: ExecutionOperationStatus.SUCCEEDED,
+      result: {
+        schemaVersion: 'tool-result/1',
+        operationId: prepared.plan.operationId,
+        toolCallId: prepared.plan.toolCallId,
+        status: 'succeeded',
       },
     });
   });

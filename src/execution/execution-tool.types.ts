@@ -65,3 +65,31 @@ export interface ToolPlanContract {
   deadline: string;
   preparedAt: string;
 }
+
+export interface ToolResultContract {
+  schemaVersion: 'tool-result/1';
+  operationId: string;
+  toolCallId: string;
+  status: 'succeeded' | 'failed' | 'cancelled' | 'unknown' | 'not_executed';
+  content: string;
+  structuredContent: unknown;
+  artifactRefs: Array<{
+    role: string;
+    artifactId: string;
+    revision?: number;
+    [key: string]: unknown;
+  }>;
+  sourceRefs: string[];
+  effects: Array<{
+    effectClass:
+      | 'none'
+      | 'local_reversible'
+      | 'local_destructive'
+      | 'external_reversible'
+      | 'external_irreversible';
+    resourceKey: string;
+    status: 'applied' | 'not_applied' | 'inconclusive';
+    evidenceArtifactId?: string;
+  }>;
+  error: { code: string; message: string; [key: string]: unknown } | null;
+}

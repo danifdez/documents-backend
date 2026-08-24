@@ -20,6 +20,7 @@ describe('ExecutionCoordinatorService', () => {
   let executionAttemptService: Record<string, jest.Mock>;
   let processorFactory: Record<string, jest.Mock>;
   let outboxService: Record<string, jest.Mock>;
+  let toolRuntime: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionService = {
@@ -39,12 +40,23 @@ describe('ExecutionCoordinatorService', () => {
     outboxService = {
       publishPending: jest.fn(),
     };
+    toolRuntime = {
+      executeReady: jest.fn(),
+    };
     service = new ExecutionCoordinatorService(
       executionService as any,
       executionAttemptService as any,
       processorFactory as any,
       outboxService as any,
+      toolRuntime as any,
     );
+  });
+
+  it('executes ready local tools through the canonical runtime', async () => {
+    toolRuntime.executeReady.mockResolvedValue(2);
+
+    await expect(service.executeReadyTools(2)).resolves.toBe(2);
+    expect(toolRuntime.executeReady).toHaveBeenCalledWith(2);
   });
 
   it('accepts durable result receipts through the attempt service', async () => {

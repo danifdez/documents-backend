@@ -4,6 +4,7 @@ import { ExecutionAttemptService } from '../execution/execution-attempt.service'
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionOutboxService } from '../execution-outbox/execution-outbox.service';
+import { ExecutionToolRuntimeService } from './execution-tool-runtime.service';
 
 const TERMINAL_STATUSES = new Set<ExecutionStatus>([
   ExecutionStatus.COMPLETED,
@@ -20,7 +21,12 @@ export class ExecutionCoordinatorService {
     private readonly executionAttemptService: ExecutionAttemptService,
     private readonly executionProcessorFactory: ExecutionProcessorFactory,
     private readonly executionOutboxService: ExecutionOutboxService,
+    private readonly executionToolRuntime: ExecutionToolRuntimeService,
   ) {}
+
+  executeReadyTools(limit = 20): Promise<number> {
+    return this.executionToolRuntime.executeReady(limit);
+  }
 
   async acceptResults(limit = 20): Promise<number> {
     const processed =

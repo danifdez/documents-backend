@@ -13,12 +13,14 @@ import { ExecutionStatus } from '../../../src/execution/execution-status.enum';
 import { ExecutionOperationEntity } from '../../../src/execution/execution-operation.entity';
 import { ExecutionOperationRecoveryClass } from '../../../src/execution/execution-operation-recovery-class.enum';
 import { ExecutionOperationStatus } from '../../../src/execution/execution-operation-status.enum';
+import { ExecutionToolPlanEntity } from '../../../src/execution/execution-tool-plan.entity';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
 const OPERATION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
 const ATTEMPT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca704';
 const WORKER_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca705';
+const TOOL_CALL_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca706';
 
 describe('ExecutionAttemptService', () => {
   let service: ExecutionAttemptService;
@@ -28,6 +30,7 @@ describe('ExecutionAttemptService', () => {
   let dependencyRepo: Record<string, jest.Mock>;
   let executionRepo: Record<string, jest.Mock>;
   let operationRepo: Record<string, jest.Mock>;
+  let toolPlanRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
   const readyStep = () => ({
@@ -104,6 +107,13 @@ describe('ExecutionAttemptService', () => {
       })),
       save: jest.fn(async (value) => value),
     };
+    toolPlanRepo = {
+      findOneBy: jest.fn().mockResolvedValue({
+        operationId: OPERATION_ID,
+        stepId: STEP_ID,
+        toolCallId: TOOL_CALL_ID,
+      }),
+    };
     manager = {
       getRepository: jest.fn((entity) => {
         if (entity === ExecutionStepEntity) return stepRepo;
@@ -112,6 +122,7 @@ describe('ExecutionAttemptService', () => {
         if (entity === ExecutionStepDependencyEntity) return dependencyRepo;
         if (entity === ExecutionEntity) return executionRepo;
         if (entity === ExecutionOperationEntity) return operationRepo;
+        if (entity === ExecutionToolPlanEntity) return toolPlanRepo;
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
       query: jest.fn().mockResolvedValue([]),
@@ -315,6 +326,141 @@ describe('ExecutionAttemptService', () => {
     expect(attempt.status).toBe(ExecutionStepAttemptStatus.RESULT_RECEIVED);
     expect(step.status).toBe(ExecutionStepStatus.RESULT_RECEIVED);
     expect(receiptRepo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a canonical tool result only for its materialized plan', async () => {
+    const attempt = runningAttempt();
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
+
+    const ack = await service.receiveResult({
+      executionId: EXECUTION_ID,
+      stepId: STEP_ID,
+      operationId: OPERATION_ID,
+      attemptId: ATTEMPT_ID,
+      workerId: WORKER_ID,
+      result: {
+        stepKind: ExecutionStepKind.TOOL,
+        status: 'succeeded',
+        output: {
+          kind: ExecutionStepKind.TOOL,
+          toolResult: {
+            schemaVersion: 'tool-result/1',
+            operationId: OPERATION_ID,
+            toolCallId: TOOL_CALL_ID,
+            status: 'succeeded',
+            content: 'One match',
+            structuredContent: { count: 1 },
+            artifactRefs: [],
+            sourceRefs: [],
+            effects: [],
+            error: null,
+          },
+        },
+      },
+    });
+
+    expect(ack.code).toBe('received');
+    expect(toolPlanRepo.findOneBy).toHaveBeenCalledWith({
+      operationId: OPERATION_ID,
+    });
+  });
+
+  it('rejects disagreement between StepResult and ToolResult status', async () => {
+    await expect(
+      service.receiveResult({
+        executionId: EXECUTION_ID,
+        stepId: STEP_ID,
+        operationId: OPERATION_ID,
+        attemptId: ATTEMPT_ID,
+        workerId: WORKER_ID,
+        result: {
+          stepKind: ExecutionStepKind.TOOL,
+          status: 'failed',
+          output: {
+            kind: ExecutionStepKind.TOOL,
+            toolResult: {
+              schemaVersion: 'tool-result/1',
+              operationId: OPERATION_ID,
+              toolCallId: TOOL_CALL_ID,
+              status: 'succeeded',
+              content: 'One match',
+              structuredContent: { count: 1 },
+              artifactRefs: [],
+              sourceRefs: [],
+              effects: [],
+              error: null,
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow('tool_result_status_mismatch');
+    expect(receiptRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('persists ToolResult as the canonical operation result', async () => {
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RESULT_RECEIVED,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    const attempt = {
+      ...runningAttempt(),
+      status: ExecutionStepAttemptStatus.RESULT_RECEIVED,
+    };
+    const operation = dispatchedOperation();
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: null,
+      result: null,
+      error: null,
+    };
+    const toolResult = {
+      schemaVersion: 'tool-result/1',
+      operationId: OPERATION_ID,
+      toolCallId: TOOL_CALL_ID,
+      status: 'succeeded',
+      content: 'One match',
+      structuredContent: { count: 1 },
+      artifactRefs: [],
+      sourceRefs: [],
+      effects: [],
+      error: null,
+    };
+    manager.query
+      .mockResolvedValueOnce([{ step_id: STEP_ID }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    stepRepo.findOneBy.mockResolvedValue(step);
+    attemptRepo.findOneBy.mockResolvedValue(attempt);
+    receiptRepo.findOne.mockResolvedValue({
+      result: {
+        stepKind: ExecutionStepKind.TOOL,
+        status: 'succeeded',
+        output: { kind: ExecutionStepKind.TOOL, toolResult },
+      },
+    });
+    executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(operation);
+
+    await expect(service.processReceivedResults()).resolves.toBe(1);
+    expect(operation).toEqual(
+      expect.objectContaining({
+        status: ExecutionOperationStatus.SUCCEEDED,
+        result: toolResult,
+        error: null,
+      }),
+    );
   });
 
   it('releases dependents without finalizing while work remains', async () => {

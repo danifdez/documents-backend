@@ -257,6 +257,9 @@ describe('execution v1 contract', () => {
   const validateEvent = ajv.getSchema(
     'https://documents.local/harness/v1/schemas/execution-event.schema.json',
   )!;
+  const validateStepResult = ajv.getSchema(
+    'https://documents.local/harness/v1/schemas/step-result.schema.json',
+  )!;
   const contractHash = verifyManifest();
 
   const event = (payload: any, overrides: any = {}) => ({
@@ -290,6 +293,43 @@ describe('execution v1 contract', () => {
 
   it('keeps the runtime adapter pinned to the copied schema set', () => {
     expect(contractHash).toBe(EXECUTION_CONTRACT_SET_HASH);
+  });
+
+  it('requires the canonical ToolResult inside every tool StepResult', () => {
+    const result = {
+      schemaVersion: 'step-result/1',
+      executionId: '00000000-0000-4000-8000-000000000001',
+      stepId: '00000000-0000-4000-8000-000000000002',
+      operationId: '00000000-0000-4000-8000-000000000003',
+      attemptId: '00000000-0000-4000-8000-000000000004',
+      stepKind: 'tool',
+      status: 'succeeded',
+      output: {
+        kind: 'tool',
+        toolResult: {
+          schemaVersion: 'tool-result/1',
+          operationId: '00000000-0000-4000-8000-000000000003',
+          toolCallId: '00000000-0000-4000-8000-000000000005',
+          status: 'succeeded',
+          content: 'One match',
+          structuredContent: { count: 1 },
+          artifactRefs: [],
+          sourceRefs: [],
+          effects: [],
+          error: null,
+        },
+      },
+      artifactRefs: [],
+      error: null,
+    };
+
+    expect(validateStepResult(result)).toBe(true);
+    expect(
+      validateStepResult({
+        ...result,
+        output: { kind: 'tool' },
+      }),
+    ).toBe(false);
   });
 
   it.each(

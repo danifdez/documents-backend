@@ -26,10 +26,12 @@ import {
   ToolPlanContract,
 } from './execution-tool.types';
 import { canonicalHash } from './execution.service';
+import {
+  DOCUMENT_SEARCH_TOOL_CAPABILITY,
+  DOCUMENT_SEARCH_TOOL_NAME,
+  DOCUMENT_SEARCH_TOOL_VERSION,
+} from './execution-tool.constants';
 
-const DOCUMENT_SEARCH = 'documents.search';
-const DOCUMENT_SEARCH_VERSION = 'documents.search/1';
-const DOCUMENT_SEARCH_CAPABILITY = 'tool.documents.search/1';
 const PLAN_TIMEOUT_MS = 30_000;
 
 export interface PreparedToolPlan {
@@ -221,7 +223,7 @@ export class ExecutionToolPlanService {
     invocation: ToolInvocationContract,
     execution: ExecutionEntity,
   ): ToolPlanContract {
-    if (invocation.name !== DOCUMENT_SEARCH) {
+    if (invocation.name !== DOCUMENT_SEARCH_TOOL_NAME) {
       throw new BadRequestException('tool_not_available');
     }
     if (invocation.executionContext.dataClassification === 'secret') {
@@ -245,8 +247,8 @@ export class ExecutionToolPlanService {
       schemaVersion: 'tool-plan/1',
       operationId: randomUUID(),
       toolCallId: invocation.toolCallId,
-      toolName: DOCUMENT_SEARCH,
-      descriptorVersion: DOCUMENT_SEARCH_VERSION,
+      toolName: DOCUMENT_SEARCH_TOOL_NAME,
+      descriptorVersion: DOCUMENT_SEARCH_TOOL_VERSION,
       normalizedArguments: { query, limit },
       resources: [
         {
@@ -260,7 +262,7 @@ export class ExecutionToolPlanService {
       confirmationRequirement: null,
       recoveryClass: 'read_only_replayable',
       idempotencyKey: null,
-      requiredCapabilities: [DOCUMENT_SEARCH_CAPABILITY],
+      requiredCapabilities: [DOCUMENT_SEARCH_TOOL_CAPABILITY],
       deadline: new Date(preparedAt.getTime() + PLAN_TIMEOUT_MS).toISOString(),
       preparedAt: preparedAt.toISOString(),
     };
