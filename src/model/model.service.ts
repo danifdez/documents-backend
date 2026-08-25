@@ -5,6 +5,7 @@ import { ResourceService } from '../resource/resource.service';
 import { extractTextFromHtml } from '../utils/text';
 import { buildSummarizeWorkflowSteps } from './summarize-workflow';
 import { buildEntityExtractionWorkflowSteps } from './entity-extraction-workflow';
+import { buildKeywordsWorkflowSteps } from './keywords-workflow';
 
 @Injectable()
 export class ModelService {
@@ -187,14 +188,20 @@ export class ModelService {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
 
+    const effectiveTargetLanguage = targetLanguage || resource.language || 'en';
+    const steps = buildKeywordsWorkflowSteps(
+      extractTextFromHtml(content),
+      effectiveTargetLanguage,
+    );
     const execution = await this.executionService.create(
       'keywords',
       ExecutionPriority.NORMAL,
       {
-        resourceId: resourceId,
-        content: content,
-        targetLanguage: targetLanguage || resource.language || 'en',
+        resourceId,
+        targetLanguage: effectiveTargetLanguage,
+        chunkCount: steps.length - 1,
       },
+      { steps },
     );
     return { executionId: execution.executionId };
   }

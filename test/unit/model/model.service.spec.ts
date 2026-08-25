@@ -1,6 +1,7 @@
 import { ModelService } from '../../../src/model/model.service';
 import { buildSummarizeWorkflowSteps } from '../../../src/model/summarize-workflow';
 import { buildEntityExtractionWorkflowSteps } from '../../../src/model/entity-extraction-workflow';
+import { buildKeywordsWorkflowSteps } from '../../../src/model/keywords-workflow';
 
 describe('ModelService execution identities', () => {
   const executionIds = {
@@ -36,17 +37,42 @@ describe('ModelService execution identities', () => {
     service = new ModelService(executionService as any, resourceService as any);
   });
 
-  it.each([
-    ['key-point', () => service.keyPoints(7, 'en')],
-    ['keywords', () => service.keywords(7, 'en')],
-  ] as const)('returns the UUID of the %s execution', async (taskType, run) => {
-    await expect(run()).resolves.toEqual({
-      executionId: executionIds[taskType],
+  it.each([['key-point', () => service.keyPoints(7, 'en')]] as const)(
+    'returns the UUID of the %s execution',
+    async (taskType, run) => {
+      await expect(run()).resolves.toEqual({
+        executionId: executionIds[taskType],
+      });
+      expect(executionService.create).toHaveBeenCalledWith(
+        taskType,
+        expect.any(String),
+        expect.any(Object),
+      );
+    },
+  );
+
+  it('creates keywords as a durable map-reduce step graph', async () => {
+    await expect(service.keywords(7, 'en')).resolves.toEqual({
+      executionId: executionIds.keywords,
     });
     expect(executionService.create).toHaveBeenCalledWith(
-      taskType,
+      'keywords',
       expect.any(String),
-      expect.any(Object),
+      { resourceId: 7, targetLanguage: 'en', chunkCount: 1 },
+      {
+        steps: [
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['keywords-map'],
+          }),
+          expect.objectContaining({
+            stepKind: 'code',
+            requiredCapabilities: ['keywords-reduce'],
+            operationKind: 'artifact_processing',
+            recoveryClass: 'read_only_replayable',
+          }),
+        ],
+      },
     );
   });
 
@@ -168,6 +194,32 @@ describe('ModelService execution identities', () => {
         stepKind: 'code',
         dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
         requiredCapabilities: ['entity-extraction-reduce'],
+      }),
+    );
+  });
+
+  it('fans long keyword documents out into map steps and deterministic reduce', () => {
+    const text = Array.from(
+      { length: 1_501 },
+      (_, index) => `word-${index}`,
+    ).join(' ');
+
+    const steps = buildKeywordsWorkflowSteps([{ text }], 'es');
+
+    expect(steps).toHaveLength(3);
+    expect(steps.slice(0, 2)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepKind: 'inference',
+          requiredCapabilities: ['keywords-map'],
+        }),
+      ]),
+    );
+    expect(steps[2]).toEqual(
+      expect.objectContaining({
+        stepKind: 'code',
+        dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
+        requiredCapabilities: ['keywords-reduce'],
       }),
     );
   });
