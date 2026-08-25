@@ -3,14 +3,13 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
-  ConflictException,
   Inject,
   forwardRef,
   Logger,
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { Repository } from 'typeorm';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
 import { CreateAssistantDto, UpdateAssistantDto } from './dto/assistant.dto';
@@ -21,13 +20,17 @@ import {
   folderScopeReasonToMessage,
 } from './folder-scope.validator';
 import { ExecutionAccessScope } from '../execution/execution.types';
+import {
+  ChatMessageStore,
+  DEFAULT_CHAT_MESSAGE_PAGE_SIZE,
+} from '../common/chat-message.store';
 
-export const MESSAGE_PAGE_SIZE = 50;
-const MAX_MESSAGE_PAGE_SIZE = 200;
+export const MESSAGE_PAGE_SIZE = DEFAULT_CHAT_MESSAGE_PAGE_SIZE;
 
 @Injectable()
 export class AssistantService implements OnApplicationBootstrap {
   private readonly logger = new Logger(AssistantService.name);
+  private readonly messages: ChatMessageStore<AssistantMessageEntity>;
 
   constructor(
     @InjectRepository(AssistantEntity)
@@ -37,7 +40,13 @@ export class AssistantService implements OnApplicationBootstrap {
     @Inject(forwardRef(() => IndexedFileService))
     private readonly indexedFileService: IndexedFileService,
     private readonly executionService: ExecutionService,
-  ) {}
+  ) {
+    this.messages = new ChatMessageStore<AssistantMessageEntity>(messageRepo, {
+      conflictLabel: 'assistant',
+      where: (assistantId) => ({ assistantId }),
+      attach: (assistantId, message) => ({ assistantId, ...message }),
+    });
+  }
 
   async onApplicationBootstrap(): Promise<void> {
     try {
@@ -144,24 +153,7 @@ export class AssistantService implements OnApplicationBootstrap {
     opts: { limit?: number; before?: number } = {},
   ): Promise<{ messages: AssistantMessageEntity[]; hasMore: boolean }> {
     await this.findOne(assistantId);
-    const limit = Math.min(
-      Math.max(opts.limit ?? MESSAGE_PAGE_SIZE, 1),
-      MAX_MESSAGE_PAGE_SIZE,
-    );
-    const where: Record<string, any> = { assistantId };
-    if (opts.before != null) where.id = LessThan(opts.before);
-    // Keyset pagination by id (monotonic, append-only): fetch the newest
-    // `limit + 1` rows to detect whether older history remains, then return
-    // them in ascending order for the UI.
-    const rows = await this.messageRepo.find({
-      where,
-      order: { id: 'DESC' },
-      take: limit + 1,
-    });
-    const hasMore = rows.length > limit;
-    const page = hasMore ? rows.slice(0, limit) : rows;
-    page.reverse();
-    return { messages: page, hasMore };
+    return this.messages.page(assistantId, opts);
   }
 
   async sendMessage(
@@ -177,31 +169,15 @@ export class AssistantService implements OnApplicationBootstrap {
   }> {
     const assistant = await this.findOne(assistantId);
 
-    // Persist user message
-    const userMsg = await this.messageRepo.save(
-      this.messageRepo.create({
-        assistantId,
-        role: 'user',
-        content,
-      }),
-    );
+    const userMsg = await this.messages.appendUser(assistantId, content);
 
     // Touch lastSeenAt
     assistant.lastSeenAt = new Date();
     await this.assistantRepo.save(assistant);
 
-    // Build conversation history for the worker
     // Only ship a recent slice as transport — models decides the real context
     // window (history_turns). Never send the whole thread.
-    const recent = await this.messageRepo.find({
-      where: { assistantId },
-      order: { createdAt: 'DESC', id: 'DESC' },
-      take: 40,
-    });
-    const conversation = recent
-      .reverse()
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role, content: m.content }));
+    const conversation = await this.messages.recentConversation(assistantId);
 
     const execution = await this.executionService.createForChat(
       'assistant_chat',
@@ -225,14 +201,7 @@ export class AssistantService implements OnApplicationBootstrap {
     content: string,
     event: Record<string, any>,
   ): Promise<AssistantMessageEntity> {
-    return this.messageRepo.save(
-      this.messageRepo.create({
-        assistantId,
-        role: 'event',
-        content,
-        event,
-      }),
-    );
+    return this.messages.recordEvent(assistantId, content, event);
   }
 
   async updateEventStatus(
@@ -241,21 +210,12 @@ export class AssistantService implements OnApplicationBootstrap {
     status: 'done' | 'cancelled',
     summary?: string,
   ): Promise<AssistantMessageEntity> {
-    const msg = await this.messageRepo.findOne({
-      where: { id: messageId, assistantId },
-    });
-    if (!msg)
-      throw new NotFoundException(`Event message ${messageId} not found`);
-    if (msg.role !== 'event' || !msg.event) {
-      throw new NotFoundException(`Message ${messageId} is not an event`);
-    }
-    const ev = msg.event as any;
-    if (ev.kind === 'tool_executed' && ev.tool) {
-      ev.tool.status = status;
-      if (summary !== undefined) ev.tool.summary = summary;
-    }
-    msg.event = ev;
-    return this.messageRepo.save(msg);
+    return this.messages.updateEventStatus(
+      assistantId,
+      messageId,
+      status,
+      summary,
+    );
   }
 
   async recordAssistantReply(
@@ -264,48 +224,20 @@ export class AssistantService implements OnApplicationBootstrap {
     executionId: string | null,
     error: string | null = null,
   ): Promise<AssistantMessageEntity> {
-    const findExisting = () =>
-      executionId
-        ? this.messageRepo.findOne({
-            where: { assistantId, executionId, role: 'assistant' },
-          })
-        : Promise.resolve(null);
-    const returnExisting = (existing: AssistantMessageEntity | null) => {
-      if (!existing) return null;
-      if (existing.content !== reply || existing.error !== error) {
-        throw new ConflictException(
-          `Execution ${executionId} already has a different assistant reply`,
-        );
-      }
-      return existing;
-    };
-    const existing = returnExisting(await findExisting());
-    if (existing) return existing;
-
-    let msg: AssistantMessageEntity;
-    try {
-      msg = await this.messageRepo.save(
-        this.messageRepo.create({
-          assistantId,
-          role: 'assistant',
-          content: reply,
-          executionId,
-          error,
-        }),
-      );
-    } catch (saveError) {
-      const raced = returnExisting(await findExisting());
-      if (raced) return raced;
-      throw saveError;
-    }
-
-    // Touch lastSeenAt of the assistant
-    const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
-    if (a) {
-      a.lastSeenAt = new Date();
-      await this.assistantRepo.save(a);
-    }
-
-    return msg;
+    return this.messages.recordReply(
+      assistantId,
+      reply,
+      executionId,
+      error,
+      async () => {
+        const assistant = await this.assistantRepo.findOne({
+          where: { id: assistantId },
+        });
+        if (assistant) {
+          assistant.lastSeenAt = new Date();
+          await this.assistantRepo.save(assistant);
+        }
+      },
+    );
   }
 }

@@ -2,13 +2,12 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  ConflictException,
   Inject,
   forwardRef,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { Repository } from 'typeorm';
 import { AgentEntity } from './agent.entity';
 import { AgentMessageEntity } from './agent-message.entity';
 import { CreateAgentDto, UpdateAgentDto } from './dto/agent.dto';
@@ -23,13 +22,12 @@ import {
   AGENT_UNFAVORITE_GRACE_MS,
 } from './agent.constants';
 import { ExecutionAccessScope } from '../execution/execution.types';
-
-const MESSAGE_PAGE_SIZE = 50;
-const MAX_MESSAGE_PAGE_SIZE = 200;
+import { ChatMessageStore } from '../common/chat-message.store';
 
 @Injectable()
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
+  private readonly messages: ChatMessageStore<AgentMessageEntity>;
 
   constructor(
     @InjectRepository(AgentEntity)
@@ -39,7 +37,13 @@ export class AgentService {
     @Inject(forwardRef(() => IndexedFileService))
     private readonly indexedFileService: IndexedFileService,
     private readonly executionService: ExecutionService,
-  ) {}
+  ) {
+    this.messages = new ChatMessageStore<AgentMessageEntity>(messageRepo, {
+      conflictLabel: 'agent',
+      where: (agentId) => ({ agentId }),
+      attach: (agentId, message) => ({ agentId, ...message }),
+    });
+  }
 
   async findAll(): Promise<AgentEntity[]> {
     return this.agentRepo
@@ -137,24 +141,7 @@ export class AgentService {
     opts: { limit?: number; before?: number } = {},
   ): Promise<{ messages: AgentMessageEntity[]; hasMore: boolean }> {
     await this.findOne(agentId);
-    const limit = Math.min(
-      Math.max(opts.limit ?? MESSAGE_PAGE_SIZE, 1),
-      MAX_MESSAGE_PAGE_SIZE,
-    );
-    const where: Record<string, any> = { agentId };
-    if (opts.before != null) where.id = LessThan(opts.before);
-    // Keyset pagination by id (monotonic, append-only): fetch the newest
-    // `limit + 1` rows to detect whether older history remains, then return
-    // them in ascending order for the UI.
-    const rows = await this.messageRepo.find({
-      where,
-      order: { id: 'DESC' },
-      take: limit + 1,
-    });
-    const hasMore = rows.length > limit;
-    const page = hasMore ? rows.slice(0, limit) : rows;
-    page.reverse();
-    return { messages: page, hasMore };
+    return this.messages.page(agentId, opts);
   }
 
   async sendMessage(
@@ -170,28 +157,14 @@ export class AgentService {
   }> {
     const agent = await this.findOne(agentId);
 
-    const userMsg = await this.messageRepo.save(
-      this.messageRepo.create({
-        agentId,
-        role: 'user',
-        content,
-      }),
-    );
+    const userMsg = await this.messages.appendUser(agentId, content);
 
     this.touchInteraction(agent);
     await this.agentRepo.save(agent);
 
     // Only ship a recent slice as transport — models decides the real context
     // window (history_turns). Never send the whole thread.
-    const recent = await this.messageRepo.find({
-      where: { agentId },
-      order: { createdAt: 'DESC', id: 'DESC' },
-      take: 40,
-    });
-    const conversation = recent
-      .reverse()
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role, content: m.content }));
+    const conversation = await this.messages.recentConversation(agentId);
 
     const execution = await this.executionService.createForChat(
       'agent_chat',
@@ -216,14 +189,7 @@ export class AgentService {
     content: string,
     event: Record<string, any>,
   ): Promise<AgentMessageEntity> {
-    return this.messageRepo.save(
-      this.messageRepo.create({
-        agentId,
-        role: 'event',
-        content,
-        event,
-      }),
-    );
+    return this.messages.recordEvent(agentId, content, event);
   }
 
   async updateEventStatus(
@@ -232,21 +198,7 @@ export class AgentService {
     status: 'done' | 'cancelled',
     summary?: string,
   ): Promise<AgentMessageEntity> {
-    const msg = await this.messageRepo.findOne({
-      where: { id: messageId, agentId },
-    });
-    if (!msg)
-      throw new NotFoundException(`Event message ${messageId} not found`);
-    if (msg.role !== 'event' || !msg.event) {
-      throw new NotFoundException(`Message ${messageId} is not an event`);
-    }
-    const ev = msg.event as any;
-    if (ev.kind === 'tool_executed' && ev.tool) {
-      ev.tool.status = status;
-      if (summary !== undefined) ev.tool.summary = summary;
-    }
-    msg.event = ev;
-    return this.messageRepo.save(msg);
+    return this.messages.updateEventStatus(agentId, messageId, status, summary);
   }
 
   async recordAgentReply(
@@ -255,48 +207,19 @@ export class AgentService {
     executionId: string | null,
     error: string | null = null,
   ): Promise<AgentMessageEntity> {
-    const findExisting = () =>
-      executionId
-        ? this.messageRepo.findOne({
-            where: { agentId, executionId, role: 'assistant' },
-          })
-        : Promise.resolve(null);
-    const returnExisting = (existing: AgentMessageEntity | null) => {
-      if (!existing) return null;
-      if (existing.content !== reply || existing.error !== error) {
-        throw new ConflictException(
-          `Execution ${executionId} already has a different agent reply`,
-        );
-      }
-      return existing;
-    };
-    const existing = returnExisting(await findExisting());
-    if (existing) return existing;
-
-    let msg: AgentMessageEntity;
-    try {
-      msg = await this.messageRepo.save(
-        this.messageRepo.create({
-          agentId,
-          role: 'assistant',
-          content: reply,
-          executionId,
-          error,
-        }),
-      );
-    } catch (saveError) {
-      const raced = returnExisting(await findExisting());
-      if (raced) return raced;
-      throw saveError;
-    }
-
-    const a = await this.agentRepo.findOne({ where: { id: agentId } });
-    if (a) {
-      this.touchInteraction(a);
-      await this.agentRepo.save(a);
-    }
-
-    return msg;
+    return this.messages.recordReply(
+      agentId,
+      reply,
+      executionId,
+      error,
+      async () => {
+        const agent = await this.agentRepo.findOne({ where: { id: agentId } });
+        if (agent) {
+          this.touchInteraction(agent);
+          await this.agentRepo.save(agent);
+        }
+      },
+    );
   }
 
   private touchInteraction(agent: AgentEntity): void {
