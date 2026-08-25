@@ -4,6 +4,8 @@ import { ResourceService } from 'src/resource/resource.service';
 import { ExecutionService } from 'src/execution/execution.service';
 import { ExecutionPriority } from 'src/execution/execution-priority.enum';
 import { ExecutionEntity } from 'src/execution/execution.entity';
+import { extractTextFromHtml } from 'src/utils/text';
+import { buildDateExtractionWorkflowSteps } from 'src/model/date-extraction-workflow';
 
 @Injectable()
 export class DetectLanguageProcessor implements ExecutionProcessor {
@@ -62,15 +64,19 @@ export class DetectLanguageProcessor implements ExecutionProcessor {
       const anchorDate = resource?.publicationDate
         ? String(resource.publicationDate).slice(0, 10)
         : null;
+      const dateSteps = buildDateExtractionWorkflowSteps(
+        extractTextFromHtml(content),
+        detectedLanguage,
+        anchorDate,
+      );
       await this.executionService.create(
         'date-extraction',
         ExecutionPriority.NORMAL,
         {
           resourceId,
-          text: content,
-          language: detectedLanguage,
-          anchorDate,
+          chunkCount: dateSteps.length - 1,
         },
+        { steps: dateSteps },
       );
     }
   }

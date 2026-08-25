@@ -1,5 +1,5 @@
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsISO8601 } from 'class-validator';
-import { DatePrecision, DateResolver } from '../resource-date.entity';
+import { IsIn, IsInt, IsOptional, IsString, IsISO8601 } from 'class-validator';
+import { DatePrecision } from '../resource-date.entity';
 
 export class ResourceDatePayload {
   @IsOptional()
@@ -24,13 +24,6 @@ export class ResourceDatePayload {
   @IsOptional()
   @IsString()
   contextSnippet?: string | null;
-
-  @IsIn(['dateparser', 'llm', 'unresolved'])
-  resolver: DateResolver;
-
-  @IsOptional()
-  @IsBoolean()
-  isRelative?: boolean;
 
   @IsOptional()
   @IsString()

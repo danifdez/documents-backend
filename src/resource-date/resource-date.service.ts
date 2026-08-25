@@ -23,7 +23,6 @@ export class ResourceDateService {
   async replaceByResourceId(
     resourceId: number,
     dates: ResourceDatePayload[],
-    anchorDateUsed: string | null,
   ): Promise<ResourceDateEntity[]> {
     await this.repo.delete({ resourceId });
     if (!dates.length) return [];
@@ -37,10 +36,7 @@ export class ResourceDateService {
         precision: d.precision ?? null,
         charOffset: d.charOffset ?? null,
         contextSnippet: d.contextSnippet ?? null,
-        resolver: d.resolver,
-        isRelative: d.isRelative ?? false,
         unresolvedReason: d.unresolvedReason ?? null,
-        anchorDateUsed,
       }),
     );
     return this.repo.save(rows);

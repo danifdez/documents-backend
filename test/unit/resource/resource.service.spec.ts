@@ -82,6 +82,39 @@ describe('ResourceService', () => {
       repo.preload.mockResolvedValue(undefined);
       expect(await service.update(999, { name: 'x' })).toBeNull();
     });
+
+    it('rebuilds date extraction as a durable workflow when its anchor changes', async () => {
+      const resource = buildResource({
+        publicationDate: '2026-08-25' as any,
+        language: 'es',
+      });
+      repo.findOne
+        .mockResolvedValueOnce({ id: 1, publicationDate: null })
+        .mockResolvedValueOnce({ content: '<p>El 20 de julio de 1969.</p>' });
+      repo.preload.mockResolvedValue(resource);
+      repo.save.mockResolvedValue(resource);
+      executionService.create.mockResolvedValue({ executionId: 'execution-1' });
+
+      await service.update(1, { publicationDate: '2026-08-25' as any });
+
+      expect(executionService.create).toHaveBeenCalledWith(
+        'date-extraction',
+        expect.any(String),
+        { resourceId: 1, chunkCount: 1 },
+        {
+          steps: [
+            expect.objectContaining({
+              stepKind: 'inference',
+              requiredCapabilities: ['date-extraction-map'],
+            }),
+            expect.objectContaining({
+              stepKind: 'code',
+              requiredCapabilities: ['date-extraction-reduce'],
+            }),
+          ],
+        },
+      );
+    });
   });
 
   describe('remove', () => {

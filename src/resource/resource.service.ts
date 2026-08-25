@@ -16,6 +16,8 @@ import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
 import { RESOURCE_TYPE_WEBPAGE } from '../common/constants';
 import { globalSimilaritySearch } from '../common/global-search';
+import { extractTextFromHtml } from '../utils/text';
+import { buildDateExtractionWorkflowSteps } from '../model/date-extraction-workflow';
 
 @Injectable()
 export class ResourceService {
@@ -246,15 +248,19 @@ export class ResourceService {
     if (anchorChanged) {
       const content = await this.getContentById(id);
       if (content) {
+        const steps = buildDateExtractionWorkflowSteps(
+          extractTextFromHtml(content),
+          saved.language || null,
+          newAnchor,
+        );
         await this.executionService.create(
           'date-extraction',
           ExecutionPriority.NORMAL,
           {
             resourceId: id,
-            text: content,
-            language: saved.language || null,
-            anchorDate: newAnchor,
+            chunkCount: steps.length - 1,
           },
+          { steps },
         );
       }
     }
