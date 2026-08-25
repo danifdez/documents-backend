@@ -16,6 +16,7 @@ import { KeyPointsProcessor } from './processors/key-points-processor';
 import { KeywordsProcessor } from './processors/keywords-processor';
 import { DatasetStatsProcessor } from './processors/dataset-stats-processor';
 import { DatasetExtractionProcessor } from './processors/dataset-extraction-processor';
+import { DatasetProposeColumnsProcessor } from './processors/dataset-propose-columns-processor';
 import { DatasetModule } from '../dataset/dataset.module';
 import { DataSourceSyncProcessor } from './processors/data-source-sync-processor';
 import { TranscribeProcessor } from './processors/transcribe-processor';
@@ -81,6 +82,7 @@ export class ExecutionProcessorModule {
       providers.push(
         DatasetStatsProcessor,
         DatasetExtractionProcessor,
+        DatasetProposeColumnsProcessor,
         DataSourceSyncProcessor,
       );
     }

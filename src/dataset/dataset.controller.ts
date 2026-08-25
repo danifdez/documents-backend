@@ -7,13 +7,13 @@ import {
   Delete,
   Patch,
   ParseIntPipe,
+  ParseUUIDPipe,
   Query,
   UseInterceptors,
   UploadedFile,
   HttpException,
   HttpStatus,
   Res,
-  Header,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -30,7 +30,6 @@ import {
   UpdateDatasetRecordDto,
   CreateDatasetRelationDto,
   LinkRecordsDto,
-  CsvImportMappingDto,
   BulkDeleteRecordsDto,
   CreateDatasetChartDto,
   UpdateDatasetChartDto,
@@ -200,7 +199,7 @@ export class DatasetController {
 
   @Get('propose-columns/:executionId')
   async getProposeColumnsResult(
-    @Param('executionId', ParseIntPipe) executionId: string,
+    @Param('executionId', ParseUUIDPipe) executionId: string,
   ) {
     const execution = await this.executionService.findOne(executionId);
     if (!execution)
@@ -368,7 +367,7 @@ export class DatasetController {
   @Get(':id/stats/:executionId')
   async getStatsResult(
     @Param('id', ParseIntPipe) id: number,
-    @Param('executionId', ParseIntPipe) executionId: string,
+    @Param('executionId', ParseUUIDPipe) executionId: string,
   ) {
     const execution = await this.executionService.findOne(executionId);
     if (!execution) {

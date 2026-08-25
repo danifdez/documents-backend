@@ -182,7 +182,7 @@ export class DatasetExtractionService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    const execution = await this.executionService.create(
+    const execution = await this.executionService.createInference(
       'dataset.propose-columns',
       ExecutionPriority.NORMAL,
       {
