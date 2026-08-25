@@ -2,6 +2,7 @@ import { ModelService } from '../../../src/model/model.service';
 import { buildSummarizeWorkflowSteps } from '../../../src/model/summarize-workflow';
 import { buildEntityExtractionWorkflowSteps } from '../../../src/model/entity-extraction-workflow';
 import { buildKeywordsWorkflowSteps } from '../../../src/model/keywords-workflow';
+import { buildKeyPointWorkflowSteps } from '../../../src/model/key-point-workflow';
 
 describe('ModelService execution identities', () => {
   const executionIds = {
@@ -37,19 +38,28 @@ describe('ModelService execution identities', () => {
     service = new ModelService(executionService as any, resourceService as any);
   });
 
-  it.each([['key-point', () => service.keyPoints(7, 'en')]] as const)(
-    'returns the UUID of the %s execution',
-    async (taskType, run) => {
-      await expect(run()).resolves.toEqual({
-        executionId: executionIds[taskType],
-      });
-      expect(executionService.create).toHaveBeenCalledWith(
-        taskType,
-        expect.any(String),
-        expect.any(Object),
-      );
-    },
-  );
+  it('creates key points as a durable inference map-reduce graph', async () => {
+    await expect(service.keyPoints(7, 'en')).resolves.toEqual({
+      executionId: executionIds['key-point'],
+    });
+    expect(executionService.create).toHaveBeenCalledWith(
+      'key-point',
+      expect.any(String),
+      { resourceId: 7, targetLanguage: 'en', chunkCount: 1 },
+      {
+        steps: [
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['key-point-map'],
+          }),
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['key-point-reduce'],
+          }),
+        ],
+      },
+    );
+  });
 
   it('creates keywords as a durable map-reduce step graph', async () => {
     await expect(service.keywords(7, 'en')).resolves.toEqual({
@@ -220,6 +230,32 @@ describe('ModelService execution identities', () => {
         stepKind: 'code',
         dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
         requiredCapabilities: ['keywords-reduce'],
+      }),
+    );
+  });
+
+  it('fans long key-point documents out into maps and one inference reduce', () => {
+    const text = Array.from(
+      { length: 1_501 },
+      (_, index) => `word-${index}`,
+    ).join(' ');
+
+    const steps = buildKeyPointWorkflowSteps([{ text }], 'es');
+
+    expect(steps).toHaveLength(3);
+    expect(steps.slice(0, 2)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepKind: 'inference',
+          requiredCapabilities: ['key-point-map'],
+        }),
+      ]),
+    );
+    expect(steps[2]).toEqual(
+      expect.objectContaining({
+        stepKind: 'inference',
+        dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
+        requiredCapabilities: ['key-point-reduce'],
       }),
     );
   });

@@ -1,11 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ResourceService } from 'src/resource/resource.service';
-import { ExecutionEntity } from 'src/execution/execution.entity';
+import { ResourceService } from '../../resource/resource.service';
+import { ExecutionEntity } from '../../execution/execution.entity';
 
 @Injectable()
 export class KeyPointsProcessor implements ExecutionProcessor {
-  private readonly logger = new Logger(KeyPointsProcessor.name);
   private readonly TASK_TYPE = 'key-point';
 
   constructor(private readonly resourceService: ResourceService) {}
@@ -15,45 +14,22 @@ export class KeyPointsProcessor implements ExecutionProcessor {
   }
 
   async process(execution: ExecutionEntity): Promise<any> {
-    const resourceId = execution.payload['resourceId']
-      ? Number(execution.payload['resourceId'])
-      : null;
-    const result = execution.result as {
-      key_points?: string[];
-      error?: string;
-    };
-
-    if (result?.error) {
-      this.logger.warn(
-        `Key-points execution ${execution.executionId} returned error: ${result.error}`,
-      );
-      return {
-        success: false,
-        message: result.error,
-        publication: {
-          socketEvent: 'notification',
-          payload: {
-            type: 'key-points',
-            message: `Key points extraction failed: ${result.error}`,
-            resourceId: resourceId ?? undefined,
-          },
-        },
-      };
+    const resourceId = Number(execution.payload['resourceId']);
+    const result = execution.result as { key_points?: unknown };
+    if (!Number.isInteger(resourceId) || resourceId <= 0) {
+      throw new Error('Key-point execution requires a valid resourceId');
+    }
+    if (
+      !result ||
+      !Array.isArray(result.key_points) ||
+      result.key_points.some((point) => typeof point !== 'string')
+    ) {
+      throw new Error('Key-point execution returned an invalid result');
     }
 
-    if (resourceId && result && Array.isArray(result.key_points)) {
-      try {
-        await this.resourceService.update(resourceId, {
-          keyPoints: result.key_points,
-        });
-      } catch (err) {
-        this.logger.error('Failed to update resource with key points', err);
-      }
-    } else {
-      this.logger.warn(
-        'KeyPointsProcessor: Invalid execution result or missing resourceId',
-      );
-    }
+    await this.resourceService.update(resourceId, {
+      keyPoints: result.key_points,
+    });
 
     return {
       success: true,
@@ -63,7 +39,7 @@ export class KeyPointsProcessor implements ExecutionProcessor {
         payload: {
           type: 'key-points',
           message: `Key points extracted for resource ${resourceId}`,
-          resourceId: resourceId ?? undefined,
+          resourceId,
         },
       },
     };
