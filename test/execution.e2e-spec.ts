@@ -44,6 +44,7 @@ import {
 } from '../src/execution/inference-budget-policy';
 
 const TEST_RUNTIME_FINGERPRINT = `sha256:${'a'.repeat(64)}`;
+const TEST_CODE_FINGERPRINT = `sha256:${'b'.repeat(64)}`;
 import {
   exactToolRepeatGuardSnapshot,
   ProgressEvent,
@@ -646,6 +647,7 @@ describe('execution PostgreSQL integration', () => {
         attemptId: assignment!.attemptId,
         stepKind: ExecutionStepKind.INFERENCE,
         status: 'succeeded',
+        codeFingerprint: TEST_CODE_FINGERPRINT,
         runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
         output: {
           kind: ExecutionStepKind.INFERENCE,
@@ -941,6 +943,7 @@ describe('execution PostgreSQL integration', () => {
     );
     const workerId = randomUUID();
     const inferenceMetadata = {
+      codeFingerprint: TEST_CODE_FINGERPRINT,
       runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
       usage: {
         promptTokens: null,
@@ -1132,9 +1135,9 @@ describe('execution PostgreSQL integration', () => {
     expect(JSON.stringify(bundle)).not.toContain('known-secret');
     expect(bundle.embeddedArtifacts).toBeDefined();
     expect(bundle.bundleCompleteness).toEqual({
-      status: 'evaluable_partial',
-      reproducible: false,
-      missing: ['environment.documentsRevision'],
+      status: 'reproducible',
+      reproducible: true,
+      missing: [],
     });
     expect(bundle.policySummary).toEqual({
       decision: 'allow',

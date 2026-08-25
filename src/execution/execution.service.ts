@@ -1622,7 +1622,7 @@ export class ExecutionService {
     const inferenceIdentities = await this.readInferenceIdentities(events);
     const toolIdentities = await this.readToolVersions(events);
     const environment = {
-      documentsRevision: this.config.get('DOCUMENTS_REVISION') ?? 'unknown',
+      codeFingerprints: inferenceIdentities.codeFingerprints,
       promptPackages: inferenceIdentities.promptPackages,
       toolVersions: toolIdentities.toolVersions,
       modelFingerprints: inferenceIdentities.modelFingerprints,
@@ -1688,20 +1688,19 @@ export class ExecutionService {
       modelIdentityKnown: boolean;
       adapterIdentityKnown: boolean;
       promptIdentityKnown: boolean;
+      codeIdentityKnown: boolean;
       toolIdentityKnown: boolean;
       runtimeIdentityKnown: boolean;
     } = {
       modelIdentityKnown: false,
       adapterIdentityKnown: false,
       promptIdentityKnown: false,
+      codeIdentityKnown: false,
       toolIdentityKnown: false,
       runtimeIdentityKnown: false,
     },
   ): string[] {
     const missing = new Set(execution.missingEvidence ?? []);
-    if (environment.documentsRevision === 'unknown') {
-      missing.add('environment.documentsRevision');
-    }
 
     const starts = new Map<string, Record<string, unknown>>();
     const finishes = new Set<string>();
@@ -1733,6 +1732,9 @@ export class ExecutionService {
       }
     }
     if (hasInference) {
+      if (!inferenceIdentities.codeIdentityKnown) {
+        missing.add('environment.codeFingerprints');
+      }
       if (!inferenceIdentities.modelIdentityKnown) {
         missing.add('environment.modelFingerprints');
       }
@@ -1763,10 +1765,12 @@ export class ExecutionService {
     modelFingerprints: string[];
     adapterFingerprints: string[];
     promptPackages: string[];
+    codeFingerprints: string[];
     runtimeFingerprints: string[];
     modelIdentityKnown: boolean;
     adapterIdentityKnown: boolean;
     promptIdentityKnown: boolean;
+    codeIdentityKnown: boolean;
     runtimeIdentityKnown: boolean;
   }> {
     const inferenceOperationIds = new Set(
@@ -1804,10 +1808,12 @@ export class ExecutionService {
         modelFingerprints: [],
         adapterFingerprints: [],
         promptPackages: [],
+        codeFingerprints: [],
         runtimeFingerprints: [...runtimeFingerprints].sort(),
         modelIdentityKnown: inferenceOperationIds.size === 0,
         adapterIdentityKnown: inferenceOperationIds.size === 0,
         promptIdentityKnown: inferenceOperationIds.size === 0,
+        codeIdentityKnown: inferenceOperationIds.size === 0,
         runtimeIdentityKnown:
           operationIds.size === 0 && runtimeFingerprints.size > 0,
       };
@@ -1819,9 +1825,11 @@ export class ExecutionService {
     const modelFingerprints = new Set<string>();
     const adapterFingerprints = new Set<string>();
     const promptPackages = new Set<string>();
+    const codeFingerprints = new Set<string>();
     const modelOperations = new Set<string>();
     const adapterOperations = new Set<string>();
     const promptOperations = new Set<string>();
+    const codeOperations = new Set<string>();
     const runtimeOperations = new Set<string>();
     for (const receipt of receipts) {
       if (!operationIds.has(receipt.operationId)) continue;
@@ -1834,6 +1842,14 @@ export class ExecutionService {
         runtimeOperations.add(receipt.operationId);
       }
       if (!inferenceOperationIds.has(receipt.operationId)) continue;
+      const codeFingerprint = receipt.result?.codeFingerprint;
+      if (
+        typeof codeFingerprint === 'string' &&
+        EXECUTION_CONTENT_HASH_PATTERN.test(codeFingerprint)
+      ) {
+        codeFingerprints.add(codeFingerprint);
+        codeOperations.add(receipt.operationId);
+      }
       const inference = receipt.result?.inference;
       if (!inference || typeof inference !== 'object') continue;
       const metadata = inference as Record<string, unknown>;
@@ -1874,10 +1890,12 @@ export class ExecutionService {
       modelFingerprints: [...modelFingerprints].sort(),
       adapterFingerprints: [...adapterFingerprints].sort(),
       promptPackages: [...promptPackages].sort(),
+      codeFingerprints: [...codeFingerprints].sort(),
       runtimeFingerprints: [...runtimeFingerprints].sort(),
       modelIdentityKnown: coversEveryInference(modelOperations),
       adapterIdentityKnown: coversEveryInference(adapterOperations),
       promptIdentityKnown: coversEveryInference(promptOperations),
+      codeIdentityKnown: coversEveryInference(codeOperations),
       runtimeIdentityKnown: [...operationIds].every((operationId) =>
         runtimeOperations.has(operationId),
       ),

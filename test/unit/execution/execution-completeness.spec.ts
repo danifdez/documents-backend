@@ -45,7 +45,7 @@ describe('ExecutionService bundle completeness', () => {
       ],
       [{ artifactId: 'artifact-1', body: null }],
       {
-        documentsRevision: 'unknown',
+        codeFingerprints: [],
         promptPackages: [],
         toolVersions: [],
         modelFingerprints: [],
@@ -57,7 +57,7 @@ describe('ExecutionService bundle completeness', () => {
     expect(missing).toEqual([
       'artifact.artifact-1.body',
       'environment.adapterFingerprints',
-      'environment.documentsRevision',
+      'environment.codeFingerprints',
       'environment.modelFingerprints',
       'environment.promptPackages',
       'environment.runtimeFingerprints',
@@ -72,6 +72,7 @@ describe('ExecutionService bundle completeness', () => {
       {
         operationId: 'inference-1',
         result: {
+          codeFingerprint: `sha256:${'c'.repeat(64)}`,
           runtimeFingerprint: `sha256:${'b'.repeat(64)}`,
           inference: {
             effectiveModel: 'model-b',
@@ -83,6 +84,7 @@ describe('ExecutionService bundle completeness', () => {
       {
         operationId: 'inference-2',
         result: {
+          codeFingerprint: `sha256:${'c'.repeat(64)}`,
           runtimeFingerprint: `sha256:${'a'.repeat(64)}`,
           inference: {
             effectiveModel: 'model-a',
@@ -114,6 +116,7 @@ describe('ExecutionService bundle completeness', () => {
       modelFingerprints: ['model-a', 'model-b'],
       adapterFingerprints: ['adapter-a'],
       promptPackages: ['prompt-a', 'prompt-b'],
+      codeFingerprints: [`sha256:${'c'.repeat(64)}`],
       runtimeFingerprints: [
         `sha256:${'a'.repeat(64)}`,
         `sha256:${'b'.repeat(64)}`,
@@ -121,6 +124,7 @@ describe('ExecutionService bundle completeness', () => {
       modelIdentityKnown: true,
       adapterIdentityKnown: true,
       promptIdentityKnown: true,
+      codeIdentityKnown: true,
       runtimeIdentityKnown: true,
     });
   });

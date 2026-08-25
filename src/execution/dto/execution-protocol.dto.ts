@@ -14,6 +14,7 @@ import {
   Matches,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { ExecutionStepKind } from '../execution-step-kind.enum';
 
@@ -86,6 +87,15 @@ export class ReceiveExecutionStepResultDto {
 
   @IsIn(['succeeded', 'failed', 'cancelled'])
   status: string;
+
+  @ValidateIf(
+    (result: ReceiveExecutionStepResultDto) =>
+      result.stepKind === ExecutionStepKind.INFERENCE ||
+      result.codeFingerprint !== undefined,
+  )
+  @IsString()
+  @Matches(/^sha256:[0-9a-f]{64}$/)
+  codeFingerprint?: string;
 
   @IsString()
   @Matches(/^sha256:[0-9a-f]{64}$/)
