@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -2041,7 +2042,16 @@ export class ExecutionService {
     };
   }
 
-  async exportBundle(rootExecutionId: string, scope: ExecutionAccessScope) {
+  async exportBundle(
+    rootExecutionId: string,
+    scope: ExecutionAccessScope,
+    evaluationConsentGranted: boolean,
+  ) {
+    if (!evaluationConsentGranted) {
+      throw new ForbiddenException(
+        'Explicit consent is required to export evaluation evidence',
+      );
+    }
     const execution = await this.findOwned(rootExecutionId, scope);
     const events = (
       await this.eventRepo.find({
@@ -2124,8 +2134,17 @@ export class ExecutionService {
         eventsHash: canonicalHash(events),
         schemaManifestHash: EXECUTION_CONTRACT_SET_HASH,
       },
-      purpose: 'evaluation',
-      accessScope: scope,
+      policySummary: {
+        decision: 'allow',
+        purpose: 'evaluation',
+        consent: {
+          status: 'granted',
+          basis: 'explicit_export_request',
+        },
+        allowedDestinations: ['ai-train'],
+        retentionClass: 'evaluation',
+        accessScope: scope,
+      },
       exportedAt: new Date().toISOString(),
     };
     bundle.manifestHash = canonicalHash(bundle);

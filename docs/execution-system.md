@@ -44,7 +44,10 @@ Priorities are `high`, `normal`, and `background`. Worker claims also filter by
 - `POST /executions` creates generic work and returns an execution with a UUID.
 - Product-specific asynchronous endpoints return `{ "executionId": "<uuid>" }`.
 - `GET /executions/:rootExecutionId/events` pages the evidence log.
-- `GET /executions/:rootExecutionId/bundle` exports an `ExecutionBundle`.
+- `GET /executions/:rootExecutionId/bundle` exports an `ExecutionBundle` only
+  when the request includes `x-evaluation-consent: granted`. The bundle's
+  `policySummary` records that consent together with its evaluation purpose,
+  `ai-train` destination, retention class, and caller access scope.
 - Models submits events and artifacts through the token-protected internal
   endpoints; IA Browser never writes directly to PostgreSQL.
 

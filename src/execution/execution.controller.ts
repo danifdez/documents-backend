@@ -36,9 +36,14 @@ export class ExecutionController {
     @Param('rootExecutionId') rootExecutionId: string,
     @CurrentUser() user: unknown,
     @Headers('x-workspace-id') workspaceId: string | undefined,
+    @Headers('x-evaluation-consent') evaluationConsent: string | undefined,
   ) {
     const scope = this.service.resolveAccessScope(user, workspaceId);
-    return this.service.exportBundle(rootExecutionId, scope);
+    return this.service.exportBundle(
+      rootExecutionId,
+      scope,
+      evaluationConsent === 'granted',
+    );
   }
 
   @Get(':rootExecutionId/progress')

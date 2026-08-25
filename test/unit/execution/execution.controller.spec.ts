@@ -14,21 +14,38 @@ describe('ExecutionController', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('derives the read scope from the authenticated principal and workspace header', async () => {
+  it('derives scope and forwards explicit evaluation consent', async () => {
     service.exportBundle.mockResolvedValue({
       bundleSchema: 'execution-bundle/1',
     });
 
-    await controller.bundle('run-1', { userId: 7 }, 'workspace-1');
+    await controller.bundle('run-1', { userId: 7 }, 'workspace-1', 'granted');
 
     expect(service.resolveAccessScope).toHaveBeenCalledWith(
       { userId: 7 },
       'workspace-1',
     );
-    expect(service.exportBundle).toHaveBeenCalledWith('run-1', {
-      ownerPrincipal: 'user-1',
-      workspaceId: 'workspace-1',
-    });
+    expect(service.exportBundle).toHaveBeenCalledWith(
+      'run-1',
+      {
+        ownerPrincipal: 'user-1',
+        workspaceId: 'workspace-1',
+      },
+      true,
+    );
+  });
+
+  it('does not infer evaluation consent when the header is absent', async () => {
+    await controller.bundle('run-1', { userId: 7 }, 'workspace-1', undefined);
+
+    expect(service.exportBundle).toHaveBeenCalledWith(
+      'run-1',
+      {
+        ownerPrincipal: 'user-1',
+        workspaceId: 'workspace-1',
+      },
+      false,
+    );
   });
 
   it('uses the same access scope for the materialized progress projection', async () => {

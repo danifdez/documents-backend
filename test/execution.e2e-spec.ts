@@ -1107,13 +1107,31 @@ describe('execution PostgreSQL integration', () => {
       }),
     ).rejects.toThrow('Execution not found');
 
-    const bundle = await service.exportBundle(context.rootExecutionId, scope);
+    await expect(
+      service.exportBundle(context.rootExecutionId, scope, false),
+    ).rejects.toThrow('Explicit consent');
+    const bundle = await service.exportBundle(
+      context.rootExecutionId,
+      scope,
+      true,
+    );
     expect(JSON.stringify(bundle)).not.toContain('known-secret');
     expect(bundle.embeddedArtifacts).toBeDefined();
     expect(bundle.bundleCompleteness).toEqual({
       status: 'evaluable_partial',
       reproducible: false,
       missing: ['environment.documentsRevision'],
+    });
+    expect(bundle.policySummary).toEqual({
+      decision: 'allow',
+      purpose: 'evaluation',
+      consent: {
+        status: 'granted',
+        basis: 'explicit_export_request',
+      },
+      allowedDestinations: ['ai-train'],
+      retentionClass: 'evaluation',
+      accessScope: scope,
     });
     const bundleEvents = bundle.events as Record<string, any>[];
     const bundleArtifacts = bundle.artifacts as Record<string, any>[];

@@ -12,7 +12,7 @@ describe('ExecutionService primitives', () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe(
       '{"a":{"b":3,"y":2},"z":1}',
     );
-    expect(canonicalJson({ 'ä': 1, z: 2, a: 3, A: 4 })).toBe(
+    expect(canonicalJson({ ä: 1, z: 2, a: 3, A: 4 })).toBe(
       '{"A":4,"a":3,"z":2,"ä":1}',
     );
   });
@@ -67,5 +67,19 @@ describe('ExecutionService primitives', () => {
         Buffer.from(JSON.stringify({ text: 'accessToken=raw-secret' })),
       ),
     ).toThrow(BadRequestException);
+  });
+
+  it('rejects evaluation export before reading evidence without consent', async () => {
+    const service = Object.create(
+      ExecutionService.prototype,
+    ) as ExecutionService;
+
+    await expect(
+      service.exportBundle(
+        '00000000-0000-4000-8000-000000000001',
+        { ownerPrincipal: 'user-1', workspaceId: 'workspace-1' },
+        false,
+      ),
+    ).rejects.toThrow('Explicit consent');
   });
 });
