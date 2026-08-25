@@ -111,14 +111,18 @@ export class EntitiesPendingBatchTranslationStrategy extends TranslationStrategy
         text: entity.word,
       }));
 
-      await this.executionService.create('translate', ExecutionPriority.HIGH, {
-        translationType: 'entities-pending-batch',
-        sourceLanguage,
-        targetLanguages: remainingLanguages,
-        texts: textsForTranslation,
-        entityDataByIndex,
-        resourceId,
-      });
+      await this.executionService.createInference(
+        'translate',
+        ExecutionPriority.HIGH,
+        {
+          translationType: 'entities-pending-batch',
+          sourceLanguage,
+          targetLanguages: remainingLanguages,
+          texts: textsForTranslation,
+          entityDataByIndex,
+          resourceId,
+        },
+      );
 
       this.logger.log(
         `Created follow-up translation execution for remaining languages: ${remainingLanguages.join(', ')}`,

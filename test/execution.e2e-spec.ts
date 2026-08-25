@@ -339,6 +339,29 @@ describe('execution PostgreSQL integration', () => {
     ).resolves.toMatchObject({ cancelled: false });
   });
 
+  it('persists one-shot model work as an inference step', async () => {
+    const payload = {
+      sourceLanguage: 'en',
+      targetLanguage: 'es',
+      texts: ['Hello'],
+    };
+    const created = await service.createInference(
+      'translate',
+      ExecutionPriority.NORMAL,
+      payload,
+    );
+
+    await expect(
+      dataSource.getRepository(ExecutionStepEntity).findOneByOrFail({
+        executionId: created.executionId,
+      }),
+    ).resolves.toMatchObject({
+      stepKind: ExecutionStepKind.INFERENCE,
+      work: { taskType: 'translate', payload },
+      requiredCapabilities: ['translate'],
+    });
+  });
+
   it('commits terminal state, event and publication in one transaction', async () => {
     const created = await service.create('ask', ExecutionPriority.NORMAL, {
       requestId: 'request-1',

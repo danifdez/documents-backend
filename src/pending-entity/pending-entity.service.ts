@@ -586,7 +586,7 @@ export class PendingEntityService {
           entityId: pending.id,
         };
 
-        await this.executionService.create(
+        await this.executionService.createInference(
           'translate',
           ExecutionPriority.NORMAL,
           translationPayload,

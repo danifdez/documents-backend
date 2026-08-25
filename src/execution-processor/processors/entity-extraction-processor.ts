@@ -121,14 +121,18 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
 
     if (languagesToTranslate.size > 0) {
       // Create translation execution for entity names
-      await this.executionService.create('translate', ExecutionPriority.HIGH, {
-        translationType: 'entities-pending-batch',
-        sourceLanguage,
-        targetLanguages: Array.from(languagesToTranslate),
-        texts: textsForTranslation,
-        entityDataByIndex,
-        resourceId,
-      });
+      await this.executionService.createInference(
+        'translate',
+        ExecutionPriority.HIGH,
+        {
+          translationType: 'entities-pending-batch',
+          sourceLanguage,
+          targetLanguages: Array.from(languagesToTranslate),
+          texts: textsForTranslation,
+          entityDataByIndex,
+          resourceId,
+        },
+      );
 
       this.logger.log(
         `Created translation execution for ${result.entities.length} entities to languages: ${Array.from(languagesToTranslate).join(', ')}`,

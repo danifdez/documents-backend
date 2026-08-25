@@ -6,8 +6,38 @@ import {
   ExecutionService,
 } from '../../../src/execution/execution.service';
 import { BadRequestException } from '@nestjs/common';
+import { ExecutionPriority } from '../../../src/execution/execution-priority.enum';
 
 describe('ExecutionService primitives', () => {
+  it('creates single-assignment inference work explicitly', async () => {
+    const service = Object.create(
+      ExecutionService.prototype,
+    ) as ExecutionService;
+    const create = jest.fn().mockResolvedValue({ executionId: 'execution-1' });
+    service.create = create;
+    const payload = { texts: ['Hello'], targetLanguage: 'es' };
+
+    await service.createInference(
+      'translate',
+      ExecutionPriority.NORMAL,
+      payload,
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      'translate',
+      ExecutionPriority.NORMAL,
+      payload,
+      {
+        initialStep: {
+          stepKind: 'inference',
+          work: { taskType: 'translate', payload },
+          requiredCapabilities: ['translate'],
+          priority: 0,
+        },
+      },
+    );
+  });
+
   it('canonicalizes object keys recursively', () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe(
       '{"a":{"b":3,"y":2},"z":1}',

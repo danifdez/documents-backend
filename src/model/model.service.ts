@@ -95,7 +95,7 @@ export class ModelService {
     const sourceLanguage = resource.language || 'en';
     const extractedTexts = extractTextFromHtml(content);
 
-    const execution = await this.executionService.create(
+    const execution = await this.executionService.createInference(
       'translate',
       ExecutionPriority.NORMAL,
       {

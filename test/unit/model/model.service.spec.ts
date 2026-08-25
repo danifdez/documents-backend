@@ -9,7 +9,7 @@ describe('ModelService execution identities', () => {
     'key-point': '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
     keywords: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
   };
-  let executionService: { create: jest.Mock };
+  let executionService: { create: jest.Mock; createInference: jest.Mock };
   let resourceService: {
     findOne: jest.Mock;
     getContentById: jest.Mock;
@@ -23,6 +23,9 @@ describe('ModelService execution identities', () => {
       create: jest.fn(async (taskType: keyof typeof executionIds) => ({
         executionId: executionIds[taskType],
       })),
+      createInference: jest.fn(async (taskType: keyof typeof executionIds) => ({
+        executionId: executionIds[taskType],
+      })),
     };
     resourceService = {
       findOne: jest.fn().mockResolvedValue({ language: 'es' }),
@@ -33,7 +36,6 @@ describe('ModelService execution identities', () => {
   });
 
   it.each([
-    ['translate', () => service.translate(7, 'en')],
     ['entity-extraction', () => service.extractEntities(7)],
     ['key-point', () => service.keyPoints(7, 'en')],
     ['keywords', () => service.keywords(7, 'en')],
@@ -45,6 +47,21 @@ describe('ModelService execution identities', () => {
       taskType,
       expect.any(String),
       expect.any(Object),
+    );
+  });
+
+  it('creates translate as an inference assignment', async () => {
+    await expect(service.translate(7, 'en')).resolves.toEqual({
+      executionId: executionIds.translate,
+    });
+    expect(executionService.createInference).toHaveBeenCalledWith(
+      'translate',
+      expect.any(String),
+      expect.objectContaining({
+        sourceLanguage: 'es',
+        targetLanguage: 'en',
+        texts: expect.any(Array),
+      }),
     );
   });
 

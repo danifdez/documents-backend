@@ -425,6 +425,21 @@ export class ExecutionService {
     });
   }
 
+  async createInference(
+    taskType: string,
+    priority: ExecutionPriority,
+    payload: Record<string, unknown>,
+  ): Promise<ExecutionEntity> {
+    return this.create(taskType, priority, payload, {
+      initialStep: {
+        stepKind: ExecutionStepKind.INFERENCE,
+        work: { taskType, payload },
+        requiredCapabilities: [taskType],
+        priority: STEP_PRIORITY[priority],
+      },
+    });
+  }
+
   async findAll(): Promise<ExecutionEntity[]> {
     return this.executionRepo.find({ order: { createdAt: 'DESC' } });
   }
