@@ -1,49 +1,31 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ExecutionEntity } from 'src/execution/execution.entity';
-
-const DATASET_TASK_TYPES = new Set([
-  'distribution',
-  'correlation',
-  'correlation-matrix',
-  'group-by',
-  'time-series',
-  'outliers',
-  'pivot-table',
-  'summary',
-  'query',
-  'chart',
-]);
+import { ExecutionEntity } from '../../execution/execution.entity';
+import { isDatasetAnalysisTaskType } from '../../dataset/dataset-analysis.types';
 
 @Injectable()
 export class DatasetStatsProcessor implements ExecutionProcessor {
-  private readonly logger = new Logger(DatasetStatsProcessor.name);
-
   canProcess(taskType: string): boolean {
-    return DATASET_TASK_TYPES.has(taskType);
+    return isDatasetAnalysisTaskType(taskType);
   }
 
   async process(execution: ExecutionEntity): Promise<any> {
     const datasetId = execution.payload['datasetId'];
-    const result = execution.result as Record<string, any>;
-
-    if (result?.error) {
-      this.logger.warn(
-        `Stats analysis failed for dataset ${datasetId}: ${result.error}`,
-      );
+    const result = execution.result as Record<string, unknown> | null;
+    if (!result || typeof result !== 'object') {
+      return { success: false, reason: 'invalid_dataset_analysis_result' };
     }
 
     const payload = {
       type: execution.taskType,
-      message: result?.error
-        ? `Statistical analysis failed for dataset`
-        : `Statistical analysis completed`,
+      message: 'Statistical analysis completed',
       datasetId,
+      datasetIds: execution.payload['datasetIds'],
       executionId: execution.executionId,
     };
 
     return {
-      success: !result?.error,
+      success: true,
       message: 'Dataset stats processed',
       publication: { socketEvent: 'notification', payload },
     };

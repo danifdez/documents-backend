@@ -22,7 +22,6 @@ import { DatasetQueryService, RecordFilter } from './dataset-query.service';
 import { DatasetCsvService } from './dataset-csv.service';
 import { DatasetExtractionService } from './dataset-extraction.service';
 import { ExecutionService } from '../execution/execution.service';
-import { ExecutionPriority } from '../execution/execution-priority.enum';
 import {
   CreateDatasetDto,
   UpdateDatasetDto,
@@ -39,6 +38,7 @@ import {
 import { ImportDatasetDto, ImportConfirmDto } from './dto/import-dataset.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
+import { DatasetAnalysisService } from './dataset-analysis.service';
 
 @Controller('datasets')
 export class DatasetController {
@@ -48,6 +48,7 @@ export class DatasetController {
     private readonly csvService: DatasetCsvService,
     private readonly extractionService: DatasetExtractionService,
     private readonly executionService: ExecutionService,
+    private readonly analysisService: DatasetAnalysisService,
   ) {}
 
   @Post('import')
@@ -325,14 +326,10 @@ export class DatasetController {
     if (!dataset) {
       throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
     }
-    const operation = body.operation || 'summary';
-    const execution = await this.executionService.create(
-      operation,
-      ExecutionPriority.NORMAL,
-      {
-        datasetId: id,
-        params: body.params || {},
-      },
+    const execution = await this.analysisService.createExecution(
+      body.operation || 'summary',
+      [id],
+      body.params || {},
     );
     return { executionId: execution.executionId, message: 'Analysis started' };
   }
@@ -349,14 +346,10 @@ export class DatasetController {
     if (!body.datasetIds || body.datasetIds.length === 0) {
       throw new HttpException('datasetIds required', HttpStatus.BAD_REQUEST);
     }
-    const operation = body.operation || 'query';
-    const execution = await this.executionService.create(
-      operation,
-      ExecutionPriority.NORMAL,
-      {
-        datasetIds: body.datasetIds,
-        params: body.params || {},
-      },
+    const execution = await this.analysisService.createExecution(
+      body.operation || 'query',
+      body.datasetIds,
+      body.params || {},
     );
     return {
       executionId: execution.executionId,

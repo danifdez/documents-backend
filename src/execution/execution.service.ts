@@ -492,6 +492,23 @@ export class ExecutionService {
     });
   }
 
+  async createCode(
+    taskType: string,
+    priority: ExecutionPriority,
+    payload: Record<string, unknown>,
+    options?: Omit<CreateExecutionOptions, 'initialStep' | 'steps'>,
+  ): Promise<ExecutionEntity> {
+    return this.create(taskType, priority, payload, {
+      ...(options ?? {}),
+      initialStep: {
+        stepKind: ExecutionStepKind.CODE,
+        work: { taskType, payload },
+        requiredCapabilities: [taskType],
+        priority: STEP_PRIORITY[priority],
+      },
+    });
+  }
+
   async findAll(): Promise<ExecutionEntity[]> {
     return this.executionRepo.find({ order: { createdAt: 'DESC' } });
   }

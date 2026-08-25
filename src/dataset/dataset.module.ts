@@ -7,6 +7,7 @@ import { DatasetCsvService } from './dataset-csv.service';
 import { DatasetExtractionService } from './dataset-extraction.service';
 import { ExecutionModule } from '../execution/execution.module';
 import { ResourceModule } from '../resource/resource.module';
+import { DatasetAnalysisService } from './dataset-analysis.service';
 
 @Module({
   imports: [DatabaseModule, ExecutionModule, ResourceModule],
@@ -16,7 +17,8 @@ import { ResourceModule } from '../resource/resource.module';
     DatasetQueryService,
     DatasetCsvService,
     DatasetExtractionService,
+    DatasetAnalysisService,
   ],
-  exports: [DatasetService, DatasetExtractionService],
+  exports: [DatasetService, DatasetExtractionService, DatasetAnalysisService],
 })
 export class DatasetModule {}

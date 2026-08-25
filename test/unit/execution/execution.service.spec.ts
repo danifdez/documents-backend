@@ -38,6 +38,45 @@ describe('ExecutionService primitives', () => {
     );
   });
 
+  it('creates deterministic code work explicitly', async () => {
+    const service = Object.create(
+      ExecutionService.prototype,
+    ) as ExecutionService;
+    const create = jest.fn().mockResolvedValue({ executionId: 'execution-1' });
+    service.create = create;
+    const payload = { datasetId: 7, params: { field: 'score' } };
+    const inputArtifacts = [
+      {
+        role: 'datasets',
+        kind: 'dataset_snapshot',
+        mediaType: 'application/json',
+        body: Buffer.from('{}'),
+      },
+    ];
+
+    await service.createCode(
+      'distribution',
+      ExecutionPriority.NORMAL,
+      payload,
+      { inputArtifacts },
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      'distribution',
+      ExecutionPriority.NORMAL,
+      payload,
+      {
+        inputArtifacts,
+        initialStep: {
+          stepKind: 'code',
+          work: { taskType: 'distribution', payload },
+          requiredCapabilities: ['distribution'],
+          priority: 0,
+        },
+      },
+    );
+  });
+
   it('canonicalizes object keys recursively', () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe(
       '{"a":{"b":3,"y":2},"z":1}',
