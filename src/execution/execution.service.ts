@@ -45,6 +45,7 @@ import { canonicalHash, contentHash } from './execution-canonical';
 import {
   appendBackendExecutionEvent,
   BackendExecutionEventData,
+  nextBackendProducerSequence,
 } from './execution-event.writer';
 
 export {
@@ -137,6 +138,23 @@ function rejectSensitiveStrings(value: unknown, path = '$'): void {
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     rejectSensitiveStrings(child, `${path}.${key}`);
   }
+}
+
+export interface CreateExecutionOptions {
+  rootExecutionId?: string;
+  parentExecutionId?: string;
+  ownerPrincipal?: string;
+  workspaceId?: string;
+  initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
+  steps?: Array<Omit<CreateExecutionStepInput, 'executionId'>>;
+  inputArtifacts?: Array<{
+    role: string;
+    kind: string;
+    mediaType: string;
+    body: Buffer;
+    dataClassification?: string;
+    retentionClass?: string;
+  }>;
 }
 
 @Injectable()
@@ -313,33 +331,49 @@ export class ExecutionService {
     taskType: string,
     priority: ExecutionPriority,
     payload: Record<string, unknown>,
-    options?: {
-      rootExecutionId?: string;
-      parentExecutionId?: string;
-      ownerPrincipal?: string;
-      workspaceId?: string;
-      initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
-      steps?: Array<Omit<CreateExecutionStepInput, 'executionId'>>;
-      inputArtifacts?: Array<{
-        role: string;
-        kind: string;
-        mediaType: string;
-        body: Buffer;
-        dataClassification?: string;
-        retentionClass?: string;
-      }>;
-    },
+    options?: CreateExecutionOptions,
   ): Promise<ExecutionEntity> {
     const executionId = randomUUID();
     const rootExecutionId = options?.rootExecutionId ?? executionId;
     return this.dataSource.transaction(async (manager) => {
-      const execution = manager.getRepository(ExecutionEntity).create({
+      const executionRepo = manager.getRepository(ExecutionEntity);
+      let eventRoot: ExecutionEntity | null = null;
+      let parent: ExecutionEntity | null = null;
+      if (rootExecutionId !== executionId) {
+        if (!options?.parentExecutionId) {
+          throw new BadRequestException('Child execution requires a parent');
+        }
+        eventRoot = await executionRepo.findOne({
+          where: { executionId: rootExecutionId, rootExecutionId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!eventRoot) throw new NotFoundException('Root execution not found');
+        parent = await executionRepo.findOne({
+          where: {
+            executionId: options.parentExecutionId,
+            rootExecutionId,
+          },
+        });
+        if (!parent) throw new NotFoundException('Parent execution not found');
+        if (
+          (options.ownerPrincipal &&
+            options.ownerPrincipal !== eventRoot.ownerPrincipal) ||
+          (options.workspaceId && options.workspaceId !== eventRoot.workspaceId)
+        ) {
+          throw new BadRequestException('Child execution scope mismatch');
+        }
+      } else if (options?.parentExecutionId) {
+        throw new BadRequestException('Root execution cannot have a parent');
+      }
+      const execution = executionRepo.create({
         executionId,
         rootExecutionId,
         parentExecutionId: options?.parentExecutionId ?? null,
         turnId: null,
-        ownerPrincipal: options?.ownerPrincipal ?? 'system',
-        workspaceId: options?.workspaceId ?? 'default',
+        ownerPrincipal:
+          eventRoot?.ownerPrincipal ?? options?.ownerPrincipal ?? 'system',
+        workspaceId:
+          eventRoot?.workspaceId ?? options?.workspaceId ?? 'default',
         schemaVersion: EXECUTION_SCHEMA,
         taskType,
         payload,
@@ -357,7 +391,7 @@ export class ExecutionService {
         completenessStatus: 'reproducible',
         missingEvidence: [],
       });
-      await manager.save(execution);
+      await executionRepo.save(execution);
       const inputArtifactRefs = await Promise.all(
         (options?.inputArtifacts ?? []).map(async (input) => {
           const artifactId = randomUUID();
@@ -385,22 +419,38 @@ export class ExecutionService {
       if (options?.steps && !options.steps.length) {
         throw new BadRequestException('Execution requires at least one step');
       }
+      const rootEvents = eventRoot
+        ? await manager.getRepository(ExecutionEventEntity).find({
+            where: { rootExecutionId },
+            order: { sequence: 'ASC' },
+          })
+        : [];
+      const eventSequence = eventRoot ? Number(eventRoot.lastSequence) + 1 : 1;
+      const producerSequence = eventRoot
+        ? nextBackendProducerSequence(rootEvents)
+        : 1;
       const executionEvent = await this.appendBackendEvent(
         manager,
-        execution,
-        1,
+        eventRoot ?? execution,
+        producerSequence,
         {
           eventType: 'execution.created',
           payloadSchema: 'execution.created/1',
           payload: { executionKind: taskType, initialStatus: 'queued' },
           actor: { type: 'system' },
           executionId,
+          causedByEventId: parent?.lastEventId ?? undefined,
           artifactRefs: inputArtifactRefs.map(({ artifactId }) => artifactId),
         },
-        1,
+        eventSequence,
       );
-      execution.lastSequence = '1';
+      execution.lastSequence = executionEvent.sequence;
       execution.lastEventId = executionEvent.eventId;
+      if (eventRoot) {
+        eventRoot.lastSequence = executionEvent.sequence;
+        eventRoot.lastEventId = executionEvent.eventId;
+        await executionRepo.save(eventRoot);
+      }
       const steps = options?.steps ?? [
         {
           stepKind: ExecutionStepKind.SERVICE,
@@ -421,7 +471,7 @@ export class ExecutionService {
           causedByEventId: step.causedByEventId ?? executionEvent.eventId,
         });
       }
-      return manager.save(execution);
+      return executionRepo.save(execution);
     });
   }
 
@@ -429,8 +479,10 @@ export class ExecutionService {
     taskType: string,
     priority: ExecutionPriority,
     payload: Record<string, unknown>,
+    options?: Omit<CreateExecutionOptions, 'initialStep' | 'steps'>,
   ): Promise<ExecutionEntity> {
     return this.create(taskType, priority, payload, {
+      ...(options ?? {}),
       initialStep: {
         stepKind: ExecutionStepKind.INFERENCE,
         work: { taskType, payload },

@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ExecutionPriority } from 'src/execution/execution-priority.enum';
-import { ResourceService } from 'src/resource/resource.service';
-import { ExecutionService } from 'src/execution/execution.service';
-import { ExecutionEntity } from 'src/execution/execution.entity';
+import { ExecutionPriority } from '../../execution/execution-priority.enum';
+import { ResourceService } from '../../resource/resource.service';
+import { ExecutionService } from '../../execution/execution.service';
+import { ExecutionEntity } from '../../execution/execution.entity';
 
 @Injectable()
 export class TranscribeProcessor implements ExecutionProcessor {
@@ -26,12 +26,11 @@ export class TranscribeProcessor implements ExecutionProcessor {
       language?: string;
       language_probability?: number;
       duration?: number;
-      error?: string;
     };
 
-    if (result.error || !result.transcript) {
+    if (!result?.transcript) {
       this.logger.warn(
-        `Transcription failed for resource ${resourceId}: ${result.error || 'empty transcript'}`,
+        `Transcription produced no text for resource ${resourceId}`,
       );
       await this.resourceService.update(resourceId, {
         status: 'confirmed_extraction',
@@ -39,14 +38,16 @@ export class TranscribeProcessor implements ExecutionProcessor {
       return {
         success: false,
         resourceId,
-        error: result.error || 'empty transcript',
+        reason: 'empty_transcript',
       };
     }
 
     const existingContent =
       await this.resourceService.getContentById(resourceId);
 
-    const transcriptHtml = `<h3>Transcripción</h3><div class="transcript">${this.escapeHtml(result.transcript)}</div>`;
+    const transcriptHtml =
+      '<h3>Transcription</h3><div class="transcript">' +
+      `${this.escapeHtml(result.transcript)}</div>`;
     const newContent = existingContent
       ? `${existingContent}\n${transcriptHtml}`
       : transcriptHtml;
@@ -69,7 +70,8 @@ export class TranscribeProcessor implements ExecutionProcessor {
     }
 
     this.logger.log(
-      `Transcription completed for resource ${resourceId}: language=${result.language}, duration=${result.duration}s`,
+      `Transcription completed for resource ${resourceId}: ` +
+        `language=${result.language}, duration=${result.duration}s`,
     );
 
     return {

@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ExecutionPriority } from 'src/execution/execution-priority.enum';
-import { ResourceService } from 'src/resource/resource.service';
-import { ExecutionService } from 'src/execution/execution.service';
-import { ExecutionEntity } from 'src/execution/execution.entity';
-import { FileStorageService } from 'src/file-storage/file-storage.service';
+import { ExecutionPriority } from '../../execution/execution-priority.enum';
+import { ResourceService } from '../../resource/resource.service';
+import { ExecutionService } from '../../execution/execution.service';
+import { ExecutionEntity } from '../../execution/execution.entity';
+import { FileStorageService } from '../../file-storage/file-storage.service';
 
 const MEDIA_EXTENSIONS = new Set([
   '.mp3',
@@ -85,7 +85,7 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
       if (!buffer) {
         throw new Error(`Audio file not found for transcribe: ${relativePath}`);
       }
-      await this.executionService.create(
+      await this.executionService.createInference(
         'transcribe',
         ExecutionPriority.BACKGROUND,
         {
@@ -94,6 +94,10 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
           resourceId,
         },
         {
+          rootExecutionId: execution.rootExecutionId,
+          parentExecutionId: execution.executionId,
+          ownerPrincipal: execution.ownerPrincipal,
+          workspaceId: execution.workspaceId,
           inputArtifacts: [
             {
               role: 'media',
@@ -114,7 +118,9 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
         socketEvent: 'notification',
         payload: {
           type: 'document-extraction',
-          message: `Document extraction completed for resource with hash ${hash}. Ready for confirmation.`,
+          message:
+            `Document extraction completed for resource with hash ${hash}. ` +
+            'Ready for confirmation.',
           resourceId,
         },
       },

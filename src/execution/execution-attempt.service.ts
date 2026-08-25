@@ -903,6 +903,7 @@ export class ExecutionAttemptService {
     attempt: ExecutionStepAttemptEntity,
     operation: ExecutionOperationEntity,
   ): Promise<void> {
+    const eventRoot = await this.lockEventRoot(manager, execution);
     const eventRepo = manager.getRepository(ExecutionEventEntity);
     const rows = await eventRepo.find({
       where: { rootExecutionId: execution.rootExecutionId },
@@ -925,7 +926,7 @@ export class ExecutionAttemptService {
     );
     const event = await appendBackendExecutionEvent(
       manager,
-      execution,
+      eventRoot,
       nextBackendProducerSequence(rows),
       {
         eventType: 'operation.started',
@@ -952,6 +953,11 @@ export class ExecutionAttemptService {
     this.applyProgressProjection(execution, [...rows, event]);
     execution.lastSequence = event.sequence;
     execution.lastEventId = event.eventId;
+    if (eventRoot.executionId !== execution.executionId) {
+      eventRoot.lastSequence = event.sequence;
+      eventRoot.lastEventId = event.eventId;
+      await manager.getRepository(ExecutionEntity).save(eventRoot);
+    }
   }
 
   private operationBudgetStartPayload(
@@ -1034,6 +1040,7 @@ export class ExecutionAttemptService {
     stepResult: Record<string, unknown>,
     error: Record<string, unknown> | null,
   ): Promise<void> {
+    const eventRoot = await this.lockEventRoot(manager, execution);
     const eventRepo = manager.getRepository(ExecutionEventEntity);
     const rows = await eventRepo.find({
       where: { rootExecutionId: execution.rootExecutionId },
@@ -1056,7 +1063,7 @@ export class ExecutionAttemptService {
         : operation.status;
     const event = await appendBackendExecutionEvent(
       manager,
-      execution,
+      eventRoot,
       nextBackendProducerSequence(rows),
       {
         eventType: 'operation.finished',
@@ -1085,6 +1092,27 @@ export class ExecutionAttemptService {
     this.applyProgressProjection(execution, [...rows, event]);
     execution.lastSequence = event.sequence;
     execution.lastEventId = event.eventId;
+    if (eventRoot.executionId !== execution.executionId) {
+      eventRoot.lastSequence = event.sequence;
+      eventRoot.lastEventId = event.eventId;
+      await manager.getRepository(ExecutionEntity).save(eventRoot);
+    }
+  }
+
+  private async lockEventRoot(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+  ): Promise<ExecutionEntity> {
+    if (execution.rootExecutionId === execution.executionId) return execution;
+    const root = await manager.getRepository(ExecutionEntity).findOne({
+      where: {
+        executionId: execution.rootExecutionId,
+        rootExecutionId: execution.rootExecutionId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!root) throw new NotFoundException('root_execution_not_found');
+    return root;
   }
 
   private applyProgressProjection(

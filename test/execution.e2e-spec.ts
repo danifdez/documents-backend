@@ -362,6 +362,152 @@ describe('execution PostgreSQL integration', () => {
     });
   });
 
+  it('preserves tree identity and artifacts for child inference work', async () => {
+    const parent = await service.create(
+      'document-extraction',
+      ExecutionPriority.NORMAL,
+      { resourceId: 7 },
+    );
+    const media = Buffer.from('media-body');
+    const child = await service.createInference(
+      'transcribe',
+      ExecutionPriority.BACKGROUND,
+      { resourceId: 7, extension: '.wav' },
+      {
+        rootExecutionId: parent.rootExecutionId,
+        parentExecutionId: parent.executionId,
+        ownerPrincipal: parent.ownerPrincipal,
+        workspaceId: parent.workspaceId,
+        inputArtifacts: [
+          {
+            role: 'media',
+            kind: 'source_media',
+            mediaType: 'audio/wav',
+            body: media,
+          },
+        ],
+      },
+    );
+
+    expect(child).toMatchObject({
+      rootExecutionId: parent.rootExecutionId,
+      parentExecutionId: parent.executionId,
+      ownerPrincipal: parent.ownerPrincipal,
+      workspaceId: parent.workspaceId,
+    });
+    const step = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ executionId: child.executionId });
+    expect(step).toMatchObject({
+      stepKind: ExecutionStepKind.INFERENCE,
+      inputArtifactRefs: [{ role: 'media' }],
+    });
+    const artifact = await dataSource
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.artifact_id = :artifactId', {
+        artifactId: step.inputArtifactRefs[0].artifactId,
+      })
+      .getOneOrFail();
+    expect(artifact).toMatchObject({
+      rootExecutionId: parent.rootExecutionId,
+      kind: 'source_media',
+      mediaType: 'audio/wav',
+      body: media,
+    });
+
+    const workerId = randomUUID();
+    const assignment = await attemptService.claimReadyStep({
+      workerId,
+      stepKinds: [ExecutionStepKind.INFERENCE],
+      capabilities: ['transcribe'],
+      leaseDurationMs: 30_000,
+    });
+    expect(assignment).toMatchObject({
+      executionId: child.executionId,
+      stepId: step.stepId,
+      inputArtifactRefs: [{ role: 'media' }],
+    });
+    await attemptService.startAttempt(assignment!.attemptId, workerId);
+    await attemptService.receiveResult({
+      executionId: assignment!.executionId,
+      stepId: assignment!.stepId,
+      operationId: assignment!.operationId,
+      attemptId: assignment!.attemptId,
+      workerId,
+      result: {
+        schemaVersion: 'step-result/1',
+        executionId: assignment!.executionId,
+        stepId: assignment!.stepId,
+        operationId: assignment!.operationId,
+        attemptId: assignment!.attemptId,
+        stepKind: ExecutionStepKind.INFERENCE,
+        status: 'succeeded',
+        output: {
+          kind: ExecutionStepKind.INFERENCE,
+          outcome: {
+            kind: 'structured_result',
+            schemaId: 'transcribe-output/1',
+            value: { transcript: 'Hello' },
+          },
+        },
+        codeFingerprint: TEST_CODE_FINGERPRINT,
+        runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
+        usage: {
+          promptTokens: null,
+          completionTokens: null,
+          totalTokens: null,
+        },
+        inference: {
+          effectiveModel: 'e2e-whisper',
+          effectiveAdapter: null,
+          effectivePromptPackages: ['transcribe/1'],
+          finishReason: 'completed',
+          inferenceMs: 1,
+          cacheOutcome: 'unknown',
+          warnings: [],
+        },
+        artifactRefs: [],
+        error: null,
+      },
+    });
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+
+    const treeEvents = await dataSource
+      .getRepository(ExecutionEventEntity)
+      .find({
+        where: { rootExecutionId: parent.rootExecutionId },
+        order: { sequence: 'ASC' },
+      });
+    expect(treeEvents.map((event) => event.sequence)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+    expect(treeEvents.map((event) => event.eventType)).toEqual([
+      'execution.created',
+      'execution.created',
+      'operation.started',
+      'operation.finished',
+    ]);
+    const persistedRoot = await dataSource
+      .getRepository(ExecutionEntity)
+      .findOneByOrFail({ executionId: parent.executionId });
+    const persistedChild = await dataSource
+      .getRepository(ExecutionEntity)
+      .findOneByOrFail({ executionId: child.executionId });
+    expect(persistedRoot.lastSequence).toBe('4');
+    expect(persistedRoot.lastEventId).toBe(treeEvents[3].eventId);
+    expect(persistedChild).toMatchObject({
+      phase: 'backend_finalization',
+      result: { transcript: 'Hello' },
+      lastSequence: '4',
+      lastEventId: treeEvents[3].eventId,
+    });
+  });
+
   it('commits terminal state, event and publication in one transaction', async () => {
     const created = await service.create('ask', ExecutionPriority.NORMAL, {
       requestId: 'request-1',
