@@ -1115,6 +1115,15 @@ describe('execution PostgreSQL integration', () => {
       reproducible: false,
       missing: ['environment.documentsRevision'],
     });
+    const bundleEvents = bundle.events as Record<string, any>[];
+    const bundleArtifacts = bundle.artifacts as Record<string, any>[];
+    const userSource = bundleEvents.find(
+      (event: any) => event.eventType === 'source.observed',
+    );
+    const userArtifact = bundleArtifacts.find(
+      (artifact: any) => artifact.kind === 'user_message',
+    );
+    expect(userArtifact.inputSourceIds).toEqual([userSource.payload.sourceId]);
 
     await expect(
       dataSource.query(

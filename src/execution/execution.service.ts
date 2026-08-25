@@ -275,7 +275,7 @@ export class ExecutionService {
           redaction: { applied: safeMessage !== message },
           retentionClass: 'evaluation',
           createdByEventId: null,
-          inputSourceIds: [],
+          inputSourceIds: [sourceId],
           storageRef: `execution:${rootExecutionId}:artifact:${artifactId}`,
           body,
         }),
@@ -1459,6 +1459,12 @@ export class ExecutionService {
           payload?.messageKind === 'final_response'
         );
       });
+      const observedSourceIds = rows.flatMap((row) => {
+        if (row.eventType !== 'source.observed') return [];
+        const sourceId = (row.envelope.payload as Record<string, unknown>)
+          ?.sourceId;
+        return typeof sourceId === 'string' ? [sourceId] : [];
+      });
 
       if (!hasFinalMessage && reply && !TERMINAL_STATES.has(execution.status)) {
         const artifactId = randomUUID();
@@ -1477,7 +1483,7 @@ export class ExecutionService {
             redaction: { applied: safeReply !== reply },
             retentionClass: 'evaluation',
             createdByEventId: null,
-            inputSourceIds: [],
+            inputSourceIds: observedSourceIds,
             storageRef: `execution:${execution.rootExecutionId}:artifact:${artifactId}`,
             body,
           }),
