@@ -665,6 +665,7 @@ describe('execution PostgreSQL integration', () => {
         inference: {
           effectiveModel: 'e2e-model',
           effectiveAdapter: null,
+          effectivePromptPackages: ['e2e-prompt'],
           finishReason: 'tool_calls',
           inferenceMs: 1,
           cacheOutcome: 'miss',
@@ -944,6 +945,7 @@ describe('execution PostgreSQL integration', () => {
       inference: {
         effectiveModel: 'e2e-model',
         effectiveAdapter: null,
+        effectivePromptPackages: ['e2e-prompt'],
         finishReason: 'completed',
         inferenceMs: 1,
         cacheOutcome: 'unknown',

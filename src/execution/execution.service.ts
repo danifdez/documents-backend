@@ -1621,7 +1621,7 @@ export class ExecutionService {
     const inferenceIdentities = await this.readInferenceIdentities(events);
     const environment = {
       documentsRevision: this.config.get('DOCUMENTS_REVISION') ?? 'unknown',
-      promptPackages: [],
+      promptPackages: inferenceIdentities.promptPackages,
       toolVersions: [],
       modelFingerprints: inferenceIdentities.modelFingerprints,
       adapterFingerprints: inferenceIdentities.adapterFingerprints,
@@ -1685,7 +1685,12 @@ export class ExecutionService {
     inferenceIdentities: {
       modelIdentityKnown: boolean;
       adapterIdentityKnown: boolean;
-    } = { modelIdentityKnown: false, adapterIdentityKnown: false },
+      promptIdentityKnown: boolean;
+    } = {
+      modelIdentityKnown: false,
+      adapterIdentityKnown: false,
+      promptIdentityKnown: false,
+    },
   ): string[] {
     const missing = new Set(execution.missingEvidence ?? []);
     if (environment.documentsRevision === 'unknown') {
@@ -1728,7 +1733,7 @@ export class ExecutionService {
       if (!inferenceIdentities.adapterIdentityKnown) {
         missing.add('environment.adapterFingerprints');
       }
-      if ((environment.promptPackages as unknown[]).length === 0) {
+      if (!inferenceIdentities.promptIdentityKnown) {
         missing.add('environment.promptPackages');
       }
     }
@@ -1748,8 +1753,10 @@ export class ExecutionService {
   ): Promise<{
     modelFingerprints: string[];
     adapterFingerprints: string[];
+    promptPackages: string[];
     modelIdentityKnown: boolean;
     adapterIdentityKnown: boolean;
+    promptIdentityKnown: boolean;
   }> {
     const inferenceOperationIds = new Set(
       events
@@ -1768,8 +1775,10 @@ export class ExecutionService {
       return {
         modelFingerprints: [],
         adapterFingerprints: [],
+        promptPackages: [],
         modelIdentityKnown: inferenceOperationIds.size === 0,
         adapterIdentityKnown: inferenceOperationIds.size === 0,
+        promptIdentityKnown: inferenceOperationIds.size === 0,
       };
     }
 
@@ -1778,8 +1787,10 @@ export class ExecutionService {
       .find({ where: { executionId: In(executionIds) } });
     const modelFingerprints = new Set<string>();
     const adapterFingerprints = new Set<string>();
+    const promptPackages = new Set<string>();
     const modelOperations = new Set<string>();
     const adapterOperations = new Set<string>();
+    const promptOperations = new Set<string>();
     for (const receipt of receipts) {
       if (!inferenceOperationIds.has(receipt.operationId)) continue;
       const inference = receipt.result?.inference;
@@ -1801,6 +1812,18 @@ export class ExecutionService {
           adapterFingerprints.add(metadata.effectiveAdapter);
         }
       }
+      if (
+        Array.isArray(metadata.effectivePromptPackages) &&
+        metadata.effectivePromptPackages.length > 0 &&
+        metadata.effectivePromptPackages.every(
+          (value) => typeof value === 'string' && value.length > 0,
+        )
+      ) {
+        promptOperations.add(receipt.operationId);
+        for (const promptPackage of metadata.effectivePromptPackages) {
+          promptPackages.add(promptPackage as string);
+        }
+      }
     }
     const coversEveryInference = (covered: Set<string>) =>
       [...inferenceOperationIds].every((operationId) =>
@@ -1809,8 +1832,10 @@ export class ExecutionService {
     return {
       modelFingerprints: [...modelFingerprints].sort(),
       adapterFingerprints: [...adapterFingerprints].sort(),
+      promptPackages: [...promptPackages].sort(),
       modelIdentityKnown: coversEveryInference(modelOperations),
       adapterIdentityKnown: coversEveryInference(adapterOperations),
+      promptIdentityKnown: coversEveryInference(promptOperations),
     };
   }
 

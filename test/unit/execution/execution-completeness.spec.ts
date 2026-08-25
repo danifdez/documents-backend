@@ -65,7 +65,11 @@ describe('ExecutionService bundle completeness', () => {
       {
         operationId: 'inference-1',
         result: {
-          inference: { effectiveModel: 'model-b', effectiveAdapter: null },
+          inference: {
+            effectiveModel: 'model-b',
+            effectiveAdapter: null,
+            effectivePromptPackages: ['prompt-b'],
+          },
         },
       },
       {
@@ -74,6 +78,7 @@ describe('ExecutionService bundle completeness', () => {
           inference: {
             effectiveModel: 'model-a',
             effectiveAdapter: 'adapter-a',
+            effectivePromptPackages: ['prompt-a'],
           },
         },
       },
@@ -99,8 +104,10 @@ describe('ExecutionService bundle completeness', () => {
     expect(identities).toEqual({
       modelFingerprints: ['model-a', 'model-b'],
       adapterFingerprints: ['adapter-a'],
+      promptPackages: ['prompt-a', 'prompt-b'],
       modelIdentityKnown: true,
       adapterIdentityKnown: true,
+      promptIdentityKnown: true,
     });
   });
 });
