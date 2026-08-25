@@ -47,6 +47,7 @@ import {
   ProgressEvent,
   projectExecutionProgress,
 } from '../src/execution/execution-progress';
+import { ExecutionProgressService } from '../src/execution/execution-progress.service';
 
 loadEnv({ path: '.env' });
 
@@ -54,6 +55,7 @@ describe('execution PostgreSQL integration', () => {
   const schema = `execution_test_${randomUUID().replaceAll('-', '_')}`;
   let dataSource: DataSource;
   let service: ExecutionService;
+  let budgets: ExecutionProgressService;
   let attemptService: ExecutionAttemptService;
   let workerService: WorkerService;
   let toolPlanService: ExecutionToolPlanService;
@@ -112,13 +114,18 @@ describe('execution PostgreSQL integration', () => {
     await new AddWorkerCredentials1757668140380().up(runner);
     await runner.release();
 
+    const config = {
+      get: (_key: string, fallback?: unknown) => fallback,
+    } as any;
+    budgets = new ExecutionProgressService(dataSource, config);
     service = new ExecutionService(
       dataSource,
       dataSource.getRepository(ExecutionEntity),
       dataSource.getRepository(ExecutionEventEntity),
       dataSource.getRepository(ExecutionArtifactEntity),
-      { get: (_key: string, fallback?: unknown) => fallback } as any,
+      config,
       new ExecutionContractValidator(),
+      budgets,
     );
     attemptService = new ExecutionAttemptService(
       dataSource,
@@ -131,7 +138,7 @@ describe('execution PostgreSQL integration', () => {
     );
     agentLoopService = new ExecutionAgentLoopService(
       dataSource,
-      service,
+      budgets,
       toolPlanService,
     );
   });
@@ -423,7 +430,7 @@ describe('execution PostgreSQL integration', () => {
         dataClassification: 'workspace',
       },
     });
-    const { grant } = await service.requestProgressGrant(created.executionId, {
+    const { grant } = await budgets.requestProgressGrant(created.executionId, {
       executionId: created.executionId,
       turnId: created.turnId!,
       loopId: created.executionId,
@@ -442,7 +449,7 @@ describe('execution PostgreSQL integration', () => {
         exactToolRepeatTerminateAfterBlock: false,
       },
     });
-    const reserved = await service.reserveOperationBudget(created.executionId, {
+    const reserved = await budgets.reserveOperationBudget(created.executionId, {
       executionId: created.executionId,
       loopId: created.executionId,
       grantId: grant.grantId,
@@ -1178,7 +1185,7 @@ describe('execution PostgreSQL integration', () => {
       toolCallSoftLimit: 0,
       exactToolRepeatWarning: true,
     };
-    const { grant } = await service.requestProgressGrant(context.executionId, {
+    const { grant } = await budgets.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
       loopId: context.executionId,
@@ -1187,7 +1194,7 @@ describe('execution PostgreSQL integration', () => {
       requestedPolicy,
     });
     const reserve = (operationId: string) =>
-      service.reserveOperationBudget(context.executionId, {
+      budgets.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
         grantId: grant.grantId,
@@ -1207,7 +1214,7 @@ describe('execution PostgreSQL integration', () => {
     expect(decisions.filter((decision) => !decision.granted)).toHaveLength(1);
 
     const reserveTool = (operationId: string, toolCallId: string) =>
-      service.reserveOperationBudget(context.executionId, {
+      budgets.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
         grantId: grant.grantId,
@@ -1232,7 +1239,7 @@ describe('execution PostgreSQL integration', () => {
 
     const nextAttemptId = randomUUID();
     await activateStepAttempt(context.executionId, nextAttemptId);
-    const repeated = await service.requestProgressGrant(context.executionId, {
+    const repeated = await budgets.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
       loopId: context.executionId,
@@ -1263,7 +1270,7 @@ describe('execution PostgreSQL integration', () => {
     );
     const attemptId = randomUUID();
     await activateStepAttempt(context.executionId, attemptId);
-    const { grant } = await service.requestProgressGrant(context.executionId, {
+    const { grant } = await budgets.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
       loopId: context.executionId,
@@ -1281,7 +1288,7 @@ describe('execution PostgreSQL integration', () => {
       },
     });
     const reserveTool = (operationId = randomUUID()) =>
-      service.reserveOperationBudget(context.executionId, {
+      budgets.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
         grantId: grant.grantId,
@@ -1344,7 +1351,7 @@ describe('execution PostgreSQL integration', () => {
     );
     const attemptId = randomUUID();
     await activateStepAttempt(context.executionId, attemptId);
-    const { grant } = await service.requestProgressGrant(context.executionId, {
+    const { grant } = await budgets.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
       loopId: context.executionId,
@@ -1362,7 +1369,7 @@ describe('execution PostgreSQL integration', () => {
       },
     });
     const reserveInference = (operationId = randomUUID()) =>
-      service.reserveOperationBudget(context.executionId, {
+      budgets.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
         grantId: grant.grantId,
@@ -1421,7 +1428,7 @@ describe('execution PostgreSQL integration', () => {
     );
     const attemptId = randomUUID();
     await activateStepAttempt(context.executionId, attemptId);
-    const { grant } = await service.requestProgressGrant(context.executionId, {
+    const { grant } = await budgets.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
       loopId: context.executionId,
@@ -1491,7 +1498,7 @@ describe('execution PostgreSQL integration', () => {
       toolCallId: string,
       round: number,
     ) =>
-      service.reserveOperationBudget(context.executionId, {
+      budgets.reserveOperationBudget(context.executionId, {
         executionId: context.executionId,
         loopId: context.executionId,
         grantId: grant.grantId,
@@ -1659,7 +1666,7 @@ describe('execution PostgreSQL integration', () => {
     );
 
     const inferenceOperationId = randomUUID();
-    const inference = await service.reserveOperationBudget(
+    const inference = await budgets.reserveOperationBudget(
       context.executionId,
       {
         executionId: context.executionId,
@@ -1787,7 +1794,7 @@ describe('execution PostgreSQL integration', () => {
       toolCallSoftLimit: 0,
       exactToolRepeatWarning: true,
     };
-    const { grant } = await service.requestProgressGrant(context.executionId, {
+    const { grant } = await budgets.requestProgressGrant(context.executionId, {
       executionId: context.executionId,
       turnId: context.turnId,
       loopId: context.executionId,
@@ -1850,7 +1857,7 @@ describe('execution PostgreSQL integration', () => {
 
     const normalOperationId = randomUUID();
     const normalAttemptId = randomUUID();
-    const normalReservation = await service.reserveOperationBudget(
+    const normalReservation = await budgets.reserveOperationBudget(
       context.executionId,
       {
         executionId: context.executionId,
@@ -1902,7 +1909,7 @@ describe('execution PostgreSQL integration', () => {
     const toolOperationId = randomUUID();
     const toolAttemptId = randomUUID();
     const toolCallId = randomUUID();
-    const toolReservation = await service.reserveOperationBudget(
+    const toolReservation = await budgets.reserveOperationBudget(
       context.executionId,
       {
         executionId: context.executionId,
@@ -1962,7 +1969,7 @@ describe('execution PostgreSQL integration', () => {
 
     const closingOperationId = randomUUID();
     const closingAttemptId = randomUUID();
-    const closingReservation = await service.reserveOperationBudget(
+    const closingReservation = await budgets.reserveOperationBudget(
       context.executionId,
       {
         executionId: context.executionId,

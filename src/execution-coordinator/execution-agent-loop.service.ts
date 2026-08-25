@@ -11,7 +11,7 @@ import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity
 import { ExecutionToolPlanService } from '../execution/execution-tool-plan.service';
 import { ToolResultContract } from '../execution/execution-tool.types';
 import { ExecutionEntity } from '../execution/execution.entity';
-import { ExecutionService } from '../execution/execution.service';
+import { ExecutionProgressService } from '../execution/execution-progress.service';
 
 const CHAT_TASK_TYPES = ['assistant-chat', 'agent-chat'];
 const DEFAULT_POLICY = {
@@ -45,7 +45,7 @@ export class ExecutionAgentLoopService {
 
   constructor(
     private readonly dataSource: DataSource,
-    private readonly executions: ExecutionService,
+    private readonly progress: ExecutionProgressService,
     private readonly toolPlans: ExecutionToolPlanService,
   ) {}
 
@@ -138,7 +138,7 @@ export class ExecutionAgentLoopService {
     const execution = await this.dataSource
       .getRepository(ExecutionEntity)
       .findOneByOrFail({ executionId: step.executionId });
-    const { grant } = await this.executions.requestProgressGrant(
+    const { grant } = await this.progress.requestProgressGrant(
       execution.executionId,
       {
         executionId: execution.executionId,
@@ -156,7 +156,7 @@ export class ExecutionAgentLoopService {
       refreshed.progressLedger?.operationBudget?.reservations[step.operationId];
     const round =
       existingReservation?.round ?? this.nextInferenceRound(refreshed);
-    const decision = await this.executions.reserveOperationBudget(
+    const decision = await this.progress.reserveOperationBudget(
       execution.executionId,
       {
         executionId: execution.executionId,
@@ -249,7 +249,7 @@ export class ExecutionAgentLoopService {
             dataClassification: 'workspace',
           },
         });
-        const decision = await this.executions.reserveOperationBudget(
+        const decision = await this.progress.reserveOperationBudget(
           execution.executionId,
           {
             executionId: execution.executionId,

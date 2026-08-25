@@ -8,6 +8,7 @@ import { ExecutionAttemptService } from './execution-attempt.service';
 import { ExecutionProtocolController } from './execution-protocol.controller';
 import { WorkerModule } from '../worker/worker.module';
 import { ExecutionToolPlanService } from './execution-tool-plan.service';
+import { ExecutionProgressService } from './execution-progress.service';
 
 @Module({
   imports: [DatabaseModule, WorkerModule],
@@ -18,12 +19,14 @@ import { ExecutionToolPlanService } from './execution-tool-plan.service';
     ExecutionStepService,
     ExecutionAttemptService,
     ExecutionToolPlanService,
+    ExecutionProgressService,
   ],
   exports: [
     ExecutionService,
     ExecutionStepService,
     ExecutionAttemptService,
     ExecutionToolPlanService,
+    ExecutionProgressService,
   ],
 })
 export class ExecutionModule {}

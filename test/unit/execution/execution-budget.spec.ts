@@ -17,14 +17,16 @@ import {
   contentHash,
   ExecutionService,
 } from '../../../src/execution/execution.service';
+import { ExecutionProgressService } from '../../../src/execution/execution-progress.service';
 import { ExecutionStatus } from '../../../src/execution/execution-status.enum';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const TURN_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
 const ATTEMPT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
 
-describe('ExecutionService operation budget', () => {
-  let service: ExecutionService;
+describe('ExecutionProgressService operation budget', () => {
+  let service: ExecutionProgressService;
+  let executionService: ExecutionService;
   let execution: Record<string, any>;
   let rows: any[];
 
@@ -100,7 +102,8 @@ describe('ExecutionService operation budget', () => {
         return value;
       }),
     };
-    service = Object.create(ExecutionService.prototype);
+    service = Object.create(ExecutionProgressService.prototype);
+    executionService = Object.create(ExecutionService.prototype);
     (service as any).dataSource = {
       transaction: jest.fn(async (callback) => callback(manager)),
     };
@@ -357,7 +360,7 @@ describe('ExecutionService operation budget', () => {
     };
 
     expect(() =>
-      (service as any).assertDeterministicPartial(
+      (executionService as any).assertDeterministicPartial(
         execution,
         rows,
         artifacts,
@@ -368,7 +371,7 @@ describe('ExecutionService operation budget', () => {
     ).not.toThrow();
     rows[3].envelope.payload.reason = 'transport_error';
     expect(() =>
-      (service as any).assertDeterministicPartial(
+      (executionService as any).assertDeterministicPartial(
         execution,
         rows,
         artifacts,
@@ -380,7 +383,7 @@ describe('ExecutionService operation budget', () => {
     rows[3].envelope.payload.reason = 'empty_model_response';
     completion.partialResult.completedOperations[0].summary = 'Invented';
     expect(() =>
-      (service as any).assertDeterministicPartial(
+      (executionService as any).assertDeterministicPartial(
         execution,
         rows,
         artifacts,
@@ -391,7 +394,7 @@ describe('ExecutionService operation budget', () => {
     ).toThrow(BadRequestException);
     completion.partialResult.completedOperations[0].summary = 'Document read';
     expect(() =>
-      (service as any).assertDeterministicPartial(
+      (executionService as any).assertDeterministicPartial(
         execution,
         rows,
         artifacts,
@@ -418,7 +421,7 @@ describe('ExecutionService operation budget', () => {
     };
 
     expect(() =>
-      (service as any).assertLoopDetectedCompletion(
+      (executionService as any).assertLoopDetectedCompletion(
         execution,
         [termination],
         'Immediate exact tool repeat persisted',
@@ -426,7 +429,7 @@ describe('ExecutionService operation budget', () => {
       ),
     ).not.toThrow();
     expect(() =>
-      (service as any).assertLoopDetectedCompletion(
+      (executionService as any).assertLoopDetectedCompletion(
         execution,
         [],
         'Immediate exact tool repeat persisted',
@@ -434,7 +437,7 @@ describe('ExecutionService operation budget', () => {
       ),
     ).toThrow(BadRequestException);
     expect(() =>
-      (service as any).assertLoopDetectedCompletion(
+      (executionService as any).assertLoopDetectedCompletion(
         execution,
         [termination],
         null,
@@ -464,10 +467,10 @@ describe('ExecutionService operation budget', () => {
       },
     };
     expect(() =>
-      (service as any).assertPartialShape(partial, execution),
+      (executionService as any).assertPartialShape(partial, execution),
     ).not.toThrow();
     expect(() =>
-      (service as any).assertPartialShape(
+      (executionService as any).assertPartialShape(
         { ...partial, pending: ['final_synthesis'] },
         execution,
       ),
@@ -1634,17 +1637,17 @@ describe('ExecutionService operation budget', () => {
     };
 
     expect(() =>
-      (service as any).validateIncomingEvent(execution, incoming),
+      (executionService as any).validateIncomingEvent(execution, incoming),
     ).toThrow('Budget decisions can only be emitted by documents-backend');
     expect(() =>
-      (service as any).validateIncomingEvent(execution, {
+      (executionService as any).validateIncomingEvent(execution, {
         ...incoming,
         eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca730',
         payload: { message: 'spoofed reservation', kind: 'budget_reservation' },
       }),
     ).toThrow('Budget decisions can only be emitted by documents-backend');
     expect(() =>
-      (service as any).validateIncomingEvent(execution, {
+      (executionService as any).validateIncomingEvent(execution, {
         ...incoming,
         eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca731',
         payload: {
