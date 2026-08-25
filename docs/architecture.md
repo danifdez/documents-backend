@@ -145,10 +145,10 @@ at any point during request or execution processing.
 ### Interaction with the models service
 
 The backend never runs AI models itself. AI tasks are delegated to the separate
-models worker through the shared `executions` table. The flow is:
+Models worker through an authenticated HTTP protocol. The flow is:
 
-1. Backend transactionally creates an execution and its first event.
-2. A compatible models worker claims it with `FOR UPDATE SKIP LOCKED` and a new `attemptId`.
-3. The worker persists checkpoint, result, and evidence, then moves the same row to `backend_finalization`.
-4. `TaskScheduleService` selects a backend processor, applies domain effects, and completes or fails the execution.
-5. A Socket.io notification containing the UUID `executionId` is emitted to the frontend.
+1. Backend transactionally creates an execution, its initial step and evidence.
+2. A registered worker requests work; Backend atomically grants a compatible ready step and fenced attempt.
+3. Models downloads attempt-scoped artifacts, executes the handler and retries its result until Backend returns a terminal ACK.
+4. Backend stores the receipt, advances the durable coordinator and applies authorized domain effects.
+5. The publication outbox emits the resulting notification to the frontend.

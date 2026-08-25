@@ -10,6 +10,7 @@ import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
 import { AddExecutionStepContinuation1757668140430 } from '../migrations/1757668140430-AddExecutionStepContinuation';
 import { AddExecutionStepContinuationTarget1757668140440 } from '../migrations/1757668140440-AddExecutionStepContinuationTarget';
+import { DropObsoleteExecutionCheckpoint1757668140450 } from '../migrations/1757668140450-DropObsoleteExecutionCheckpoint';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -103,6 +104,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionToolPlans1757668140420().up(runner);
     await new AddExecutionStepContinuation1757668140430().up(runner);
     await new AddExecutionStepContinuationTarget1757668140440().up(runner);
+    await new DropObsoleteExecutionCheckpoint1757668140450().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -222,6 +224,17 @@ describe('execution PostgreSQL integration', () => {
       await executionRepo.save(execution);
     });
   };
+
+  it('does not retain the obsolete execution checkpoint column', async () => {
+    const [column] = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'executions'
+        AND column_name = 'checkpoint'
+    `);
+    expect(column).toBeUndefined();
+  });
 
   it('commits an execution and its initial step atomically', async () => {
     const inputBody = Buffer.from('Hello artifact', 'utf8');

@@ -164,8 +164,6 @@ export function buildExecution(
     completionReason: null,
     result: null,
     error: null,
-    checkpoint: null,
-    availableAt: now,
     completedAt: null,
     lastSequence: '0',
     lastEventId: null,

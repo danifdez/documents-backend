@@ -81,9 +81,6 @@ export class ExecutionEntity {
   @Column({ type: 'jsonb', nullable: true })
   error: any;
 
-  @Column({ type: 'jsonb', nullable: true })
-  checkpoint: any;
-
   @Column({ name: 'progress_policy', type: 'jsonb', nullable: true })
   progressPolicy: ProgressPolicyProjection | null;
 
