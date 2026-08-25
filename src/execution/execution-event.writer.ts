@@ -4,6 +4,7 @@ import { canonicalHash } from './execution-canonical';
 import { EXECUTION_EVENT_SCHEMA } from './execution.constants';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
+import { BACKEND_RUNTIME_FINGERPRINT } from './execution-runtime';
 
 export interface BackendExecutionEventData {
   eventType: string;
@@ -50,6 +51,7 @@ export async function appendBackendExecutionEvent(
       component: 'documents-backend',
       instanceId: process.env.HOSTNAME ?? 'backend',
       version: process.env.npm_package_version ?? 'development',
+      runtimeFingerprint: BACKEND_RUNTIME_FINGERPRINT,
     },
     actor: data.actor,
     occurredAt: now,

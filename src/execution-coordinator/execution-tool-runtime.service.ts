@@ -13,6 +13,7 @@ import {
   ToolResultContract,
 } from '../execution/execution-tool.types';
 import { SearchResultDto } from '../search/dto/search-result.dto';
+import { BACKEND_RUNTIME_FINGERPRINT } from '../execution/execution-runtime';
 
 const TOOL_RUNTIME_WORKER_ID = '00000000-0000-4000-8000-000000000001';
 const TOOL_LEASE_MS = 30_000;
@@ -104,6 +105,7 @@ export class ExecutionToolRuntimeService {
         attemptId: assignment.attemptId,
         stepKind: ExecutionStepKind.TOOL,
         status,
+        runtimeFingerprint: BACKEND_RUNTIME_FINGERPRINT,
         output: { kind: ExecutionStepKind.TOOL, toolResult: result },
         artifactRefs: result.artifactRefs,
         error: result.error,

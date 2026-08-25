@@ -35,6 +35,7 @@ import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { ExecutionProgressService } from './execution-progress.service';
 import { ExecutionResultReceiptEntity } from './execution-result-receipt.entity';
+import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
 import {
   ExecutionOutboxEntity,
   ExecutionOutboxStatus,
@@ -1619,13 +1620,14 @@ export class ExecutionService {
     const firstSequence = events.length ? Number(events[0].sequence) : 0;
     const lastSequence = events.length ? Number(events.at(-1).sequence) : 0;
     const inferenceIdentities = await this.readInferenceIdentities(events);
+    const toolIdentities = await this.readToolVersions(events);
     const environment = {
       documentsRevision: this.config.get('DOCUMENTS_REVISION') ?? 'unknown',
       promptPackages: inferenceIdentities.promptPackages,
-      toolVersions: [],
+      toolVersions: toolIdentities.toolVersions,
       modelFingerprints: inferenceIdentities.modelFingerprints,
       adapterFingerprints: inferenceIdentities.adapterFingerprints,
-      runtimeFingerprint: process.version,
+      runtimeFingerprints: inferenceIdentities.runtimeFingerprints,
       featureFlags: {},
     };
     const missingEvidence = this.deriveBundleMissingEvidence(
@@ -1633,7 +1635,7 @@ export class ExecutionService {
       events,
       artifacts,
       environment,
-      inferenceIdentities,
+      { ...inferenceIdentities, ...toolIdentities },
     );
     const completenessStatus = missingEvidence.length
       ? 'evaluable_partial'
@@ -1686,10 +1688,14 @@ export class ExecutionService {
       modelIdentityKnown: boolean;
       adapterIdentityKnown: boolean;
       promptIdentityKnown: boolean;
+      toolIdentityKnown: boolean;
+      runtimeIdentityKnown: boolean;
     } = {
       modelIdentityKnown: false,
       adapterIdentityKnown: false,
       promptIdentityKnown: false,
+      toolIdentityKnown: false,
+      runtimeIdentityKnown: false,
     },
   ): string[] {
     const missing = new Set(execution.missingEvidence ?? []);
@@ -1737,8 +1743,11 @@ export class ExecutionService {
         missing.add('environment.promptPackages');
       }
     }
-    if (hasTool && (environment.toolVersions as unknown[]).length === 0) {
+    if (hasTool && !inferenceIdentities.toolIdentityKnown) {
       missing.add('environment.toolVersions');
+    }
+    if (!inferenceIdentities.runtimeIdentityKnown) {
+      missing.add('environment.runtimeFingerprints');
     }
     for (const artifact of artifacts) {
       if (artifact.body === null) {
@@ -1754,9 +1763,11 @@ export class ExecutionService {
     modelFingerprints: string[];
     adapterFingerprints: string[];
     promptPackages: string[];
+    runtimeFingerprints: string[];
     modelIdentityKnown: boolean;
     adapterIdentityKnown: boolean;
     promptIdentityKnown: boolean;
+    runtimeIdentityKnown: boolean;
   }> {
     const inferenceOperationIds = new Set(
       events
@@ -1771,14 +1782,34 @@ export class ExecutionService {
     const executionIds = [
       ...new Set(events.map((event) => String(event.executionId))),
     ].filter(Boolean);
-    if (inferenceOperationIds.size === 0 || executionIds.length === 0) {
+    const operationIds = new Set(
+      events
+        .filter((event) => event.eventType === 'operation.started')
+        .map((event) => String(event.operationId)),
+    );
+    const runtimeFingerprints = new Set<string>();
+    for (const event of events) {
+      const runtimeFingerprint = (
+        event.producer as Record<string, unknown> | undefined
+      )?.runtimeFingerprint;
+      if (
+        typeof runtimeFingerprint === 'string' &&
+        EXECUTION_CONTENT_HASH_PATTERN.test(runtimeFingerprint)
+      ) {
+        runtimeFingerprints.add(runtimeFingerprint);
+      }
+    }
+    if (operationIds.size === 0 || executionIds.length === 0) {
       return {
         modelFingerprints: [],
         adapterFingerprints: [],
         promptPackages: [],
+        runtimeFingerprints: [...runtimeFingerprints].sort(),
         modelIdentityKnown: inferenceOperationIds.size === 0,
         adapterIdentityKnown: inferenceOperationIds.size === 0,
         promptIdentityKnown: inferenceOperationIds.size === 0,
+        runtimeIdentityKnown:
+          operationIds.size === 0 && runtimeFingerprints.size > 0,
       };
     }
 
@@ -1791,7 +1822,17 @@ export class ExecutionService {
     const modelOperations = new Set<string>();
     const adapterOperations = new Set<string>();
     const promptOperations = new Set<string>();
+    const runtimeOperations = new Set<string>();
     for (const receipt of receipts) {
+      if (!operationIds.has(receipt.operationId)) continue;
+      const runtimeFingerprint = receipt.result?.runtimeFingerprint;
+      if (
+        typeof runtimeFingerprint === 'string' &&
+        EXECUTION_CONTENT_HASH_PATTERN.test(runtimeFingerprint)
+      ) {
+        runtimeFingerprints.add(runtimeFingerprint);
+        runtimeOperations.add(receipt.operationId);
+      }
       if (!inferenceOperationIds.has(receipt.operationId)) continue;
       const inference = receipt.result?.inference;
       if (!inference || typeof inference !== 'object') continue;
@@ -1833,9 +1874,54 @@ export class ExecutionService {
       modelFingerprints: [...modelFingerprints].sort(),
       adapterFingerprints: [...adapterFingerprints].sort(),
       promptPackages: [...promptPackages].sort(),
+      runtimeFingerprints: [...runtimeFingerprints].sort(),
       modelIdentityKnown: coversEveryInference(modelOperations),
       adapterIdentityKnown: coversEveryInference(adapterOperations),
       promptIdentityKnown: coversEveryInference(promptOperations),
+      runtimeIdentityKnown: [...operationIds].every((operationId) =>
+        runtimeOperations.has(operationId),
+      ),
+    };
+  }
+
+  private async readToolVersions(events: Record<string, unknown>[]): Promise<{
+    toolVersions: string[];
+    toolIdentityKnown: boolean;
+  }> {
+    const operationIds = new Set(
+      events
+        .filter(
+          (event) =>
+            event.eventType === 'operation.started' &&
+            (event.payload as Record<string, unknown> | undefined)
+              ?.operationKind === 'tool_call',
+        )
+        .map((event) => String(event.operationId)),
+    );
+    if (operationIds.size === 0) {
+      return { toolVersions: [], toolIdentityKnown: true };
+    }
+    const plans = await this.dataSource
+      .getRepository(ExecutionToolPlanEntity)
+      .find({ where: { operationId: In([...operationIds]) } });
+    const covered = new Set<string>();
+    const versions = new Set<string>();
+    for (const plan of plans) {
+      const version = plan.plan?.descriptorVersion;
+      if (
+        operationIds.has(plan.operationId) &&
+        typeof version === 'string' &&
+        version
+      ) {
+        covered.add(plan.operationId);
+        versions.add(version);
+      }
+    }
+    return {
+      toolVersions: [...versions].sort(),
+      toolIdentityKnown: [...operationIds].every((operationId) =>
+        covered.has(operationId),
+      ),
     };
   }
 

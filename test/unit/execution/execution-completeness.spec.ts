@@ -11,6 +11,11 @@ describe('ExecutionService bundle completeness', () => {
       readInferenceIdentities: (...args: unknown[]) => Promise<unknown>;
     }
   ).readInferenceIdentities;
+  const readToolVersions = (
+    ExecutionService.prototype as unknown as {
+      readToolVersions: (...args: unknown[]) => Promise<unknown>;
+    }
+  ).readToolVersions;
 
   it('declares unknown inference evidence, omitted bodies, and open operations', () => {
     const missing = derive(
@@ -45,6 +50,7 @@ describe('ExecutionService bundle completeness', () => {
         toolVersions: [],
         modelFingerprints: [],
         adapterFingerprints: [],
+        runtimeFingerprints: [],
       },
     );
 
@@ -54,6 +60,7 @@ describe('ExecutionService bundle completeness', () => {
       'environment.documentsRevision',
       'environment.modelFingerprints',
       'environment.promptPackages',
+      'environment.runtimeFingerprints',
       'environment.toolVersions',
       'operation.inference-1.metrics.timeToFirstTokenMs',
       'operation.tool-1.finish',
@@ -65,6 +72,7 @@ describe('ExecutionService bundle completeness', () => {
       {
         operationId: 'inference-1',
         result: {
+          runtimeFingerprint: `sha256:${'b'.repeat(64)}`,
           inference: {
             effectiveModel: 'model-b',
             effectiveAdapter: null,
@@ -75,6 +83,7 @@ describe('ExecutionService bundle completeness', () => {
       {
         operationId: 'inference-2',
         result: {
+          runtimeFingerprint: `sha256:${'a'.repeat(64)}`,
           inference: {
             effectiveModel: 'model-a',
             effectiveAdapter: 'adapter-a',
@@ -105,9 +114,47 @@ describe('ExecutionService bundle completeness', () => {
       modelFingerprints: ['model-a', 'model-b'],
       adapterFingerprints: ['adapter-a'],
       promptPackages: ['prompt-a', 'prompt-b'],
+      runtimeFingerprints: [
+        `sha256:${'a'.repeat(64)}`,
+        `sha256:${'b'.repeat(64)}`,
+      ],
       modelIdentityKnown: true,
       adapterIdentityKnown: true,
       promptIdentityKnown: true,
+      runtimeIdentityKnown: true,
+    });
+  });
+
+  it('collects descriptor versions from every persisted tool plan', async () => {
+    const find = jest.fn().mockResolvedValue([
+      {
+        operationId: 'tool-1',
+        plan: { descriptorVersion: 'documents.search/1' },
+      },
+      {
+        operationId: 'tool-2',
+        plan: { descriptorVersion: 'documents.read/2' },
+      },
+    ]);
+    const identities = await readToolVersions.call(
+      { dataSource: { getRepository: () => ({ find }) } },
+      [
+        {
+          eventType: 'operation.started',
+          operationId: 'tool-1',
+          payload: { operationKind: 'tool_call' },
+        },
+        {
+          eventType: 'operation.started',
+          operationId: 'tool-2',
+          payload: { operationKind: 'tool_call' },
+        },
+      ],
+    );
+
+    expect(identities).toEqual({
+      toolVersions: ['documents.read/2', 'documents.search/1'],
+      toolIdentityKnown: true,
     });
   });
 });

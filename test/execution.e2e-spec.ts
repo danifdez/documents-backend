@@ -42,6 +42,8 @@ import {
   assertOperationBudgetProjection,
   governedBudgetStart,
 } from '../src/execution/inference-budget-policy';
+
+const TEST_RUNTIME_FINGERPRINT = `sha256:${'a'.repeat(64)}`;
 import {
   exactToolRepeatGuardSnapshot,
   ProgressEvent,
@@ -644,6 +646,7 @@ describe('execution PostgreSQL integration', () => {
         attemptId: assignment!.attemptId,
         stepKind: ExecutionStepKind.INFERENCE,
         status: 'succeeded',
+        runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
         output: {
           kind: ExecutionStepKind.INFERENCE,
           outcome: {
@@ -849,6 +852,7 @@ describe('execution PostgreSQL integration', () => {
       attemptId: attempt.attemptId,
       stepKind: ExecutionStepKind.SERVICE,
       status: 'succeeded',
+      runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
       output: { kind: 'service', value: { language: 'en' } },
       artifactRefs: [],
       error: null,
@@ -937,6 +941,7 @@ describe('execution PostgreSQL integration', () => {
     );
     const workerId = randomUUID();
     const inferenceMetadata = {
+      runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
       usage: {
         promptTokens: null,
         completionTokens: null,

@@ -304,6 +304,7 @@ describe('execution v1 contract', () => {
       attemptId: '00000000-0000-4000-8000-000000000004',
       stepKind: 'tool',
       status: 'succeeded',
+      runtimeFingerprint: `sha256:${'a'.repeat(64)}`,
       output: {
         kind: 'tool',
         toolResult: {

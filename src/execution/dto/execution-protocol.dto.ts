@@ -11,6 +11,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   Min,
 } from 'class-validator';
@@ -85,6 +86,10 @@ export class ReceiveExecutionStepResultDto {
 
   @IsIn(['succeeded', 'failed', 'cancelled'])
   status: string;
+
+  @IsString()
+  @Matches(/^sha256:[0-9a-f]{64}$/)
+  runtimeFingerprint: string;
 
   @IsArray()
   artifactRefs: Record<string, unknown>[];
