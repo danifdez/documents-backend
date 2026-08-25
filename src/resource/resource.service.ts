@@ -18,6 +18,7 @@ import { RESOURCE_TYPE_WEBPAGE } from '../common/constants';
 import { globalSimilaritySearch } from '../common/global-search';
 import { extractTextFromHtml } from '../utils/text';
 import { buildDateExtractionWorkflowSteps } from '../model/date-extraction-workflow';
+import { AgeGraphService } from '../graph/age-graph.service';
 
 @Injectable()
 export class ResourceService {
@@ -28,6 +29,7 @@ export class ResourceService {
     private readonly repo: Repository<ResourceEntity>,
     private readonly fileStorageService: FileStorageService,
     private readonly executionService: ExecutionService,
+    private readonly graphService: AgeGraphService,
   ) {}
 
   async findOne(id: number): Promise<ResourceEntity | null> {
@@ -523,22 +525,10 @@ export class ResourceService {
   }
 
   async removeWithFile(id: number): Promise<void> {
+    await this.graphService.deleteByResource(id);
     const resource = await this.remove(id);
     if (resource && resource.path) {
       await this.fileStorageService.deleteFile(resource.path);
-    }
-    // Cleanup graph relationships for this resource
-    try {
-      await this.executionService.create(
-        'relationship-modify',
-        ExecutionPriority.BACKGROUND,
-        {
-          action: 'delete-by-resource',
-          resourceId: id,
-        },
-      );
-    } catch {
-      // Relationship cleanup is best-effort; don't fail the delete
     }
   }
 

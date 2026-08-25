@@ -10,8 +10,6 @@ export enum ExecutionType {
   DELETE_VECTORS = 'delete-vectors',
   SEARCH = 'search',
   EMBEDDING = 'embedding',
-  RELATIONSHIP_QUERY = 'relationship-query',
-  RELATIONSHIP_MODIFY = 'relationship-modify',
   RELATIONSHIP_EXTRACTION = 'relationship-extraction',
   DETECT_LANGUAGE = 'detect-language',
   TRANSCRIBE = 'transcribe',

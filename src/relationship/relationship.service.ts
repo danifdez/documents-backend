@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { ExecutionService } from 'src/execution/execution.service';
-import { ExecutionPriority } from 'src/execution/execution-priority.enum';
-import { ResourceService } from 'src/resource/resource.service';
-import { EntityService } from 'src/entity/entity.service';
-import { extractTextFromHtml } from 'src/utils/text';
+import { ExecutionService } from '../execution/execution.service';
+import { ExecutionPriority } from '../execution/execution-priority.enum';
+import { ResourceService } from '../resource/resource.service';
+import { EntityService } from '../entity/entity.service';
+import { extractTextFromHtml } from '../utils/text';
+// eslint-disable-next-line max-len
+import { AgeGraphService, RelationshipGraph } from '../graph/age-graph.service';
+// eslint-disable-next-line max-len
+import { buildRelationshipExtractionWorkflowSteps } from '../model/relationship-extraction-workflow';
 
 @Injectable()
 export class RelationshipService {
@@ -11,68 +15,26 @@ export class RelationshipService {
     private readonly executionService: ExecutionService,
     private readonly resourceService: ResourceService,
     private readonly entityService: EntityService,
+    private readonly graphService: AgeGraphService,
   ) {}
 
-  async queryAll(requestId?: string): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-query',
-      ExecutionPriority.HIGH,
-      {
-        query_type: 'all',
-        requestId,
-      },
-    );
-    return { executionId: execution.executionId };
+  queryAll(): Promise<RelationshipGraph> {
+    return this.graphService.queryAll();
   }
 
-  async queryByResource(
-    resourceId: number,
-    requestId?: string,
-  ): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-query',
-      ExecutionPriority.HIGH,
-      {
-        query_type: 'by-resource',
-        resourceId,
-        requestId,
-      },
-    );
-    return { executionId: execution.executionId };
+  queryByResource(resourceId: number): Promise<RelationshipGraph> {
+    return this.graphService.queryByResource(resourceId);
   }
 
-  async queryNeighborhood(
-    entityNames: string[],
-    requestId?: string,
-  ): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-query',
-      ExecutionPriority.HIGH,
-      {
-        query_type: 'neighborhood',
-        entityNames,
-        requestId,
-      },
-    );
-    return { executionId: execution.executionId };
+  queryNeighborhood(entityNames: string[]): Promise<RelationshipGraph> {
+    return this.graphService.queryNeighborhood(entityNames);
   }
 
-  async queryByProject(
+  queryByProject(
     projectId: number,
     resourceIds?: number[],
-    requestId?: string,
-  ): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-query',
-      ExecutionPriority.HIGH,
-      {
-        query_type: 'by-project',
-        projectId,
-        resourceIds,
-        requestId,
-      },
-    );
-    return { executionId: execution.executionId };
+  ): Promise<RelationshipGraph> {
+    return this.graphService.queryByProject(projectId, resourceIds);
   }
 
   async createRelationship(dto: {
@@ -80,23 +42,36 @@ export class RelationshipService {
     predicate: string;
     objectId: number;
     resourceId: number;
-    projectId?: number;
-    requestId?: string;
-  }): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-modify',
-      ExecutionPriority.NORMAL,
+  }): Promise<{ success: true }> {
+    const [subject, object, resource] = await Promise.all([
+      this.entityService.findOne(dto.subjectId),
+      this.entityService.findOne(dto.objectId),
+      this.resourceService.findOne(dto.resourceId),
+    ]);
+    if (!subject || !object) {
+      throw new Error(
+        'Relationship endpoints must reference existing entities',
+      );
+    }
+    if (!resource) {
+      throw new Error('Relationship resource must exist');
+    }
+    await this.graphService.createRelationship(
       {
-        action: 'create',
-        subjectId: dto.subjectId,
-        predicate: dto.predicate,
-        objectId: dto.objectId,
-        resourceId: dto.resourceId,
-        projectId: dto.projectId,
-        requestId: dto.requestId,
+        id: subject.id,
+        name: subject.name,
+        type: subject.entityType?.name || 'UNKNOWN',
       },
+      dto.predicate,
+      {
+        id: object.id,
+        name: object.name,
+        type: object.entityType?.name || 'UNKNOWN',
+      },
+      dto.resourceId,
+      resource.project?.id,
     );
-    return { executionId: execution.executionId };
+    return { success: true };
   }
 
   async updateRelationship(dto: {
@@ -105,22 +80,15 @@ export class RelationshipService {
     objectId: number;
     newPredicate: string;
     resourceId: number;
-    requestId?: string;
-  }): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-modify',
-      ExecutionPriority.NORMAL,
-      {
-        action: 'update',
-        subjectId: dto.subjectId,
-        predicate: dto.predicate,
-        objectId: dto.objectId,
-        newPredicate: dto.newPredicate,
-        resourceId: dto.resourceId,
-        requestId: dto.requestId,
-      },
+  }): Promise<{ success: true }> {
+    await this.graphService.updateRelationship(
+      dto.subjectId,
+      dto.predicate,
+      dto.objectId,
+      dto.newPredicate,
+      dto.resourceId,
     );
-    return { executionId: execution.executionId };
+    return { success: true };
   }
 
   async deleteRelationship(dto: {
@@ -128,21 +96,14 @@ export class RelationshipService {
     predicate: string;
     objectId: number;
     resourceId: number;
-    requestId?: string;
-  }): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-modify',
-      ExecutionPriority.NORMAL,
-      {
-        action: 'delete',
-        subjectId: dto.subjectId,
-        predicate: dto.predicate,
-        objectId: dto.objectId,
-        resourceId: dto.resourceId,
-        requestId: dto.requestId,
-      },
+  }): Promise<{ success: true }> {
+    await this.graphService.deleteRelationship(
+      dto.subjectId,
+      dto.predicate,
+      dto.objectId,
+      dto.resourceId,
     );
-    return { executionId: execution.executionId };
+    return { success: true };
   }
 
   async extractRelationshipsForProject(
@@ -156,7 +117,7 @@ export class RelationshipService {
         const result = await this.extractRelationships(resource.id);
         executionIds.push(result.executionId);
       } catch {
-        // Skip resources without content or entities
+        // Resources without usable content or two confirmed entities are skipped.
       }
     }
 
@@ -170,58 +131,42 @@ export class RelationshipService {
     if (!resource) {
       throw new Error(`Resource with ID ${resourceId} not found`);
     }
-
     const content = await this.resourceService.getContentById(resourceId);
     if (!content) {
       throw new Error(`Resource with ID ${resourceId} has no content`);
     }
-
     const entities = await this.entityService.findByResourceId(resourceId);
-    if (entities.length === 0) {
+    if (entities.length < 2) {
       throw new Error(
-        `Resource with ID ${resourceId} has no confirmed entities`,
+        `Resource with ID ${resourceId} needs at least two confirmed entities`,
       );
     }
-
-    const projectId =
-      (resource.project && (resource.project as any).id) ||
-      (resource as any).projectId ||
-      null;
-
-    const plainText = extractTextFromHtml(content)
-      .map((t) => t.text)
-      .join('\n');
-
+    const projectId = resource.project?.id ?? null;
+    const workflowEntities = entities.map((entity) => ({
+      id: entity.id,
+      name: entity.name,
+      type: entity.entityType?.name || 'UNKNOWN',
+    }));
+    const steps = buildRelationshipExtractionWorkflowSteps(
+      extractTextFromHtml(content),
+      workflowEntities,
+    );
     const execution = await this.executionService.create(
       'relationship-extraction',
       ExecutionPriority.NORMAL,
       {
         resourceId,
         projectId,
-        text: plainText,
-        entities: entities.map((e) => ({
-          id: e.id,
-          name: e.name,
-          type: e.entityType?.name || 'UNKNOWN',
-        })),
+        entities: workflowEntities,
+        chunkCount: steps.length - 1,
       },
+      { steps },
     );
     return { executionId: execution.executionId };
   }
 
-  async deleteByResource(
-    resourceId: number,
-    requestId?: string,
-  ): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
-      'relationship-modify',
-      ExecutionPriority.NORMAL,
-      {
-        action: 'delete-by-resource',
-        resourceId,
-        requestId,
-      },
-    );
-    return { executionId: execution.executionId };
+  async deleteByResource(resourceId: number): Promise<{ success: true }> {
+    await this.graphService.deleteByResource(resourceId);
+    return { success: true };
   }
 }

@@ -17,57 +17,53 @@ import {
 } from './dto/relationship.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
+import { RelationshipGraph } from '../graph/age-graph.service';
 
 @Controller('relationships')
 export class RelationshipController {
   constructor(private readonly service: RelationshipService) {}
 
   @Get('all')
-  async queryAll(
-    @Query('requestId') requestId?: string,
-  ): Promise<{ executionId: string }> {
-    return this.service.queryAll(requestId);
+  async queryAll(): Promise<RelationshipGraph> {
+    return this.service.queryAll();
   }
 
   @Get('resource/:resourceId')
   async queryByResource(
     @Param('resourceId', ParseIntPipe) resourceId: number,
-    @Query('requestId') requestId?: string,
-  ): Promise<{ executionId: string }> {
-    return this.service.queryByResource(resourceId, requestId);
+  ): Promise<RelationshipGraph> {
+    return this.service.queryByResource(resourceId);
   }
 
   @Get('project/:projectId')
   async queryByProject(
     @Param('projectId', ParseIntPipe) projectId: number,
     @Query('resourceIds') resourceIdsStr?: string,
-    @Query('requestId') requestId?: string,
-  ): Promise<{ executionId: string }> {
+  ): Promise<RelationshipGraph> {
     const resourceIds = resourceIdsStr
       ? resourceIdsStr.split(',').map(Number).filter(Boolean)
       : undefined;
-    return this.service.queryByProject(projectId, resourceIds, requestId);
+    return this.service.queryByProject(projectId, resourceIds);
   }
 
   @Get('neighborhood')
   async queryNeighborhood(
     @Query('names') namesStr: string,
-    @Query('requestId') requestId?: string,
-  ): Promise<{ executionId: string }> {
+  ): Promise<RelationshipGraph> {
     const entityNames = namesStr
       ? namesStr
           .split(',')
           .map((n) => n.trim())
           .filter(Boolean)
       : [];
-    return this.service.queryNeighborhood(entityNames, requestId);
+    return this.service.queryNeighborhood(entityNames);
   }
 
   @Post()
   @RequirePermissions(Permission.RELATIONSHIPS)
   async createRelationship(
     @Body() dto: CreateRelationshipDto,
-  ): Promise<{ executionId: string }> {
+  ): Promise<{ success: true }> {
     return this.service.createRelationship(dto);
   }
 
@@ -75,7 +71,7 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async updateRelationship(
     @Body() dto: UpdateRelationshipDto,
-  ): Promise<{ executionId: string }> {
+  ): Promise<{ success: true }> {
     return this.service.updateRelationship(dto);
   }
 
@@ -83,7 +79,7 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async deleteRelationship(
     @Body() dto: DeleteRelationshipDto,
-  ): Promise<{ executionId: string }> {
+  ): Promise<{ success: true }> {
     return this.service.deleteRelationship(dto);
   }
 

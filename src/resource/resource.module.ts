@@ -4,11 +4,12 @@ import { ResourceController } from './resource.controller';
 import { ResourceService } from './resource.service';
 import { FileStorageModule } from '../file-storage/file-storage.module';
 import { ExecutionModule } from 'src/execution/execution.module';
+import { GraphModule } from '../graph/graph.module';
 
 @Module({
-  imports: [DatabaseModule, FileStorageModule, ExecutionModule],
+  imports: [DatabaseModule, FileStorageModule, ExecutionModule, GraphModule],
   controllers: [ResourceController],
   providers: [ResourceService],
   exports: [ResourceService],
 })
-export class ResourceModule { }
+export class ResourceModule {}

@@ -5,6 +5,7 @@ import { ResourceService } from '../../../src/resource/resource.service';
 import { ResourceEntity } from '../../../src/resource/resource.entity';
 import { FileStorageService } from '../../../src/file-storage/file-storage.service';
 import { ExecutionService } from '../../../src/execution/execution.service';
+import { AgeGraphService } from '../../../src/graph/age-graph.service';
 import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildResource } from '../../factories';
 
@@ -13,6 +14,7 @@ describe('ResourceService', () => {
   let repo: MockRepository<ResourceEntity>;
   let fileStorage: Record<string, jest.Mock>;
   let executionService: Record<string, jest.Mock>;
+  let graphService: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     repo = createMockRepository<ResourceEntity>();
@@ -23,6 +25,7 @@ describe('ResourceService', () => {
       deleteFile: jest.fn(),
     };
     executionService = { create: jest.fn() };
+    graphService = { deleteByResource: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -30,6 +33,7 @@ describe('ResourceService', () => {
         { provide: getRepositoryToken(ResourceEntity), useValue: repo },
         { provide: FileStorageService, useValue: fileStorage },
         { provide: ExecutionService, useValue: executionService },
+        { provide: AgeGraphService, useValue: graphService },
       ],
     }).compile();
 
@@ -283,6 +287,7 @@ describe('ResourceService', () => {
       fileStorage.deleteFile.mockResolvedValue(true);
 
       await service.removeWithFile(1);
+      expect(graphService.deleteByResource).toHaveBeenCalledWith(1);
       expect(fileStorage.deleteFile).toHaveBeenCalledWith('some/path.pdf');
     });
 

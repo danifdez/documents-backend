@@ -13,6 +13,9 @@ import { ResourceEntity } from '../resource/resource.entity';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { readFeaturesFromEnv } from '../common/feature-flags';
+import { extractTextFromHtml } from '../utils/text';
+// eslint-disable-next-line max-len
+import { buildRelationshipExtractionWorkflowSteps } from '../model/relationship-extraction-workflow';
 
 export interface CreatePendingEntityDto {
   resourceId: number;
@@ -277,24 +280,30 @@ export class PendingEntityService {
         const allEntities =
           await this.entityService.findByResourceId(resourceId);
         if (allEntities.length >= 2) {
-          // Fetch content explicitly (findOne excludes large text fields)
-          const relText =
-            content ||
-            (await this.resourceService.getContentById(resourceId)) ||
-            '';
+          const relContent =
+            content || (await this.resourceService.getContentById(resourceId));
+          if (!relContent) {
+            throw new Error('Relationship extraction content is empty');
+          }
+          const workflowEntities = allEntities.map((entity) => ({
+            id: entity.id,
+            name: entity.name,
+            type: entity.entityType?.name || 'UNKNOWN',
+          }));
+          const steps = buildRelationshipExtractionWorkflowSteps(
+            extractTextFromHtml(relContent),
+            workflowEntities,
+          );
           await this.executionService.create(
             'relationship-extraction',
             ExecutionPriority.NORMAL,
             {
               resourceId,
               projectId,
-              text: relText,
-              entities: allEntities.map((e) => ({
-                id: e.id,
-                name: e.name,
-                type: e.entityType?.name || 'UNKNOWN',
-              })),
+              entities: workflowEntities,
+              chunkCount: steps.length - 1,
             },
+            { steps },
           );
         }
       } catch (error) {
@@ -529,7 +538,7 @@ export class PendingEntityService {
 
   /**
    * Retranslate entity when name changes
-   * Updates the translation for the current language and triggers executions for missing translations
+   * Updates the current language and triggers missing translations.
    */
   async retranslateEntity(
     id: number,

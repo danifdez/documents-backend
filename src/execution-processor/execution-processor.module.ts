@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 import { Module } from '@nestjs/common';
 import { ExecutionProcessorFactory } from './execution-processor.factory';
 import { DocumentExtractionProcessor } from './processors/document-extraction-processor';
@@ -22,8 +23,6 @@ import { DataSourceSyncProcessor } from './processors/data-source-sync-processor
 import { TranscribeProcessor } from './processors/transcribe-processor';
 import { DatabaseModule } from '../database/database.module';
 import { RelationshipExtractionProcessor } from './processors/relationship-extraction-processor';
-import { RelationshipQueryProcessor } from './processors/relationship-query-processor';
-import { RelationshipModifyProcessor } from './processors/relationship-modify-processor';
 import { DeleteVectorsProcessor } from './processors/delete-vectors-processor';
 import { SearchProcessor } from './processors/search-processor';
 import { DateExtractionProcessor } from './processors/date-extraction-processor';
@@ -35,8 +34,10 @@ import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 import { AgentModule } from '../agent/agent.module';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 import { ContentTranslationStrategy } from './processors/translate/content-translation.strategy';
+// eslint-disable-next-line max-len
 import { EntitiesPendingBatchTranslationStrategy } from './processors/translate/entities-pending-batch-translation.strategy';
 import { EntityRetranslationStrategy } from './processors/translate/entity-retranslation.strategy';
+// eslint-disable-next-line max-len
 import { EntitiesBatchTranslationStrategy } from './processors/translate/entities-batch-translation.strategy';
 import { EntityTranslationStrategy } from './processors/translate/entity-translation.strategy';
 import { ExecutionModule } from '../execution/execution.module';
@@ -92,12 +93,16 @@ export class ExecutionProcessorModule {
       const {
         PendingEntityModule,
       } = require('../pending-entity/pending-entity.module');
-      featureImports.push(EntityModule, EntityTypeModule, PendingEntityModule);
+      const { GraphModule } = require('../graph/graph.module');
+      featureImports.push(
+        EntityModule,
+        EntityTypeModule,
+        PendingEntityModule,
+        GraphModule,
+      );
       providers.push(
         EntityExtractionProcessor,
         RelationshipExtractionProcessor,
-        RelationshipQueryProcessor,
-        RelationshipModifyProcessor,
         EntitiesPendingBatchTranslationStrategy,
         EntityRetranslationStrategy,
         EntitiesBatchTranslationStrategy,

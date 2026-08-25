@@ -4,9 +4,10 @@ import { RelationshipService } from './relationship.service';
 import { ExecutionModule } from 'src/execution/execution.module';
 import { ResourceModule } from 'src/resource/resource.module';
 import { EntityModule } from 'src/entity/entity.module';
+import { GraphModule } from '../graph/graph.module';
 
 @Module({
-  imports: [ExecutionModule, ResourceModule, EntityModule],
+  imports: [ExecutionModule, ResourceModule, EntityModule, GraphModule],
   controllers: [RelationshipController],
   providers: [RelationshipService],
   exports: [RelationshipService],
