@@ -2,9 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ExecutionEntity } from 'src/execution/execution.entity';
-import { IndexedFileEntity } from 'src/indexed-file/indexed-file.entity';
-import { sourceIdForIndexedFile } from 'src/vector/vector-source-id.util';
+import { ExecutionEntity } from '../../execution/execution.entity';
+import { IndexedFileEntity } from '../../indexed-file/indexed-file.entity';
+import { sourceIdForIndexedFile } from '../../vector/vector-source-id.util';
+import {
+  VectorPointInput,
+  VectorStoreService,
+} from '../../vector/vector-store.service';
 
 @Injectable()
 export class IndexedFileIngestProcessor implements ExecutionProcessor {
@@ -14,6 +18,7 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
   constructor(
     @InjectRepository(IndexedFileEntity)
     private readonly repository: Repository<IndexedFileEntity>,
+    private readonly vectorStore: VectorStoreService,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -48,8 +53,17 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
     const result = execution.result as {
       chunks?: number;
       sourceId?: string;
+      points?: unknown[];
     } | null;
     const chunks = Number(result?.chunks ?? 0);
+    if (!Array.isArray(result?.points) || chunks !== result.points.length) {
+      throw new Error('indexed-file-ingest result has invalid points');
+    }
+    await this.vectorStore.replaceIndexedFile(
+      indexedFileId,
+      `${file.ownerType}:${file.ownerId}`,
+      result.points as VectorPointInput[],
+    );
 
     file.embeddingId = chunks > 0 ? sourceIdForIndexedFile(file.id) : null;
     await this.repository.save(file);

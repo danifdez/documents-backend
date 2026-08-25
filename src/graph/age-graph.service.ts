@@ -121,6 +121,32 @@ export class AgeGraphService {
     }
   }
 
+  async queryNeighborhoodForText(
+    text: string,
+    projectId?: number,
+  ): Promise<RelationshipGraph> {
+    const normalized = text.trim().toLocaleLowerCase();
+    if (!normalized) return { entities: [], relationships: [] };
+    const runner = await this.connect();
+    let names: string[];
+    try {
+      const rows = await this.cypher(
+        runner,
+        'MATCH (e:Entity) RETURN DISTINCT e.name AS name ORDER BY e.name LIMIT 1000',
+        {},
+        'name agtype',
+      );
+      names = rows
+        .map((row) => String(this.ageValue(row.name) ?? '').trim())
+        .filter((name) => name.length >= 2)
+        .filter((name) => normalized.includes(name.toLocaleLowerCase()))
+        .slice(0, 20);
+    } finally {
+      await runner.release();
+    }
+    return this.queryNeighborhood(names, projectId);
+  }
+
   async createRelationship(
     subject: RelationshipEntityInput,
     predicate: string,

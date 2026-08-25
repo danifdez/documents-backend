@@ -7,7 +7,6 @@ export enum ExecutionType {
   KEY_POINT = 'key-point',
   KEYWORDS = 'keywords',
   INGEST_CONTENT = 'ingest-content',
-  DELETE_VECTORS = 'delete-vectors',
   SEARCH = 'search',
   EMBEDDING = 'embedding',
   RELATIONSHIP_EXTRACTION = 'relationship-extraction',

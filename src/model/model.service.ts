@@ -7,12 +7,17 @@ import { buildSummarizeWorkflowSteps } from './summarize-workflow';
 import { buildEntityExtractionWorkflowSteps } from './entity-extraction-workflow';
 import { buildKeywordsWorkflowSteps } from './keywords-workflow';
 import { buildKeyPointWorkflowSteps } from './key-point-workflow';
+import { VectorStoreService } from '../vector/vector-store.service';
+import { AgeGraphService } from '../graph/age-graph.service';
+import { readFeaturesFromEnv } from '../common/feature-flags';
 
 @Injectable()
 export class ModelService {
   constructor(
     private readonly executionService: ExecutionService,
     private readonly resourceService: ResourceService,
+    private readonly vectorStore: VectorStoreService,
+    private readonly graphService: AgeGraphService,
   ) {}
 
   async ask(
@@ -21,7 +26,14 @@ export class ModelService {
     requestId?: string,
     context?: string,
   ): Promise<{ executionId: string }> {
-    const execution = await this.executionService.create(
+    const graphPromise = readFeaturesFromEnv().relationships
+      ? this.graphService.queryNeighborhoodForText(question, projectId)
+      : Promise.resolve({ entities: [], relationships: [] });
+    const [candidates, graph] = await Promise.all([
+      this.vectorStore.workspaceCandidates(projectId),
+      graphPromise,
+    ]);
+    const execution = await this.executionService.createInference(
       'ask',
       ExecutionPriority.HIGH,
       {
@@ -29,6 +41,10 @@ export class ModelService {
         projectId,
         requestId,
         context,
+        graphContext: graph.relationships,
+      },
+      {
+        inputArtifacts: [this.vectorStore.vectorCandidatesArtifact(candidates)],
       },
     );
     return { executionId: execution.executionId };
@@ -219,6 +235,7 @@ export class ModelService {
     requestId?: string,
     limit?: number,
   ): Promise<{ executionId: string }> {
+    const candidates = await this.vectorStore.workspaceCandidates(projectId);
     const execution = await this.executionService.create(
       'search',
       ExecutionPriority.HIGH,
@@ -227,6 +244,9 @@ export class ModelService {
         projectId,
         requestId,
         limit: limit || 10,
+      },
+      {
+        inputArtifacts: [this.vectorStore.vectorCandidatesArtifact(candidates)],
       },
     );
     return { executionId: execution.executionId };

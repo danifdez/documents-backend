@@ -18,7 +18,7 @@ import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
-import { sourceIdForIndexedFile } from '../vector/vector-source-id.util';
+import { VectorStoreService } from '../vector/vector-store.service';
 import {
   detectMimeType,
   resolveSafePath,
@@ -83,6 +83,7 @@ export class IndexedFileService {
     @InjectRepository(AgentEntity)
     private readonly agentRepository: Repository<AgentEntity>,
     private readonly executionService: ExecutionService,
+    private readonly vectorStore: VectorStoreService,
   ) {}
 
   async findByOwner(owner: OwnerRef): Promise<IndexedFileEntity[]> {
@@ -304,10 +305,18 @@ export class IndexedFileService {
 
     let execution;
     try {
+      const candidates = await this.vectorStore.indexedFileCandidates(
+        `${ownerType}:${ownerId}`,
+      );
       execution = await this.executionService.create(
         'indexed-file-search',
         ExecutionPriority.HIGH,
         { ownerType, ownerId, query: q, limit },
+        {
+          inputArtifacts: [
+            this.vectorStore.vectorCandidatesArtifact(candidates),
+          ],
+        },
       );
     } catch (e: any) {
       this.logger.warn(
@@ -340,23 +349,6 @@ export class IndexedFileService {
       `folder search execution ${execution.executionId} timed out`,
     );
     return [];
-  }
-
-  private async enqueueVectorCleanup(args: {
-    sourceId?: string;
-    indexedFileId?: number;
-    ownerType?: IndexedFileOwnerType;
-    ownerId?: number;
-  }): Promise<void> {
-    try {
-      await this.executionService.create(
-        'indexed-file-delete-vectors',
-        ExecutionPriority.BACKGROUND,
-        args,
-      );
-    } catch (e: any) {
-      this.logger.warn(`vector cleanup enqueue failed: ${e?.message ?? e}`);
-    }
   }
 
   async readWithSync(
@@ -435,9 +427,7 @@ export class IndexedFileService {
         row.extractedText = null;
         row.embeddingId = null;
         row = await this.repository.save(row);
-        void this.enqueueVectorCleanup({
-          sourceId: sourceIdForIndexedFile(row.id),
-        });
+        await this.vectorStore.deleteIndexedFile(row.id);
         await this.enqueueExtraction(row, buffer);
       } else {
         row.mtime = stat.mtime;
@@ -677,7 +667,8 @@ export class IndexedFileService {
     }
 
     this.logger.log(
-      `[indexed-file] reconcile owner=${ownerType}:${ownerId} added=${added} updated=${updated} removed=${removed}`,
+      `[indexed-file] reconcile owner=${ownerType}:${ownerId} ` +
+        `added=${added} updated=${updated} removed=${removed}`,
     );
     return { status: 'done', added, updated, removed };
   }

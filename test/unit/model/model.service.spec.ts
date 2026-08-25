@@ -11,6 +11,8 @@ describe('ModelService execution identities', () => {
     'entity-extraction': '018f1d8a-54d7-7d63-a1ee-5e9a6adca703',
     'key-point': '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
     keywords: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
+    ask: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
+    search: '018f1d8a-54d7-7d63-a1ee-5e9a6adca707',
   };
   let executionService: { create: jest.Mock; createInference: jest.Mock };
   let resourceService: {
@@ -19,6 +21,8 @@ describe('ModelService execution identities', () => {
     getTranslatedContentById: jest.Mock;
   };
   let service: ModelService;
+  let vectorStore: Record<string, jest.Mock>;
+  let graphService: Record<string, jest.Mock>;
 
   beforeEach(() => {
     delete process.env.AGENT_ENTITY_EXTRACTION;
@@ -35,7 +39,27 @@ describe('ModelService execution identities', () => {
       getContentById: jest.fn().mockResolvedValue('<p>Hola mundo</p>'),
       getTranslatedContentById: jest.fn().mockResolvedValue(null),
     };
-    service = new ModelService(executionService as any, resourceService as any);
+    vectorStore = {
+      workspaceCandidates: jest.fn().mockResolvedValue([]),
+      vectorCandidatesArtifact: jest.fn().mockReturnValue({
+        role: 'vector_candidates',
+        kind: 'vector_candidates',
+        mediaType: 'application/json',
+        body: Buffer.from('{"candidates":[]}'),
+      }),
+    };
+    graphService = {
+      queryNeighborhoodForText: jest.fn().mockResolvedValue({
+        entities: [],
+        relationships: [],
+      }),
+    };
+    service = new ModelService(
+      executionService as any,
+      resourceService as any,
+      vectorStore as any,
+      graphService as any,
+    );
   });
 
   it('creates key points as a durable inference map-reduce graph', async () => {
@@ -58,6 +82,40 @@ describe('ModelService execution identities', () => {
           }),
         ],
       },
+    );
+  });
+
+  it('freezes vector and graph context before creating ask work', async () => {
+    await expect(
+      service.ask('Who designed it?', 3, 'request-1'),
+    ).resolves.toEqual({ executionId: executionIds.ask });
+    expect(vectorStore.workspaceCandidates).toHaveBeenCalledWith(3);
+    expect(graphService.queryNeighborhoodForText).toHaveBeenCalledWith(
+      'Who designed it?',
+      3,
+    );
+    expect(executionService.createInference).toHaveBeenCalledWith(
+      'ask',
+      expect.any(String),
+      expect.objectContaining({
+        question: 'Who designed it?',
+        projectId: 3,
+        graphContext: [],
+      }),
+      expect.objectContaining({ inputArtifacts: [expect.any(Object)] }),
+    );
+  });
+
+  it('freezes scoped vector candidates for semantic search', async () => {
+    await expect(
+      service.semanticSearch('engine', 3, 'request-2', 4),
+    ).resolves.toEqual({ executionId: executionIds.search });
+    expect(vectorStore.workspaceCandidates).toHaveBeenCalledWith(3);
+    expect(executionService.create).toHaveBeenCalledWith(
+      'search',
+      expect.any(String),
+      { query: 'engine', projectId: 3, requestId: 'request-2', limit: 4 },
+      expect.objectContaining({ inputArtifacts: [expect.any(Object)] }),
     );
   });
 

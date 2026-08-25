@@ -3,12 +3,12 @@ import { ArchiveService } from './archive.service';
 import { ArchiveController } from './archive.controller';
 import { DatabaseModule } from '../database/database.module';
 import { FileStorageModule } from '../file-storage/file-storage.module';
-import { ExecutionModule } from '../execution/execution.module';
+import { VectorModule } from '../vector/vector.module';
 
 @Module({
-    imports: [DatabaseModule, FileStorageModule, ExecutionModule],
-    controllers: [ArchiveController],
-    providers: [ArchiveService],
-    exports: [ArchiveService],
+  imports: [DatabaseModule, FileStorageModule, VectorModule],
+  controllers: [ArchiveController],
+  providers: [ArchiveService],
+  exports: [ArchiveService],
 })
-export class ArchiveModule { }
+export class ArchiveModule {}

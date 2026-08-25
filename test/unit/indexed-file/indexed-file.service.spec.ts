@@ -12,6 +12,7 @@ import { IndexedFileEntity } from '../../../src/indexed-file/indexed-file.entity
 import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { AgentEntity } from '../../../src/agent/agent.entity';
 import { ExecutionService } from '../../../src/execution/execution.service';
+import { VectorStoreService } from '../../../src/vector/vector-store.service';
 
 function createMockRepo() {
   const store = new Map<number, any>();
@@ -70,6 +71,7 @@ describe('IndexedFileService', () => {
   let assistantRepo: ReturnType<typeof createMockRepo>;
   let agentRepo: ReturnType<typeof createMockRepo>;
   let executionService: { create: jest.Mock };
+  let vectorStore: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     tmpScope = await fs.mkdtemp(path.join(os.tmpdir(), 'indexed-file-test-'));
@@ -82,6 +84,16 @@ describe('IndexedFileService', () => {
     });
 
     executionService = { create: jest.fn(async () => ({ id: 1 })) };
+    vectorStore = {
+      indexedFileCandidates: jest.fn().mockResolvedValue([]),
+      vectorCandidatesArtifact: jest.fn().mockReturnValue({
+        role: 'vector_candidates',
+        kind: 'vector_candidates',
+        mediaType: 'application/json',
+        body: Buffer.from('{"candidates":[]}'),
+      }),
+      deleteIndexedFile: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,6 +108,7 @@ describe('IndexedFileService', () => {
         },
         { provide: getRepositoryToken(AgentEntity), useValue: agentRepo },
         { provide: ExecutionService, useValue: executionService },
+        { provide: VectorStoreService, useValue: vectorStore },
       ],
     }).compile();
     service = module.get(IndexedFileService);
@@ -359,7 +372,7 @@ describe('IndexedFileService', () => {
   // Vector chunks are removed by the indexed_file_chunks.indexed_file_id FK
   // (ON DELETE CASCADE), so deleting the row is enough and needs no cleanup execution.
   describe('vector cleanup (ON DELETE CASCADE)', () => {
-    it('deleteFile removes the row and enqueues no delete-vectors execution', async () => {
+    it('deleteFile relies on the foreign-key cascade', async () => {
       const e = await service.writeFile(owner, 'a.md', 'x', {
         overwrite: false,
       });
@@ -369,21 +382,15 @@ describe('IndexedFileService', () => {
         ownerId: assistantId,
       });
       expect(indexedRepo.store.size).toBe(0);
-      const cleanupCall = executionService.create.mock.calls.find(
-        (c) => c[0] === 'indexed-file-delete-vectors',
-      );
-      expect(cleanupCall).toBeUndefined();
+      expect(executionService.create).not.toHaveBeenCalled();
     });
 
-    it('clearAllForOwner removes the rows and enqueues no delete-vectors execution', async () => {
+    it('clearAllForOwner relies on the foreign-key cascade', async () => {
       await service.writeFile(owner, 'a.md', 'x', { overwrite: false });
       executionService.create.mockClear();
       await service.clearAllForOwner(owner);
       expect(indexedRepo.store.size).toBe(0);
-      const cleanupCall = executionService.create.mock.calls.find(
-        (c) => c[0] === 'indexed-file-delete-vectors',
-      );
-      expect(cleanupCall).toBeUndefined();
+      expect(executionService.create).not.toHaveBeenCalled();
     });
   });
 });

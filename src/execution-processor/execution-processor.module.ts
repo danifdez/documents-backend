@@ -23,7 +23,6 @@ import { DataSourceSyncProcessor } from './processors/data-source-sync-processor
 import { TranscribeProcessor } from './processors/transcribe-processor';
 import { DatabaseModule } from '../database/database.module';
 import { RelationshipExtractionProcessor } from './processors/relationship-extraction-processor';
-import { DeleteVectorsProcessor } from './processors/delete-vectors-processor';
 import { SearchProcessor } from './processors/search-processor';
 import { DateExtractionProcessor } from './processors/date-extraction-processor';
 import { AssistantChatProcessor } from './processors/assistant-chat-processor';
@@ -41,6 +40,9 @@ import { EntityRetranslationStrategy } from './processors/translate/entity-retra
 import { EntitiesBatchTranslationStrategy } from './processors/translate/entities-batch-translation.strategy';
 import { EntityTranslationStrategy } from './processors/translate/entity-translation.strategy';
 import { ExecutionModule } from '../execution/execution.module';
+import { VectorModule } from '../vector/vector.module';
+import { MemoryIngestProcessor } from './processors/memory-ingest-processor';
+import { VectorSearchProcessor } from './processors/vector-search-processor';
 
 @Module({})
 export class ExecutionProcessorModule {
@@ -63,8 +65,9 @@ export class ExecutionProcessorModule {
       KeywordsProcessor,
       AskProcessor,
       TranscribeProcessor,
-      DeleteVectorsProcessor,
       SearchProcessor,
+      MemoryIngestProcessor,
+      VectorSearchProcessor,
       AssistantChatProcessor,
       IndexedFileExtractionProcessor,
       IndexedFileIngestProcessor,
@@ -122,6 +125,7 @@ export class ExecutionProcessorModule {
         AssistantModule,
         IndexedFileModule,
         AgentModule,
+        VectorModule,
         ...featureImports,
       ],
       providers,

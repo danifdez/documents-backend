@@ -5,21 +5,27 @@ import { KnowledgeEntryEntity } from '../../../src/knowledge-base/knowledge-entr
 import { ExecutionService } from '../../../src/execution/execution.service';
 import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildKnowledgeEntry } from '../../factories';
+import { VectorStoreService } from '../../../src/vector/vector-store.service';
 
 describe('KnowledgeEntryService', () => {
   let service: KnowledgeEntryService;
   let repo: MockRepository<KnowledgeEntryEntity>;
   let executionService: Record<string, jest.Mock>;
+  let vectorStore: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     repo = createMockRepository<KnowledgeEntryEntity>();
     executionService = { create: jest.fn().mockResolvedValue({}) };
+    vectorStore = {
+      deleteWorkspaceSource: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KnowledgeEntryService,
         { provide: getRepositoryToken(KnowledgeEntryEntity), useValue: repo },
         { provide: ExecutionService, useValue: executionService },
+        { provide: VectorStoreService, useValue: vectorStore },
       ],
     }).compile();
 
@@ -134,24 +140,26 @@ describe('KnowledgeEntryService', () => {
   });
 
   describe('remove', () => {
-    it('should remove entry and schedule vector deletion', async () => {
+    it('should remove vectors and then delete the entry', async () => {
       const entry = buildKnowledgeEntry();
       repo.findOneBy.mockResolvedValue(entry);
       repo.remove.mockResolvedValue(entry);
 
       const result = await service.remove(1);
       expect(result).toEqual({ deleted: true });
-      expect(executionService.create).toHaveBeenCalledWith(
-        'delete-vectors',
-        expect.any(String),
-        { sourceId: 'knowledge_1' },
+      expect(vectorStore.deleteWorkspaceSource).toHaveBeenCalledWith(
+        'knowledge_1',
       );
+      expect(
+        vectorStore.deleteWorkspaceSource.mock.invocationCallOrder[0],
+      ).toBeLessThan(repo.remove.mock.invocationCallOrder[0]);
     });
 
     it('should return deleted false when not found', async () => {
       repo.findOneBy.mockResolvedValue(null);
       expect(await service.remove(999)).toEqual({ deleted: false });
       expect(executionService.create).not.toHaveBeenCalled();
+      expect(vectorStore.deleteWorkspaceSource).not.toHaveBeenCalled();
     });
   });
 });

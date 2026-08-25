@@ -13,6 +13,7 @@ import { ExecutionService } from '../execution/execution.service';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionEntity } from '../execution/execution.entity';
+import { VectorStoreService } from '../vector/vector-store.service';
 
 export type MemoryRelevance = 'high' | 'medium' | 'recent';
 
@@ -30,6 +31,7 @@ export class AssistantMemoryService {
     @InjectRepository(AssistantEntity)
     private readonly assistantRepo: Repository<AssistantEntity>,
     private readonly executionService: ExecutionService,
+    private readonly vectorStore: VectorStoreService,
   ) {}
 
   private async ensureCanHaveMemory(
@@ -96,6 +98,7 @@ export class AssistantMemoryService {
     limit: number,
     timeoutMs = 3000,
   ): Promise<Array<{ memoryId: number; score: number }>> {
+    const candidates = await this.vectorStore.memoryCandidates(assistantId);
     let execution;
     try {
       execution = await this.executionService.create(
@@ -105,6 +108,11 @@ export class AssistantMemoryService {
           ownerId: assistantId,
           query,
           limit,
+        },
+        {
+          inputArtifacts: [
+            this.vectorStore.vectorCandidatesArtifact(candidates),
+          ],
         },
       );
     } catch (e: any) {

@@ -78,7 +78,7 @@ describe('DatasetAnalysisService', () => {
     const { service, executionService } = setup();
 
     await expect(
-      service.createExecution('delete-vectors', [1], {}),
+      service.createExecution('unsupported-operation', [1], {}),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(executionService.createCode).not.toHaveBeenCalled();
   });

@@ -7,11 +7,9 @@ import { DocEntity } from '../doc/doc.entity';
 import { NoteEntity } from '../note/note.entity';
 import { ResourceEntity } from '../resource/resource.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
-import { ExecutionService } from '../execution/execution.service';
-import { ExecutionPriority } from '../execution/execution-priority.enum';
+import { VectorStoreService } from '../vector/vector-store.service';
 import {
   sourceIdForDoc,
-  sourceIdForNote,
   sourceIdForResource,
 } from '../vector/vector-source-id.util';
 
@@ -38,7 +36,7 @@ export class ArchiveService {
     @InjectRepository(ResourceEntity)
     private readonly resourceRepo: Repository<ResourceEntity>,
     private readonly fileStorageService: FileStorageService,
-    private readonly executionService: ExecutionService,
+    private readonly vectorStore: VectorStoreService,
   ) {}
 
   async archiveProject(projectId: number): Promise<void> {
@@ -75,7 +73,7 @@ export class ArchiveService {
     }
 
     await this.moveResourceFilesToArchive(buckets.resources);
-    await this.scheduleVectorDeletion(buckets);
+    await this.deleteVectors(buckets);
   }
 
   async unarchiveProject(projectId: number): Promise<void> {
@@ -148,7 +146,7 @@ export class ArchiveService {
     }
 
     await this.moveResourceFilesToArchive(buckets.resources);
-    await this.scheduleVectorDeletion(buckets);
+    await this.deleteVectors(buckets);
   }
 
   async unarchiveThread(threadId: number): Promise<void> {
@@ -346,24 +344,11 @@ export class ArchiveService {
     }
   }
 
-  private async scheduleVectorDeletion(buckets: CascadeBuckets): Promise<void> {
+  private async deleteVectors(buckets: CascadeBuckets): Promise<void> {
     const sourceIds = [
       ...buckets.resources.map((r) => sourceIdForResource(r.id)),
       ...buckets.docs.map((d) => sourceIdForDoc(d.id)),
-      ...buckets.notes.map((n) => sourceIdForNote(n.id)),
     ];
-    for (const sourceId of sourceIds) {
-      try {
-        await this.executionService.create(
-          'delete-vectors',
-          ExecutionPriority.BACKGROUND,
-          { sourceId },
-        );
-      } catch (err) {
-        this.logger.error(
-          `Failed to schedule vector deletion for ${sourceId}: ${err.message}`,
-        );
-      }
-    }
+    await this.vectorStore.deleteWorkspaceSources(sourceIds);
   }
 }

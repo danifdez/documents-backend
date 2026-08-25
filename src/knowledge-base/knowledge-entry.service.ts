@@ -10,6 +10,7 @@ import { ExecutionService } from '../execution/execution.service';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { sourceIdForKnowledge } from '../vector/vector-source-id.util';
 import { globalSimilaritySearch } from '../common/global-search';
+import { VectorStoreService } from '../vector/vector-store.service';
 
 @Injectable()
 export class KnowledgeEntryService {
@@ -19,6 +20,7 @@ export class KnowledgeEntryService {
     @InjectRepository(KnowledgeEntryEntity)
     private readonly repository: Repository<KnowledgeEntryEntity>,
     private readonly executionService: ExecutionService,
+    private readonly vectorStore: VectorStoreService,
   ) {}
 
   async findAll(): Promise<KnowledgeEntryEntity[]> {
@@ -93,8 +95,8 @@ export class KnowledgeEntryService {
   async remove(id: number): Promise<{ deleted: boolean }> {
     const entry = await this.repository.findOneBy({ id });
     if (!entry) return { deleted: false };
+    await this.vectorStore.deleteWorkspaceSource(sourceIdForKnowledge(id));
     await this.repository.remove(entry);
-    await this.scheduleDeleteVectors(id);
     return { deleted: true };
   }
 
@@ -123,25 +125,6 @@ export class KnowledgeEntryService {
     } catch (error) {
       this.logger.error(
         `Failed to schedule ingest for knowledge entry ${entry.id}: ${error.message}`,
-      );
-    }
-  }
-
-  private async scheduleDeleteVectors(entryId: number) {
-    try {
-      await this.executionService.create(
-        'delete-vectors',
-        ExecutionPriority.BACKGROUND,
-        {
-          sourceId: sourceIdForKnowledge(entryId),
-        },
-      );
-      this.logger.log(
-        `Scheduled vector deletion for knowledge entry ${entryId}`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to schedule vector deletion for knowledge entry ${entryId}: ${error.message}`,
       );
     }
   }
