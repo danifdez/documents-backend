@@ -41,12 +41,6 @@ export class ExecutionEntity {
   @Column({ name: 'task_type', type: 'varchar', length: 100 })
   taskType: string;
 
-  @Column({ type: 'varchar', length: 30, default: 'root' })
-  origin: string;
-
-  @Column({ type: 'varchar', length: 20, default: 'normal' })
-  priority: string;
-
   @Column({ type: 'jsonb', nullable: true })
   payload: any;
 
@@ -55,9 +49,6 @@ export class ExecutionEntity {
 
   @Column({ type: 'varchar', length: 80, nullable: true })
   phase: string | null;
-
-  @Column({ name: 'wait_reason', type: 'varchar', length: 100, nullable: true })
-  waitReason: string | null;
 
   @Column({
     name: 'completion_kind',

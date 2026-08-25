@@ -192,12 +192,9 @@ export class ExecutionService {
         schemaVersion: EXECUTION_SCHEMA,
         taskType:
           executionKind === 'assistant_chat' ? 'assistant-chat' : 'agent-chat',
-        origin: 'root',
-        priority: ExecutionPriority.HIGH,
         payload,
         status: ExecutionStatus.QUEUED,
         phase: null,
-        waitReason: null,
         completionKind: null,
         completionReason: null,
         result: null,
@@ -317,7 +314,6 @@ export class ExecutionService {
     priority: ExecutionPriority,
     payload: Record<string, unknown>,
     options?: {
-      origin?: string;
       rootExecutionId?: string;
       parentExecutionId?: string;
       ownerPrincipal?: string;
@@ -346,12 +342,9 @@ export class ExecutionService {
         workspaceId: options?.workspaceId ?? 'default',
         schemaVersion: EXECUTION_SCHEMA,
         taskType,
-        origin: options?.origin ?? 'root',
-        priority,
         payload,
         status: ExecutionStatus.QUEUED,
         phase: null,
-        waitReason: null,
         completionKind: null,
         completionReason: null,
         result: null,

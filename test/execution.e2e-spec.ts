@@ -11,6 +11,7 @@ import { CreateExecutionToolPlans1757668140420 } from '../migrations/17576681404
 import { AddExecutionStepContinuation1757668140430 } from '../migrations/1757668140430-AddExecutionStepContinuation';
 import { AddExecutionStepContinuationTarget1757668140440 } from '../migrations/1757668140440-AddExecutionStepContinuationTarget';
 import { DropObsoleteExecutionCheckpoint1757668140450 } from '../migrations/1757668140450-DropObsoleteExecutionCheckpoint';
+import { DropObsoleteExecutionRoutingFields1757668140460 } from '../migrations/1757668140460-DropObsoleteExecutionRoutingFields';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -105,6 +106,7 @@ describe('execution PostgreSQL integration', () => {
     await new AddExecutionStepContinuation1757668140430().up(runner);
     await new AddExecutionStepContinuationTarget1757668140440().up(runner);
     await new DropObsoleteExecutionCheckpoint1757668140450().up(runner);
+    await new DropObsoleteExecutionRoutingFields1757668140460().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -225,15 +227,15 @@ describe('execution PostgreSQL integration', () => {
     });
   };
 
-  it('does not retain the obsolete execution checkpoint column', async () => {
-    const [column] = await dataSource.query(`
+  it('does not retain obsolete execution control columns', async () => {
+    const columns = await dataSource.query(`
       SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = current_schema()
         AND table_name = 'executions'
-        AND column_name = 'checkpoint'
+        AND column_name IN ('checkpoint', 'origin', 'priority', 'wait_reason')
     `);
-    expect(column).toBeUndefined();
+    expect(columns).toEqual([]);
   });
 
   it('commits an execution and its initial step atomically', async () => {
