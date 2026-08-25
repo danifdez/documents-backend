@@ -31,6 +31,7 @@ describe('ExecutionService primitives', () => {
         initialStep: {
           stepKind: 'inference',
           work: { taskType: 'translate', payload },
+          finalizeOnFailure: false,
           requiredCapabilities: ['translate'],
           priority: 0,
         },
@@ -70,6 +71,7 @@ describe('ExecutionService primitives', () => {
         initialStep: {
           stepKind: 'code',
           work: { taskType: 'distribution', payload },
+          finalizeOnFailure: false,
           requiredCapabilities: ['distribution'],
           priority: 0,
         },

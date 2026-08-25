@@ -10,7 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DatasetEntity, DatasetField } from './dataset.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
-import { CellAnchor, ExtractionStatus } from './cell-anchor.type';
+import { CellAnchor } from './cell-anchor.type';
 import { ResourceService } from '../resource/resource.service';
 import { ResourceEntity } from '../resource/resource.entity';
 import { ExecutionService } from '../execution/execution.service';
@@ -327,10 +327,11 @@ export class DatasetExtractionService {
       model: dataset.extractionConfig?.model ?? DEFAULT_MODEL,
     };
 
-    return await this.executionService.create(
+    return await this.executionService.createInference(
       'dataset.extract-row',
       ExecutionPriority.NORMAL,
       payload,
+      { finalizeOnFailure: true },
     );
   }
 
@@ -344,14 +345,13 @@ export class DatasetExtractionService {
   async applyExtractionResult(
     recordId: number,
     result: {
-      data: Record<string, any> | null;
-      cellMetadata: Record<string, CellAnchor> | null;
-      error: string | null;
+      data: Record<string, any>;
+      cellMetadata: Record<string, CellAnchor>;
       model?: string;
       promptVersion?: string;
     },
     columnsExtracted: string[],
-  ): Promise<{ datasetId: number; status: ExtractionStatus }> {
+  ): Promise<{ datasetId: number; status: 'extracted' }> {
     const record = await this.recordRepository.findOne({
       where: { id: recordId },
       relations: ['dataset'],
@@ -360,17 +360,10 @@ export class DatasetExtractionService {
       throw new NotFoundException(`Record with id ${recordId} not found`);
     }
 
-    if (result.error) {
-      record.extractionStatus = 'failed';
-      record.extractionError = result.error;
-      await this.recordRepository.save(record);
-      return { datasetId: record.dataset.id, status: 'failed' };
-    }
-
     const data = { ...(record.data || {}) };
     const cellMetadata = { ...(record.cellMetadata || {}) };
-    const incomingData = result.data || {};
-    const incomingAnchors = result.cellMetadata || {};
+    const incomingData = result.data;
+    const incomingAnchors = result.cellMetadata;
 
     for (const fieldKey of columnsExtracted) {
       const currentAnchor = cellMetadata[fieldKey];
@@ -399,5 +392,23 @@ export class DatasetExtractionService {
     await this.recordRepository.save(record);
 
     return { datasetId: record.dataset.id, status: 'extracted' };
+  }
+
+  async markExtractionFailed(
+    recordId: number,
+    message: string,
+  ): Promise<{ datasetId: number; status: 'failed' }> {
+    const record = await this.recordRepository.findOne({
+      where: { id: recordId },
+      relations: ['dataset'],
+    });
+    if (!record) {
+      throw new NotFoundException(`Record with id ${recordId} not found`);
+    }
+
+    record.extractionStatus = 'failed';
+    record.extractionError = message;
+    await this.recordRepository.save(record);
+    return { datasetId: record.dataset.id, status: 'failed' };
   }
 }

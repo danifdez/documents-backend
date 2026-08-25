@@ -54,6 +54,8 @@ export class ExecutionCoordinatorService {
       if (!execution) break;
 
       try {
+        const finalizingFailure =
+          execution.phase === 'domain_failure_finalization';
         const processor = this.executionProcessorFactory.getProcessor(
           execution.taskType,
         );
@@ -71,17 +73,24 @@ export class ExecutionCoordinatorService {
         );
         const result = await processor.process(execution);
         if (
-          result &&
-          typeof result === 'object' &&
-          'success' in result &&
-          result.success === false
+          finalizingFailure ||
+          (result &&
+            typeof result === 'object' &&
+            'success' in result &&
+            result.success === false)
         ) {
+          const executionError = execution.error as Record<
+            string,
+            unknown
+          > | null;
           const message =
             typeof result.message === 'string'
               ? result.message
               : typeof result.reason === 'string'
                 ? result.reason
-                : `Execution finalizer rejected task type: ${execution.taskType}`;
+                : typeof executionError?.message === 'string'
+                  ? executionError.message
+                  : `Execution finalizer rejected task type: ${execution.taskType}`;
           await this.executionService.markAsFailed(
             execution.executionId,
             message,

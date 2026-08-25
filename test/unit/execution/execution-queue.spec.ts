@@ -84,6 +84,25 @@ describe('ExecutionService queue state', () => {
     expect(executionRepo.findOneBy).not.toHaveBeenCalled();
   });
 
+  it('preserves failure intent while claiming domain reconciliation', async () => {
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: 'backend_failure_finalization',
+      error: { code: 'MODEL_FAILED', message: 'Model failed' },
+    };
+    manager.query.mockResolvedValue([{ execution_id: EXECUTION_ID }]);
+    executionRepo.findOneBy.mockResolvedValue(execution);
+    executionRepo.save.mockImplementation(async (value) => value);
+
+    await expect(service.claimReadyForFinalization()).resolves.toEqual(
+      expect.objectContaining({
+        phase: 'domain_failure_finalization',
+        error: { code: 'MODEL_FAILED', message: 'Model failed' },
+      }),
+    );
+  });
+
   it('makes abandoned finalizations claimable again', async () => {
     const staleBefore = new Date('2026-08-24T10:00:00.000Z');
     manager.query.mockResolvedValue([
@@ -95,7 +114,7 @@ describe('ExecutionService queue state', () => {
       2,
     );
     expect(manager.query).toHaveBeenCalledWith(
-      expect.stringContaining(`SET "phase" = 'backend_finalization'`),
+      expect.stringContaining(`WHEN "phase" = 'domain_failure_finalization'`),
       [staleBefore],
     );
   });

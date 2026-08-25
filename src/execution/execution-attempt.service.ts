@@ -649,9 +649,12 @@ export class ExecutionAttemptService {
         ].includes(execution.status);
         const executionHasTerminalIntent =
           executionWasTerminal ||
-          ['terminal_pending_failed', 'terminal_pending_cancelled'].includes(
-            execution.phase ?? '',
-          );
+          [
+            'terminal_pending_failed',
+            'terminal_pending_cancelled',
+            'backend_failure_finalization',
+            'domain_failure_finalization',
+          ].includes(execution.phase ?? '');
         const finishedAt = new Date();
         if (acceptedStatus === 'succeeded') {
           assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
@@ -680,7 +683,9 @@ export class ExecutionAttemptService {
           operation.error = acceptedError as Record<string, unknown>;
           if (!executionHasTerminalIntent) {
             execution.error = acceptedError;
-            execution.phase = 'terminal_pending_failed';
+            execution.phase = step.finalizeOnFailure
+              ? 'backend_failure_finalization'
+              : 'terminal_pending_failed';
           }
         }
         assertAttemptTransition(

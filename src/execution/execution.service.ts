@@ -157,6 +157,13 @@ export interface CreateExecutionOptions {
   }>;
 }
 
+type CreateSingleStepExecutionOptions = Omit<
+  CreateExecutionOptions,
+  'initialStep' | 'steps'
+> & {
+  finalizeOnFailure?: boolean;
+};
+
 @Injectable()
 export class ExecutionService {
   constructor(
@@ -479,13 +486,15 @@ export class ExecutionService {
     taskType: string,
     priority: ExecutionPriority,
     payload: Record<string, unknown>,
-    options?: Omit<CreateExecutionOptions, 'initialStep' | 'steps'>,
+    options?: CreateSingleStepExecutionOptions,
   ): Promise<ExecutionEntity> {
+    const { finalizeOnFailure = false, ...executionOptions } = options ?? {};
     return this.create(taskType, priority, payload, {
-      ...(options ?? {}),
+      ...executionOptions,
       initialStep: {
         stepKind: ExecutionStepKind.INFERENCE,
         work: { taskType, payload },
+        finalizeOnFailure,
         requiredCapabilities: [taskType],
         priority: STEP_PRIORITY[priority],
       },
@@ -496,13 +505,15 @@ export class ExecutionService {
     taskType: string,
     priority: ExecutionPriority,
     payload: Record<string, unknown>,
-    options?: Omit<CreateExecutionOptions, 'initialStep' | 'steps'>,
+    options?: CreateSingleStepExecutionOptions,
   ): Promise<ExecutionEntity> {
+    const { finalizeOnFailure = false, ...executionOptions } = options ?? {};
     return this.create(taskType, priority, payload, {
-      ...(options ?? {}),
+      ...executionOptions,
       initialStep: {
         stepKind: ExecutionStepKind.CODE,
         work: { taskType, payload },
+        finalizeOnFailure,
         requiredCapabilities: [taskType],
         priority: STEP_PRIORITY[priority],
       },
@@ -523,7 +534,7 @@ export class ExecutionService {
         SELECT "execution_id"
         FROM "executions"
         WHERE "status" = 'running'
-          AND "phase" = 'backend_finalization'
+          AND "phase" IN ('backend_finalization', 'backend_failure_finalization')
         ORDER BY "updated_at"
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -536,7 +547,10 @@ export class ExecutionService {
       });
       if (!execution) return null;
 
-      execution.phase = 'domain_finalization';
+      execution.phase =
+        execution.phase === 'backend_failure_finalization'
+          ? 'domain_failure_finalization'
+          : 'domain_finalization';
       return executionRepo.save(execution);
     });
   }
@@ -546,9 +560,14 @@ export class ExecutionService {
       const rows = await manager.query(
         `
           UPDATE "executions"
-          SET "phase" = 'backend_finalization', "updated_at" = now()
+          SET "phase" = CASE
+            WHEN "phase" = 'domain_failure_finalization'
+              THEN 'backend_failure_finalization'
+            ELSE 'backend_finalization'
+          END,
+          "updated_at" = now()
           WHERE "status" = 'running'
-            AND "phase" = 'domain_finalization'
+            AND "phase" IN ('domain_finalization', 'domain_failure_finalization')
             AND "updated_at" <= $1
           RETURNING "execution_id"
         `,

@@ -48,6 +48,9 @@ export class ExecutionStepEntity {
   @Column({ type: 'jsonb' })
   work: Record<string, unknown>;
 
+  @Column({ name: 'finalize_on_failure', type: 'boolean', default: false })
+  finalizeOnFailure: boolean;
+
   @Column({
     name: 'required_capabilities',
     type: 'text',

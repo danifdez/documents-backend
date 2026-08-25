@@ -85,6 +85,7 @@ describe('ExecutionStepService', () => {
         executionId: EXECUTION_ID,
         schemaVersion: 'step/1',
         status: ExecutionStepStatus.READY,
+        finalizeOnFailure: false,
       }),
     );
     expect(stepRepo.save).toHaveBeenCalledTimes(1);

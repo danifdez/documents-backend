@@ -10,6 +10,7 @@ export interface CreateExecutionStepInput {
   dependsOnStepIds?: string[];
   inputArtifactRefs?: ExecutionArtifactRef[];
   work: Record<string, unknown>;
+  finalizeOnFailure?: boolean;
   requiredCapabilities?: string[];
   resourceKeys?: string[];
   budgetReservationId?: string | null;

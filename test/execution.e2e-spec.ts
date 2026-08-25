@@ -12,6 +12,7 @@ import { AddExecutionStepContinuation1757668140430 } from '../migrations/1757668
 import { AddExecutionStepContinuationTarget1757668140440 } from '../migrations/1757668140440-AddExecutionStepContinuationTarget';
 import { DropObsoleteExecutionCheckpoint1757668140450 } from '../migrations/1757668140450-DropObsoleteExecutionCheckpoint';
 import { DropObsoleteExecutionRoutingFields1757668140460 } from '../migrations/1757668140460-DropObsoleteExecutionRoutingFields';
+import { AddExecutionStepFailureFinalization1757668140470 } from '../migrations/1757668140470-AddExecutionStepFailureFinalization';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -107,6 +108,7 @@ describe('execution PostgreSQL integration', () => {
     await new AddExecutionStepContinuationTarget1757668140440().up(runner);
     await new DropObsoleteExecutionCheckpoint1757668140450().up(runner);
     await new DropObsoleteExecutionRoutingFields1757668140460().up(runner);
+    await new AddExecutionStepFailureFinalization1757668140470().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
         "id" uuid PRIMARY KEY,
@@ -359,6 +361,25 @@ describe('execution PostgreSQL integration', () => {
       stepKind: ExecutionStepKind.INFERENCE,
       work: { taskType: 'translate', payload },
       requiredCapabilities: ['translate'],
+    });
+  });
+
+  it('persists domain reconciliation policy for failed steps', async () => {
+    const payload = { datasetId: 3, recordId: 5 };
+    const created = await service.createInference(
+      'dataset.extract-row',
+      ExecutionPriority.NORMAL,
+      payload,
+      { finalizeOnFailure: true },
+    );
+
+    await expect(
+      dataSource.getRepository(ExecutionStepEntity).findOneByOrFail({
+        executionId: created.executionId,
+      }),
+    ).resolves.toMatchObject({
+      stepKind: ExecutionStepKind.INFERENCE,
+      finalizeOnFailure: true,
     });
   });
 

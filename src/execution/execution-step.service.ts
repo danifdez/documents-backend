@@ -78,6 +78,7 @@ export async function createExecutionStep(
     version: 1,
     inputArtifactRefs: input.inputArtifactRefs ?? [],
     work: input.work,
+    finalizeOnFailure: input.finalizeOnFailure ?? false,
     requiredCapabilities: [...new Set(input.requiredCapabilities ?? [])],
     resourceKeys: [...new Set(input.resourceKeys ?? [])],
     budgetReservationId: input.budgetReservationId ?? null,

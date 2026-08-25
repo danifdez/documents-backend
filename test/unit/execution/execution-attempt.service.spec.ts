@@ -676,6 +676,48 @@ describe('ExecutionAttemptService', () => {
     );
   });
 
+  it('routes a failed result through required domain reconciliation', async () => {
+    const step = {
+      ...readyStep(),
+      status: ExecutionStepStatus.RESULT_RECEIVED,
+      currentAttemptId: ATTEMPT_ID,
+      finalizeOnFailure: true,
+    };
+    const attempt = {
+      ...runningAttempt(),
+      status: ExecutionStepAttemptStatus.RESULT_RECEIVED,
+    };
+    const operation = dispatchedOperation();
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: null,
+      error: null,
+    };
+    manager.query
+      .mockResolvedValueOnce([{ step_id: STEP_ID }])
+      .mockResolvedValueOnce([]);
+    stepRepo.findOneBy.mockResolvedValue(step);
+    attemptRepo.findOneBy.mockResolvedValue(attempt);
+    receiptRepo.findOne.mockResolvedValue({
+      result: {
+        status: 'failed',
+        error: { code: 'MODEL_FAILED', message: 'Model failed' },
+      },
+    });
+    executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(operation);
+
+    await expect(service.processReceivedResults()).resolves.toBe(1);
+    expect(execution).toEqual(
+      expect.objectContaining({
+        status: ExecutionStatus.RUNNING,
+        phase: 'backend_failure_finalization',
+        error: { code: 'MODEL_FAILED', message: 'Model failed' },
+      }),
+    );
+  });
+
   it('does not revive an execution when a parallel result arrives late', async () => {
     const step = {
       ...readyStep(),

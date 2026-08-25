@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { DatasetExtractionService } from '../../dataset/dataset-extraction.service';
+import { CellAnchor } from '../../dataset/cell-anchor.type';
 
 @Injectable()
 export class DatasetExtractionProcessor implements ExecutionProcessor {
@@ -27,17 +28,58 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
 
     if (!recordId || !datasetId) {
       this.logger.warn(
-        `dataset.extract-row execution ${execution.executionId} missing datasetId/recordId in payload`,
+        `dataset.extract-row execution ${execution.executionId} ` +
+          'missing datasetId/recordId in payload',
       );
       return { success: false, message: 'Invalid payload' };
     }
 
-    const result = (execution.result || {}) as any;
-    const { status } = await this.extractionService.applyExtractionResult(
-      recordId,
-      result,
-      columns,
-    );
+    const result = execution.result as {
+      data?: Record<string, unknown>;
+      cellMetadata?: Record<string, CellAnchor>;
+      model?: string;
+      promptVersion?: string;
+    } | null;
+    const executionError = execution.error as Record<string, unknown> | null;
+    let status: 'extracted' | 'failed';
+    let failureMessage: string | null = null;
+
+    if (execution.phase === 'domain_failure_finalization') {
+      failureMessage =
+        typeof executionError?.message === 'string'
+          ? executionError.message
+          : 'Dataset extraction failed';
+      await this.extractionService.markExtractionFailed(
+        recordId,
+        failureMessage,
+      );
+      status = 'failed';
+    } else if (
+      !result ||
+      !result.data ||
+      typeof result.data !== 'object' ||
+      Array.isArray(result.data) ||
+      !result.cellMetadata ||
+      typeof result.cellMetadata !== 'object' ||
+      Array.isArray(result.cellMetadata)
+    ) {
+      failureMessage = 'Invalid dataset extraction result';
+      await this.extractionService.markExtractionFailed(
+        recordId,
+        failureMessage,
+      );
+      status = 'failed';
+    } else {
+      ({ status } = await this.extractionService.applyExtractionResult(
+        recordId,
+        {
+          ...result,
+          data: result.data,
+          cellMetadata: result.cellMetadata,
+        },
+        columns,
+      ));
+    }
 
     const publication = {
       socketEvent: 'notification',
@@ -56,7 +98,7 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
 
     return {
       success: status !== 'failed',
-      message: `record ${recordId} -> ${status}`,
+      message: failureMessage ?? `record ${recordId} -> ${status}`,
       publication,
     };
   }

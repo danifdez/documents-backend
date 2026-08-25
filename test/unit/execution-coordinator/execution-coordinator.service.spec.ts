@@ -139,6 +139,32 @@ describe('ExecutionCoordinatorService', () => {
     expect(executionService.markAsCompleted).not.toHaveBeenCalled();
   });
 
+  it('keeps a failed execution terminal after domain reconciliation', async () => {
+    const claimed = execution({
+      phase: 'domain_failure_finalization',
+      error: { code: 'MODEL_FAILED', message: 'Model failed' },
+    });
+    executionService.claimReadyForFinalization
+      .mockResolvedValueOnce(claimed)
+      .mockResolvedValueOnce(null);
+    processorFactory.getProcessor.mockReturnValue({
+      process: jest.fn().mockResolvedValue({
+        success: true,
+        publication: { socketEvent: 'notification', payload: {} },
+      }),
+    });
+
+    await expect(service.finalizeReady()).resolves.toBe(1);
+    expect(executionService.markAsFailed).toHaveBeenCalledWith(
+      EXECUTION_ID,
+      'Model failed',
+      {
+        publication: { socketEvent: 'notification', payload: {} },
+      },
+    );
+    expect(executionService.markAsCompleted).not.toHaveBeenCalled();
+  });
+
   it('publishes durable terminal notifications through the outbox', async () => {
     outboxService.publishPending.mockResolvedValue(2);
 
