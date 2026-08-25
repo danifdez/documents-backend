@@ -1,5 +1,6 @@
 import { ModelService } from '../../../src/model/model.service';
 import { buildSummarizeWorkflowSteps } from '../../../src/model/summarize-workflow';
+import { buildEntityExtractionWorkflowSteps } from '../../../src/model/entity-extraction-workflow';
 
 describe('ModelService execution identities', () => {
   const executionIds = {
@@ -36,7 +37,6 @@ describe('ModelService execution identities', () => {
   });
 
   it.each([
-    ['entity-extraction', () => service.extractEntities(7)],
     ['key-point', () => service.keyPoints(7, 'en')],
     ['keywords', () => service.keywords(7, 'en')],
   ] as const)('returns the UUID of the %s execution', async (taskType, run) => {
@@ -47,6 +47,31 @@ describe('ModelService execution identities', () => {
       taskType,
       expect.any(String),
       expect.any(Object),
+    );
+  });
+
+  it('creates entity extraction as a durable map-reduce step graph', async () => {
+    await expect(service.extractEntities(7)).resolves.toEqual({
+      executionId: executionIds['entity-extraction'],
+    });
+    expect(executionService.create).toHaveBeenCalledWith(
+      'entity-extraction',
+      expect.any(String),
+      { resourceId: 7, chunkCount: 1 },
+      {
+        steps: [
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['entity-extraction-map'],
+          }),
+          expect.objectContaining({
+            stepKind: 'code',
+            requiredCapabilities: ['entity-extraction-reduce'],
+            operationKind: 'artifact_processing',
+            recoveryClass: 'read_only_replayable',
+          }),
+        ],
+      },
     );
   });
 
@@ -117,6 +142,32 @@ describe('ModelService execution identities', () => {
       expect.objectContaining({
         dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
         requiredCapabilities: ['summarize-reduce'],
+      }),
+    );
+  });
+
+  it('fans long entity documents out into map steps and deterministic reduce', () => {
+    const text = Array.from(
+      { length: 1_501 },
+      (_, index) => `word-${index}`,
+    ).join(' ');
+
+    const steps = buildEntityExtractionWorkflowSteps([{ text }]);
+
+    expect(steps).toHaveLength(3);
+    expect(steps.slice(0, 2)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepKind: 'inference',
+          requiredCapabilities: ['entity-extraction-map'],
+        }),
+      ]),
+    );
+    expect(steps[2]).toEqual(
+      expect.objectContaining({
+        stepKind: 'code',
+        dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
+        requiredCapabilities: ['entity-extraction-reduce'],
       }),
     );
   });

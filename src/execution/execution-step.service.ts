@@ -225,16 +225,16 @@ async function materializeMapReduceInput(
   const byId = new Map(mapSteps.map((step) => [step.stepId, step]));
   const partials = mapStepIds.map((stepId) => {
     const step = byId.get(stepId);
-    const value = executionStepOutputValue(step?.result) as
-      Record<string, unknown> | undefined;
-    const partial = value?.[resultKey];
+    const value = executionStepOutputValue(step?.result);
     if (
       step?.status !== ExecutionStepStatus.COMPLETED ||
-      typeof partial !== 'string'
+      !value ||
+      typeof value !== 'object' ||
+      !Object.prototype.hasOwnProperty.call(value, resultKey)
     ) {
       throw new ConflictException('invalid_map_reduce_dependency_result');
     }
-    return partial;
+    return (value as Record<string, unknown>)[resultKey];
   });
   const payload =
     work.payload && typeof work.payload === 'object'

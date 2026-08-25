@@ -48,7 +48,6 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
     const resourceId = Number(execution.payload['resourceId']) as number;
     const result = execution.result as {
       entities?: Array<{ word: string; entity: string }>;
-      error?: string;
     };
 
     // Validate resourceId
@@ -56,13 +55,6 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
       const errorMessage = `Invalid resource ID: ${resourceId}`;
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
-    }
-
-    if (result?.error) {
-      this.logger.warn(
-        `entity-extraction execution ${execution.executionId} returned error: ${result.error}`,
-      );
-      return { success: false, message: result.error };
     }
 
     // Get the resource and validate it exists. Avoid double DB calls (resourceExists + findOne).
@@ -75,7 +67,9 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
 
     // Validate execution result shape early to fail fast and avoid unnecessary DB work
     if (!result || !Array.isArray(result.entities)) {
-      const errorMessage = `Invalid execution result for entity-extraction on resource ${resourceId}`;
+      const errorMessage =
+        `Invalid execution result for entity-extraction on resource ` +
+        resourceId;
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
     }
@@ -135,7 +129,8 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
       );
 
       this.logger.log(
-        `Created translation execution for ${result.entities.length} entities to languages: ${Array.from(languagesToTranslate).join(', ')}`,
+        `Created translation execution for ${result.entities.length} ` +
+          `entities to languages: ${Array.from(languagesToTranslate).join(', ')}`,
       );
     } else {
       // No translation needed, create pending entities directly

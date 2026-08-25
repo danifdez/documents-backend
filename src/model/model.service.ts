@@ -4,6 +4,7 @@ import { ExecutionService } from '../execution/execution.service';
 import { ResourceService } from '../resource/resource.service';
 import { extractTextFromHtml } from '../utils/text';
 import { buildSummarizeWorkflowSteps } from './summarize-workflow';
+import { buildEntityExtractionWorkflowSteps } from './entity-extraction-workflow';
 
 @Injectable()
 export class ModelService {
@@ -120,16 +121,16 @@ export class ModelService {
     }
 
     const extractedTexts = extractTextFromHtml(content);
+    const steps = buildEntityExtractionWorkflowSteps(extractedTexts);
 
     const execution = await this.executionService.create(
       'entity-extraction',
       ExecutionPriority.NORMAL,
       {
-        resourceId: resourceId,
-        from: 'content',
-        texts: extractedTexts,
-        kind: 'one_shot',
+        resourceId,
+        chunkCount: steps.length - 1,
       },
+      { steps },
     );
     return { executionId: execution.executionId };
   }

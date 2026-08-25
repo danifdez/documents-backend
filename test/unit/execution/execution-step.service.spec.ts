@@ -240,4 +240,56 @@ describe('ExecutionStepService', () => {
     });
     expect(reduce.status).toBe(ExecutionStepStatus.READY);
   });
+
+  it('materializes structured map results for deterministic reduce steps', async () => {
+    const reduce = {
+      stepId: STEP_ID,
+      operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
+      status: ExecutionStepStatus.BLOCKED,
+      version: 1,
+      work: {
+        taskType: 'entity-extraction-reduce',
+        payload: {},
+        coordination: {
+          kind: 'map-reduce-reduce/1',
+          mapStepIds: [DEPENDENCY_ID, SECOND_DEPENDENCY_ID],
+          resultKey: 'entities',
+        },
+      },
+    };
+    manager.query.mockResolvedValue([{ step_id: STEP_ID }]);
+    stepRepo.findOneBy.mockResolvedValue(reduce);
+    stepRepo.find.mockResolvedValue([
+      {
+        stepId: DEPENDENCY_ID,
+        status: ExecutionStepStatus.COMPLETED,
+        result: {
+          kind: 'inference',
+          outcome: {
+            kind: 'structured_result',
+            value: { entities: [{ word: 'Ada', entity: 'PERSON' }] },
+          },
+        },
+      },
+      {
+        stepId: SECOND_DEPENDENCY_ID,
+        status: ExecutionStepStatus.COMPLETED,
+        result: {
+          kind: 'inference',
+          outcome: {
+            kind: 'structured_result',
+            value: { entities: [{ word: 'Paris', entity: 'GPE' }] },
+          },
+        },
+      },
+    ]);
+
+    await expect(service.releaseDependents(DEPENDENCY_ID)).resolves.toBe(1);
+    expect(reduce.work.payload).toEqual({
+      partials: [
+        [{ word: 'Ada', entity: 'PERSON' }],
+        [{ word: 'Paris', entity: 'GPE' }],
+      ],
+    });
+  });
 });
