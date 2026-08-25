@@ -34,6 +34,7 @@ import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionPriority } from './execution-priority.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { ExecutionProgressService } from './execution-progress.service';
+import { ExecutionResultReceiptEntity } from './execution-result-receipt.entity';
 import {
   ExecutionOutboxEntity,
   ExecutionOutboxStatus,
@@ -1617,11 +1618,13 @@ export class ExecutionService {
     });
     const firstSequence = events.length ? Number(events[0].sequence) : 0;
     const lastSequence = events.length ? Number(events.at(-1).sequence) : 0;
+    const inferenceIdentities = await this.readInferenceIdentities(events);
     const environment = {
       documentsRevision: this.config.get('DOCUMENTS_REVISION') ?? 'unknown',
       promptPackages: [],
       toolVersions: [],
-      modelFingerprint: null,
+      modelFingerprints: inferenceIdentities.modelFingerprints,
+      adapterFingerprints: inferenceIdentities.adapterFingerprints,
       runtimeFingerprint: process.version,
       featureFlags: {},
     };
@@ -1630,6 +1633,7 @@ export class ExecutionService {
       events,
       artifacts,
       environment,
+      inferenceIdentities,
     );
     const completenessStatus = missingEvidence.length
       ? 'evaluable_partial'
@@ -1678,6 +1682,10 @@ export class ExecutionService {
     events: Record<string, unknown>[],
     artifacts: ExecutionArtifactEntity[],
     environment: Record<string, unknown>,
+    inferenceIdentities: {
+      modelIdentityKnown: boolean;
+      adapterIdentityKnown: boolean;
+    } = { modelIdentityKnown: false, adapterIdentityKnown: false },
   ): string[] {
     const missing = new Set(execution.missingEvidence ?? []);
     if (environment.documentsRevision === 'unknown') {
@@ -1714,8 +1722,11 @@ export class ExecutionService {
       }
     }
     if (hasInference) {
-      if (environment.modelFingerprint == null) {
-        missing.add('environment.modelFingerprint');
+      if (!inferenceIdentities.modelIdentityKnown) {
+        missing.add('environment.modelFingerprints');
+      }
+      if (!inferenceIdentities.adapterIdentityKnown) {
+        missing.add('environment.adapterFingerprints');
       }
       if ((environment.promptPackages as unknown[]).length === 0) {
         missing.add('environment.promptPackages');
@@ -1730,6 +1741,77 @@ export class ExecutionService {
       }
     }
     return [...missing].sort();
+  }
+
+  private async readInferenceIdentities(
+    events: Record<string, unknown>[],
+  ): Promise<{
+    modelFingerprints: string[];
+    adapterFingerprints: string[];
+    modelIdentityKnown: boolean;
+    adapterIdentityKnown: boolean;
+  }> {
+    const inferenceOperationIds = new Set(
+      events
+        .filter(
+          (event) =>
+            event.eventType === 'operation.started' &&
+            (event.payload as Record<string, unknown> | undefined)
+              ?.operationKind === 'inference',
+        )
+        .map((event) => String(event.operationId)),
+    );
+    const executionIds = [
+      ...new Set(events.map((event) => String(event.executionId))),
+    ].filter(Boolean);
+    if (inferenceOperationIds.size === 0 || executionIds.length === 0) {
+      return {
+        modelFingerprints: [],
+        adapterFingerprints: [],
+        modelIdentityKnown: inferenceOperationIds.size === 0,
+        adapterIdentityKnown: inferenceOperationIds.size === 0,
+      };
+    }
+
+    const receipts = await this.dataSource
+      .getRepository(ExecutionResultReceiptEntity)
+      .find({ where: { executionId: In(executionIds) } });
+    const modelFingerprints = new Set<string>();
+    const adapterFingerprints = new Set<string>();
+    const modelOperations = new Set<string>();
+    const adapterOperations = new Set<string>();
+    for (const receipt of receipts) {
+      if (!inferenceOperationIds.has(receipt.operationId)) continue;
+      const inference = receipt.result?.inference;
+      if (!inference || typeof inference !== 'object') continue;
+      const metadata = inference as Record<string, unknown>;
+      if (
+        typeof metadata.effectiveModel === 'string' &&
+        metadata.effectiveModel
+      ) {
+        modelFingerprints.add(metadata.effectiveModel);
+        modelOperations.add(receipt.operationId);
+      }
+      if (Object.prototype.hasOwnProperty.call(metadata, 'effectiveAdapter')) {
+        adapterOperations.add(receipt.operationId);
+        if (
+          typeof metadata.effectiveAdapter === 'string' &&
+          metadata.effectiveAdapter
+        ) {
+          adapterFingerprints.add(metadata.effectiveAdapter);
+        }
+      }
+    }
+    const coversEveryInference = (covered: Set<string>) =>
+      [...inferenceOperationIds].every((operationId) =>
+        covered.has(operationId),
+      );
+    return {
+      modelFingerprints: [...modelFingerprints].sort(),
+      adapterFingerprints: [...adapterFingerprints].sort(),
+      modelIdentityKnown: coversEveryInference(modelOperations),
+      adapterIdentityKnown: coversEveryInference(adapterOperations),
+    };
   }
 
   private async findOwned(

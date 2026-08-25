@@ -6,6 +6,11 @@ describe('ExecutionService bundle completeness', () => {
       deriveBundleMissingEvidence: (...args: unknown[]) => string[];
     }
   ).deriveBundleMissingEvidence;
+  const readIdentities = (
+    ExecutionService.prototype as unknown as {
+      readInferenceIdentities: (...args: unknown[]) => Promise<unknown>;
+    }
+  ).readInferenceIdentities;
 
   it('declares unknown inference evidence, omitted bodies, and open operations', () => {
     const missing = derive(
@@ -38,18 +43,64 @@ describe('ExecutionService bundle completeness', () => {
         documentsRevision: 'unknown',
         promptPackages: [],
         toolVersions: [],
-        modelFingerprint: null,
+        modelFingerprints: [],
+        adapterFingerprints: [],
       },
     );
 
     expect(missing).toEqual([
       'artifact.artifact-1.body',
+      'environment.adapterFingerprints',
       'environment.documentsRevision',
-      'environment.modelFingerprint',
+      'environment.modelFingerprints',
       'environment.promptPackages',
       'environment.toolVersions',
       'operation.inference-1.metrics.timeToFirstTokenMs',
       'operation.tool-1.finish',
     ]);
+  });
+
+  it('collects every persisted model and distinguishes no adapter from unknown', async () => {
+    const find = jest.fn().mockResolvedValue([
+      {
+        operationId: 'inference-1',
+        result: {
+          inference: { effectiveModel: 'model-b', effectiveAdapter: null },
+        },
+      },
+      {
+        operationId: 'inference-2',
+        result: {
+          inference: {
+            effectiveModel: 'model-a',
+            effectiveAdapter: 'adapter-a',
+          },
+        },
+      },
+    ]);
+    const identities = await readIdentities.call(
+      { dataSource: { getRepository: () => ({ find }) } },
+      [
+        {
+          eventType: 'operation.started',
+          executionId: 'execution-1',
+          operationId: 'inference-1',
+          payload: { operationKind: 'inference' },
+        },
+        {
+          eventType: 'operation.started',
+          executionId: 'execution-1',
+          operationId: 'inference-2',
+          payload: { operationKind: 'inference' },
+        },
+      ],
+    );
+
+    expect(identities).toEqual({
+      modelFingerprints: ['model-a', 'model-b'],
+      adapterFingerprints: ['adapter-a'],
+      modelIdentityKnown: true,
+      adapterIdentityKnown: true,
+    });
   });
 });
