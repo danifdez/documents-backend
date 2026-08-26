@@ -3,7 +3,6 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -27,8 +26,6 @@ import {
 
 @Injectable()
 export class WorkerService {
-  private readonly logger = new Logger(WorkerService.name);
-
   constructor(
     @InjectRepository(WorkerEntity)
     private readonly repo: Repository<WorkerEntity>,
@@ -274,25 +271,15 @@ export class WorkerService {
 
   async markStaleOffline(thresholdSeconds: number = 60): Promise<number> {
     const threshold = new Date(Date.now() - thresholdSeconds * 1000);
-    const staleWorkers = await this.repo.find({
-      where: {
+    const result = await this.repo.update(
+      {
         status: 'online',
+        revokedAt: IsNull(),
         lastHeartbeat: LessThan(threshold),
       },
-    });
-
-    if (staleWorkers.length === 0) return 0;
-
-    for (const worker of staleWorkers) {
-      worker.status = 'offline';
-      this.logger.warn(
-        `Marking worker ${worker.name} (${worker.id}) as offline — ` +
-          `last heartbeat: ${worker.lastHeartbeat.toISOString()}`,
-      );
-    }
-
-    await this.repo.save(staleWorkers);
-    return staleWorkers.length;
+      { status: 'offline' },
+    );
+    return result.affected ?? 0;
   }
 
   private hashCredential(credential: string): string {

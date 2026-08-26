@@ -147,6 +147,22 @@ describe('WorkerService', () => {
     ).rejects.toThrow('worker_not_available');
   });
 
+  it('marks stale workers offline with an atomic guarded update', async () => {
+    repo.update = jest.fn().mockResolvedValue({ affected: 2 });
+
+    await expect(service.markStaleOffline(60)).resolves.toBe(2);
+
+    expect(repo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'online',
+        revokedAt: expect.anything(),
+        lastHeartbeat: expect.anything(),
+      }),
+      { status: 'offline' },
+    );
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
   it('revokes only a browser owned by the current principal', async () => {
     const queryBuilder = repo.createQueryBuilder!() as any;
     const worker = buildWorker({
