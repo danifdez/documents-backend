@@ -196,6 +196,64 @@ describe('ExecutionService primitives', () => {
     expect(service.createChildInference).not.toHaveBeenCalled();
   });
 
+  it('reuses an idempotent compound child while holding the root lock', async () => {
+    const service = Object.create(ExecutionService.prototype) as any;
+    const root = {
+      executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+      rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+      cancellationRequestedAt: null,
+    };
+    const parent = {
+      executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
+      rootExecutionId: root.executionId,
+      cancellationRequestedAt: null,
+    };
+    const payload = {
+      resourceId: 7,
+      chunkCount: 1,
+      originFinalizerKey: 'detect-language:date-extraction:7:hash',
+    };
+    const child = {
+      executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca703',
+      parentExecutionId: parent.executionId,
+      taskType: 'date-extraction',
+      payload,
+    };
+    const executions = {
+      findOne: jest
+        .fn()
+        .mockResolvedValueOnce(root)
+        .mockResolvedValueOnce(parent),
+      find: jest.fn().mockResolvedValue([child]),
+    };
+    const steps = { countBy: jest.fn().mockResolvedValue(2) };
+    const manager = {
+      getRepository: jest.fn((entity) =>
+        entity.name === 'ExecutionEntity' ? executions : steps,
+      ),
+    };
+    service.dataSource = {
+      transaction: jest.fn((callback) => callback(manager)),
+    };
+
+    await expect(
+      service.create(
+        'date-extraction',
+        ExecutionPriority.NORMAL,
+        { resourceId: 7, chunkCount: 1 },
+        {
+          rootExecutionId: root.executionId,
+          parentExecutionId: parent.executionId,
+          childIdempotencyKey: 'detect-language:date-extraction:7:hash',
+          steps: [{ stepKind: 'inference' }, { stepKind: 'code' }] as any,
+        },
+      ),
+    ).resolves.toBe(child);
+    expect(steps.countBy).toHaveBeenCalledWith({
+      executionId: child.executionId,
+    });
+  });
+
   it('canonicalizes object keys recursively', () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe(
       '{"a":{"b":3,"y":2},"z":1}',

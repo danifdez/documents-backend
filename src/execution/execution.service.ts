@@ -175,6 +175,7 @@ function rejectSensitiveStrings(value: unknown, path = '$'): void {
 export interface CreateExecutionOptions {
   rootExecutionId?: string;
   parentExecutionId?: string;
+  childIdempotencyKey?: string;
   ownerPrincipal?: string;
   initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
   steps?: Array<Omit<CreateExecutionStepInput, 'executionId'>>;
@@ -1423,6 +1424,47 @@ export class ExecutionService {
       } else if (options?.parentExecutionId) {
         throw new BadRequestException('Root execution cannot have a parent');
       }
+      let effectivePayload = payload;
+      if (options?.childIdempotencyKey !== undefined) {
+        if (
+          !parent ||
+          !options.childIdempotencyKey ||
+          options.childIdempotencyKey.length > 160
+        ) {
+          throw new BadRequestException('invalid_child_idempotency_key');
+        }
+        effectivePayload = {
+          ...payload,
+          [FINALIZER_IDEMPOTENCY_FIELD]: options.childIdempotencyKey,
+        };
+        const candidates = await executionRepo.find({
+          where: { parentExecutionId: parent.executionId, taskType },
+        });
+        const matches = candidates.filter(
+          (candidate) =>
+            candidate.payload?.[FINALIZER_IDEMPOTENCY_FIELD] ===
+            options.childIdempotencyKey,
+        );
+        if (matches.length > 1) {
+          throw new ConflictException('duplicate_child_idempotency_key');
+        }
+        if (matches.length === 1) {
+          const existing = matches[0];
+          if (
+            canonicalHash(existing.payload) !== canonicalHash(effectivePayload)
+          ) {
+            throw new ConflictException('child_idempotency_conflict');
+          }
+          const stepCount = await manager
+            .getRepository(ExecutionStepEntity)
+            .countBy({ executionId: existing.executionId });
+          const expectedStepCount = options.steps?.length ?? 1;
+          if (stepCount !== expectedStepCount) {
+            throw new ConflictException('incomplete_child_execution');
+          }
+          return existing;
+        }
+      }
       const execution = executionRepo.create({
         executionId,
         rootExecutionId,
@@ -1433,7 +1475,7 @@ export class ExecutionService {
           eventRoot?.ownerPrincipal ?? options?.ownerPrincipal ?? 'system',
         schemaVersion: EXECUTION_SCHEMA,
         taskType,
-        payload,
+        payload: effectivePayload,
         status: ExecutionStatus.QUEUED,
         phase: null,
         cancellationRequestedAt: null,
@@ -1513,7 +1555,7 @@ export class ExecutionService {
       const steps = options?.steps ?? [
         {
           stepKind: ExecutionStepKind.SERVICE,
-          work: { taskType, payload },
+          work: { taskType, payload: effectivePayload },
           requiredCapabilities: [taskType],
           priority: STEP_PRIORITY[priority],
           ...options?.initialStep,
