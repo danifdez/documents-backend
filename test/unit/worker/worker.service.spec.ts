@@ -92,6 +92,29 @@ describe('WorkerService', () => {
     expect(repo.save).not.toHaveBeenCalled();
   });
 
+  it('does not reactivate a revoked browser identity during enrollment', async () => {
+    const queryBuilder = repo.createQueryBuilder!() as any;
+    queryBuilder.getOne.mockResolvedValue(
+      buildWorker({
+        workerKind: WorkerKind.BROWSER,
+        ownerPrincipal: '7',
+        status: 'revoked',
+        revokedAt: new Date(),
+        credentialHash: null,
+      }),
+    );
+
+    await expect(
+      service.enrollBrowser(
+        '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+        'IA Browser',
+        '7',
+        {},
+      ),
+    ).rejects.toThrow('worker_identity_revoked');
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
   it('does not let a Models heartbeat escalate into tool work', async () => {
     repo.update = jest.fn();
 

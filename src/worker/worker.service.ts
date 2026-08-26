@@ -113,6 +113,9 @@ export class WorkerService {
     if (existing && existing.workerKind !== workerKind) {
       throw new ConflictException('worker_identity_kind_conflict');
     }
+    if (existing?.revokedAt) {
+      throw new ConflictException('worker_identity_revoked');
+    }
     if (
       existing?.ownerPrincipal &&
       existing.ownerPrincipal !== ownerPrincipal
