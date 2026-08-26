@@ -1748,6 +1748,10 @@ describe('execution PostgreSQL integration', () => {
       budgetReservationId: null,
       inputArtifactRefs: expect.arrayContaining([
         { role: pageArtifactRole, artifactId: pageArtifactId },
+        {
+          role: 'active_context',
+          artifactId: expect.any(String),
+        },
       ]),
       work: {
         taskType: 'assistant-chat',
@@ -1778,6 +1782,26 @@ describe('execution PostgreSQL integration', () => {
         },
       },
     });
+    const continuationStep = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ stepId: source.continuationStepId! });
+    const contextRefs = continuationStep.inputArtifactRefs.filter(
+      (ref) => ref.role === 'active_context',
+    );
+    expect(contextRefs).toHaveLength(1);
+    const continuationContext = await dataSource
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.artifactId = :artifactId', {
+        artifactId: contextRefs[0].artifactId,
+      })
+      .getOneOrFail();
+    const continuationSnapshot = JSON.parse(
+      continuationContext.body!.toString(),
+    );
+    expect(continuationSnapshot.sourceConversation.revision).toBe(1);
+    expect(continuationSnapshot.effectivePayload.toolHistory).toHaveLength(1);
     await expect(
       agentLoopService.materializeReadyToolContinuations(),
     ).resolves.toBe(0);
@@ -2279,6 +2303,32 @@ describe('execution PostgreSQL integration', () => {
     await expect(
       stepRepo.countBy({ executionId: second.executionId }),
     ).resolves.toBe(0);
+    const firstStep = await stepRepo.findOneByOrFail({
+      executionId: first.executionId,
+    });
+    const firstContextRef = firstStep.inputArtifactRefs.find(
+      (ref) => ref.role === 'active_context',
+    );
+    expect(firstContextRef).toBeDefined();
+    const firstContextArtifact = await dataSource
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.artifactId = :artifactId', {
+        artifactId: firstContextRef!.artifactId,
+      })
+      .getOneOrFail();
+    const firstSnapshot = JSON.parse(firstContextArtifact.body!.toString());
+    expect(firstSnapshot).toMatchObject({
+      schemaVersion: 'active-context/1',
+      sessionId: session.sessionId,
+      turnId: first.turnId,
+      sourceConversation: { revision: 1 },
+      effectivePayload: {
+        conversation: [{ role: 'user', content: 'First message' }],
+        continuityCapsule: null,
+      },
+    });
 
     await service.updateStatus(
       second.executionId,
@@ -2327,6 +2377,29 @@ describe('execution PostgreSQL integration', () => {
     await expect(
       stepRepo.countBy({ executionId: third.executionId }),
     ).resolves.toBe(1);
+    const promotedStep = await stepRepo.findOneByOrFail({
+      executionId: third.executionId,
+    });
+    const promotedContextRef = promotedStep.inputArtifactRefs.find(
+      (ref) => ref.role === 'active_context',
+    );
+    expect(promotedContextRef).toBeDefined();
+    const promotedContextArtifact = await dataSource
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.artifactId = :artifactId', {
+        artifactId: promotedContextRef!.artifactId,
+      })
+      .getOneOrFail();
+    const promotedSnapshot = JSON.parse(
+      promotedContextArtifact.body!.toString(),
+    );
+    expect(promotedSnapshot.sourceConversation.revision).toBe(2);
+    expect(promotedSnapshot.effectivePayload.conversation).toEqual([
+      { role: 'user', content: 'First message' },
+      { role: 'user', content: 'Third message' },
+    ]);
   });
 
   it('serializes concurrent messages into one session and one active turn', async () => {

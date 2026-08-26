@@ -260,6 +260,9 @@ describe('execution v1 contract', () => {
   const validateStepResult = ajv.getSchema(
     'https://documents.local/harness/v1/schemas/step-result.schema.json',
   )!;
+  const validateActiveContext = ajv.getSchema(
+    'https://documents.local/harness/v1/schemas/active-context.schema.json',
+  )!;
   const contractHash = verifyManifest();
 
   const event = (payload: any, overrides: any = {}) => ({
@@ -293,6 +296,55 @@ describe('execution v1 contract', () => {
 
   it('keeps the runtime adapter pinned to the copied schema set', () => {
     expect(contractHash).toBe(EXECUTION_CONTRACT_SET_HASH);
+  });
+
+  it('validates the frozen active context and its continuity capsule', () => {
+    const conversation = {
+      artifactId: '00000000-0000-4000-8000-000000000011',
+      revision: 7,
+      contentHash: `sha256:${'a'.repeat(64)}`,
+    };
+    const capsule = {
+      schemaVersion: 'continuity-capsule/1',
+      sourceConversation: conversation,
+      omittedMessageCount: 2,
+      omittedTurnCount: 1,
+      roleCounts: { user: 1, assistant: 1 },
+      firstOmittedAt: '2026-08-26T10:00:00Z',
+      lastOmittedAt: '2026-08-26T10:01:00Z',
+      truncatedMessageIds: [],
+      digest: 'user [turn old]: Previous request',
+    };
+    const activeContext = {
+      schemaVersion: 'active-context/1',
+      artifactId: '00000000-0000-4000-8000-000000000012',
+      rootExecutionId: '00000000-0000-4000-8000-000000000013',
+      sessionId: '00000000-0000-4000-8000-000000000014',
+      turnId: '00000000-0000-4000-8000-000000000015',
+      causedByEventId: '00000000-0000-4000-8000-000000000016',
+      sourceConversation: conversation,
+      layers: {
+        stable: { ownerId: 1 },
+        contextual: {
+          conversation: [{ role: 'user', content: 'Continue' }],
+          continuityCapsule: capsule,
+        },
+        volatile: {},
+      },
+      effectivePayload: {
+        ownerId: 1,
+        conversation: [{ role: 'user', content: 'Continue' }],
+        continuityCapsule: capsule,
+      },
+    };
+
+    expect(validateActiveContext(activeContext)).toBe(true);
+    expect(
+      validateActiveContext({
+        ...activeContext,
+        schemaVersion: 'active-context/2',
+      }),
+    ).toBe(false);
   });
 
   it('requires the canonical ToolResult inside every tool StepResult', () => {

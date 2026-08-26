@@ -12,6 +12,10 @@ import { ExecutionToolPlanService } from '../execution/execution-tool-plan.servi
 import { ToolResultContract } from '../execution/execution-tool.types';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionProgressService } from '../execution/execution-progress.service';
+import {
+  ACTIVE_CONTEXT_ARTIFACT_ROLE,
+  freezeActiveContextArtifact,
+} from '../conversation/conversation-context';
 
 const CHAT_TASK_TYPES = ['assistant-chat', 'agent-chat', 'delegated-agent'];
 const TOOL_LOOP_TASK_TYPES = ['assistant-chat', 'agent-chat'];
@@ -437,12 +441,14 @@ export class ExecutionAgentLoopService {
         ...orderedToolSteps.flatMap(
           (toolStep) => toolStep?.outputArtifactRefs ?? [],
         ),
-      ].filter(
-        (ref, index, refs) =>
-          refs.findIndex(
-            (candidate) => candidate.artifactId === ref.artifactId,
-          ) === index,
-      );
+      ]
+        .filter((ref) => ref.role !== ACTIVE_CONTEXT_ARTIFACT_ROLE)
+        .filter(
+          (ref, index, refs) =>
+            refs.findIndex(
+              (candidate) => candidate.artifactId === ref.artifactId,
+            ) === index,
+        );
       const execution = await manager.getRepository(ExecutionEntity).findOne({
         where: { executionId: source.executionId },
         lock: { mode: 'pessimistic_write' },
@@ -475,22 +481,39 @@ export class ExecutionAgentLoopService {
       const history = Array.isArray(payload.toolHistory)
         ? (payload.toolHistory as ToolRound[])
         : [];
+      const effectivePayload = {
+        ...payload,
+        toolHistory: [
+          ...history,
+          { round: sourceReservation.round, calls, results },
+        ],
+      };
+      const contextArtifact = await freezeActiveContextArtifact(manager, {
+        rootExecutionId: execution.rootExecutionId,
+        sessionId: execution.sessionId,
+        turnId: execution.turnId,
+        causedByEventId: finish.eventId,
+        effectivePayload,
+        derivedFromArtifactIds: continuationArtifacts.map(
+          (artifact) => artifact.artifactId,
+        ),
+      });
       const continuation = await createExecutionStep(manager, {
         executionId: execution.executionId,
         stepKind: ExecutionStepKind.INFERENCE,
         dependsOnStepIds: toolStepIds as string[],
-        inputArtifactRefs: continuationArtifacts,
+        inputArtifactRefs: [
+          ...continuationArtifacts,
+          {
+            role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+            artifactId: contextArtifact.artifactId,
+          },
+        ],
         work: {
           taskType: execution.taskType,
           agentName:
             execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
-          payload: {
-            ...payload,
-            toolHistory: [
-              ...history,
-              { round: sourceReservation.round, calls, results },
-            ],
-          },
+          payload: effectivePayload,
         },
         requiredCapabilities: [execution.taskType],
         priority: source.priority,

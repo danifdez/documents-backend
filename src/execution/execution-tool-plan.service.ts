@@ -269,6 +269,12 @@ export class ExecutionToolPlanService {
               payload: {
                 conversation: [{ role: 'user', content: goal }],
                 delegationMode: true,
+                ...(execution.payload?.conversationContext
+                  ? {
+                      conversationContext:
+                        execution.payload.conversationContext,
+                    }
+                  : {}),
               },
             },
             requiredCapability: 'assistant-chat',

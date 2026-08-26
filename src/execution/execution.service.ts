@@ -66,6 +66,11 @@ import {
 import { AssistantMessageEntity } from '../assistant/assistant-message.entity';
 import { AgentMessageEntity } from '../agent/agent-message.entity';
 import { AGENT_DEFAULT_TTL_MS } from '../agent/agent.constants';
+import {
+  ACTIVE_CONTEXT_ARTIFACT_ROLE,
+  buildActiveConversationContext,
+  freezeActiveContextArtifact,
+} from '../conversation/conversation-context';
 
 export {
   canonicalHash,
@@ -225,10 +230,6 @@ export class ExecutionService {
       user && typeof user === 'object' ? (user as Record<string, unknown>) : {};
     const owner = record.userId ?? record.sub ?? 'standalone';
     return { ownerPrincipal: String(owner) };
-  }
-
-  private contextConversation(messages: ConversationArtifactMessage[]) {
-    return messages.slice(-40).map(({ role, content }) => ({ role, content }));
   }
 
   private async finishConversationTurn(
@@ -392,7 +393,7 @@ export class ExecutionService {
     manager: EntityManager,
     session: ConversationSessionEntity,
     message: ConversationArtifactMessage,
-  ): Promise<ConversationArtifactMessage[]> {
+  ): Promise<ConversationArtifactRevisionEntity> {
     const revisionRepo = manager.getRepository(
       ConversationArtifactRevisionEntity,
     );
@@ -402,7 +403,7 @@ export class ExecutionService {
     });
     const messages = [...previous.messages, message];
     const revision = session.conversationRevision + 1;
-    await revisionRepo.save(
+    const stored = await revisionRepo.save(
       revisionRepo.create({
         artifactId: session.conversationArtifactId,
         revision,
@@ -414,7 +415,7 @@ export class ExecutionService {
     );
     session.conversationRevision = revision;
     session.version += 1;
-    return messages;
+    return stored;
   }
 
   private async promoteNextConversationTurn(
@@ -442,7 +443,7 @@ export class ExecutionService {
             turnId: next.turnId,
             role: 'user',
           });
-    const messages = await this.appendConversationRevision(manager, session, {
+    const revision = await this.appendConversationRevision(manager, session, {
       messageId: userMessage.id,
       turnId: next.turnId,
       role: 'user',
@@ -467,16 +468,29 @@ export class ExecutionService {
     if (!nextExecution?.lastEventId) {
       throw new ConflictException('queued_turn_execution_missing');
     }
+    const activeContext = buildActiveConversationContext(revision);
     nextExecution.payload = {
       ...(nextExecution.payload ?? {}),
-      conversation: this.contextConversation(messages),
+      ...activeContext,
     };
     await executionRepo.save(nextExecution);
+    const contextArtifact = await freezeActiveContextArtifact(manager, {
+      rootExecutionId: nextExecution.rootExecutionId,
+      sessionId: nextExecution.sessionId,
+      turnId: nextExecution.turnId,
+      causedByEventId: nextExecution.lastEventId,
+      effectivePayload: nextExecution.payload,
+      derivedFromArtifactIds: [next.requestArtifactId],
+    });
     await createExecutionStep(manager, {
       executionId: nextExecution.executionId,
       stepKind: ExecutionStepKind.INFERENCE,
       inputArtifactRefs: [
         { role: 'user_message', artifactId: next.requestArtifactId },
+        {
+          role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+          artifactId: contextArtifact.artifactId,
+        },
       ],
       work: {
         taskType: nextExecution.taskType,
@@ -862,9 +876,26 @@ export class ExecutionService {
     root.lastEventId = event.eventId;
     await executionRepo.save(root);
     await executionRepo.save(child);
+    const childPayload =
+      input.work.payload && typeof input.work.payload === 'object'
+        ? (input.work.payload as Record<string, unknown>)
+        : {};
+    const contextArtifact = await freezeActiveContextArtifact(manager, {
+      rootExecutionId: child.rootExecutionId,
+      sessionId: child.sessionId,
+      turnId: child.turnId,
+      causedByEventId: event.eventId,
+      effectivePayload: childPayload,
+    });
     const step = await createExecutionStep(manager, {
       executionId,
       stepKind: ExecutionStepKind.INFERENCE,
+      inputArtifactRefs: [
+        {
+          role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+          artifactId: contextArtifact.artifactId,
+        },
+      ],
       work: input.work,
       requiredCapabilities: [input.requiredCapability],
       deadline: input.deadline,
@@ -981,8 +1012,9 @@ export class ExecutionService {
       const conversationMessages: ConversationArtifactMessage[] = obtainsLane
         ? [...(previous?.messages ?? []), userArtifactMessage]
         : (previous?.messages ?? []);
+      let activeRevision: ConversationArtifactRevisionEntity | null = null;
       if (obtainsLane) {
-        await revisionRepo.save(
+        activeRevision = await revisionRepo.save(
           revisionRepo.create({
             artifactId: session.conversationArtifactId,
             revision: startingRevision,
@@ -998,8 +1030,9 @@ export class ExecutionService {
       if (obtainsLane) session.activeTurnId = turn.turnId;
       await sessionRepo.save(session);
 
-      const conversation = this.contextConversation(conversationMessages);
-      const executionPayload = { ...payload, conversation };
+      const executionPayload = activeRevision
+        ? { ...payload, ...buildActiveConversationContext(activeRevision) }
+        : { ...payload };
       const execution = manager.getRepository(ExecutionEntity).create({
         executionId,
         rootExecutionId,
@@ -1117,10 +1150,24 @@ export class ExecutionService {
       execution.lastSequence = '3';
       execution.lastEventId = sourceEvent.eventId;
       if (obtainsLane) {
+        const contextArtifact = await freezeActiveContextArtifact(manager, {
+          rootExecutionId,
+          sessionId: session.sessionId,
+          turnId,
+          causedByEventId: sourceEvent.eventId,
+          effectivePayload: executionPayload,
+          derivedFromArtifactIds: [artifactId],
+        });
         await createExecutionStep(manager, {
           executionId,
           stepKind: ExecutionStepKind.INFERENCE,
-          inputArtifactRefs: [{ role: 'user_message', artifactId }],
+          inputArtifactRefs: [
+            { role: 'user_message', artifactId },
+            {
+              role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+              artifactId: contextArtifact.artifactId,
+            },
+          ],
           work: { taskType: execution.taskType, payload: executionPayload },
           requiredCapabilities: [execution.taskType],
           priority: STEP_PRIORITY[ExecutionPriority.HIGH],
