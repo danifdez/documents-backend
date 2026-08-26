@@ -186,6 +186,7 @@ describe('ExecutionAttemptService', () => {
     };
     service = new ExecutionAttemptService({
       transaction: jest.fn(async (callback) => callback(manager)),
+      getRepository: manager.getRepository,
     } as any);
   });
 
@@ -246,6 +247,25 @@ describe('ExecutionAttemptService', () => {
     expect(control.leaseRemainingMs).toBeGreaterThan(0);
     expect(control.leaseRemainingMs).toBeLessThanOrEqual(10_000);
     expect(attemptRepo.save).toHaveBeenCalledWith(attempt);
+  });
+
+  it('exposes cancellation to a federated reader before artifact creation', async () => {
+    attemptRepo.findOneBy.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: new Date(),
+    });
+
+    const control = await service.readAttemptControl(ATTEMPT_ID, WORKER_ID);
+
+    expect(control.cancelled).toBe(true);
+    expect(control.leaseExpiresAt).toEqual(expect.any(Date));
   });
 
   it('stores an output artifact under the active fenced attempt', async () => {
