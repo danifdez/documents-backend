@@ -96,7 +96,7 @@ describe('WorkerService', () => {
     repo.update = jest.fn();
 
     await expect(
-      service.heartbeat(
+      service.heartbeatModels(
         '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
         ['tool.browser.read_current_page/1'],
         [ExecutionStepKind.TOOL],
@@ -105,6 +105,46 @@ describe('WorkerService', () => {
       ),
     ).rejects.toThrow('models_tool_steps_not_allowed');
     expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('updates only a live Models identity during heartbeat', async () => {
+    repo.update = jest.fn().mockResolvedValue({ affected: 1 });
+
+    await service.heartbeatModels(
+      '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+      ['detect-language'],
+      [ExecutionStepKind.SERVICE],
+      1,
+      { version: 'test' },
+    );
+
+    expect(repo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+        workerKind: WorkerKind.MODELS,
+        revokedAt: expect.anything(),
+      }),
+      expect.objectContaining({
+        capabilities: ['detect-language'],
+        stepKinds: [ExecutionStepKind.SERVICE],
+        maximumConcurrency: 1,
+        status: 'online',
+      }),
+    );
+  });
+
+  it('does not revive a Models identity revoked after authentication', async () => {
+    repo.update = jest.fn().mockResolvedValue({ affected: 0 });
+
+    await expect(
+      service.heartbeatModels(
+        '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+        ['detect-language'],
+        [ExecutionStepKind.SERVICE],
+        1,
+        {},
+      ),
+    ).rejects.toThrow('worker_not_available');
   });
 
   it('revokes only a browser owned by the current principal', async () => {

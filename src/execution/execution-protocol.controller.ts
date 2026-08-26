@@ -58,7 +58,7 @@ export class ExecutionProtocolController {
     @Body() body: ModelsWorkerHeartbeatDto,
   ) {
     await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
-    await this.workers.heartbeat(
+    await this.workers.heartbeatModels(
       workerId,
       body.capabilities,
       body.stepKinds,

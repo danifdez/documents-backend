@@ -188,7 +188,7 @@ export class WorkerService {
     await this.repo.save(worker);
   }
 
-  async heartbeat(
+  async heartbeatModels(
     id: string,
     capabilities: string[],
     stepKinds: ExecutionStepKind[],
@@ -197,14 +197,20 @@ export class WorkerService {
   ): Promise<void> {
     this.assertMaximumConcurrency(maximumConcurrency);
     this.assertModelsStepKinds(stepKinds);
-    await this.repo.update(id, {
-      capabilities: [...new Set(capabilities)],
-      stepKinds: [...new Set(stepKinds)],
-      maximumConcurrency,
-      metadata: metadata as any,
-      status: 'online',
-      lastHeartbeat: new Date(),
-    });
+    const result = await this.repo.update(
+      { id, workerKind: WorkerKind.MODELS, revokedAt: IsNull() },
+      {
+        capabilities: [...new Set(capabilities)],
+        stepKinds: [...new Set(stepKinds)],
+        maximumConcurrency,
+        metadata: metadata as any,
+        status: 'online',
+        lastHeartbeat: new Date(),
+      },
+    );
+    if (!result.affected) {
+      throw new ConflictException('worker_not_available');
+    }
   }
 
   async heartbeatBrowser(
