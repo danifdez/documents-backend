@@ -23,6 +23,10 @@ import {
 import { WorkerEntity } from '../worker/worker.entity';
 import { WorkerKind } from '../worker/worker-kind.enum';
 import type { ConversationOwnerType } from './conversation-session.entity';
+import {
+  ActiveProductSkill,
+  selectProductSkills,
+} from './product-skill-registry';
 
 export const ACTIVE_CAPABILITY_SET_SCHEMA = 'active-capability-set/1';
 const BROWSER_HEARTBEAT_MAX_AGE_MS = 60_000;
@@ -45,7 +49,7 @@ export interface ActiveCapabilitySet {
   owner: { type: ConversationOwnerType; id: number };
   selectionPolicy: 'backend-availability/1';
   tools: ActiveToolCapability[];
-  skills: [];
+  skills: ActiveProductSkill[];
 }
 
 export async function buildActiveCapabilitySet(
@@ -56,6 +60,7 @@ export async function buildActiveCapabilitySet(
     ownerPrincipal: string;
     folderScope: string | null;
     browserFederationEnabled: boolean;
+    objective: string;
   },
 ): Promise<ActiveCapabilitySet> {
   const tools: ActiveToolCapability[] = [
@@ -113,7 +118,10 @@ export async function buildActiveCapabilitySet(
     owner: { type: input.ownerType, id: input.ownerId },
     selectionPolicy: 'backend-availability/1',
     tools,
-    skills: [],
+    skills: selectProductSkills(
+      input.objective,
+      new Set(tools.map(({ name }) => name)),
+    ),
   };
 }
 

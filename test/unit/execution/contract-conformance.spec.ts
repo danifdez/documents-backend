@@ -263,6 +263,9 @@ describe('execution v1 contract', () => {
   const validateActiveContext = ajv.getSchema(
     'https://documents.local/harness/v1/schemas/active-context.schema.json',
   )!;
+  const validateContextChunkPlan = ajv.getSchema(
+    'https://documents.local/harness/v1/schemas/context-chunk-plan.schema.json',
+  )!;
   const contractHash = verifyManifest();
 
   const event = (payload: any, overrides: any = {}) => ({
@@ -342,6 +345,7 @@ describe('execution v1 contract', () => {
             ],
             skills: [],
           },
+          activeInputReduction: null,
         },
         volatile: {},
       },
@@ -356,9 +360,66 @@ describe('execution v1 contract', () => {
     expect(
       validateActiveContext({
         ...activeContext,
+        layers: {
+          ...activeContext.layers,
+          contextual: {
+            ...activeContext.layers.contextual,
+            activeInputReduction: {
+              schemaVersion: 'active-input-reduction/1',
+              sourceArtifact: {
+                artifactId: '00000000-0000-4000-8000-000000000017',
+                contentHash: `sha256:${'b'.repeat(64)}`,
+                size: 20000,
+              },
+              planArtifact: {
+                artifactId: '00000000-0000-4000-8000-000000000018',
+                contentHash: `sha256:${'c'.repeat(64)}`,
+              },
+              strategy: 'chunk-map-reduce/1',
+              chunkCount: 2,
+              digest: 'Complete reduced request',
+            },
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      validateActiveContext({
+        ...activeContext,
         schemaVersion: 'active-context/2',
       }),
     ).toBe(false);
+  });
+
+  it('validates a deterministic chunk plan for oversized input', () => {
+    expect(
+      validateContextChunkPlan({
+        schemaVersion: 'context-chunk-plan/1',
+        sourceArtifact: {
+          artifactId: '00000000-0000-4000-8000-000000000017',
+          contentHash: `sha256:${'b'.repeat(64)}`,
+          size: 20000,
+        },
+        algorithm: 'deterministic-text-boundaries/1',
+        offsetUnit: 'utf16-code-unit',
+        maxChunkChars: 12000,
+        reductionFanIn: 8,
+        chunks: [
+          {
+            index: 0,
+            start: 0,
+            end: 12000,
+            contentHash: `sha256:${'c'.repeat(64)}`,
+          },
+          {
+            index: 1,
+            start: 12000,
+            end: 20000,
+            contentHash: `sha256:${'d'.repeat(64)}`,
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 
   it('requires the canonical ToolResult inside every tool StepResult', () => {

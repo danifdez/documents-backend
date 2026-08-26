@@ -66,6 +66,7 @@ export class ExecutionAgentLoopService {
           WHERE step."status" = 'ready'
             AND step."step_kind" = 'inference'
             AND step."budget_reservation_id" IS NULL
+            AND step."work" ->> 'taskType' = ANY($1::text[])
             AND execution."task_type" = ANY($1::text[])
             AND execution."status" IN ('queued', 'running')
             AND execution."cancellation_requested_at" IS NULL

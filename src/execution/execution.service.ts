@@ -73,6 +73,7 @@ import {
 } from '../conversation/conversation-context';
 import { buildActiveMemoryContext } from '../memory/active-memory';
 import { buildActiveCapabilitySet } from '../conversation/active-capabilities';
+import { buildContextInputWorkflow } from '../conversation/context-input-workflow';
 
 export {
   canonicalHash,
@@ -495,35 +496,20 @@ export class ExecutionService {
         ownerPrincipal: nextExecution.ownerPrincipal,
         folderScope: ownerConfig.folderScope,
         browserFederationEnabled: this.browserFederationEnabled(),
+        objective: userMessage.content,
       }),
     };
     await executionRepo.save(nextExecution);
-    const contextArtifact = await freezeActiveContextArtifact(manager, {
-      rootExecutionId: nextExecution.rootExecutionId,
-      sessionId: nextExecution.sessionId,
-      turnId: nextExecution.turnId,
-      causedByEventId: nextExecution.lastEventId,
-      effectivePayload: nextExecution.payload,
-      derivedFromArtifactIds: [next.requestArtifactId],
-    });
-    await createExecutionStep(manager, {
-      executionId: nextExecution.executionId,
-      stepKind: ExecutionStepKind.INFERENCE,
-      inputArtifactRefs: [
-        { role: 'user_message', artifactId: next.requestArtifactId },
-        {
-          role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
-          artifactId: contextArtifact.artifactId,
-        },
-      ],
-      work: {
-        taskType: nextExecution.taskType,
-        payload: nextExecution.payload,
-      },
-      requiredCapabilities: [nextExecution.taskType],
-      priority: STEP_PRIORITY[ExecutionPriority.HIGH],
-      causedByEventId: nextExecution.lastEventId,
-    });
+    const requestArtifact = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .findOneByOrFail({ artifactId: next.requestArtifactId });
+    await this.createInitialChatSteps(
+      manager,
+      nextExecution,
+      requestArtifact,
+      userMessage.content,
+      nextExecution.lastEventId,
+    );
   }
 
   private chatPublication(
@@ -1076,6 +1062,7 @@ export class ExecutionService {
               ownerPrincipal: scope.ownerPrincipal,
               folderScope: ownerConfig.folderScope,
               browserFederationEnabled: this.browserFederationEnabled(),
+              objective: safeMessage,
             }),
           }
         : canonicalPayload;
@@ -1107,7 +1094,7 @@ export class ExecutionService {
         missingEvidence: [],
       });
       await manager.save(execution);
-      await manager.save(
+      const requestArtifact = await manager.save(
         manager.getRepository(ExecutionArtifactEntity).create({
           artifactId,
           rootExecutionId,
@@ -1196,29 +1183,13 @@ export class ExecutionService {
       execution.lastSequence = '3';
       execution.lastEventId = sourceEvent.eventId;
       if (obtainsLane) {
-        const contextArtifact = await freezeActiveContextArtifact(manager, {
-          rootExecutionId,
-          sessionId: session.sessionId,
-          turnId,
-          causedByEventId: sourceEvent.eventId,
-          effectivePayload: executionPayload,
-          derivedFromArtifactIds: [artifactId],
-        });
-        await createExecutionStep(manager, {
-          executionId,
-          stepKind: ExecutionStepKind.INFERENCE,
-          inputArtifactRefs: [
-            { role: 'user_message', artifactId },
-            {
-              role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
-              artifactId: contextArtifact.artifactId,
-            },
-          ],
-          work: { taskType: execution.taskType, payload: executionPayload },
-          requiredCapabilities: [execution.taskType],
-          priority: STEP_PRIORITY[ExecutionPriority.HIGH],
-          causedByEventId: sourceEvent.eventId,
-        });
+        await this.createInitialChatSteps(
+          manager,
+          execution,
+          requestArtifact,
+          safeMessage,
+          sourceEvent.eventId,
+        );
       }
       return { execution: await manager.save(execution), userMessage };
     });
@@ -1247,6 +1218,59 @@ export class ExecutionService {
       systemPrompt:
         typeof rows[0].systemPrompt === 'string' ? rows[0].systemPrompt : null,
     };
+  }
+
+  private async createInitialChatSteps(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    requestArtifact: ExecutionArtifactEntity,
+    message: string,
+    causedByEventId: string,
+  ): Promise<void> {
+    if (!['assistant-chat', 'agent-chat'].includes(execution.taskType)) {
+      throw new ConflictException('invalid_chat_execution_type');
+    }
+    const workflow = await buildContextInputWorkflow(manager, {
+      executionId: execution.executionId,
+      taskType: execution.taskType as 'assistant-chat' | 'agent-chat',
+      message,
+      requestArtifact,
+      effectivePayload: execution.payload ?? {},
+      causedByEventId,
+    });
+    if (workflow) {
+      for (const step of workflow.steps) {
+        await createExecutionStep(manager, {
+          ...step,
+          executionId: execution.executionId,
+        });
+      }
+      return;
+    }
+
+    const contextArtifact = await freezeActiveContextArtifact(manager, {
+      rootExecutionId: execution.rootExecutionId,
+      sessionId: execution.sessionId,
+      turnId: execution.turnId,
+      causedByEventId,
+      effectivePayload: execution.payload ?? {},
+      derivedFromArtifactIds: [requestArtifact.artifactId],
+    });
+    await createExecutionStep(manager, {
+      executionId: execution.executionId,
+      stepKind: ExecutionStepKind.INFERENCE,
+      inputArtifactRefs: [
+        { role: 'user_message', artifactId: requestArtifact.artifactId },
+        {
+          role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+          artifactId: contextArtifact.artifactId,
+        },
+      ],
+      work: { taskType: execution.taskType, payload: execution.payload ?? {} },
+      requiredCapabilities: [execution.taskType],
+      priority: STEP_PRIORITY[ExecutionPriority.HIGH],
+      causedByEventId,
+    });
   }
 
   private browserFederationEnabled(): boolean {

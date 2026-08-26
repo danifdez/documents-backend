@@ -5,6 +5,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { MAX_CHAT_MESSAGE_CHARS } from '../../conversation/conversation.constants';
 
 export class UpdateAssistantWorkingFolderDto {
   @IsDefined()
@@ -17,5 +18,6 @@ export class UpdateAssistantWorkingFolderDto {
 export class SendMessageDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(MAX_CHAT_MESSAGE_CHARS)
   content: string;
 }

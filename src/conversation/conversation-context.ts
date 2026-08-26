@@ -13,7 +13,7 @@ export const ACTIVE_CONTEXT_SCHEMA = 'active-context/1';
 export const CONTINUITY_CAPSULE_SCHEMA = 'continuity-capsule/1';
 export const MAX_ACTIVE_CONVERSATION_MESSAGES = 24;
 export const MAX_ACTIVE_CONVERSATION_CHARS = 32_000;
-const MAX_ACTIVE_MESSAGE_CHARS = 16_000;
+export const MAX_ACTIVE_MESSAGE_CHARS = 16_000;
 const MAX_CAPSULE_CHARS = 4_000;
 const MAX_CAPSULE_MESSAGE_CHARS = 360;
 const MAX_ACTIVE_CONTEXT_ARTIFACT_BYTES = 1024 * 1024;
@@ -57,6 +57,7 @@ export interface ActiveContextSnapshot {
       continuityCapsule: unknown;
       activeMemory: unknown;
       activeCapabilities: unknown;
+      activeInputReduction: unknown;
     };
     volatile: Record<string, unknown>;
   };
@@ -141,6 +142,8 @@ export async function freezeActiveContextArtifact(
         continuityCapsule: input.effectivePayload.continuityCapsule ?? null,
         activeMemory: input.effectivePayload.activeMemory ?? null,
         activeCapabilities: input.effectivePayload.activeCapabilities ?? null,
+        activeInputReduction:
+          input.effectivePayload.activeInputReduction ?? null,
       },
       volatile: selectPayloadFields(input.effectivePayload, [
         'toolHistory',

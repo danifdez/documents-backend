@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import { AgentEntity } from '../agent.entity';
 import { AgentMessageEntity } from '../agent-message.entity';
+import { MAX_CHAT_MESSAGE_CHARS } from '../../conversation/conversation.constants';
 
 export class CreateAgentDto {
   @IsString()
@@ -74,6 +75,7 @@ export class UpdateAgentDto {
 export class SendAgentMessageDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(MAX_CHAT_MESSAGE_CHARS)
   content: string;
 }
 

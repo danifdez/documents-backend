@@ -204,6 +204,10 @@ export class ExecutionAttemptService {
             AND (
               "step_kind" <> 'inference'
               OR "budget_reservation_id" IS NOT NULL
+              OR "work" ->> 'taskType' IN (
+                'context-input-map',
+                'context-input-reduce'
+              )
               OR NOT EXISTS (
                 SELECT 1
                 FROM "executions" governed_execution
@@ -1115,6 +1119,9 @@ export class ExecutionAttemptService {
       step.stepKind === ExecutionStepKind.INFERENCE &&
       ['assistant-chat', 'agent-chat', 'delegated-agent'].includes(
         execution.taskType,
+      ) &&
+      !['context-input-map', 'context-input-reduce'].includes(
+        String(step.work?.taskType ?? ''),
       ) &&
       !step.budgetReservationId
     ) {

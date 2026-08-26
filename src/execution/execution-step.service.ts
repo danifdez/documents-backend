@@ -18,6 +18,18 @@ import { ExecutionStepKind } from './execution-step-kind.enum';
 import { ExecutionStepStatus } from './execution-step-status.enum';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
 import { executionStepOutputValue } from './execution-step-result';
+import {
+  ACTIVE_CONTEXT_ARTIFACT_ROLE,
+  freezeActiveContextArtifact,
+} from '../conversation/conversation-context';
+import {
+  ACTIVE_INPUT_REDUCTION_SCHEMA,
+  CONTEXT_CHUNK_PLAN_SCHEMA,
+  CONTEXT_INPUT_FINAL_COORDINATION,
+  ContextChunkPlan,
+} from '../conversation/context-input-workflow';
+import { ExecutionArtifactEntity } from './execution-artifact.entity';
+import { contentHash } from './execution-canonical';
 
 export async function createExecutionStep(
   manager: EntityManager,
@@ -184,7 +196,7 @@ export async function releaseExecutionStepDependents(
   for (const row of rows) {
     const candidate = await stepRepo.findOneBy({ stepId: row.step_id });
     if (!candidate) continue;
-    await materializeMapReduceInput(stepRepo, candidate);
+    await materializeCoordinatedInput(manager, stepRepo, candidate);
     candidate.status = ExecutionStepStatus.READY;
     candidate.version += 1;
     await stepRepo.save(candidate);
@@ -223,12 +235,17 @@ function defaultOperationKind(
   return byStepKind[stepKind];
 }
 
-async function materializeMapReduceInput(
+async function materializeCoordinatedInput(
+  manager: EntityManager,
   stepRepo: Repository<ExecutionStepEntity>,
   candidate: ExecutionStepEntity,
 ): Promise<void> {
   const work = (candidate.work ?? {}) as Record<string, unknown>;
   const coordination = work.coordination as Record<string, unknown> | undefined;
+  if (coordination?.kind === CONTEXT_INPUT_FINAL_COORDINATION) {
+    await materializeContextInput(manager, stepRepo, candidate, coordination);
+    return;
+  }
   if (coordination?.kind !== 'map-reduce-reduce/1') return;
 
   const mapStepIds = coordination.mapStepIds;
@@ -267,6 +284,156 @@ async function materializeMapReduceInput(
     ...work,
     payload: { ...payload, partials },
   };
+}
+
+async function materializeContextInput(
+  manager: EntityManager,
+  stepRepo: Repository<ExecutionStepEntity>,
+  candidate: ExecutionStepEntity,
+  coordination: Record<string, unknown>,
+): Promise<void> {
+  const reductionStepId = coordination.reductionStepId;
+  const resultKey = coordination.resultKey;
+  const planArtifactId = coordination.planArtifactId;
+  const sourceArtifactId = coordination.sourceArtifactId;
+  if (
+    typeof reductionStepId !== 'string' ||
+    typeof resultKey !== 'string' ||
+    typeof planArtifactId !== 'string' ||
+    typeof sourceArtifactId !== 'string'
+  ) {
+    throw new ConflictException('invalid_context_input_coordination');
+  }
+  const reductionStep = await stepRepo.findOneBy({ stepId: reductionStepId });
+  const output = executionStepOutputValue(reductionStep?.result);
+  const digest =
+    output && typeof output === 'object'
+      ? (output as Record<string, unknown>)[resultKey]
+      : null;
+  if (
+    reductionStep?.status !== ExecutionStepStatus.COMPLETED ||
+    typeof digest !== 'string' ||
+    !digest.trim() ||
+    digest.length > 16_000
+  ) {
+    throw new ConflictException('invalid_context_input_reduction');
+  }
+
+  const execution = await manager.getRepository(ExecutionEntity).findOneBy({
+    executionId: candidate.executionId,
+  });
+  if (!execution) throw new ConflictException('execution_not_found');
+  const artifactRepo = manager.getRepository(ExecutionArtifactEntity);
+  const planArtifact = await artifactRepo
+    .createQueryBuilder('artifact')
+    .addSelect('artifact.body')
+    .where('artifact.artifactId = :artifactId', { artifactId: planArtifactId })
+    .andWhere('artifact.rootExecutionId = :rootExecutionId', {
+      rootExecutionId: execution.rootExecutionId,
+    })
+    .getOne();
+  if (!planArtifact?.body) {
+    throw new ConflictException('context_chunk_plan_not_found');
+  }
+  if (contentHash(planArtifact.body) !== planArtifact.contentHash) {
+    throw new ConflictException('context_chunk_plan_integrity_mismatch');
+  }
+  let plan: ContextChunkPlan;
+  try {
+    plan = JSON.parse(planArtifact.body.toString('utf8')) as ContextChunkPlan;
+  } catch {
+    throw new ConflictException('invalid_context_chunk_plan');
+  }
+  const sourceArtifact = await artifactRepo
+    .createQueryBuilder('artifact')
+    .addSelect('artifact.body')
+    .where('artifact.artifactId = :artifactId', {
+      artifactId: sourceArtifactId,
+    })
+    .andWhere('artifact.rootExecutionId = :rootExecutionId', {
+      rootExecutionId: execution.rootExecutionId,
+    })
+    .getOne();
+  const sourceBody = sourceArtifact?.body;
+  const sourceText = sourceBody?.toString('utf8');
+  if (
+    plan.schemaVersion !== CONTEXT_CHUNK_PLAN_SCHEMA ||
+    plan.sourceArtifact?.artifactId !== sourceArtifactId ||
+    plan.sourceArtifact?.contentHash !== sourceArtifact?.contentHash ||
+    plan.sourceArtifact?.size !== Number(sourceArtifact?.size) ||
+    !sourceBody ||
+    contentHash(sourceBody) !== sourceArtifact.contentHash ||
+    typeof sourceText !== 'string' ||
+    plan.algorithm !== 'deterministic-text-boundaries/1' ||
+    plan.offsetUnit !== 'utf16-code-unit' ||
+    plan.maxChunkChars !== 12_000 ||
+    plan.reductionFanIn !== 8 ||
+    !Array.isArray(plan.chunks) ||
+    plan.chunks.length < 2 ||
+    plan.chunks.length > 21 ||
+    plan.chunks.some(
+      (chunk, index) =>
+        chunk.index !== index ||
+        chunk.start !== (index === 0 ? 0 : plan.chunks[index - 1].end) ||
+        !Number.isInteger(chunk.end) ||
+        chunk.end <= chunk.start ||
+        chunk.end - chunk.start > 12_000 ||
+        contentHash(
+          Buffer.from(sourceText.slice(chunk.start, chunk.end), 'utf8'),
+        ) !== chunk.contentHash,
+    ) ||
+    plan.chunks.at(-1)?.end !== sourceText.length
+  ) {
+    throw new ConflictException('invalid_context_chunk_plan');
+  }
+
+  const finish = await manager.getRepository(ExecutionEventEntity).findOne({
+    where: {
+      rootExecutionId: execution.rootExecutionId,
+      operationId: reductionStep.operationId,
+      eventType: 'operation.finished',
+    },
+    order: { sequence: 'DESC' },
+  });
+  if (!finish) throw new ConflictException('context_reduction_finish_missing');
+
+  const work = (candidate.work ?? {}) as Record<string, unknown>;
+  const payload =
+    work.payload && typeof work.payload === 'object'
+      ? (work.payload as Record<string, unknown>)
+      : {};
+  const effectivePayload = {
+    ...payload,
+    activeInputReduction: {
+      schemaVersion: ACTIVE_INPUT_REDUCTION_SCHEMA,
+      sourceArtifact: plan.sourceArtifact,
+      planArtifact: {
+        artifactId: planArtifact.artifactId,
+        contentHash: planArtifact.contentHash,
+      },
+      strategy: 'chunk-map-reduce/1',
+      chunkCount: plan.chunks.length,
+      digest: digest.trim(),
+    },
+  };
+  const contextArtifact = await freezeActiveContextArtifact(manager, {
+    rootExecutionId: execution.rootExecutionId,
+    sessionId: execution.sessionId,
+    turnId: execution.turnId,
+    causedByEventId: finish.eventId,
+    effectivePayload,
+    derivedFromArtifactIds: [sourceArtifactId, planArtifactId],
+  });
+  candidate.inputArtifactRefs = [
+    ...candidate.inputArtifactRefs.filter(
+      (ref) => ref.role !== ACTIVE_CONTEXT_ARTIFACT_ROLE,
+    ),
+    {
+      role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+      artifactId: contextArtifact.artifactId,
+    },
+  ];
+  candidate.work = { ...work, payload: effectivePayload };
 }
 
 @Injectable()

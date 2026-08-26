@@ -10,6 +10,7 @@ describe('active capability selection', () => {
       ownerPrincipal: 'user',
       folderScope: null,
       browserFederationEnabled: false,
+      objective: 'Answer this question',
     });
     const withFolder = await buildActiveCapabilitySet(manager as any, {
       ownerType: 'agent',
@@ -17,6 +18,7 @@ describe('active capability selection', () => {
       ownerPrincipal: 'user',
       folderScope: '/workspace',
       browserFederationEnabled: false,
+      objective: 'Answer this question',
     });
 
     expect(withoutFolder.tools.map(({ name }) => name)).toEqual([
@@ -34,6 +36,38 @@ describe('active capability selection', () => {
       ]),
     );
     expect(withFolder.skills).toEqual([]);
+  });
+
+  it('activates a matching product skill only when its tools already exist', async () => {
+    const manager = { getRepository: jest.fn() };
+    const withoutFolder = await buildActiveCapabilitySet(manager as any, {
+      ownerType: 'assistant',
+      ownerId: 1,
+      ownerPrincipal: 'user',
+      folderScope: null,
+      browserFederationEnabled: false,
+      objective: 'Modify the spreadsheet file',
+    });
+    const withFolder = await buildActiveCapabilitySet(manager as any, {
+      ownerType: 'agent',
+      ownerId: 2,
+      ownerPrincipal: 'user',
+      folderScope: '/workspace',
+      browserFederationEnabled: false,
+      objective: 'Modifica el documento de presupuesto',
+    });
+
+    expect(withoutFolder.skills).toEqual([]);
+    expect(withFolder.skills).toEqual([
+      expect.objectContaining({
+        skillId: 'workspace-document-workflow',
+        version: 'workspace-document-workflow/1',
+        activationReason: 'objective_match',
+        contentHash:
+          'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+      }),
+    ]);
+    expect(withFolder.skills[0]).not.toHaveProperty('instructions');
   });
 
   it('selects browser read only for a live paired browser', async () => {
@@ -54,6 +88,7 @@ describe('active capability selection', () => {
       ownerPrincipal: 'paired-user',
       folderScope: null,
       browserFederationEnabled: true,
+      objective: 'Read the current browser page',
     });
 
     expect(selected.tools).toContainEqual({

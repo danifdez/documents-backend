@@ -1,0 +1,1 @@
+export const MAX_CHAT_MESSAGE_CHARS = 250_000;

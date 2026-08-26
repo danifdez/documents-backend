@@ -2250,6 +2250,156 @@ describe('execution PostgreSQL integration', () => {
     });
   });
 
+  it('materializes oversized chat input through a durable reduction graph', async () => {
+    const message =
+      `Create the report. ${'source material '.repeat(1400)}` +
+      'Keep the final CSV constraint.';
+    const created = await createChat(
+      'assistant_chat',
+      message,
+      { ownerPrincipal: 'large-context-e2e' },
+      { ownerId: 1 },
+    );
+    const workerId = randomUUID();
+    const metadata = {
+      codeFingerprint: TEST_CODE_FINGERPRINT,
+      runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
+      usage: {
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+      },
+      inference: {
+        effectiveModel: 'e2e-model',
+        effectiveAdapter: null,
+        effectivePromptPackages: ['e2e-prompt'],
+        finishReason: 'completed',
+        inferenceMs: 1,
+        cacheOutcome: 'unknown',
+        warnings: [],
+      },
+    };
+    const initialSteps = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .find({ where: { executionId: created.executionId } });
+    const maps = initialSteps.filter(
+      (step) => step.work.taskType === 'context-input-map',
+    );
+    expect(maps.length).toBeGreaterThan(1);
+    expect(
+      initialSteps.find((step) => step.work.taskType === 'assistant-chat'),
+    ).toMatchObject({ status: ExecutionStepStatus.BLOCKED });
+
+    for (let index = 0; index < maps.length; index += 1) {
+      const mapWorkerId = randomUUID();
+      const assignment = await attemptService.claimReadyStep({
+        workerId: mapWorkerId,
+        stepKinds: [ExecutionStepKind.INFERENCE],
+        capabilities: ['context-input-map'],
+        leaseDurationMs: 30_000,
+      });
+      expect(assignment).not.toBeNull();
+      await attemptService.startAttempt(assignment!.attemptId, mapWorkerId);
+      const chunkIndex = Number(
+        (assignment!.work.payload as Record<string, unknown>).chunkIndex,
+      );
+      await attemptService.receiveResult({
+        executionId: assignment!.executionId,
+        stepId: assignment!.stepId,
+        operationId: assignment!.operationId,
+        attemptId: assignment!.attemptId,
+        workerId: mapWorkerId,
+        result: {
+          schemaVersion: 'step-result/1',
+          executionId: assignment!.executionId,
+          stepId: assignment!.stepId,
+          operationId: assignment!.operationId,
+          attemptId: assignment!.attemptId,
+          stepKind: ExecutionStepKind.INFERENCE,
+          status: 'succeeded',
+          output: {
+            kind: ExecutionStepKind.INFERENCE,
+            outcome: {
+              kind: 'structured_result',
+              schemaId: 'context-input-map-output/1',
+              value: { digest: `digest-${chunkIndex}` },
+            },
+          },
+          ...metadata,
+          artifactRefs: [],
+          error: null,
+        },
+      });
+      await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    }
+
+    const reduction = await attemptService.claimReadyStep({
+      workerId,
+      stepKinds: [ExecutionStepKind.INFERENCE],
+      capabilities: ['context-input-reduce'],
+      leaseDurationMs: 30_000,
+    });
+    expect(reduction?.work).toMatchObject({
+      taskType: 'context-input-reduce',
+      payload: {
+        partials: maps.map((_step, index) => `digest-${index}`),
+      },
+    });
+    await attemptService.startAttempt(reduction!.attemptId, workerId);
+    await attemptService.receiveResult({
+      executionId: reduction!.executionId,
+      stepId: reduction!.stepId,
+      operationId: reduction!.operationId,
+      attemptId: reduction!.attemptId,
+      workerId,
+      result: {
+        schemaVersion: 'step-result/1',
+        executionId: reduction!.executionId,
+        stepId: reduction!.stepId,
+        operationId: reduction!.operationId,
+        attemptId: reduction!.attemptId,
+        stepKind: ExecutionStepKind.INFERENCE,
+        status: 'succeeded',
+        output: {
+          kind: ExecutionStepKind.INFERENCE,
+          outcome: {
+            kind: 'structured_result',
+            schemaId: 'context-input-reduce-output/1',
+            value: { digest: 'Complete reduced user request' },
+          },
+        },
+        ...metadata,
+        artifactRefs: [],
+        error: null,
+      },
+    });
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    await expect(agentLoopService.prepareReadyInferences()).resolves.toBe(1);
+
+    const finalAssignment = await attemptService.claimReadyStep({
+      workerId,
+      stepKinds: [ExecutionStepKind.INFERENCE],
+      capabilities: ['assistant-chat'],
+      leaseDurationMs: 30_000,
+    });
+    expect(finalAssignment?.work.taskType).toBe('assistant-chat');
+    const contextRef = finalAssignment!.inputArtifactRefs.find(
+      (ref) => ref.role === 'active_context',
+    );
+    expect(contextRef).toBeDefined();
+    const rows = await dataSource.query(
+      'SELECT "body" FROM "execution_artifacts" WHERE "artifact_id" = $1',
+      [contextRef!.artifactId],
+    );
+    const snapshot = JSON.parse((rows[0].body as Buffer).toString('utf8'));
+    expect(snapshot.effectivePayload.activeInputReduction).toMatchObject({
+      schemaVersion: 'active-input-reduction/1',
+      strategy: 'chunk-map-reduce/1',
+      chunkCount: maps.length,
+      digest: 'Complete reduced user request',
+    });
+  });
+
   it('keeps assistant and agent chat as distinct execution types', async () => {
     const scope = { ownerPrincipal: 'e2e-user' };
     const assistant = await createChat(
@@ -2413,6 +2563,18 @@ describe('execution PostgreSQL integration', () => {
         'workspace_files.delete',
       ]),
     );
+    expect(accepted.execution.payload.activeCapabilities.skills).toEqual([
+      expect.objectContaining({
+        skillId: 'workspace-document-workflow',
+        version: 'workspace-document-workflow/1',
+        activationReason: 'objective_match',
+        contentHash:
+          'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+      }),
+    ]);
+    expect(
+      accepted.execution.payload.activeCapabilities.skills[0],
+    ).not.toHaveProperty('instructions');
   });
 
   it('persists one conversation lane and promotes queued turns in order', async () => {
