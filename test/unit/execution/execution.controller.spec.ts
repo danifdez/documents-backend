@@ -4,7 +4,6 @@ describe('ExecutionController', () => {
   const service = {
     resolveAccessScope: jest.fn(() => ({
       ownerPrincipal: 'user-1',
-      workspaceId: 'workspace-1',
     })),
     readEvents: jest.fn(),
     readProgress: jest.fn(),
@@ -19,30 +18,25 @@ describe('ExecutionController', () => {
       bundleSchema: 'execution-bundle/1',
     });
 
-    await controller.bundle('run-1', { userId: 7 }, 'workspace-1', 'granted');
+    await controller.bundle('run-1', { userId: 7 }, 'granted');
 
-    expect(service.resolveAccessScope).toHaveBeenCalledWith(
-      { userId: 7 },
-      'workspace-1',
-    );
+    expect(service.resolveAccessScope).toHaveBeenCalledWith({ userId: 7 });
     expect(service.exportBundle).toHaveBeenCalledWith(
       'run-1',
       {
         ownerPrincipal: 'user-1',
-        workspaceId: 'workspace-1',
       },
       true,
     );
   });
 
   it('does not infer evaluation consent when the header is absent', async () => {
-    await controller.bundle('run-1', { userId: 7 }, 'workspace-1', undefined);
+    await controller.bundle('run-1', { userId: 7 }, undefined);
 
     expect(service.exportBundle).toHaveBeenCalledWith(
       'run-1',
       {
         ownerPrincipal: 'user-1',
-        workspaceId: 'workspace-1',
       },
       false,
     );
@@ -51,11 +45,10 @@ describe('ExecutionController', () => {
   it('uses the same access scope for the materialized progress projection', async () => {
     service.readProgress.mockResolvedValue({ policy: null, ledger: null });
 
-    await controller.progress('run-1', { userId: 7 }, 'workspace-1');
+    await controller.progress('run-1', { userId: 7 });
 
     expect(service.readProgress).toHaveBeenCalledWith('run-1', {
       ownerPrincipal: 'user-1',
-      workspaceId: 'workspace-1',
     });
   });
 });

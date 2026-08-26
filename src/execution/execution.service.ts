@@ -144,7 +144,6 @@ export interface CreateExecutionOptions {
   rootExecutionId?: string;
   parentExecutionId?: string;
   ownerPrincipal?: string;
-  workspaceId?: string;
   initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
   steps?: Array<Omit<CreateExecutionStepInput, 'executionId'>>;
   inputArtifacts?: Array<{
@@ -179,17 +178,11 @@ export class ExecutionService {
     private readonly progress: ExecutionProgressService,
   ) {}
 
-  resolveAccessScope(
-    user: unknown,
-    workspaceId?: string,
-  ): ExecutionAccessScope {
+  resolveAccessScope(user: unknown): ExecutionAccessScope {
     const record =
       user && typeof user === 'object' ? (user as Record<string, unknown>) : {};
     const owner = record.userId ?? record.sub ?? 'standalone';
-    return {
-      ownerPrincipal: String(owner),
-      workspaceId: (workspaceId || 'default').trim().slice(0, 200) || 'default',
-    };
+    return { ownerPrincipal: String(owner) };
   }
 
   async createForChat(
@@ -213,7 +206,6 @@ export class ExecutionService {
         parentExecutionId: null,
         turnId,
         ownerPrincipal: scope.ownerPrincipal,
-        workspaceId: scope.workspaceId,
         schemaVersion: EXECUTION_SCHEMA,
         taskType:
           executionKind === 'assistant_chat' ? 'assistant-chat' : 'agent-chat',
@@ -363,9 +355,8 @@ export class ExecutionService {
         });
         if (!parent) throw new NotFoundException('Parent execution not found');
         if (
-          (options.ownerPrincipal &&
-            options.ownerPrincipal !== eventRoot.ownerPrincipal) ||
-          (options.workspaceId && options.workspaceId !== eventRoot.workspaceId)
+          options.ownerPrincipal &&
+          options.ownerPrincipal !== eventRoot.ownerPrincipal
         ) {
           throw new BadRequestException('Child execution scope mismatch');
         }
@@ -379,8 +370,6 @@ export class ExecutionService {
         turnId: null,
         ownerPrincipal:
           eventRoot?.ownerPrincipal ?? options?.ownerPrincipal ?? 'system',
-        workspaceId:
-          eventRoot?.workspaceId ?? options?.workspaceId ?? 'default',
         schemaVersion: EXECUTION_SCHEMA,
         taskType,
         payload,
@@ -2046,7 +2035,6 @@ export class ExecutionService {
         executionId: rootExecutionId,
         rootExecutionId,
         ownerPrincipal: scope.ownerPrincipal,
-        workspaceId: scope.workspaceId,
       },
     });
     if (!execution) throw new NotFoundException('Execution not found');

@@ -13,7 +13,7 @@ import type {
 } from './execution-progress';
 
 @Entity({ name: 'executions' })
-@Index('IDX_executions_access', ['ownerPrincipal', 'workspaceId'])
+@Index('IDX_executions_owner', ['ownerPrincipal'])
 @Index('IDX_executions_root', ['rootExecutionId'])
 @Index('IDX_executions_parent', ['parentExecutionId'])
 export class ExecutionEntity {
@@ -31,9 +31,6 @@ export class ExecutionEntity {
 
   @Column({ name: 'owner_principal', type: 'varchar', length: 200 })
   ownerPrincipal: string;
-
-  @Column({ name: 'workspace_id', type: 'varchar', length: 200 })
-  workspaceId: string;
 
   @Column({ name: 'schema_version', type: 'varchar', length: 50 })
   schemaVersion: string;

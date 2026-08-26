@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import {
   DeepPartial,
   FindOptionsOrder,
@@ -102,41 +102,6 @@ export class ChatMessageStore<T extends ChatMessageRecord> {
         role: message.role,
         content: message.content,
       }));
-  }
-
-  async recordEvent(
-    ownerId: number,
-    content: string,
-    event: Record<string, any>,
-  ): Promise<T> {
-    return this.save(ownerId, { role: 'event', content, event });
-  }
-
-  async updateEventStatus(
-    ownerId: number,
-    messageId: number,
-    status: 'done' | 'cancelled',
-    summary?: string,
-  ): Promise<T> {
-    const message = await this.repository.findOne({
-      where: {
-        ...this.owner.where(ownerId),
-        id: messageId,
-      } as FindOptionsWhere<T>,
-    });
-    if (!message) {
-      throw new NotFoundException(`Event message ${messageId} not found`);
-    }
-    if (message.role !== 'event' || !message.event) {
-      throw new NotFoundException(`Message ${messageId} is not an event`);
-    }
-    const event = message.event as any;
-    if (event.kind === 'tool_executed' && event.tool) {
-      event.tool.status = status;
-      if (summary !== undefined) event.tool.summary = summary;
-    }
-    message.event = event;
-    return this.repository.save(message);
   }
 
   async recordReply(

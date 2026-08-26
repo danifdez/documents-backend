@@ -97,7 +97,6 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
           rootExecutionId: execution.rootExecutionId,
           parentExecutionId: execution.executionId,
           ownerPrincipal: execution.ownerPrincipal,
-          workspaceId: execution.workspaceId,
           inputArtifacts: [
             {
               role: 'media',

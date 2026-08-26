@@ -95,7 +95,7 @@ export class ExecutionToolPlanService {
       );
       await this.assertCause(manager, execution, invocation);
       await this.assertRequester(manager, execution, invocation);
-      const planContract = this.prepareDocumentsSearch(invocation, execution);
+      const planContract = this.prepareDocumentsSearch(invocation);
       this.contractValidator.assertToolPlan(
         planContract as unknown as Record<string, unknown>,
       );
@@ -221,7 +221,6 @@ export class ExecutionToolPlanService {
 
   private prepareDocumentsSearch(
     invocation: ToolInvocationContract,
-    execution: ExecutionEntity,
   ): ToolPlanContract {
     if (invocation.name !== DOCUMENT_SEARCH_TOOL_NAME) {
       throw new BadRequestException('tool_not_available');
@@ -252,13 +251,13 @@ export class ExecutionToolPlanService {
       normalizedArguments: { query, limit },
       resources: [
         {
-          resourceKey: `workspace:${execution.workspaceId}:documents`,
+          resourceKey: 'documents:collection',
           mode: 'shared',
           kind: 'document_collection',
         },
       ],
       effects: [],
-      policyDecision: { decision: 'allowed', rule: 'workspace_read' },
+      policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
       confirmationRequirement: null,
       recoveryClass: 'read_only_replayable',
       idempotencyKey: null,

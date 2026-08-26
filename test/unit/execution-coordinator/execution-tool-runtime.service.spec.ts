@@ -33,12 +33,12 @@ describe('ExecutionToolRuntimeService', () => {
         normalizedArguments: { query: 'durable tools', limit: 2 },
         resources: [
           {
-            resourceKey: 'workspace:default:documents',
+            resourceKey: 'documents:collection',
             mode: 'shared',
           },
         ],
         effects: [],
-        policyDecision: { decision: 'allowed', rule: 'workspace_read' },
+        policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
         confirmationRequirement: null,
         recoveryClass: 'read_only_replayable',
         idempotencyKey: null,

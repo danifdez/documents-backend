@@ -23,7 +23,7 @@ reference `parentExecutionId`.
 
 | Table | Purpose |
 |---|---|
-| `executions` | UUID identity, tree links, payload, lifecycle and semantic final result |
+| `executions` | UUID identity, tree links, owner, payload, lifecycle and semantic final result |
 | `execution_steps` | Durable work graph, dependencies, availability, deadlines and step results |
 | `execution_step_attempts` | Worker claims, leases and fencing identities |
 | `execution_result_receipts` | Idempotent result delivery and terminal ACK evidence |
@@ -51,6 +51,9 @@ declared task capabilities.
 ### API and evidence
 
 - Product-specific asynchronous endpoints return `{ "executionId": "<uuid>" }`.
+- A Backend represents one workspace. Execution access is scoped by the
+  authenticated owner; no workspace identity is accepted or persisted by the
+  harness.
 - `GET /executions/:rootExecutionId/events` pages the evidence log.
 - `GET /executions/:rootExecutionId/bundle` exports an `ExecutionBundle` only
   when the request includes `x-evaluation-consent: granted`. The bundle's

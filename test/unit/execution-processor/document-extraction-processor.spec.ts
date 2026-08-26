@@ -22,7 +22,6 @@ describe('DocumentExtractionProcessor', () => {
       executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
       rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca700',
       ownerPrincipal: 'user-1',
-      workspaceId: 'workspace-1',
       payload: { hash: 'hash', extension: '.wav', resourceId: 7 },
       result: {
         title: 'Recording',
@@ -42,7 +41,6 @@ describe('DocumentExtractionProcessor', () => {
         rootExecutionId: execution.rootExecutionId,
         parentExecutionId: execution.executionId,
         ownerPrincipal: execution.ownerPrincipal,
-        workspaceId: execution.workspaceId,
         inputArtifacts: [
           {
             role: 'media',

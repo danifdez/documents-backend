@@ -149,7 +149,6 @@ export class AgentService {
     content: string,
     accessScope: ExecutionAccessScope = {
       ownerPrincipal: 'standalone',
-      workspaceId: 'default',
     },
   ): Promise<{
     userMessage: AgentMessageEntity;
@@ -182,23 +181,6 @@ export class AgentService {
       userMessage: userMsg,
       executionId: execution.executionId,
     };
-  }
-
-  async recordEvent(
-    agentId: number,
-    content: string,
-    event: Record<string, any>,
-  ): Promise<AgentMessageEntity> {
-    return this.messages.recordEvent(agentId, content, event);
-  }
-
-  async updateEventStatus(
-    agentId: number,
-    messageId: number,
-    status: 'done' | 'cancelled',
-    summary?: string,
-  ): Promise<AgentMessageEntity> {
-    return this.messages.updateEventStatus(agentId, messageId, status, summary);
   }
 
   async recordAgentReply(

@@ -148,7 +148,7 @@ describe('ExecutionService primitives', () => {
     await expect(
       service.exportBundle(
         '00000000-0000-4000-8000-000000000001',
-        { ownerPrincipal: 'user-1', workspaceId: 'workspace-1' },
+        { ownerPrincipal: 'user-1' },
         false,
       ),
     ).rejects.toThrow('Explicit consent');

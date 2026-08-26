@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import {
   ChatMessageRecord,
@@ -51,58 +51,6 @@ describe('ChatMessageStore', () => {
       order: { createdAt: 'DESC', id: 'DESC' },
       take: 40,
     });
-  });
-
-  it('records an event and updates its tool status', async () => {
-    let stored: TestMessage | null = null;
-    const repository = {
-      create: jest.fn((input) => input),
-      save: jest.fn(async (input: Partial<TestMessage>) => {
-        stored = message({
-          id: input.id ?? 1,
-          ownerId: input.ownerId ?? 7,
-          ...input,
-        });
-        return stored;
-      }),
-      findOne: jest.fn(async () => stored),
-    } as unknown as Repository<TestMessage>;
-    const store = createStore(repository);
-
-    const created = await store.recordEvent(7, 'Tool running', {
-      kind: 'tool_executed',
-      tool: { name: 'search', status: 'running' },
-    });
-    const updated = await store.updateEventStatus(
-      7,
-      created.id,
-      'done',
-      'Found',
-    );
-
-    expect(updated.event).toEqual({
-      kind: 'tool_executed',
-      tool: { name: 'search', status: 'done', summary: 'Found' },
-    });
-  });
-
-  it('preserves event validation errors', async () => {
-    const repository = {
-      findOne: jest
-        .fn()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(
-          message({ id: 3, ownerId: 7, role: 'user', content: 'question' }),
-        ),
-    } as unknown as Repository<TestMessage>;
-    const store = createStore(repository);
-
-    await expect(store.updateEventStatus(7, 2, 'done')).rejects.toThrow(
-      new NotFoundException('Event message 2 not found'),
-    );
-    await expect(store.updateEventStatus(7, 3, 'done')).rejects.toThrow(
-      new NotFoundException('Message 3 is not an event'),
-    );
   });
 
   it('reuses an identical reply without running the creation callback', async () => {

@@ -70,22 +70,6 @@ export class NotificationGateway implements OnGatewayConnection {
     );
   }
 
-  sendAssistantStreamChunk(data: any) {
-    this.server.emit('assistantStreamChunk', data);
-  }
-
-  sendAssistantToolEvent(data: any) {
-    this.server.emit('assistantToolEvent', data);
-  }
-
-  sendAgentStreamChunk(data: any) {
-    this.server.emit('agentStreamChunk', data);
-  }
-
-  sendAgentToolEvent(data: any) {
-    this.server.emit('agentToolEvent', data);
-  }
-
   sendCalendarAlarm(data: {
     eventId: number;
     occurrenceStart: string;

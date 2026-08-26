@@ -11,7 +11,6 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         "parent_execution_id" uuid,
         "turn_id" uuid,
         "owner_principal" varchar(200) NOT NULL,
-        "workspace_id" varchar(200) NOT NULL,
         "schema_version" varchar(50) NOT NULL,
         "task_type" varchar(100) NOT NULL,
         "origin" varchar(30) NOT NULL DEFAULT 'root',
@@ -38,7 +37,7 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
       )
     `);
     await queryRunner.query(
-      `CREATE INDEX "IDX_executions_access" ON "executions" ("owner_principal", "workspace_id")`,
+      `CREATE INDEX "IDX_executions_owner" ON "executions" ("owner_principal")`,
     );
     await queryRunner.query(
       `CREATE INDEX "IDX_executions_root" ON "executions" ("root_execution_id")`,

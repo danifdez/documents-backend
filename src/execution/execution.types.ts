@@ -1,6 +1,5 @@
 export interface ExecutionAccessScope {
   ownerPrincipal: string;
-  workspaceId: string;
 }
 
 export interface ExecutionContext {

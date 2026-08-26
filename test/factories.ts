@@ -152,7 +152,6 @@ export function buildExecution(
     parentExecutionId: null,
     turnId: null,
     ownerPrincipal: 'test-user',
-    workspaceId: 'test-workspace',
     schemaVersion: 'execution-event/1',
     taskType: 'document-extraction',
     payload: {},

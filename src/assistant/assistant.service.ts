@@ -161,7 +161,6 @@ export class AssistantService implements OnApplicationBootstrap {
     content: string,
     accessScope: ExecutionAccessScope = {
       ownerPrincipal: 'standalone',
-      workspaceId: 'default',
     },
   ): Promise<{
     userMessage: AssistantMessageEntity;
@@ -194,28 +193,6 @@ export class AssistantService implements OnApplicationBootstrap {
       userMessage: userMsg,
       executionId: execution.executionId,
     };
-  }
-
-  async recordEvent(
-    assistantId: number,
-    content: string,
-    event: Record<string, any>,
-  ): Promise<AssistantMessageEntity> {
-    return this.messages.recordEvent(assistantId, content, event);
-  }
-
-  async updateEventStatus(
-    assistantId: number,
-    messageId: number,
-    status: 'done' | 'cancelled',
-    summary?: string,
-  ): Promise<AssistantMessageEntity> {
-    return this.messages.updateEventStatus(
-      assistantId,
-      messageId,
-      status,
-      summary,
-    );
   }
 
   async recordAssistantReply(

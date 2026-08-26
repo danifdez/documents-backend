@@ -15,6 +15,7 @@ import { DropObsoleteExecutionRoutingFields1757668140460 } from '../migrations/1
 import { AddExecutionStepFailureFinalization1757668140470 } from '../migrations/1757668140470-AddExecutionStepFailureFinalization';
 import { AddExecutionOutputArtifacts1757668140600 } from '../migrations/1757668140600-AddExecutionOutputArtifacts';
 import { AddWorkerConcurrency1757668140700 } from '../migrations/1757668140700-AddWorkerConcurrency';
+import { RemoveExecutionWorkspaceScope1757668140710 } from '../migrations/1757668140710-RemoveExecutionWorkspaceScope';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -125,6 +126,7 @@ describe('execution PostgreSQL integration', () => {
     await new AddWorkerCredentials1757668140380().up(runner);
     await new AddExecutionOutputArtifacts1757668140600().up(runner);
     await new AddWorkerConcurrency1757668140700().up(runner);
+    await new RemoveExecutionWorkspaceScope1757668140710().up(runner);
     await runner.release();
 
     const config = {
@@ -242,7 +244,13 @@ describe('execution PostgreSQL integration', () => {
       FROM information_schema.columns
       WHERE table_schema = current_schema()
         AND table_name = 'executions'
-        AND column_name IN ('checkpoint', 'origin', 'priority', 'wait_reason')
+        AND column_name IN (
+          'checkpoint',
+          'origin',
+          'priority',
+          'wait_reason',
+          'workspace_id'
+        )
     `);
     expect(columns).toEqual([]);
   });
@@ -405,7 +413,6 @@ describe('execution PostgreSQL integration', () => {
         rootExecutionId: parent.rootExecutionId,
         parentExecutionId: parent.executionId,
         ownerPrincipal: parent.ownerPrincipal,
-        workspaceId: parent.workspaceId,
         inputArtifacts: [
           {
             role: 'media',
@@ -421,7 +428,6 @@ describe('execution PostgreSQL integration', () => {
       rootExecutionId: parent.rootExecutionId,
       parentExecutionId: parent.executionId,
       ownerPrincipal: parent.ownerPrincipal,
-      workspaceId: parent.workspaceId,
     });
     const step = await dataSource
       .getRepository(ExecutionStepEntity)
@@ -614,7 +620,7 @@ describe('execution PostgreSQL integration', () => {
       stepId: null,
       plan: {
         normalizedArguments: { query: 'harness', limit: 5 },
-        policyDecision: { decision: 'allowed', rule: 'workspace_read' },
+        policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
       },
     });
   });
@@ -623,7 +629,7 @@ describe('execution PostgreSQL integration', () => {
     const created = await service.createForChat(
       'assistant_chat',
       'Find the harness plan',
-      { ownerPrincipal: 'tool-e2e', workspaceId: 'default' },
+      { ownerPrincipal: 'tool-e2e' },
       {},
     );
     const sourceAttemptId = randomUUID();
@@ -826,7 +832,7 @@ describe('execution PostgreSQL integration', () => {
     const created = await service.createForChat(
       'assistant_chat',
       'Find the harness plan',
-      { ownerPrincipal: 'agent-loop-e2e', workspaceId: 'default' },
+      { ownerPrincipal: 'agent-loop-e2e' },
       {},
     );
     await expect(agentLoopService.prepareReadyInferences()).resolves.toBe(1);
@@ -1336,7 +1342,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('keeps assistant and agent chat as distinct execution types', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const scope = { ownerPrincipal: 'e2e-user' };
     const assistant = await service.createForChat(
       'assistant_chat',
       'assistant message',
@@ -1355,7 +1361,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('serializes concurrent producers, paginates, deduplicates, and enforces append-only rows', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const scope = { ownerPrincipal: 'e2e-user' };
     const context = await service.createForChat(
       'assistant_chat',
       'Authorization: Bearer known-secret',
@@ -1393,8 +1399,7 @@ describe('execution PostgreSQL integration', () => {
     expect(page2.events.map((event: any) => event.sequence)).toEqual([3, 4, 5]);
     await expect(
       service.readEvents(context.rootExecutionId, {
-        ownerPrincipal: 'e2e-user',
-        workspaceId: 'other',
+        ownerPrincipal: 'other-user',
       }),
     ).rejects.toThrow('Execution not found');
 
@@ -1449,7 +1454,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('serializes the last operation budget slots and fences stale attempts', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const scope = { ownerPrincipal: 'e2e-user' };
     const context = await service.createForChat(
       'assistant_chat',
       'budget me',
@@ -1545,7 +1550,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('records one soft-limit signal when concurrent tool reservations cross it', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const scope = { ownerPrincipal: 'e2e-user' };
     const context = await service.createForChat(
       'assistant_chat',
       'cross the tool soft limit',
@@ -1626,7 +1631,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('records one soft-limit signal at the normal inference soft limit', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const scope = { ownerPrincipal: 'e2e-user' };
     const context = await service.createForChat(
       'assistant_chat',
       'cross the normal inference soft limit',
@@ -1703,7 +1708,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('persists one exact-repeat signal and consumes its warning transactionally', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const scope = { ownerPrincipal: 'e2e-user' };
     const context = await service.createForChat(
       'assistant_chat',
       'repeat one exact tool call',
@@ -2059,7 +2064,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('validates, fences, finalizes, and replays a deterministic partial', async () => {
-    const scope = { ownerPrincipal: 'e2e-user', workspaceId: 'e2e-workspace' };
+    const scope = { ownerPrincipal: 'e2e-user' };
     const context = await service.createForChat(
       'assistant_chat',
       'materialize a deterministic partial',

@@ -71,13 +71,13 @@ describe('ExecutionToolPlanService', () => {
     normalizedArguments: { query: 'harness', limit: 10 },
     resources: [
       {
-        resourceKey: 'workspace:default:documents',
+        resourceKey: 'documents:collection',
         mode: 'shared',
         kind: 'document_collection',
       },
     ],
     effects: [],
-    policyDecision: { decision: 'allowed', rule: 'workspace_read' },
+    policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
     confirmationRequirement: null,
     recoveryClass: 'read_only_replayable',
     idempotencyKey: null,
@@ -90,7 +90,6 @@ describe('ExecutionToolPlanService', () => {
     execution = {
       executionId: EXECUTION_ID,
       rootExecutionId: EXECUTION_ID,
-      workspaceId: 'default',
       status: ExecutionStatus.RUNNING,
       phase: 'backend_finalization',
       lastEventId: EVENT_ID,
@@ -180,7 +179,7 @@ describe('ExecutionToolPlanService', () => {
       expect.objectContaining({
         operationId: expect.any(String),
         normalizedArguments: { query: 'harness', limit: 10 },
-        policyDecision: { decision: 'allowed', rule: 'workspace_read' },
+        policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
         recoveryClass: 'read_only_replayable',
       }),
     );
@@ -261,7 +260,7 @@ describe('ExecutionToolPlanService', () => {
         operationId: TOOL_OPERATION_ID,
         budgetReservationId: RESERVATION_ID,
         requiredCapabilities: ['tool.documents.search/1'],
-        resourceKeys: ['workspace:default:documents'],
+        resourceKeys: ['documents:collection'],
       }),
     );
     expect(operationRepo.save).toHaveBeenCalledWith(
