@@ -14,6 +14,9 @@ import {
   BROWSER_READ_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_NAME,
   BROWSER_READ_TOOL_VERSION,
+  BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
+  BROWSER_TYPE_TEXT_TOOL_NAME,
+  BROWSER_TYPE_TEXT_TOOL_VERSION,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
   SKILL_RESOURCE_LOAD_TOOL_NAME,
@@ -142,6 +145,11 @@ export async function buildActiveCapabilitySet(
         BROWSER_CLICK_TOOL_VERSION,
         'paired_browser',
       ),
+      tool(
+        BROWSER_TYPE_TEXT_TOOL_NAME,
+        BROWSER_TYPE_TEXT_TOOL_VERSION,
+        'paired_browser',
+      ),
     );
   }
   return {
@@ -186,6 +194,7 @@ async function hasPairedBrowser(
         BROWSER_NAVIGATE_TOOL_CAPABILITY,
         BROWSER_GO_BACK_TOOL_CAPABILITY,
         BROWSER_CLICK_TOOL_CAPABILITY,
+        BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
       ]),
     })
     .getExists();

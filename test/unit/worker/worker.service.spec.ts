@@ -66,6 +66,7 @@ describe('WorkerService', () => {
         'tool.browser.navigate/1',
         'tool.browser.go_back/1',
         'tool.browser.click/1',
+        'tool.browser.type_text/1',
       ],
       stepKinds: [ExecutionStepKind.TOOL],
       maximumConcurrency: 1,

@@ -42,6 +42,9 @@ import {
   BROWSER_READ_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_NAME,
   BROWSER_READ_TOOL_VERSION,
+  BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
+  BROWSER_TYPE_TEXT_TOOL_NAME,
+  BROWSER_TYPE_TEXT_TOOL_VERSION,
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
@@ -383,6 +386,9 @@ export class ExecutionToolPlanService {
     }
     if (invocation.name === BROWSER_CLICK_TOOL_NAME) {
       return this.prepareBrowserClick(invocation);
+    }
+    if (invocation.name === BROWSER_TYPE_TEXT_TOOL_NAME) {
+      return this.prepareBrowserTypeText(invocation);
     }
     if (invocation.name === WORKSPACE_FILE_READ_TOOL_NAME) {
       return this.prepareWorkspaceFileRead(invocation, execution);
@@ -1087,6 +1093,8 @@ export class ExecutionToolPlanService {
     const preparedAt = new Date();
     const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
     const resourceKey = 'browser:active-page';
+    const labelForPrompt = JSON.stringify(expectedLabel);
+    const urlForPrompt = JSON.stringify(expectedCurrentUrl);
     return {
       schemaVersion: 'tool-plan/1',
       operationId: randomUUID(),
@@ -1120,14 +1128,118 @@ export class ExecutionToolPlanService {
         confirmationId: randomUUID(),
         reason: 'Clicking a page control can trigger an external action.',
         prompt:
-          `Click ${expectedKind} "${expectedLabel}" ` +
-          `(control ${elementIndex}) on "${expectedCurrentUrl}"?`,
+          `Click ${expectedKind} ${labelForPrompt} ` +
+          `(control ${elementIndex}) on ${urlForPrompt}?`,
         scope: 'once',
         expiresAt: expiresAt.toISOString(),
       },
       recoveryClass: 'effect_checked',
       idempotencyKey: `browser-click:${invocation.toolCallId}`,
       requiredCapabilities: [BROWSER_CLICK_TOOL_CAPABILITY],
+      deadline: expiresAt.toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareBrowserTypeText(
+    invocation: ToolInvocationContract,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    const allowedKeys = [
+      'expectedCurrentUrl',
+      'elementIndex',
+      'expectedLabel',
+      'expectedCurrentValue',
+      'expectedCurrentValueTruncated',
+      'text',
+    ];
+    const expectedCurrentValue = invocation.arguments.expectedCurrentValue;
+    const text = invocation.arguments.text;
+    if (
+      Object.keys(invocation.arguments).some(
+        (key) => !allowedKeys.includes(key),
+      ) ||
+      typeof invocation.arguments.expectedCurrentUrl !== 'string' ||
+      !Number.isInteger(invocation.arguments.elementIndex) ||
+      typeof invocation.arguments.expectedLabel !== 'string' ||
+      typeof expectedCurrentValue !== 'string' ||
+      invocation.arguments.expectedCurrentValueTruncated !== false ||
+      typeof text !== 'string'
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const expectedCurrentUrl = invocation.arguments.expectedCurrentUrl.trim();
+    const elementIndex = Number(invocation.arguments.elementIndex);
+    const expectedLabel = invocation.arguments.expectedLabel.trim();
+    const normalizedCurrentValue = expectedCurrentValue
+      .replace(/\s+/g, ' ')
+      .trim();
+    const normalizedText = text.replace(/\s+/g, ' ').trim();
+    if (
+      !this.isHttpUrl(expectedCurrentUrl) ||
+      elementIndex < 1 ||
+      elementIndex > 60 ||
+      !expectedLabel ||
+      expectedLabel.length > 120 ||
+      expectedCurrentValue !== normalizedCurrentValue ||
+      expectedCurrentValue.length > 60 ||
+      text !== normalizedText ||
+      !text ||
+      text.length > 60
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const preparedAt = new Date();
+    const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
+    const resourceKey = 'browser:active-page';
+    const labelForPrompt = JSON.stringify(expectedLabel);
+    const textForPrompt = JSON.stringify(text);
+    const urlForPrompt = JSON.stringify(expectedCurrentUrl);
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: BROWSER_TYPE_TEXT_TOOL_NAME,
+      descriptorVersion: BROWSER_TYPE_TEXT_TOOL_VERSION,
+      normalizedArguments: {
+        expectedCurrentUrl,
+        elementIndex,
+        expectedLabel,
+        expectedCurrentValue,
+        expectedCurrentValueTruncated: false,
+        text,
+      },
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_irreversible',
+          resourceKey,
+          description:
+            `Type text into field "${expectedLabel}" ` +
+            `(control ${elementIndex}) on ${expectedCurrentUrl}`,
+          reversible: false,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_type_text_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Typing can trigger input handlers on an external page.',
+        prompt:
+          `Type ${textForPrompt} into field ${labelForPrompt} ` +
+          `(control ${elementIndex}) on ${urlForPrompt} without submitting?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-type-text:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_TYPE_TEXT_TOOL_CAPABILITY],
       deadline: expiresAt.toISOString(),
       preparedAt: preparedAt.toISOString(),
     };

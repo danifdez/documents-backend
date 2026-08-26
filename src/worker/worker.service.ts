@@ -21,6 +21,7 @@ import {
   BROWSER_GO_BACK_TOOL_CAPABILITY,
   BROWSER_NAVIGATE_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_CAPABILITY,
+  BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
 } from '../execution/execution-tool.constants';
 
 @Injectable()
@@ -85,6 +86,7 @@ export class WorkerService {
         BROWSER_NAVIGATE_TOOL_CAPABILITY,
         BROWSER_GO_BACK_TOOL_CAPABILITY,
         BROWSER_CLICK_TOOL_CAPABILITY,
+        BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
       ],
       [ExecutionStepKind.TOOL],
       1,
@@ -213,6 +215,7 @@ export class WorkerService {
           BROWSER_NAVIGATE_TOOL_CAPABILITY,
           BROWSER_GO_BACK_TOOL_CAPABILITY,
           BROWSER_CLICK_TOOL_CAPABILITY,
+          BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
         ],
         stepKinds: [ExecutionStepKind.TOOL],
         maximumConcurrency: 1,

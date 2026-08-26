@@ -106,6 +106,7 @@ describe('ExecutionToolPlanService', () => {
             'browser.navigate',
             'browser.go_back',
             'browser.click',
+            'browser.type_text',
             'browser.read_current_page',
             'workspace_files.list',
             'workspace_files.search',
@@ -660,6 +661,102 @@ describe('ExecutionToolPlanService', () => {
             elementIndex: 7,
             expectedKind: 'field',
             expectedLabel: 'Search',
+          },
+        }),
+      ),
+    ).rejects.toThrow('invalid_arguments');
+  });
+
+  it('prepares exact browser text entry without form submission', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'browser.type_text',
+        arguments: {
+          expectedCurrentUrl: '  https://example.test/search  ',
+          elementIndex: 8,
+          expectedLabel: '  Search  ',
+          expectedCurrentValue: 'old query',
+          expectedCurrentValueTruncated: false,
+          text: 'new query',
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'browser.type_text',
+        descriptorVersion: 'browser.type_text/1',
+        normalizedArguments: {
+          expectedCurrentUrl: 'https://example.test/search',
+          elementIndex: 8,
+          expectedLabel: 'Search',
+          expectedCurrentValue: 'old query',
+          expectedCurrentValueTruncated: false,
+          text: 'new query',
+        },
+        resources: [
+          {
+            resourceKey: 'browser:active-page',
+            mode: 'exclusive',
+            kind: 'browser_page',
+          },
+        ],
+        effects: [
+          expect.objectContaining({
+            effectClass: 'external_irreversible',
+            resourceKey: 'browser:active-page',
+            reversible: false,
+            verificationRequired: true,
+          }),
+        ],
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'paired_browser_type_text_requires_confirmation',
+        }),
+        confirmationRequirement: expect.objectContaining({
+          prompt: [
+            'Type "new query" into field "Search" (control 8)',
+            'on "https://example.test/search" without submitting?',
+          ].join(' '),
+          scope: 'once',
+        }),
+        recoveryClass: 'effect_checked',
+        idempotencyKey: `browser-type-text:${TOOL_CALL_ID}`,
+        requiredCapabilities: ['tool.browser.type_text/1'],
+      }),
+    );
+  });
+
+  it('rejects browser text entry that cannot be verified as short single-line text', async () => {
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'browser.type_text',
+          arguments: {
+            expectedCurrentUrl: 'https://example.test/search',
+            elementIndex: 8,
+            expectedLabel: 'Search',
+            expectedCurrentValue: '',
+            expectedCurrentValueTruncated: false,
+            text: 'two\nlines',
+          },
+        }),
+      ),
+    ).rejects.toThrow('invalid_arguments');
+  });
+
+  it('rejects browser text entry when the observed current value was truncated', async () => {
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'browser.type_text',
+          arguments: {
+            expectedCurrentUrl: 'https://example.test/search',
+            elementIndex: 8,
+            expectedLabel: 'Search',
+            expectedCurrentValue: 'partial value',
+            expectedCurrentValueTruncated: true,
+            text: 'new query',
           },
         }),
       ),
