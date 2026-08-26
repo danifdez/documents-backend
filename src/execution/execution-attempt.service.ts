@@ -457,7 +457,11 @@ export class ExecutionAttemptService {
     attemptId: string,
     workerId: string,
     leaseDurationMs: number,
-  ): Promise<{ leaseExpiresAt: Date; cancelled: boolean }> {
+  ): Promise<{
+    leaseExpiresAt: Date;
+    leaseRemainingMs: number;
+    cancelled: boolean;
+  }> {
     this.assertLeaseDuration(leaseDurationMs);
     return this.dataSource.transaction(async (manager) => {
       const { attempt, step } = await this.lockCurrentAttempt(
@@ -482,8 +486,16 @@ export class ExecutionAttemptService {
         execution?.status === ExecutionStatus.CANCELLED ||
         Boolean(execution?.cancellationRequestedAt) ||
         step.status === ExecutionStepStatus.CANCELLED;
-      if (cancelled)
-        return { leaseExpiresAt: attempt.leaseExpiresAt, cancelled };
+      if (cancelled) {
+        return {
+          leaseExpiresAt: attempt.leaseExpiresAt,
+          leaseRemainingMs: Math.max(
+            0,
+            attempt.leaseExpiresAt.getTime() - now.getTime(),
+          ),
+          cancelled,
+        };
+      }
 
       const requestedExpiry = new Date(now.getTime() + leaseDurationMs);
       attempt.leaseExpiresAt =
@@ -495,7 +507,11 @@ export class ExecutionAttemptService {
       }
       attempt.heartbeatAt = now;
       await manager.getRepository(ExecutionStepAttemptEntity).save(attempt);
-      return { leaseExpiresAt: attempt.leaseExpiresAt, cancelled: false };
+      return {
+        leaseExpiresAt: attempt.leaseExpiresAt,
+        leaseRemainingMs: attempt.leaseExpiresAt.getTime() - now.getTime(),
+        cancelled: false,
+      };
     });
   }
 

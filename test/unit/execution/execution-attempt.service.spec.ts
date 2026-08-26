@@ -212,9 +212,40 @@ describe('ExecutionAttemptService', () => {
 
     expect(control).toEqual({
       leaseExpiresAt: originalExpiry,
+      leaseRemainingMs: expect.any(Number),
       cancelled: true,
     });
+    expect(control.leaseRemainingMs).toBeGreaterThan(0);
     expect(attemptRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('reports the server-side lease window capped by the step deadline', async () => {
+    const attempt = runningAttempt();
+    const deadline = new Date(Date.now() + 10_000);
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      deadline,
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: null,
+    });
+
+    const control = await service.renewAttemptLease(
+      ATTEMPT_ID,
+      WORKER_ID,
+      60_000,
+    );
+
+    expect(control.cancelled).toBe(false);
+    expect(control.leaseExpiresAt).toEqual(deadline);
+    expect(control.leaseRemainingMs).toBeGreaterThan(0);
+    expect(control.leaseRemainingMs).toBeLessThanOrEqual(10_000);
+    expect(attemptRepo.save).toHaveBeenCalledWith(attempt);
   });
 
   it('stores an output artifact under the active fenced attempt', async () => {
