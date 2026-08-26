@@ -32,7 +32,7 @@ describe('ExecutionAgentLoopService', () => {
   });
 
   it('does not update operations when no terminal child join is waiting', async () => {
-    const query = jest.fn().mockResolvedValue([]);
+    const query = jest.fn().mockResolvedValue([[], 0]);
     const service = new ExecutionAgentLoopService(
       {
         transaction: jest.fn(async (callback) => callback({ query })),

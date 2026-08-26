@@ -34,6 +34,7 @@ import { BrowserWorkController } from '../worker/browser-work.controller';
   ],
   exports: [
     ExecutionService,
+    ExecutionContractValidator,
     ExecutionStepService,
     ExecutionAttemptService,
     ExecutionToolPlanService,

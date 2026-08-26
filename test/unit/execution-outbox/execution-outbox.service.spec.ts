@@ -19,14 +19,17 @@ describe('ExecutionOutboxService', () => {
   it('claims and marks a publication as published after socket delivery', async () => {
     manager.query
       .mockResolvedValueOnce([
-        {
-          outbox_id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
-          socket_event: 'askResponse',
-          payload: { response: 'done' },
-          attempts: 1,
-        },
+        [
+          {
+            outbox_id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+            socket_event: 'askResponse',
+            payload: { response: 'done' },
+            attempts: 1,
+          },
+        ],
+        1,
       ])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([[], 0]);
     gateway.publishExecution.mockResolvedValue(true);
 
     await expect(service.publishPending()).resolves.toBe(1);
@@ -45,12 +48,15 @@ describe('ExecutionOutboxService', () => {
 
   it('returns the publication to pending when no client is connected', async () => {
     manager.query.mockResolvedValueOnce([
-      {
-        outbox_id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
-        socket_event: 'notification',
-        payload: { type: 'summarize' },
-        attempts: 2,
-      },
+      [
+        {
+          outbox_id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+          socket_event: 'notification',
+          payload: { type: 'summarize' },
+          attempts: 2,
+        },
+      ],
+      1,
     ]);
     gateway.publishExecution.mockResolvedValue(false);
 
@@ -59,5 +65,13 @@ describe('ExecutionOutboxService', () => {
       expect.stringContaining(`SET "status" = 'pending'`),
       ['018f1d8a-54d7-7d63-a1ee-5e9a6adca701', 2, 2, 'no_connected_clients'],
     );
+  });
+
+  it('stops when the current TypeORM update result has no claimed rows', async () => {
+    manager.query.mockResolvedValueOnce([[], 0]);
+
+    await expect(service.publishPending()).resolves.toBe(0);
+    expect(gateway.publishExecution).not.toHaveBeenCalled();
+    expect(dataSource.query).not.toHaveBeenCalled();
   });
 });

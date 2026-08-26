@@ -893,7 +893,7 @@ export class ExecutionService {
 
   async recoverStaleFinalizations(staleBefore: Date): Promise<number> {
     return this.dataSource.transaction(async (manager) => {
-      const rows = await manager.query(
+      const [rows] = (await manager.query(
         `
           UPDATE "executions"
           SET "phase" = CASE
@@ -908,7 +908,7 @@ export class ExecutionService {
           RETURNING "execution_id"
         `,
         [staleBefore],
-      );
+      )) as [{ execution_id: string }[], number];
       return rows.length;
     });
   }

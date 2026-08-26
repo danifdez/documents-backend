@@ -49,7 +49,7 @@ export class ExecutionOutboxService {
 
   private claimNext(): Promise<ClaimedOutboxMessage | null> {
     return this.dataSource.transaction(async (manager) => {
-      const rows = await manager.query(
+      const [rows] = (await manager.query(
         `
           WITH candidate AS (
             SELECT "outbox_id"
@@ -76,7 +76,7 @@ export class ExecutionOutboxService {
                     message."payload", message."attempts"
         `,
         [PUBLISH_LEASE_MS],
-      );
+      )) as [ClaimedOutboxMessage[], number];
       return rows[0] ?? null;
     });
   }

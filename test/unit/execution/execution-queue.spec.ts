@@ -106,8 +106,11 @@ describe('ExecutionService queue state', () => {
   it('makes abandoned finalizations claimable again', async () => {
     const staleBefore = new Date('2026-08-24T10:00:00.000Z');
     manager.query.mockResolvedValue([
-      { execution_id: EXECUTION_ID },
-      { execution_id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca703' },
+      [
+        { execution_id: EXECUTION_ID },
+        { execution_id: '018f1d8a-54d7-7d63-a1ee-5e9a6adca703' },
+      ],
+      2,
     ]);
 
     await expect(service.recoverStaleFinalizations(staleBefore)).resolves.toBe(

@@ -138,7 +138,7 @@ export class ExecutionAgentLoopService {
 
   async releaseTerminalDelegations(limit = 20): Promise<number> {
     return this.dataSource.transaction(async (manager) => {
-      const released = await manager.query(
+      const [releasedRows] = (await manager.query(
         `
           WITH candidates AS (
             SELECT step."step_id"
@@ -168,11 +168,7 @@ export class ExecutionAgentLoopService {
           RETURNING step."operation_id"
         `,
         [limit],
-      );
-      const releasedRows =
-        Array.isArray(released[0]) && typeof released[1] === 'number'
-          ? released[0]
-          : released;
+      )) as [{ operation_id: string }[], number];
       const operationIds = releasedRows.map(
         (row: { operation_id: string }) => row.operation_id,
       );
