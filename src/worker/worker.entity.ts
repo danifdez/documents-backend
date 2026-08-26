@@ -1,8 +1,22 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Check, Column, Entity, PrimaryColumn } from 'typeorm';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { WorkerKind } from './worker-kind.enum';
 
 @Entity({ name: 'workers' })
+@Check('CHK_workers_kind', `"worker_kind" IN ('models', 'browser')`)
+@Check(
+  'CHK_workers_kind_scope',
+  `(
+    "worker_kind" = 'models'
+    AND "owner_principal" IS NULL
+    AND NOT ('tool' = ANY("step_kinds"))
+  ) OR (
+    "worker_kind" = 'browser'
+    AND "owner_principal" IS NOT NULL
+    AND "step_kinds" = ARRAY['tool']::text[]
+    AND "maximum_concurrency" = 1
+  )`,
+)
 export class WorkerEntity {
   @PrimaryColumn('uuid')
   id: string;

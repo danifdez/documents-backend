@@ -418,6 +418,25 @@ describe('execution PostgreSQL integration', () => {
     expect(consolidatedIndexes).toHaveLength(12);
   });
 
+  it('enforces worker kind isolation in the base schema', async () => {
+    await expect(
+      dataSource.query(
+        `INSERT INTO workers
+          (id, name, worker_kind, owner_principal, step_kinds)
+         VALUES ($1, 'Invalid Models tool', 'models', NULL, ARRAY['tool'])`,
+        [randomUUID()],
+      ),
+    ).rejects.toThrow(/CHK_workers_kind_scope/);
+    await expect(
+      dataSource.query(
+        `INSERT INTO workers
+          (id, name, worker_kind, owner_principal, step_kinds)
+         VALUES ($1, 'Invalid Browser worker', 'browser', NULL, ARRAY['tool'])`,
+        [randomUUID()],
+      ),
+    ).rejects.toThrow(/CHK_workers_kind_scope/);
+  });
+
   it('creates current message and resource-date schemas directly', async () => {
     const retiredDateColumns = await dataSource.query(`
       SELECT column_name
