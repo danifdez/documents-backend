@@ -79,6 +79,123 @@ describe('ExecutionService primitives', () => {
     );
   });
 
+  it('creates a finalizer child with a stable idempotency identity', async () => {
+    const service = Object.create(ExecutionService.prototype) as any;
+    const parent = {
+      executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+      rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+      cancellationRequestedAt: null,
+    };
+    const executions = {
+      findOneBy: jest.fn().mockResolvedValue(parent),
+      findOne: jest.fn().mockResolvedValue(parent),
+      find: jest.fn().mockResolvedValue([]),
+    };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(executions),
+    };
+    service.dataSource = {
+      transaction: jest.fn((callback) => callback(manager)),
+    };
+    service.createChildInference = jest.fn().mockResolvedValue({
+      execution: { executionId: 'child-1' },
+      step: { stepId: 'step-1' },
+    });
+    const input = {
+      taskType: 'detect-language',
+      payload: { resourceId: 7, samples: ['one', 'two'] },
+      work: {
+        taskType: 'detect-language',
+        payload: { resourceId: 7, samples: ['one', 'two'] },
+      },
+      requiredCapability: 'detect-language',
+      deadline: new Date('2026-08-27T12:00:00.000Z'),
+      causedByEventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
+    };
+
+    await service.createChildInferenceOnce(
+      parent.executionId,
+      'transcribe:detect-language',
+      input,
+    );
+
+    expect(service.createChildInference).toHaveBeenCalledWith(
+      manager,
+      parent,
+      expect.objectContaining({
+        payload: {
+          ...input.payload,
+          originFinalizerKey: 'transcribe:detect-language',
+        },
+        work: {
+          taskType: 'detect-language',
+          payload: {
+            ...input.payload,
+            originFinalizerKey: 'transcribe:detect-language',
+          },
+        },
+      }),
+    );
+  });
+
+  it('reuses the existing finalizer child without creating another', async () => {
+    const service = Object.create(ExecutionService.prototype) as any;
+    const parent = {
+      executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+      rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+      cancellationRequestedAt: null,
+    };
+    const payload = {
+      resourceId: 7,
+      samples: ['one', 'two'],
+      originFinalizerKey: 'transcribe:detect-language',
+    };
+    const child = {
+      executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
+      parentExecutionId: parent.executionId,
+      taskType: 'detect-language',
+      payload,
+    };
+    const step = {
+      stepId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca703',
+      executionId: child.executionId,
+      stepKind: 'inference',
+    };
+    const executions = {
+      findOneBy: jest.fn().mockResolvedValue(parent),
+      findOne: jest.fn().mockResolvedValue(parent),
+      find: jest.fn().mockResolvedValue([child]),
+    };
+    const steps = { findOne: jest.fn().mockResolvedValue(step) };
+    const manager = {
+      getRepository: jest.fn((entity) =>
+        entity.name === 'ExecutionEntity' ? executions : steps,
+      ),
+    };
+    service.dataSource = {
+      transaction: jest.fn((callback) => callback(manager)),
+    };
+    service.createChildInference = jest.fn();
+
+    await expect(
+      service.createChildInferenceOnce(
+        parent.executionId,
+        'transcribe:detect-language',
+        {
+          taskType: 'detect-language',
+          payload: { resourceId: 7, samples: ['one', 'two'] },
+          work: {
+            taskType: 'detect-language',
+            payload: { resourceId: 7, samples: ['one', 'two'] },
+          },
+          requiredCapability: 'detect-language',
+          causedByEventId: parent.executionId,
+        },
+      ),
+    ).resolves.toEqual({ execution: child, step });
+    expect(service.createChildInference).not.toHaveBeenCalled();
+  });
+
   it('canonicalizes object keys recursively', () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe(
       '{"a":{"b":3,"y":2},"z":1}',

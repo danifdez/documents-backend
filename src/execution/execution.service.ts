@@ -193,9 +193,11 @@ export interface CreateChildInferenceInput {
   payload: Record<string, unknown>;
   work: Record<string, unknown>;
   requiredCapability: string;
-  deadline: Date;
+  deadline?: Date;
   causedByEventId: string;
 }
+
+const FINALIZER_IDEMPOTENCY_FIELD = 'originFinalizerKey';
 
 export type ChatMessageEntity = AssistantMessageEntity | AgentMessageEntity;
 
@@ -923,6 +925,88 @@ export class ExecutionService {
       causedByEventId: event.eventId,
     });
     return { execution: child, step };
+  }
+
+  async createChildInferenceOnce(
+    parentExecutionId: string,
+    idempotencyKey: string,
+    input: CreateChildInferenceInput,
+  ): Promise<{ execution: ExecutionEntity; step: ExecutionStepEntity }> {
+    if (!idempotencyKey || idempotencyKey.length > 160) {
+      throw new BadRequestException('invalid_child_idempotency_key');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const executions = manager.getRepository(ExecutionEntity);
+      const parentRef = await executions.findOneBy({
+        executionId: parentExecutionId,
+      });
+      if (!parentRef) throw new NotFoundException('Parent execution not found');
+      const root = await executions.findOne({
+        where: {
+          executionId: parentRef.rootExecutionId,
+          rootExecutionId: parentRef.rootExecutionId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!root) throw new NotFoundException('Root execution not found');
+      const parent =
+        parentRef.executionId === root.executionId
+          ? root
+          : await executions.findOne({
+              where: {
+                executionId: parentRef.executionId,
+                rootExecutionId: root.executionId,
+              },
+              lock: { mode: 'pessimistic_write' },
+            });
+      if (!parent) throw new NotFoundException('Parent execution not found');
+      if (root.cancellationRequestedAt || parent.cancellationRequestedAt) {
+        throw new ConflictException('execution_cancellation_requested');
+      }
+
+      const payload = {
+        ...input.payload,
+        [FINALIZER_IDEMPOTENCY_FIELD]: idempotencyKey,
+      };
+      const workPayload =
+        input.work.payload && typeof input.work.payload === 'object'
+          ? {
+              ...(input.work.payload as Record<string, unknown>),
+              [FINALIZER_IDEMPOTENCY_FIELD]: idempotencyKey,
+            }
+          : payload;
+      const work = { ...input.work, payload: workPayload };
+      const candidates = await executions.find({
+        where: { parentExecutionId, taskType: input.taskType },
+      });
+      const matches = candidates.filter(
+        (candidate) =>
+          candidate.payload?.[FINALIZER_IDEMPOTENCY_FIELD] === idempotencyKey,
+      );
+      if (matches.length > 1) {
+        throw new ConflictException('duplicate_child_idempotency_key');
+      }
+      if (matches.length === 1) {
+        const existing = matches[0];
+        if (canonicalHash(existing.payload) !== canonicalHash(payload)) {
+          throw new ConflictException('child_idempotency_conflict');
+        }
+        const step = await manager.getRepository(ExecutionStepEntity).findOne({
+          where: {
+            executionId: existing.executionId,
+            stepKind: ExecutionStepKind.INFERENCE,
+          },
+        });
+        if (!step) throw new ConflictException('incomplete_child_execution');
+        return { execution: existing, step };
+      }
+
+      return this.createChildInference(manager, parent, {
+        ...input,
+        payload,
+        work,
+      });
+    });
   }
 
   async createForChat(
