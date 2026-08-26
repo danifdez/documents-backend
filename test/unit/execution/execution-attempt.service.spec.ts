@@ -189,6 +189,34 @@ describe('ExecutionAttemptService', () => {
     } as any);
   });
 
+  it('reports cancellation without extending the lease before an effect', async () => {
+    const attempt = runningAttempt();
+    const originalExpiry = attempt.leaseExpiresAt;
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: new Date(),
+    });
+
+    const control = await service.renewAttemptLease(
+      ATTEMPT_ID,
+      WORKER_ID,
+      60_000,
+    );
+
+    expect(control).toEqual({
+      leaseExpiresAt: originalExpiry,
+      cancelled: true,
+    });
+    expect(attemptRepo.save).not.toHaveBeenCalled();
+  });
+
   it('stores an output artifact under the active fenced attempt', async () => {
     const body = Buffer.from('{"points":[]}');
     attemptRepo.findOne.mockResolvedValue(runningAttempt());
