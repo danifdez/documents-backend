@@ -208,7 +208,11 @@ export class ExecutionAttemptService {
                 SELECT 1
                 FROM "executions" governed_execution
                 WHERE governed_execution."execution_id" = "execution_steps"."execution_id"
-                  AND governed_execution."task_type" IN ('assistant-chat', 'agent-chat')
+                  AND governed_execution."task_type" IN (
+                    'assistant-chat',
+                    'agent-chat',
+                    'delegated-agent'
+                  )
               )
             )
             AND EXISTS (
@@ -1069,7 +1073,9 @@ export class ExecutionAttemptService {
     }
     if (
       step.stepKind === ExecutionStepKind.INFERENCE &&
-      ['assistant-chat', 'agent-chat'].includes(execution.taskType) &&
+      ['assistant-chat', 'agent-chat', 'delegated-agent'].includes(
+        execution.taskType,
+      ) &&
       !step.budgetReservationId
     ) {
       throw new ConflictException('operation_budget_not_reserved');
@@ -1244,7 +1250,9 @@ export class ExecutionAttemptService {
         work.agentName ??
           (execution.taskType === 'agent-chat' ? 'agent' : 'assistant'),
       ),
-      loopKind: 'top_level',
+      loopKind: execution.parentExecutionId
+        ? 'synchronous_subagent'
+        : 'top_level',
       round: reservation.round,
       maxRounds,
       phase: reservation.phase,

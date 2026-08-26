@@ -13,7 +13,11 @@ import type {
   ProgressGrantRequest,
 } from './execution.types';
 
-const CHAT_TASK_TYPES = new Set(['assistant-chat', 'agent-chat']);
+const CHAT_TASK_TYPES = new Set([
+  'assistant-chat',
+  'agent-chat',
+  'delegated-agent',
+]);
 const EXCLUDED_CHAT_INFERENCE_PHASES = new Set([
   'memory_extraction',
   'structured_output_repair',
@@ -431,7 +435,6 @@ export function governedBudgetStart(
   const phase = String(payload.phase ?? '');
   const governed =
     CHAT_TASK_TYPES.has(execution.taskType) &&
-    payload.loopKind !== 'synchronous_subagent' &&
     (operationKind === 'tool_call' ||
       !EXCLUDED_CHAT_INFERENCE_PHASES.has(phase));
   if (!governed) return null;

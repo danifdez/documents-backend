@@ -41,6 +41,7 @@ describe('ExecutionToolPlanService', () => {
   let planRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
   let confirmations: Record<string, jest.Mock>;
+  let executions: Record<string, jest.Mock>;
 
   const invocation = (
     overrides: Partial<ToolInvocationContract> = {},
@@ -98,6 +99,7 @@ describe('ExecutionToolPlanService', () => {
     };
     executionRepo = {
       findOne: jest.fn().mockResolvedValue(execution),
+      find: jest.fn().mockResolvedValue([execution]),
       save: jest.fn(async (value) => value),
     };
     eventRepo = {
@@ -166,6 +168,7 @@ describe('ExecutionToolPlanService', () => {
       decisionForPlan: jest.fn().mockResolvedValue(null),
       activatePending: jest.fn().mockResolvedValue(0),
     };
+    executions = { createChildInference: jest.fn() };
     service = new ExecutionToolPlanService(
       {
         transaction: jest.fn(async (callback) => callback(manager)),
@@ -175,6 +178,7 @@ describe('ExecutionToolPlanService', () => {
         assertToolPlan: jest.fn(),
       } as any,
       confirmations as any,
+      executions as any,
     );
   });
 
@@ -249,6 +253,36 @@ describe('ExecutionToolPlanService', () => {
       prepared.plan,
     );
     expect(stepRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('prepares a bounded durable delegation without application effects', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'agents.delegate',
+        arguments: { goal: 'Compare the two evidence sets' },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'agents.delegate',
+        descriptorVersion: 'agents.delegate/1',
+        normalizedArguments: { goal: 'Compare the two evidence sets' },
+        effects: [],
+        policyDecision: {
+          decision: 'allowed',
+          rule: 'bounded_internal_delegation',
+          conditions: ['max_depth_1', 'single_inference', 'join_all'],
+        },
+        recoveryClass: 'idempotent',
+        requiredCapabilities: ['tool.agents.delegate/1'],
+      }),
+    );
+    expect(confirmations.createPending).toHaveBeenCalledWith(
+      manager,
+      execution,
+      prepared.plan,
+    );
   });
 
   it('rejects reuse of a tool call identity with different arguments', async () => {
@@ -329,6 +363,48 @@ describe('ExecutionToolPlanService', () => {
     ).rejects.toThrow('tool_budget_not_reserved');
     expect(stepRepo.save).not.toHaveBeenCalled();
     expect(operationRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects recursive delegation before creating another child', async () => {
+    const plan = {
+      ...planContract(),
+      toolName: 'agents.delegate',
+      descriptorVersion: 'agents.delegate/1',
+      normalizedArguments: { goal: 'Delegate again' },
+      requiredCapabilities: ['tool.agents.delegate/1'],
+    };
+    execution.parentExecutionId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca799';
+    execution.progressLedger = {
+      operationBudget: {
+        grants: {},
+        reservations: {
+          [TOOL_OPERATION_ID]: {
+            reservationId: RESERVATION_ID,
+            operationId: TOOL_OPERATION_ID,
+            operationKind: 'tool_call',
+            toolCallId: TOOL_CALL_ID,
+            status: 'reserved',
+          },
+        },
+      },
+    };
+    planRepo.findOne.mockResolvedValue({
+      operationId: TOOL_OPERATION_ID,
+      executionId: EXECUTION_ID,
+      toolCallId: TOOL_CALL_ID,
+      stepId: null,
+      plan,
+    });
+    invocationRepo.findOneBy.mockResolvedValue({
+      toolCallId: TOOL_CALL_ID,
+      causedByEventId: EVENT_ID,
+      invocation: invocation({ name: 'agents.delegate' }),
+    });
+
+    await expect(
+      service.materialize(TOOL_CALL_ID, RESERVATION_ID),
+    ).rejects.toThrow('delegation_depth_exceeded');
+    expect(executions.createChildInference).not.toHaveBeenCalled();
   });
 
   it('keeps confirmable work unmaterialized while the decision is pending', async () => {

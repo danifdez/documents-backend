@@ -7,12 +7,14 @@ const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
 const OPERATION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
 const ATTEMPT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca704';
 const TOOL_CALL_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca705';
+const CHILD_EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca706';
 
 describe('ExecutionToolRuntimeService', () => {
   let attempts: Record<string, jest.Mock>;
   let contracts: Record<string, jest.Mock>;
   let search: Record<string, jest.Mock>;
   let userTasks: Record<string, jest.Mock>;
+  let executions: Record<string, jest.Mock>;
   let service: ExecutionToolRuntimeService;
 
   const assignment = () => ({
@@ -107,6 +109,43 @@ describe('ExecutionToolRuntimeService', () => {
     };
   };
 
+  const delegationAssignment = () => ({
+    ...assignment(),
+    work: {
+      taskType: 'agents.delegate',
+      childExecutionId: CHILD_EXECUTION_ID,
+      childStepId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca707',
+      joinPolicy: 'all',
+      delegationDepth: 1,
+      toolPlan: {
+        schemaVersion: 'tool-plan/1' as const,
+        operationId: OPERATION_ID,
+        toolCallId: TOOL_CALL_ID,
+        toolName: 'agents.delegate',
+        descriptorVersion: 'agents.delegate/1',
+        normalizedArguments: { goal: 'Compare evidence' },
+        resources: [
+          {
+            resourceKey: `execution-tree:${EXECUTION_ID}`,
+            mode: 'shared' as const,
+          },
+        ],
+        effects: [],
+        policyDecision: {
+          decision: 'allowed' as const,
+          rule: 'bounded_internal_delegation',
+          conditions: ['max_depth_1', 'single_inference', 'join_all'],
+        },
+        confirmationRequirement: null,
+        recoveryClass: 'idempotent' as const,
+        idempotencyKey: `delegation:${TOOL_CALL_ID}`,
+        requiredCapabilities: ['tool.agents.delegate/1'],
+        deadline: '2026-08-25T00:10:00.000Z',
+        preparedAt: '2026-08-25T00:00:00.000Z',
+      },
+    },
+  });
+
   beforeEach(() => {
     attempts = {
       claimReadyStep: jest
@@ -131,11 +170,13 @@ describe('ExecutionToolRuntimeService', () => {
       createFromExecution: jest.fn(),
       findByExecutionOperation: jest.fn(),
     };
+    executions = { findOne: jest.fn() };
     service = new ExecutionToolRuntimeService(
       attempts as any,
       contracts as any,
       search as any,
       userTasks as any,
+      executions as any,
     );
   });
 
@@ -145,7 +186,11 @@ describe('ExecutionToolRuntimeService', () => {
     expect(attempts.claimReadyStep).toHaveBeenCalledWith({
       workerId: '00000000-0000-4000-8000-000000000001',
       stepKinds: [ExecutionStepKind.TOOL],
-      capabilities: ['tool.documents.search/1', 'tool.user_tasks.create/1'],
+      capabilities: [
+        'tool.documents.search/1',
+        'tool.user_tasks.create/1',
+        'tool.agents.delegate/1',
+      ],
       leaseDurationMs: 30_000,
     });
     expect(search.globalSearch).toHaveBeenCalledWith('durable tools');
@@ -248,6 +293,42 @@ describe('ExecutionToolRuntimeService', () => {
               status: 'succeeded',
               structuredContent: expect.objectContaining({ id: 17 }),
               effects: [expect.objectContaining({ status: 'applied' })],
+            }),
+          },
+        }),
+      }),
+    );
+  });
+
+  it('joins a completed child execution into a canonical tool result', async () => {
+    attempts.claimReadyStep
+      .mockReset()
+      .mockResolvedValueOnce(delegationAssignment())
+      .mockResolvedValueOnce(null);
+    executions.findOne.mockResolvedValue({
+      executionId: CHILD_EXECUTION_ID,
+      parentExecutionId: EXECUTION_ID,
+      status: 'completed',
+      payload: { delegationOperationId: OPERATION_ID },
+      result: { reply: 'Independent comparison' },
+    });
+
+    await expect(service.executeReady()).resolves.toBe(1);
+
+    expect(attempts.receiveResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          status: 'succeeded',
+          output: {
+            kind: ExecutionStepKind.TOOL,
+            toolResult: expect.objectContaining({
+              status: 'succeeded',
+              content: 'Independent comparison',
+              structuredContent: {
+                childExecutionId: CHILD_EXECUTION_ID,
+                childStatus: 'completed',
+                joinPolicy: 'all',
+              },
             }),
           },
         }),

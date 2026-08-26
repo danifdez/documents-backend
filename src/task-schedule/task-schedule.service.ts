@@ -54,6 +54,7 @@ export class TaskScheduleService {
       return;
     }
 
+    await this.executionCoordinatorService.finalizeReady();
     await this.executionCoordinatorService.executeReadyTools();
     await this.executionCoordinatorService.acceptResults();
     await this.executionCoordinatorService.finalizeReady();

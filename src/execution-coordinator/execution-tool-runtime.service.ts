@@ -4,6 +4,9 @@ import { ExecutionContractValidator } from '../execution/execution-contract-vali
 import { StepAssignment } from '../execution/execution-control-plane.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import {
+  AGENT_DELEGATE_TOOL_CAPABILITY,
+  AGENT_DELEGATE_TOOL_NAME,
+  AGENT_DELEGATE_TOOL_VERSION,
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
@@ -19,6 +22,8 @@ import { SearchResultDto } from '../search/dto/search-result.dto';
 import { BACKEND_RUNTIME_FINGERPRINT } from '../execution/execution-runtime';
 import { canonicalHash } from '../execution/execution-canonical';
 import { UserTaskEntity } from '../user-task/user-task.entity';
+import { ExecutionService } from '../execution/execution.service';
+import { ExecutionStatus } from '../execution/execution-status.enum';
 
 const TOOL_RUNTIME_WORKER_ID = '00000000-0000-4000-8000-000000000001';
 const TOOL_LEASE_MS = 30_000;
@@ -49,6 +54,7 @@ export class ExecutionToolRuntimeService {
     private readonly search: DocumentSearchProvider,
     @Inject(USER_TASK_CREATE_PROVIDER)
     private readonly userTasks: UserTaskCreateProvider,
+    private readonly executions: ExecutionService,
   ) {}
 
   async executeReady(limit = 20): Promise<number> {
@@ -60,6 +66,7 @@ export class ExecutionToolRuntimeService {
         capabilities: [
           DOCUMENT_SEARCH_TOOL_CAPABILITY,
           USER_TASK_CREATE_TOOL_CAPABILITY,
+          AGENT_DELEGATE_TOOL_CAPABILITY,
         ],
         leaseDurationMs: TOOL_LEASE_MS,
       });
@@ -83,6 +90,8 @@ export class ExecutionToolRuntimeService {
         result = this.notExecutedResult(plan, confirmationStatus);
       } else if (plan.toolName === DOCUMENT_SEARCH_TOOL_NAME) {
         result = await this.executeDocumentsSearch(plan);
+      } else if (plan.toolName === AGENT_DELEGATE_TOOL_NAME) {
+        result = await this.executeAgentDelegation(assignment, plan);
       } else {
         result = await this.executeUserTaskCreate(plan);
       }
@@ -164,6 +173,19 @@ export class ExecutionToolRuntimeService {
       }
       return { plan, confirmationStatus: null };
     }
+    if (plan.toolName === AGENT_DELEGATE_TOOL_NAME) {
+      if (
+        plan.descriptorVersion !== AGENT_DELEGATE_TOOL_VERSION ||
+        plan.policyDecision.decision !== 'allowed' ||
+        plan.confirmationRequirement !== null ||
+        plan.effects.length !== 0 ||
+        assignment.work.joinPolicy !== 'all' ||
+        assignment.work.delegationDepth !== 1
+      ) {
+        throw new Error('tool_plan_not_executable');
+      }
+      return { plan, confirmationStatus: null };
+    }
     if (
       plan.toolName !== USER_TASK_CREATE_TOOL_NAME ||
       plan.descriptorVersion !== USER_TASK_CREATE_TOOL_VERSION ||
@@ -227,6 +249,66 @@ export class ExecutionToolRuntimeService {
         },
       ],
       error: null,
+    };
+  }
+
+  private async executeAgentDelegation(
+    assignment: StepAssignment,
+    plan: ToolPlanContract,
+  ): Promise<ToolResultContract> {
+    const childExecutionId = String(assignment.work.childExecutionId ?? '');
+    const child = await this.executions.findOne(childExecutionId);
+    if (
+      !child ||
+      child.parentExecutionId !== assignment.executionId ||
+      child.payload?.delegationOperationId !== plan.operationId
+    ) {
+      throw new Error('delegated_execution_not_found');
+    }
+    if (
+      ![
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.FAILED,
+        ExecutionStatus.CANCELLED,
+      ].includes(child.status)
+    ) {
+      throw new Error('delegated_execution_not_terminal');
+    }
+    const childResult = child.result as Record<string, unknown> | string | null;
+    const content =
+      typeof childResult === 'string'
+        ? childResult
+        : typeof childResult?.reply === 'string'
+          ? childResult.reply
+          : '';
+    const status =
+      child.status === ExecutionStatus.COMPLETED
+        ? 'succeeded'
+        : child.status === ExecutionStatus.CANCELLED
+          ? 'cancelled'
+          : 'failed';
+    return {
+      schemaVersion: 'tool-result/1',
+      operationId: plan.operationId,
+      toolCallId: plan.toolCallId,
+      status,
+      content,
+      structuredContent: {
+        childExecutionId,
+        childStatus: child.status,
+        joinPolicy: 'all',
+      },
+      artifactRefs: [],
+      sourceRefs: [],
+      effects: [],
+      error:
+        status === 'failed'
+          ? {
+              code: 'delegated_execution_failed',
+              message: 'The delegated execution failed',
+              retryable: false,
+            }
+          : null,
     };
   }
 

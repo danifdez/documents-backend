@@ -1725,6 +1725,24 @@ describe('ExecutionProgressService operation budget', () => {
     ).not.toThrow();
   });
 
+  it('does not let delegated inference bypass the root budget', () => {
+    execution.taskType = 'delegated-agent';
+
+    expect(() =>
+      validateBudgetStart({
+        eventType: 'operation.started',
+        operationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca713',
+        payload: {
+          operationKind: 'inference',
+          loopKind: 'synchronous_subagent',
+          phase: 'agent_loop',
+          name: 'delegated-agent',
+          round: 2,
+        },
+      }),
+    ).toThrow(ConflictException);
+  });
+
   it('validates the complete reservation identity before consuming it', async () => {
     const { grant } = await service.requestProgressGrant(
       EXECUTION_ID,

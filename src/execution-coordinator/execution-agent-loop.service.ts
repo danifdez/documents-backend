@@ -13,7 +13,8 @@ import { ToolResultContract } from '../execution/execution-tool.types';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionProgressService } from '../execution/execution-progress.service';
 
-const CHAT_TASK_TYPES = ['assistant-chat', 'agent-chat'];
+const CHAT_TASK_TYPES = ['assistant-chat', 'agent-chat', 'delegated-agent'];
+const TOOL_LOOP_TASK_TYPES = ['assistant-chat', 'agent-chat'];
 const DEFAULT_POLICY = {
   normal: 3,
   normalInferenceSoftLimit: 2,
@@ -89,11 +90,12 @@ export class ExecutionAgentLoopService {
           AND step."step_kind" = 'inference'
           AND step."continuation_processed_at" IS NULL
           AND receipt."result" #>> '{output,outcome,kind}' = 'tool_requests'
+          AND execution."task_type" = ANY($2::text[])
           AND execution."status" IN ('queued', 'running')
         ORDER BY receipt."received_at"
         LIMIT $1
       `,
-      [limit],
+      [limit, TOOL_LOOP_TASK_TYPES],
     );
     let materialized = 0;
     for (const row of rows) {
@@ -114,12 +116,13 @@ export class ExecutionAgentLoopService {
           AND step."continuation_processed_at" IS NOT NULL
           AND step."continuation_step_id" IS NULL
           AND step."result" #>> '{outcome,kind}' = 'tool_requests'
+          AND execution."task_type" = ANY($2::text[])
           AND execution."status" IN ('queued', 'running')
           AND COALESCE(execution."phase", '') NOT LIKE 'terminal_pending_%'
         ORDER BY step."updated_at"
         LIMIT $1
       `,
-      [limit],
+      [limit, TOOL_LOOP_TASK_TYPES],
     );
     let materialized = 0;
     for (const row of rows) {
@@ -130,6 +133,60 @@ export class ExecutionAgentLoopService {
     return materialized;
   }
 
+  async releaseTerminalDelegations(limit = 20): Promise<number> {
+    return this.dataSource.transaction(async (manager) => {
+      const released = await manager.query(
+        `
+          WITH candidates AS (
+            SELECT step."step_id"
+            FROM "execution_steps" step
+            INNER JOIN "executions" parent
+              ON parent."execution_id" = step."execution_id"
+            INNER JOIN "executions" child
+              ON child."execution_id"::text = step."work" ->> 'childExecutionId'
+            WHERE step."status" = 'blocked'
+              AND step."step_kind" = 'tool'
+              AND step."work" ->> 'taskType' = 'agents.delegate'
+              AND child."root_execution_id" = parent."root_execution_id"
+              AND child."parent_execution_id" = parent."execution_id"
+              AND child."payload" ->> 'delegationOperationId' =
+                  step."operation_id"::text
+              AND child."status" IN ('completed', 'failed', 'cancelled')
+            ORDER BY step."created_at"
+            LIMIT $1
+            FOR UPDATE OF step SKIP LOCKED
+          )
+          UPDATE "execution_steps" step
+          SET "status" = 'ready',
+              "version" = "version" + 1,
+              "updated_at" = now()
+          FROM candidates
+          WHERE step."step_id" = candidates."step_id"
+          RETURNING step."operation_id"
+        `,
+        [limit],
+      );
+      const releasedRows =
+        Array.isArray(released[0]) && typeof released[1] === 'number'
+          ? released[0]
+          : released;
+      const operationIds = releasedRows.map(
+        (row: { operation_id: string }) => row.operation_id,
+      );
+      if (!operationIds.length) return 0;
+      await manager.query(
+        `
+          UPDATE "execution_operations"
+          SET "status" = 'prepared', "updated_at" = now()
+          WHERE "operation_id" = ANY($1::uuid[])
+            AND "status" = 'planned'
+        `,
+        [operationIds],
+      );
+      return operationIds.length;
+    });
+  }
+
   private async prepareInference(stepId: string): Promise<boolean> {
     const step = await this.dataSource
       .getRepository(ExecutionStepEntity)
@@ -138,36 +195,46 @@ export class ExecutionAgentLoopService {
     const execution = await this.dataSource
       .getRepository(ExecutionEntity)
       .findOneByOrFail({ executionId: step.executionId });
-    const { grant } = await this.progress.requestProgressGrant(
-      execution.executionId,
-      {
-        executionId: execution.executionId,
-        turnId: execution.turnId!,
-        loopId: execution.executionId,
-        agentName: execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
-        loopKind: 'top_level',
-        requestedPolicy: DEFAULT_POLICY,
-      },
-    );
+    const root = await this.dataSource
+      .getRepository(ExecutionEntity)
+      .findOneByOrFail({ executionId: execution.rootExecutionId });
+    const grant =
+      execution.executionId === execution.rootExecutionId
+        ? (
+            await this.progress.requestProgressGrant(root.executionId, {
+              executionId: root.executionId,
+              turnId: root.turnId!,
+              loopId: root.executionId,
+              agentName:
+                execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
+              loopKind: 'top_level',
+              requestedPolicy: DEFAULT_POLICY,
+            })
+          ).grant
+        : Object.values(root.progressLedger?.operationBudget?.grants ?? {})[0];
+    if (!grant) throw new ConflictException('root_budget_grant_missing');
     const refreshed = await this.dataSource
       .getRepository(ExecutionEntity)
-      .findOneByOrFail({ executionId: step.executionId });
+      .findOneByOrFail({ executionId: root.executionId });
     const existingReservation =
       refreshed.progressLedger?.operationBudget?.reservations[step.operationId];
     const round =
       existingReservation?.round ?? this.nextInferenceRound(refreshed);
     const decision = await this.progress.reserveOperationBudget(
-      execution.executionId,
+      root.executionId,
       {
-        executionId: execution.executionId,
-        loopId: execution.executionId,
+        executionId: root.executionId,
+        loopId: root.executionId,
         grantId: grant.grantId,
         operationId: step.operationId,
         operationKind: 'inference',
         bucket: 'normal',
         phase: 'agent_loop',
         round,
-        name: String(step.work.taskType ?? execution.taskType),
+        name:
+          execution.taskType === 'delegated-agent'
+            ? 'delegated-agent'
+            : String(step.work.taskType ?? execution.taskType),
       },
     );
     if (!decision.granted) {

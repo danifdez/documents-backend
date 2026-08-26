@@ -42,6 +42,7 @@ export class ExecutionCoordinatorService {
     await this.agentLoop.materializeAcceptedToolRequests(limit);
     await this.agentLoop.materializeReadyToolContinuations(limit);
     await this.executionService.finalizePendingTerminals(limit);
+    await this.agentLoop.releaseTerminalDelegations(limit);
     return processed;
   }
 
@@ -123,6 +124,7 @@ export class ExecutionCoordinatorService {
       }
       finalized += 1;
     }
+    await this.agentLoop.releaseTerminalDelegations(limit);
     return finalized;
   }
 

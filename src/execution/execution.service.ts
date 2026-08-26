@@ -28,6 +28,7 @@ import {
   EXECUTION_UUID_PATTERN,
 } from './execution.constants';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
+import { ExecutionStepEntity } from './execution-step.entity';
 import { ExecutionStepKind } from './execution-step-kind.enum';
 import { createExecutionStep } from './execution-step.service';
 import { ExecutionContractValidator } from './execution-contract-validator';
@@ -156,6 +157,15 @@ export interface CreateExecutionOptions {
   }>;
 }
 
+export interface CreateChildInferenceInput {
+  taskType: string;
+  payload: Record<string, unknown>;
+  work: Record<string, unknown>;
+  requiredCapability: string;
+  deadline: Date;
+  causedByEventId: string;
+}
+
 type CreateSingleStepExecutionOptions = Omit<
   CreateExecutionOptions,
   'initialStep' | 'steps'
@@ -183,6 +193,97 @@ export class ExecutionService {
       user && typeof user === 'object' ? (user as Record<string, unknown>) : {};
     const owner = record.userId ?? record.sub ?? 'standalone';
     return { ownerPrincipal: String(owner) };
+  }
+
+  async createChildInference(
+    manager: EntityManager,
+    parent: ExecutionEntity,
+    input: CreateChildInferenceInput,
+  ): Promise<{ execution: ExecutionEntity; step: ExecutionStepEntity }> {
+    const executionRepo = manager.getRepository(ExecutionEntity);
+    const root =
+      parent.executionId === parent.rootExecutionId
+        ? parent
+        : await executionRepo.findOne({
+            where: {
+              executionId: parent.rootExecutionId,
+              rootExecutionId: parent.rootExecutionId,
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+    if (!root) throw new NotFoundException('Root execution not found');
+    const cause = await manager.getRepository(ExecutionEventEntity).findOneBy({
+      eventId: input.causedByEventId,
+      rootExecutionId: root.rootExecutionId,
+    });
+    if (!cause) throw new BadRequestException('Invalid child execution cause');
+
+    const executionId = randomUUID();
+    const child = executionRepo.create({
+      executionId,
+      rootExecutionId: root.rootExecutionId,
+      parentExecutionId: parent.executionId,
+      turnId: parent.turnId,
+      ownerPrincipal: parent.ownerPrincipal,
+      schemaVersion: EXECUTION_SCHEMA,
+      taskType: input.taskType,
+      payload: input.payload,
+      status: ExecutionStatus.QUEUED,
+      phase: null,
+      waitReason: null,
+      waitCondition: null,
+      resumePhase: null,
+      waitExpiresAt: null,
+      completionKind: null,
+      completionReason: null,
+      result: null,
+      error: null,
+      progressPolicy: null,
+      progressLedger: null,
+      completedAt: null,
+      lastSequence: '0',
+      lastEventId: null,
+      completenessStatus: 'reproducible',
+      missingEvidence: [],
+    });
+    await executionRepo.save(child);
+    const rows = await manager.getRepository(ExecutionEventEntity).find({
+      where: { rootExecutionId: root.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const event = await this.appendBackendEvent(
+      manager,
+      root,
+      nextBackendProducerSequence(rows),
+      {
+        eventType: 'execution.created',
+        payloadSchema: 'execution.created/1',
+        payload: {
+          executionKind: input.taskType,
+          initialStatus: ExecutionStatus.QUEUED,
+        },
+        actor: { type: 'system' },
+        executionId,
+        turnId: child.turnId,
+        causedByEventId: input.causedByEventId,
+      },
+      Number(root.lastSequence) + 1,
+    );
+    child.lastSequence = event.sequence;
+    child.lastEventId = event.eventId;
+    root.lastSequence = event.sequence;
+    root.lastEventId = event.eventId;
+    await executionRepo.save(root);
+    await executionRepo.save(child);
+    const step = await createExecutionStep(manager, {
+      executionId,
+      stepKind: ExecutionStepKind.INFERENCE,
+      work: input.work,
+      requiredCapabilities: [input.requiredCapability],
+      deadline: input.deadline,
+      causedByEventId: event.eventId,
+    });
+    return { execution: child, step };
   }
 
   async createForChat(
@@ -1032,6 +1133,17 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) return;
+      const root =
+        execution.executionId === execution.rootExecutionId
+          ? execution
+          : await executionRepo.findOne({
+              where: {
+                executionId: execution.rootExecutionId,
+                rootExecutionId: execution.rootExecutionId,
+              },
+              lock: { mode: 'pessimistic_write' },
+            });
+      if (!root) throw new NotFoundException('Root execution not found');
       const rows = await eventRepo.find({
         where: { rootExecutionId: execution.rootExecutionId },
         order: { sequence: 'ASC' },
@@ -1052,9 +1164,9 @@ export class ExecutionService {
         error,
         completion,
       );
-      let lastEventId = rows.at(-1)?.eventId ?? execution.lastEventId;
+      let lastEventId = execution.lastEventId ?? root.lastEventId;
       let terminalEventId: string | null = null;
-      let sequence = Number(execution.lastSequence);
+      let sequence = Number(root.lastSequence);
       const producerSequence = Math.max(
         2,
         ...rows
@@ -1066,6 +1178,7 @@ export class ExecutionService {
         const payload = row.envelope.payload as
           Record<string, unknown> | undefined;
         return (
+          row.executionId === execution.executionId &&
           row.eventType === 'message.recorded' &&
           payload?.messageKind === 'final_response'
         );
@@ -1102,7 +1215,7 @@ export class ExecutionService {
         sequence += 1;
         const messageEvent = await this.appendBackendEvent(
           manager,
-          execution,
+          root,
           ++nextProducerSequence,
           {
             eventType: 'message.recorded',
@@ -1139,7 +1252,7 @@ export class ExecutionService {
         sequence += 1;
         const progressEvent = await this.appendBackendEvent(
           manager,
-          execution,
+          root,
           ++nextProducerSequence,
           {
             eventType: 'progress.reported',
@@ -1175,7 +1288,7 @@ export class ExecutionService {
             };
         const stateEvent = await this.appendBackendEvent(
           manager,
-          execution,
+          root,
           ++nextProducerSequence,
           {
             eventType: 'execution.state_changed',
@@ -1232,6 +1345,12 @@ export class ExecutionService {
       execution.phase = null;
       await this.progress.refreshProjection(eventRepo, execution);
       await executionRepo.save(execution);
+      if (root.executionId !== execution.executionId) {
+        root.lastSequence = String(sequence);
+        root.lastEventId = lastEventId;
+        await this.progress.refreshProjection(eventRepo, root);
+        await executionRepo.save(root);
+      }
       if (terminalEventId) {
         await this.appendTerminalPublication(
           manager,

@@ -27,6 +27,9 @@ import {
 } from './execution-tool.types';
 import { canonicalHash } from './execution-canonical';
 import {
+  AGENT_DELEGATE_TOOL_CAPABILITY,
+  AGENT_DELEGATE_TOOL_NAME,
+  AGENT_DELEGATE_TOOL_VERSION,
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
@@ -35,9 +38,11 @@ import {
   USER_TASK_CREATE_TOOL_VERSION,
 } from './execution-tool.constants';
 import { ExecutionConfirmationService } from './execution-confirmation.service';
+import { ExecutionService } from './execution.service';
 
 const PLAN_TIMEOUT_MS = 30_000;
 const CONFIRMATION_TIMEOUT_MS = 15 * 60_000;
+const DELEGATION_TIMEOUT_MS = 10 * 60_000;
 
 export interface PreparedToolPlan {
   invocation: ExecutionToolInvocationEntity;
@@ -51,6 +56,7 @@ export class ExecutionToolPlanService {
     private readonly dataSource: DataSource,
     private readonly contractValidator: ExecutionContractValidator,
     private readonly confirmations: ExecutionConfirmationService,
+    private readonly executions: ExecutionService,
   ) {}
 
   async prepare(invocation: ToolInvocationContract): Promise<PreparedToolPlan> {
@@ -219,6 +225,44 @@ export class ExecutionToolPlanService {
         manager,
         invocation.invocation,
       );
+      let delegationWork: Record<string, unknown> = {};
+      if (plan.toolName === AGENT_DELEGATE_TOOL_NAME) {
+        if (execution.parentExecutionId) {
+          throw new ConflictException('delegation_depth_exceeded');
+        }
+        const goal = String(plan.normalizedArguments.goal ?? '');
+        const child = await this.executions.createChildInference(
+          manager,
+          execution,
+          {
+            taskType: 'delegated-agent',
+            payload: {
+              goal,
+              delegationOperationId: plan.operationId,
+              joinPolicy: 'all',
+              depth: 1,
+            },
+            work: {
+              taskType: 'assistant-chat',
+              agentName: 'subagent',
+              payload: {
+                conversation: [{ role: 'user', content: goal }],
+                delegationMode: true,
+              },
+            },
+            requiredCapability: 'assistant-chat',
+            deadline,
+            causedByEventId: invocation.causedByEventId,
+          },
+        );
+        dependsOnStepIds.push(child.step.stepId);
+        delegationWork = {
+          childExecutionId: child.execution.executionId,
+          childStepId: child.step.stepId,
+          joinPolicy: 'all',
+          delegationDepth: 1,
+        };
+      }
       const step = await createExecutionStep(manager, {
         executionId: execution.executionId,
         stepKind: ExecutionStepKind.TOOL,
@@ -226,6 +270,7 @@ export class ExecutionToolPlanService {
         work: {
           taskType: plan.toolName,
           toolPlan: plan,
+          ...delegationWork,
           ...(confirmation
             ? {
                 confirmationDecision: {
@@ -265,6 +310,9 @@ export class ExecutionToolPlanService {
     }
     if (invocation.name === USER_TASK_CREATE_TOOL_NAME) {
       return this.prepareUserTaskCreate(invocation);
+    }
+    if (invocation.name === AGENT_DELEGATE_TOOL_NAME) {
+      return this.prepareAgentDelegation(invocation);
     }
     throw new BadRequestException('tool_not_available');
   }
@@ -378,6 +426,51 @@ export class ExecutionToolPlanService {
       idempotencyKey: `user-task:${invocation.toolCallId}`,
       requiredCapabilities: [USER_TASK_CREATE_TOOL_CAPABILITY],
       deadline: expiresAt.toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareAgentDelegation(
+    invocation: ToolInvocationContract,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    if (Object.keys(invocation.arguments).some((key) => key !== 'goal')) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const goal = String(invocation.arguments.goal ?? '').trim();
+    if (!goal || goal.length > 4_000) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const preparedAt = new Date();
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: AGENT_DELEGATE_TOOL_NAME,
+      descriptorVersion: AGENT_DELEGATE_TOOL_VERSION,
+      normalizedArguments: { goal },
+      resources: [
+        {
+          resourceKey: `execution-tree:${invocation.executionContext.executionId}`,
+          mode: 'shared',
+          kind: 'execution_tree',
+        },
+      ],
+      effects: [],
+      policyDecision: {
+        decision: 'allowed',
+        rule: 'bounded_internal_delegation',
+        conditions: ['max_depth_1', 'single_inference', 'join_all'],
+      },
+      confirmationRequirement: null,
+      recoveryClass: 'idempotent',
+      idempotencyKey: `delegation:${invocation.toolCallId}`,
+      requiredCapabilities: [AGENT_DELEGATE_TOOL_CAPABILITY],
+      deadline: new Date(
+        preparedAt.getTime() + DELEGATION_TIMEOUT_MS,
+      ).toISOString(),
       preparedAt: preparedAt.toISOString(),
     };
   }

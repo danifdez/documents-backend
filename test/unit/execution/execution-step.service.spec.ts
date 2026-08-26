@@ -14,6 +14,7 @@ const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
 const DEPENDENCY_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
 const SECOND_DEPENDENCY_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca704';
 const EVENT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca705';
+const CHILD_EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca706';
 
 describe('ExecutionStepService', () => {
   let service: ExecutionStepService;
@@ -31,6 +32,12 @@ describe('ExecutionStepService', () => {
         rootExecutionId: EXECUTION_ID,
         lastEventId: EVENT_ID,
       }),
+      find: jest.fn().mockResolvedValue([
+        {
+          executionId: EXECUTION_ID,
+          rootExecutionId: EXECUTION_ID,
+        },
+      ]),
     };
     stepRepo = {
       find: jest.fn().mockResolvedValue([]),
@@ -125,12 +132,44 @@ describe('ExecutionStepService', () => {
     ]);
   });
 
-  it('rejects dependencies from another execution', async () => {
+  it('accepts a dependency from a child execution in the same tree', async () => {
     stepRepo.find.mockResolvedValue([
       {
         stepId: DEPENDENCY_ID,
-        executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca799',
+        executionId: CHILD_EXECUTION_ID,
         status: ExecutionStepStatus.COMPLETED,
+      },
+    ]);
+    executionRepo.find.mockResolvedValue([
+      {
+        executionId: CHILD_EXECUTION_ID,
+        rootExecutionId: EXECUTION_ID,
+      },
+    ]);
+
+    await expect(
+      service.createStep({
+        executionId: EXECUTION_ID,
+        stepId: STEP_ID,
+        stepKind: ExecutionStepKind.TOOL,
+        dependsOnStepIds: [DEPENDENCY_ID],
+        work: { taskType: 'agents.delegate' },
+      }),
+    ).resolves.toMatchObject({ status: ExecutionStepStatus.READY });
+  });
+
+  it('rejects dependencies from another execution tree', async () => {
+    stepRepo.find.mockResolvedValue([
+      {
+        stepId: DEPENDENCY_ID,
+        executionId: CHILD_EXECUTION_ID,
+        status: ExecutionStepStatus.COMPLETED,
+      },
+    ]);
+    executionRepo.find.mockResolvedValue([
+      {
+        executionId: CHILD_EXECUTION_ID,
+        rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca799',
       },
     ]);
 

@@ -20,7 +20,11 @@ type ChatExecutionResult = {
 @Injectable()
 export class AssistantChatProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(AssistantChatProcessor.name);
-  private readonly taskTypes = new Set(['assistant-chat', 'agent-chat']);
+  private readonly taskTypes = new Set([
+    'assistant-chat',
+    'agent-chat',
+    'delegated-agent',
+  ]);
 
   constructor(
     private readonly assistantService: AssistantService,
@@ -33,10 +37,41 @@ export class AssistantChatProcessor implements ExecutionProcessor {
   }
 
   async process(execution: ExecutionEntity): Promise<{ success: boolean }> {
+    if (execution.taskType === 'delegated-agent') {
+      return this.processDelegated(execution);
+    }
     if (execution.taskType === 'agent-chat') {
       return this.processAgent(execution);
     }
     return this.processAssistant(execution);
+  }
+
+  private async processDelegated(
+    execution: ExecutionEntity,
+  ): Promise<{ success: boolean }> {
+    const reply =
+      typeof execution.result === 'string'
+        ? execution.result
+        : (this.result(execution).reply ?? '');
+    const error =
+      execution.error && typeof execution.error.message === 'string'
+        ? execution.error.message
+        : null;
+    await this.executionService.completeExecution(
+      execution.executionId,
+      reply,
+      error,
+      undefined,
+      {
+        socketEvent: 'executionDelegationCompleted',
+        payload: {
+          executionId: execution.executionId,
+          parentExecutionId: execution.parentExecutionId,
+          status: error ? 'failed' : 'completed',
+        },
+      },
+    );
+    return { success: !error };
   }
 
   private async processAssistant(

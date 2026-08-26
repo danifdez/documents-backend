@@ -49,6 +49,7 @@ describe('ExecutionCoordinatorService', () => {
       prepareReadyInferences: jest.fn(),
       materializeAcceptedToolRequests: jest.fn().mockResolvedValue(0),
       materializeReadyToolContinuations: jest.fn().mockResolvedValue(0),
+      releaseTerminalDelegations: jest.fn().mockResolvedValue(0),
     };
     confirmations = {
       expirePending: jest.fn(),
@@ -95,6 +96,7 @@ describe('ExecutionCoordinatorService', () => {
     expect(agentLoop.materializeAcceptedToolRequests).toHaveBeenCalledWith(3);
     expect(agentLoop.materializeReadyToolContinuations).toHaveBeenCalledWith(3);
     expect(executionService.finalizePendingTerminals).toHaveBeenCalledWith(3);
+    expect(agentLoop.releaseTerminalDelegations).toHaveBeenCalledWith(3);
   });
 
   it('runs a claimed domain finalizer and completes the execution', async () => {

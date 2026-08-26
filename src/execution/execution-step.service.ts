@@ -53,10 +53,20 @@ export async function createExecutionStep(
         where: { stepId: In(dependencyIds) },
       })
     : [];
+  const dependencyExecutionIds = [
+    ...new Set(dependencies.map((dependency) => dependency.executionId)),
+  ];
+  const dependencyExecutions = dependencyExecutionIds.length
+    ? await manager.getRepository(ExecutionEntity).find({
+        where: { executionId: In(dependencyExecutionIds) },
+      })
+    : [];
   if (
     dependencies.length !== dependencyIds.length ||
-    dependencies.some(
-      (dependency) => dependency.executionId !== input.executionId,
+    dependencyExecutions.length !== dependencyExecutionIds.length ||
+    dependencyExecutions.some(
+      (dependencyExecution) =>
+        dependencyExecution.rootExecutionId !== execution.rootExecutionId,
     )
   ) {
     throw new BadRequestException('invalid_step_dependency');
@@ -142,6 +152,16 @@ export async function releaseExecutionStepDependents(
           FROM "execution_step_dependencies" direct_dependency
           WHERE direct_dependency."step_id" = candidate."step_id"
             AND direct_dependency."depends_on_step_id" = $1
+        )
+        AND (
+          candidate."work" ->> 'taskType' <> 'agents.delegate'
+          OR EXISTS (
+            SELECT 1
+            FROM "executions" delegated_child
+            WHERE delegated_child."execution_id"::text =
+                candidate."work" ->> 'childExecutionId'
+              AND delegated_child."status" IN ('completed', 'failed', 'cancelled')
+          )
         )
         AND NOT EXISTS (
           SELECT 1
