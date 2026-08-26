@@ -105,6 +105,7 @@ describe('ExecutionToolPlanService', () => {
             'agents.delegate',
             'browser.navigate',
             'browser.go_back',
+            'browser.click',
             'browser.read_current_page',
             'workspace_files.list',
             'workspace_files.search',
@@ -590,6 +591,76 @@ describe('ExecutionToolPlanService', () => {
         invocation({
           name: 'browser.go_back',
           arguments: {},
+        }),
+      ),
+    ).rejects.toThrow('invalid_arguments');
+  });
+
+  it('prepares an exact browser click as a confirmed irreversible effect', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'browser.click',
+        arguments: {
+          expectedCurrentUrl: '  https://example.test/current  ',
+          elementIndex: 7,
+          expectedKind: 'button',
+          expectedLabel: '  Submit order  ',
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'browser.click',
+        descriptorVersion: 'browser.click/1',
+        normalizedArguments: {
+          expectedCurrentUrl: 'https://example.test/current',
+          elementIndex: 7,
+          expectedKind: 'button',
+          expectedLabel: 'Submit order',
+        },
+        resources: [
+          {
+            resourceKey: 'browser:active-page',
+            mode: 'exclusive',
+            kind: 'browser_page',
+          },
+        ],
+        effects: [
+          expect.objectContaining({
+            effectClass: 'external_irreversible',
+            resourceKey: 'browser:active-page',
+            reversible: false,
+            verificationRequired: true,
+          }),
+        ],
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'paired_browser_click_requires_confirmation',
+        }),
+        confirmationRequirement: expect.objectContaining({
+          prompt:
+            'Click button "Submit order" (control 7) on "https://example.test/current"?',
+          scope: 'once',
+        }),
+        recoveryClass: 'effect_checked',
+        idempotencyKey: `browser-click:${TOOL_CALL_ID}`,
+        requiredCapabilities: ['tool.browser.click/1'],
+      }),
+    );
+  });
+
+  it('rejects a browser click that does not exactly identify a visible control', async () => {
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'browser.click',
+          arguments: {
+            expectedCurrentUrl: 'https://example.test/current',
+            elementIndex: 7,
+            expectedKind: 'field',
+            expectedLabel: 'Search',
+          },
         }),
       ),
     ).rejects.toThrow('invalid_arguments');

@@ -27,6 +27,10 @@ export const BROWSER_GO_BACK_TOOL_NAME = 'browser.go_back';
 export const BROWSER_GO_BACK_TOOL_VERSION = 'browser.go_back/1';
 export const BROWSER_GO_BACK_TOOL_CAPABILITY = 'tool.browser.go_back/1';
 
+export const BROWSER_CLICK_TOOL_NAME = 'browser.click';
+export const BROWSER_CLICK_TOOL_VERSION = 'browser.click/1';
+export const BROWSER_CLICK_TOOL_CAPABILITY = 'tool.browser.click/1';
+
 export const WORKSPACE_FILE_READ_TOOL_NAME = 'workspace_files.read';
 export const WORKSPACE_FILE_READ_TOOL_VERSION = 'workspace_files.read/1';
 export const WORKSPACE_FILE_READ_TOOL_CAPABILITY =

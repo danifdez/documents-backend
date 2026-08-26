@@ -17,6 +17,7 @@ import { WorkerEntity } from './worker.entity';
 import { WorkerRegistrationView } from './worker-registration.types';
 import { WorkerKind } from './worker-kind.enum';
 import {
+  BROWSER_CLICK_TOOL_CAPABILITY,
   BROWSER_GO_BACK_TOOL_CAPABILITY,
   BROWSER_NAVIGATE_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_CAPABILITY,
@@ -83,6 +84,7 @@ export class WorkerService {
         BROWSER_READ_TOOL_CAPABILITY,
         BROWSER_NAVIGATE_TOOL_CAPABILITY,
         BROWSER_GO_BACK_TOOL_CAPABILITY,
+        BROWSER_CLICK_TOOL_CAPABILITY,
       ],
       [ExecutionStepKind.TOOL],
       1,
@@ -210,6 +212,7 @@ export class WorkerService {
           BROWSER_READ_TOOL_CAPABILITY,
           BROWSER_NAVIGATE_TOOL_CAPABILITY,
           BROWSER_GO_BACK_TOOL_CAPABILITY,
+          BROWSER_CLICK_TOOL_CAPABILITY,
         ],
         stepKinds: [ExecutionStepKind.TOOL],
         maximumConcurrency: 1,

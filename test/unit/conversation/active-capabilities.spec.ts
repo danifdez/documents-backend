@@ -114,6 +114,11 @@ describe('active capability selection', () => {
       descriptorVersion: 'browser.go_back/1',
       availabilityBasis: 'paired_browser',
     });
+    expect(selected.tools).toContainEqual({
+      name: 'browser.click',
+      descriptorVersion: 'browser.click/1',
+      availabilityBasis: 'paired_browser',
+    });
     expect(query.andWhere).toHaveBeenCalledWith(
       'worker.ownerPrincipal = :ownerPrincipal',
       { ownerPrincipal: 'paired-user' },
@@ -125,6 +130,7 @@ describe('active capability selection', () => {
           'tool.browser.read_current_page/1',
           'tool.browser.navigate/1',
           'tool.browser.go_back/1',
+          'tool.browser.click/1',
         ]),
       },
     );
