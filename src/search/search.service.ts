@@ -178,10 +178,7 @@ export class SearchService {
     };
 
     this.projectCollections = [docs, resources, canvases, notes, events, entities, datasets].filter(Boolean);
-    // Docs, resources and projects are always-on here: the legacy shape of
-    // globalSearch only looked at the optional services, so they were
-    // invisible to the global UI — and to the assistant tool. Including them
-    // aligns "global" with what users expect.
+    // Global search includes every available collection used by the UI and assistant tool.
     this.globalCollections = [docs, resources, projects, notes, canvases, events, knowledge, entities, datasets].filter(Boolean);
   }
 

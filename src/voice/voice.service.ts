@@ -72,23 +72,16 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     this.queue = [];
   }
 
-  /**
-   * Reserves a worker for this client. If none is free, enqueues it.
-   * Returns `true` whenever the session has been admitted (queued counts);
-   * `false` is left as a semantic placeholder for backwards compatibility
-   * with the single-worker version — today we never return it.
-   */
-  async startSession(client: Socket): Promise<boolean> {
-    if (this.findWorkerByClient(client.id)) return true;
-    if (this.findQueueEntry(client.id)) return true;
+  async startSession(client: Socket): Promise<void> {
+    if (this.findWorkerByClient(client.id)) return;
+    if (this.findQueueEntry(client.id)) return;
 
     const free = this.workers.find((w) => w.status === 'free');
     if (free) {
       await this.assignWorker(free, client);
-      return true;
+      return;
     }
     this.enqueue(client);
-    return true;
   }
 
   pushChunk(client: Socket, chunk: ArrayBuffer | Buffer): void {

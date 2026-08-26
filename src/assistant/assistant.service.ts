@@ -1,10 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  ForbiddenException,
-  BadRequestException,
-  Inject,
-  forwardRef,
   Logger,
   OnApplicationBootstrap,
 } from '@nestjs/common';
@@ -12,13 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
-import { CreateAssistantDto, UpdateAssistantDto } from './dto/assistant.dto';
 import { ExecutionService } from '../execution/execution.service';
-import { IndexedFileService } from '../indexed-file/indexed-file.service';
-import {
-  validateFolderScope,
-  folderScopeReasonToMessage,
-} from './folder-scope.validator';
 import { ExecutionAccessScope } from '../execution/execution.types';
 import {
   ChatMessageStore,
@@ -37,8 +27,6 @@ export class AssistantService implements OnApplicationBootstrap {
     private readonly assistantRepo: Repository<AssistantEntity>,
     @InjectRepository(AssistantMessageEntity)
     private readonly messageRepo: Repository<AssistantMessageEntity>,
-    @Inject(forwardRef(() => IndexedFileService))
-    private readonly indexedFileService: IndexedFileService,
     private readonly executionService: ExecutionService,
   ) {
     this.messages = new ChatMessageStore<AssistantMessageEntity>(messageRepo, {
@@ -61,13 +49,13 @@ export class AssistantService implements OnApplicationBootstrap {
 
   async ensureDefault(): Promise<AssistantEntity> {
     let personal = await this.assistantRepo.findOne({
-      where: { isSystem: true },
+      where: { id: 1 },
     });
     if (!personal) {
       personal = this.assistantRepo.create({
+        id: 1,
         name: 'Assistant',
         icon: '◇',
-        isSystem: true,
         sub: 'Your personal assistant',
       });
       personal = await this.assistantRepo.save(personal);
@@ -76,76 +64,13 @@ export class AssistantService implements OnApplicationBootstrap {
   }
 
   async list(): Promise<AssistantEntity[]> {
-    await this.ensureDefault();
-    return this.assistantRepo.find({ order: { id: 'ASC' } });
+    return [await this.ensureDefault()];
   }
 
   async findOne(id: number): Promise<AssistantEntity> {
     const a = await this.assistantRepo.findOne({ where: { id } });
     if (!a) throw new NotFoundException(`Assistant ${id} not found`);
     return a;
-  }
-
-  async create(dto: CreateAssistantDto): Promise<AssistantEntity> {
-    const folderScope = await this.resolveFolderScope(dto.folderScope);
-    const created = this.assistantRepo.create({
-      name: dto.name,
-      systemPrompt: dto.systemPrompt ?? null,
-      folderScope,
-      icon: dto.icon ?? null,
-      sub: dto.sub ?? null,
-      pinned: dto.pinned ?? false,
-      isSystem: false,
-    });
-    return this.assistantRepo.save(created);
-  }
-
-  async update(id: number, dto: UpdateAssistantDto): Promise<AssistantEntity> {
-    const a = await this.findOne(id);
-    const previousFolderScope = a.folderScope;
-    if (dto.name !== undefined) a.name = dto.name;
-    if (dto.systemPrompt !== undefined) a.systemPrompt = dto.systemPrompt;
-    if (dto.folderScope !== undefined)
-      a.folderScope = await this.resolveFolderScope(dto.folderScope);
-    if (dto.icon !== undefined) a.icon = dto.icon;
-    if (dto.sub !== undefined) a.sub = dto.sub;
-    if (dto.pinned !== undefined) a.pinned = dto.pinned;
-    const saved = await this.assistantRepo.save(a);
-    if (
-      dto.folderScope !== undefined &&
-      previousFolderScope !== saved.folderScope
-    ) {
-      try {
-        await this.indexedFileService.clearAllForOwner({
-          ownerType: 'main-assistant',
-          ownerId: saved.id,
-        });
-      } catch (e: any) {
-        this.logger.error(
-          `Failed to clear indexed files for assistant ${saved.id}: ${e?.message ?? e}`,
-        );
-      }
-    }
-    return saved;
-  }
-
-  private async resolveFolderScope(
-    input: string | null | undefined,
-  ): Promise<string | null> {
-    if (input === undefined || input === null || input === '') return null;
-    const result = await validateFolderScope(input);
-    if (result.ok === true)
-      return (result as { ok: true; absolutePath: string }).absolutePath;
-    const reason = (result as { ok: false; reason: any }).reason;
-    throw new BadRequestException(folderScopeReasonToMessage(reason));
-  }
-
-  async remove(id: number): Promise<void> {
-    const a = await this.findOne(id);
-    if (a.isSystem) {
-      throw new ForbiddenException('The personal assistant cannot be deleted.');
-    }
-    await this.assistantRepo.remove(a);
   }
 
   async getMessages(
@@ -184,7 +109,6 @@ export class AssistantService implements OnApplicationBootstrap {
       accessScope,
       {
         ownerId: assistantId,
-        folderScope: assistant.folderScope,
         conversation,
       },
     );

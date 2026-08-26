@@ -2,7 +2,7 @@
  * Per-cell traceability for cells populated by the dataset extraction pipeline.
  *
  * Stored as JSONB inside `DatasetRecordEntity.cellMetadata`, keyed by `DatasetField.key`.
- * Cells without an anchor entry (e.g. manually entered values or legacy CSV imports)
+ * Cells without an anchor entry (for example manual or CSV-imported values)
  * simply omit their key from the map; the UI treats "missing key" as "no anchor".
  *
  * Consumed by:

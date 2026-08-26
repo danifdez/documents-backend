@@ -4,6 +4,7 @@ import { DataSource, In } from 'typeorm';
 import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
 import { CreateResourceDates1757668140030 } from '../migrations/1757668140030-CreateResourceDates';
 import { CreateAssistantTables1757668140070 } from '../migrations/1757668140070-CreateAssistantTables';
+import { CreateIndexedFiles1757668140100 } from '../migrations/1757668140100-CreateIndexedFiles';
 import { CreateAgents1757668140110 } from '../migrations/1757668140110-CreateAgents';
 import { CreateAgentMessages1757668140111 } from '../migrations/1757668140111-CreateAgentMessages';
 import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-AddExecutionProgress';
@@ -115,6 +116,7 @@ describe('execution PostgreSQL integration', () => {
     await runner.query(`CREATE TABLE "resources" ("id" SERIAL PRIMARY KEY)`);
     await new CreateResourceDates1757668140030().up(runner);
     await new CreateAssistantTables1757668140070().up(runner);
+    await new CreateIndexedFiles1757668140100().up(runner);
     await new CreateAgents1757668140110().up(runner);
     await new CreateAgentMessages1757668140111().up(runner);
     await new AddExecutionProgress1757668140350().up(runner);
@@ -293,8 +295,42 @@ describe('execution PostgreSQL integration', () => {
         )
       ORDER BY indexname
     `);
+    const retiredAssistantColumns = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'assistants'
+        AND column_name IN (
+          'is_system',
+          'pinned',
+          'system_prompt',
+          'folder_scope'
+        )
+    `);
+    const indexedFileOwnerColumns = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'indexed_files'
+        AND column_name IN ('assistant_id', 'owner_type', 'owner_id')
+      ORDER BY column_name
+    `);
+    const singletonConstraint = await dataSource.query(`
+      SELECT conname
+      FROM pg_constraint
+      WHERE conrelid = 'assistants'::regclass
+        AND conname = 'CHK_assistants_singleton'
+    `);
 
     expect(retiredDateColumns).toEqual([]);
+    expect(retiredAssistantColumns).toEqual([]);
+    expect(indexedFileOwnerColumns).toEqual([
+      { column_name: 'owner_id' },
+      { column_name: 'owner_type' },
+    ]);
+    expect(singletonConstraint).toEqual([
+      { conname: 'CHK_assistants_singleton' },
+    ]);
     expect(replyIndexes).toEqual([
       { indexname: 'UQ_agent_messages_execution_reply' },
       { indexname: 'UQ_assistant_messages_execution_reply' },

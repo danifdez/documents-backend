@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { MemoryEntryEntity } from './memory-entry.entity';
@@ -39,9 +34,6 @@ export class AssistantMemoryService {
   ): Promise<AssistantEntity> {
     const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
     if (!a) throw new NotFoundException(`Assistant ${assistantId} not found`);
-    if (!a.isSystem) {
-      throw new ForbiddenException('Only the personal assistant has memory.');
-    }
     return a;
   }
 
@@ -84,7 +76,7 @@ export class AssistantMemoryService {
     limit = 25,
   ): Promise<MemoryEntryEntity[]> {
     const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
-    if (!a || !a.isSystem) return [];
+    if (!a) return [];
     return this.memoryRepo.find({
       where: { assistantId },
       order: { createdAt: 'DESC', id: 'DESC' },
@@ -165,7 +157,7 @@ export class AssistantMemoryService {
     limit = 8,
   ): Promise<MemoryEntryWithRelevance[]> {
     const a = await this.assistantRepo.findOne({ where: { id: assistantId } });
-    if (!a || !a.isSystem) return [];
+    if (!a) return [];
 
     const cleanQuery = (query ?? '').trim();
     const recentLimit = 5;

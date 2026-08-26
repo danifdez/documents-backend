@@ -82,7 +82,8 @@ abstract class IndexedFileBaseController {
     if (!file || !file.buffer) {
       throw new BadRequestException({ error: 'missing_file' });
     }
-    const filename = (filenameOverride && filenameOverride.trim()) || file.originalname;
+    const filename =
+      (filenameOverride && filenameOverride.trim()) || file.originalname;
     if (!filename) {
       throw new BadRequestException({ error: 'missing_filename' });
     }
@@ -109,7 +110,14 @@ abstract class IndexedFileBaseController {
     ownerId: number,
     query: string,
     limit?: string,
-  ): Promise<{ hits: Array<{ indexedFileId: number; filename: string; snippet: string; score: number }> }> {
+  ): Promise<{
+    hits: Array<{
+      indexedFileId: number;
+      filename: string;
+      snippet: string;
+      score: number;
+    }>;
+  }> {
     const q = (query ?? '').trim();
     if (q.length < 3) {
       throw new BadRequestException({ error: 'query_too_short' });
@@ -118,103 +126,32 @@ abstract class IndexedFileBaseController {
       this.owner(ownerId),
     );
     if (!hasFolder) {
-      throw new HttpException({ error: 'no_folder_configured' }, HttpStatus.CONFLICT);
+      throw new HttpException(
+        { error: 'no_folder_configured' },
+        HttpStatus.CONFLICT,
+      );
     }
     const n = Math.min(Math.max(parseInt(limit ?? '', 10) || 10, 1), 25);
-    const hits = await this.indexedFileService.search(this.owner(ownerId), q, n);
+    const hits = await this.indexedFileService.search(
+      this.owner(ownerId),
+      q,
+      n,
+    );
     return { hits };
   }
 
   protected handleRead(result: ReadWithSyncResult): ReadWithSyncResult {
     if (result.ok === true) return result;
     const err = (result as { error: string }).error;
-    if (err === 'not_found') throw new HttpException(result, HttpStatus.NOT_FOUND);
-    if (err === 'ambiguous') throw new HttpException(result, HttpStatus.CONFLICT);
-    if (err === 'not_ready') throw new HttpException(result, HttpStatus.ACCEPTED);
-    if (err === 'not_extractable') throw new HttpException(result, HttpStatus.UNPROCESSABLE_ENTITY);
+    if (err === 'not_found')
+      throw new HttpException(result, HttpStatus.NOT_FOUND);
+    if (err === 'ambiguous')
+      throw new HttpException(result, HttpStatus.CONFLICT);
+    if (err === 'not_ready')
+      throw new HttpException(result, HttpStatus.ACCEPTED);
+    if (err === 'not_extractable')
+      throw new HttpException(result, HttpStatus.UNPROCESSABLE_ENTITY);
     return result;
-  }
-}
-
-@Controller('assistants/:assistantId/indexed-files')
-export class AssistantIndexedFileController extends IndexedFileBaseController {
-  protected ownerType: IndexedFileOwnerType = 'main-assistant';
-
-  constructor(indexedFileService: IndexedFileService) {
-    super(indexedFileService);
-  }
-
-  @Get()
-  async list(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-  ): Promise<IndexedFileDto[]> {
-    const files = await this.indexedFileService.findByOwner(this.owner(assistantId));
-    return files.map(toIndexedFileDto);
-  }
-
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  async write(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-    @Body() dto: WriteIndexedFileDto,
-  ): Promise<IndexedFileDto> {
-    return this.writeImpl(assistantId, dto);
-  }
-
-  @Post('upload')
-  @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 250 * 1024 * 1024 } }))
-  async upload(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-    @UploadedFile() file: Express.Multer.File,
-    @Body('filename') filenameOverride?: string,
-  ): Promise<IndexedFileDto> {
-    return this.uploadImpl(assistantId, file, filenameOverride);
-  }
-
-  @Get('search')
-  async search(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-    @Query('query') query: string,
-    @Query('limit') limit?: string,
-  ): Promise<{ hits: Array<{ indexedFileId: number; filename: string; snippet: string; score: number }> }> {
-    return this.searchImpl(assistantId, query, limit);
-  }
-
-  @Get('by-filename')
-  async readByFilename(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-    @Query('filename') filename: string,
-  ): Promise<ReadWithSyncResult> {
-    return this.handleRead(
-      await this.indexedFileService.readWithSync(this.owner(assistantId), { filename: filename ?? '' }),
-    );
-  }
-
-  @Get(':id/content')
-  async readContent(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-    @Param('id', ParseIntPipe) id: number,
-  ): Promise<ReadWithSyncResult> {
-    return this.handleRead(
-      await this.indexedFileService.readWithSync(this.owner(assistantId), { indexedFileId: id }),
-    );
-  }
-
-  @Delete(':id')
-  async remove(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-    @Param('id', ParseIntPipe) id: number,
-  ): Promise<{ deleted: boolean }> {
-    await this.indexedFileService.deleteFile(id, this.owner(assistantId));
-    return { deleted: true };
-  }
-
-  @Post('reconcile')
-  async reconcile(
-    @Param('assistantId', ParseIntPipe) assistantId: number,
-  ): Promise<ScanFolderResult> {
-    return await this.indexedFileService.scanFolder(this.owner(assistantId));
   }
 }
 
@@ -230,7 +167,9 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
   async list(
     @Param('agentId', ParseIntPipe) agentId: number,
   ): Promise<IndexedFileDto[]> {
-    const files = await this.indexedFileService.findByOwner(this.owner(agentId));
+    const files = await this.indexedFileService.findByOwner(
+      this.owner(agentId),
+    );
     return files.map(toIndexedFileDto);
   }
 
@@ -245,7 +184,9 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
 
   @Post('upload')
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 250 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 250 * 1024 * 1024 } }),
+  )
   async upload(
     @Param('agentId', ParseIntPipe) agentId: number,
     @UploadedFile() file: Express.Multer.File,
@@ -259,7 +200,14 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
     @Param('agentId', ParseIntPipe) agentId: number,
     @Query('query') query: string,
     @Query('limit') limit?: string,
-  ): Promise<{ hits: Array<{ indexedFileId: number; filename: string; snippet: string; score: number }> }> {
+  ): Promise<{
+    hits: Array<{
+      indexedFileId: number;
+      filename: string;
+      snippet: string;
+      score: number;
+    }>;
+  }> {
     return this.searchImpl(agentId, query, limit);
   }
 
@@ -269,7 +217,9 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
     @Query('filename') filename: string,
   ): Promise<ReadWithSyncResult> {
     return this.handleRead(
-      await this.indexedFileService.readWithSync(this.owner(agentId), { filename: filename ?? '' }),
+      await this.indexedFileService.readWithSync(this.owner(agentId), {
+        filename: filename ?? '',
+      }),
     );
   }
 
@@ -279,7 +229,9 @@ export class AgentIndexedFileController extends IndexedFileBaseController {
     @Param('id', ParseIntPipe) id: number,
   ): Promise<ReadWithSyncResult> {
     return this.handleRead(
-      await this.indexedFileService.readWithSync(this.owner(agentId), { indexedFileId: id }),
+      await this.indexedFileService.readWithSync(this.owner(agentId), {
+        indexedFileId: id,
+      }),
     );
   }
 

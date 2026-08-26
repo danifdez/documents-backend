@@ -9,7 +9,7 @@ import { DataSourceEntity } from '../data-source/data-source.entity';
  * `description` is injected verbatim into the extraction worker's prompt
  * (see worker `dataset.extract-row`). It is the semantic guide that tells
  * the model what to look for; without it, autoextraction across many
- * sources tends to drift. Optional so legacy manual datasets stay valid.
+ * sources tends to drift. It remains optional for fields that are entered manually.
  */
 export interface DatasetField {
     key: string;

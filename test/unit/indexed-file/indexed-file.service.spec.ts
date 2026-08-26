@@ -9,7 +9,6 @@ import {
   OwnerRef,
 } from '../../../src/indexed-file/indexed-file.service';
 import { IndexedFileEntity } from '../../../src/indexed-file/indexed-file.entity';
-import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { AgentEntity } from '../../../src/agent/agent.entity';
 import { ExecutionService } from '../../../src/execution/execution.service';
 import { VectorStoreService } from '../../../src/vector/vector-store.service';
@@ -60,15 +59,14 @@ function createMockRepo() {
   };
 }
 
-const OWNER_TYPE = 'main-assistant' as const;
+const OWNER_TYPE = 'agent' as const;
 
 describe('IndexedFileService', () => {
   let service: IndexedFileService;
   let tmpScope: string;
-  const assistantId = 42;
-  const owner: OwnerRef = { ownerType: OWNER_TYPE, ownerId: assistantId };
+  const agentId = 42;
+  const owner: OwnerRef = { ownerType: OWNER_TYPE, ownerId: agentId };
   let indexedRepo: ReturnType<typeof createMockRepo>;
-  let assistantRepo: ReturnType<typeof createMockRepo>;
   let agentRepo: ReturnType<typeof createMockRepo>;
   let executionService: { create: jest.Mock };
   let vectorStore: Record<string, jest.Mock>;
@@ -76,10 +74,9 @@ describe('IndexedFileService', () => {
   beforeEach(async () => {
     tmpScope = await fs.mkdtemp(path.join(os.tmpdir(), 'indexed-file-test-'));
     indexedRepo = createMockRepo();
-    assistantRepo = createMockRepo();
     agentRepo = createMockRepo();
-    assistantRepo.store.set(assistantId, {
-      id: assistantId,
+    agentRepo.store.set(agentId, {
+      id: agentId,
       folderScope: tmpScope,
     });
 
@@ -102,10 +99,6 @@ describe('IndexedFileService', () => {
           provide: getRepositoryToken(IndexedFileEntity),
           useValue: indexedRepo,
         },
-        {
-          provide: getRepositoryToken(AssistantEntity),
-          useValue: assistantRepo,
-        },
         { provide: getRepositoryToken(AgentEntity), useValue: agentRepo },
         { provide: ExecutionService, useValue: executionService },
         { provide: VectorStoreService, useValue: vectorStore },
@@ -124,7 +117,7 @@ describe('IndexedFileService', () => {
     });
     expect(entity.filename).toBe('notes.md');
     expect(entity.ownerType).toBe(OWNER_TYPE);
-    expect(entity.ownerId).toBe(assistantId);
+    expect(entity.ownerId).toBe(agentId);
     expect(entity.mimeType).toBe('text/markdown');
     expect(entity.size).toBe(7);
     expect(entity.checksum).toMatch(/^[0-9a-f]{64}$/);
@@ -179,11 +172,11 @@ describe('IndexedFileService', () => {
     });
     await service.deleteFile(e.id, {
       ownerType: OWNER_TYPE,
-      ownerId: assistantId,
+      ownerId: agentId,
     });
     await service.deleteFile(e.id, {
       ownerType: OWNER_TYPE,
-      ownerId: assistantId,
+      ownerId: agentId,
     });
     expect(indexedRepo.store.size).toBe(0);
   });
@@ -197,8 +190,8 @@ describe('IndexedFileService', () => {
 
   describe('scanFolder', () => {
     it('returns no_folder when owner has no folderScope', async () => {
-      assistantRepo.store.set(assistantId, {
-        id: assistantId,
+      agentRepo.store.set(agentId, {
+        id: agentId,
         folderScope: null,
       });
       const result = await service.scanFolder(owner);
@@ -379,7 +372,7 @@ describe('IndexedFileService', () => {
       executionService.create.mockClear();
       await service.deleteFile(e.id, {
         ownerType: OWNER_TYPE,
-        ownerId: assistantId,
+        ownerId: agentId,
       });
       expect(indexedRepo.store.size).toBe(0);
       expect(executionService.create).not.toHaveBeenCalled();

@@ -74,7 +74,7 @@ export class VectorStoreService {
     if (!Number.isInteger(indexedFileId) || indexedFileId <= 0) {
       throw new Error('Indexed file id is invalid');
     }
-    if (!/^(main-assistant|agent):[1-9][0-9]*$/.test(ownerTag)) {
+    if (!/^agent:[1-9][0-9]*$/.test(ownerTag)) {
       throw new Error('Indexed file owner is invalid');
     }
     const sourceId = `indexed_file_${indexedFileId}`;

@@ -2,8 +2,6 @@ import {
   Controller,
   Get,
   Post,
-  Patch,
-  Delete,
   Body,
   Param,
   Query,
@@ -12,11 +10,7 @@ import {
 import { AssistantService } from './assistant.service';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
-import {
-  CreateAssistantDto,
-  UpdateAssistantDto,
-  SendMessageDto,
-} from './dto/assistant.dto';
+import { SendMessageDto } from './dto/assistant.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ExecutionService } from '../execution/execution.service';
 
@@ -37,24 +31,6 @@ export class AssistantController {
     @Param('id', ParseIntPipe) id: number,
   ): Promise<AssistantEntity> {
     return this.service.findOne(id);
-  }
-
-  @Post()
-  async create(@Body() dto: CreateAssistantDto): Promise<AssistantEntity> {
-    return this.service.create(dto);
-  }
-
-  @Patch(':id')
-  async update(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpdateAssistantDto,
-  ): Promise<AssistantEntity> {
-    return this.service.update(id, dto);
-  }
-
-  @Delete(':id')
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    return this.service.remove(id);
   }
 
   @Get(':id/messages')

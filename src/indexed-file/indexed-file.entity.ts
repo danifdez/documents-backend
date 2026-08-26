@@ -8,7 +8,7 @@ import {
   Unique,
 } from 'typeorm';
 
-export type IndexedFileOwnerType = 'main-assistant' | 'agent';
+export type IndexedFileOwnerType = 'agent';
 
 @Entity({ name: 'indexed_files' })
 @Unique('UQ_indexed_files_owner_filename', ['ownerType', 'ownerId', 'filename'])

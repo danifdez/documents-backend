@@ -6,17 +6,14 @@ export class CreateAssistantTables1757668140070 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
             CREATE TABLE "assistants" (
-                "id" SERIAL PRIMARY KEY,
+                "id" integer PRIMARY KEY DEFAULT 1,
                 "name" character varying(100) NOT NULL,
-                "system_prompt" text,
-                "folder_scope" character varying(500),
                 "icon" character varying(16),
-                "is_system" boolean NOT NULL DEFAULT false,
-                "pinned" boolean NOT NULL DEFAULT false,
                 "sub" character varying(300),
                 "last_seen_at" TIMESTAMP,
                 "created_at" TIMESTAMP NOT NULL DEFAULT now(),
-                "updated_at" TIMESTAMP NOT NULL DEFAULT now()
+                "updated_at" TIMESTAMP NOT NULL DEFAULT now(),
+                CONSTRAINT "CHK_assistants_singleton" CHECK ("id" = 1)
             )
         `);
 

@@ -72,10 +72,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('voice:start')
   async onStart(@ConnectedSocket() client: Socket): Promise<void> {
-    const ok = await this.voice.startSession(client);
-    if (!ok) {
-      client.emit('voice:error', { message: 'busy' });
-    }
+    await this.voice.startSession(client);
   }
 
   @SubscribeMessage('voice:chunk')

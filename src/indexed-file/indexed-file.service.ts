@@ -12,7 +12,6 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { IndexedFileEntity, IndexedFileOwnerType } from './indexed-file.entity';
-import { AssistantEntity } from '../assistant/assistant.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionStatus } from '../execution/execution-status.enum';
@@ -78,8 +77,6 @@ export class IndexedFileService {
   constructor(
     @InjectRepository(IndexedFileEntity)
     private readonly repository: Repository<IndexedFileEntity>,
-    @InjectRepository(AssistantEntity)
-    private readonly assistantRepository: Repository<AssistantEntity>,
     @InjectRepository(AgentEntity)
     private readonly agentRepository: Repository<AgentEntity>,
     private readonly executionService: ExecutionService,
@@ -691,23 +688,12 @@ export class IndexedFileService {
    * exist.
    */
   private async resolveFolderScope(owner: OwnerRef): Promise<string | null> {
-    const { ownerType, ownerId } = owner;
-    if (ownerType === 'main-assistant') {
-      const assistant = await this.assistantRepository.findOne({
-        where: { id: ownerId },
-      });
-      if (!assistant)
-        throw new NotFoundException(`Assistant ${ownerId} not found`);
-      return assistant.folderScope ?? null;
-    }
-    if (ownerType === 'agent') {
-      const agent = await this.agentRepository.findOne({
-        where: { id: ownerId },
-      });
-      if (!agent) throw new NotFoundException(`Agent ${ownerId} not found`);
-      return agent.folderScope ?? null;
-    }
-    throw new NotFoundException(`Unknown owner type: ${ownerType}`);
+    const { ownerId } = owner;
+    const agent = await this.agentRepository.findOne({
+      where: { id: ownerId },
+    });
+    if (!agent) throw new NotFoundException(`Agent ${ownerId} not found`);
+    return agent.folderScope ?? null;
   }
 
   private async getFolderScope(owner: OwnerRef): Promise<string> {

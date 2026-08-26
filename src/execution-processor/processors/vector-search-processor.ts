@@ -63,7 +63,7 @@ export class VectorSearchProcessor implements ExecutionProcessor {
   ): Promise<void> {
     const ownerId = this.positiveId(execution.payload['ownerId']);
     const ownerType = execution.payload['ownerType'];
-    if (ownerType !== 'main-assistant' && ownerType !== 'agent') {
+    if (ownerType !== 'agent') {
       throw new Error('indexed-file-search ownerType is invalid');
     }
     const ids = this.resultIds(results, 'indexedFileId');
