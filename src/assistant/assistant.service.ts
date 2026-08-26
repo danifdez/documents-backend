@@ -37,9 +37,7 @@ export class AssistantService implements OnApplicationBootstrap {
     private readonly executionService: ExecutionService,
   ) {
     this.messages = new ChatMessageStore<AssistantMessageEntity>(messageRepo, {
-      conflictLabel: 'assistant',
       where: (assistantId) => ({ assistantId }),
-      attach: (assistantId, message) => ({ assistantId, ...message }),
     });
   }
 
@@ -116,54 +114,25 @@ export class AssistantService implements OnApplicationBootstrap {
   }> {
     const assistant = await this.findOne(assistantId);
 
-    const userMsg = await this.messages.appendUser(assistantId, content);
-
     // Touch lastSeenAt
     assistant.lastSeenAt = new Date();
     await this.assistantRepo.save(assistant);
 
-    // Only ship a recent slice as transport — models decides the real context
-    // window (history_turns). Never send the whole thread.
-    const conversation = await this.messages.recentConversation(assistantId);
-
-    const execution = await this.executionService.createForChat(
-      'assistant_chat',
-      content,
-      accessScope,
-      {
-        ownerId: assistantId,
-        folderScope: assistant.folderScope,
-        conversation,
-      },
-    );
+    const { execution, userMessage } =
+      await this.executionService.createForChat(
+        'assistant_chat',
+        content,
+        accessScope,
+        {
+          ownerId: assistantId,
+          folderScope: assistant.folderScope,
+        },
+      );
 
     return {
-      userMessage: userMsg,
+      userMessage: userMessage as AssistantMessageEntity,
       executionId: execution.executionId,
     };
-  }
-
-  async recordAssistantReply(
-    assistantId: number,
-    reply: string,
-    executionId: string | null,
-    error: string | null = null,
-  ): Promise<AssistantMessageEntity> {
-    return this.messages.recordReply(
-      assistantId,
-      reply,
-      executionId,
-      error,
-      async () => {
-        const assistant = await this.assistantRepo.findOne({
-          where: { id: assistantId },
-        });
-        if (assistant) {
-          assistant.lastSeenAt = new Date();
-          await this.assistantRepo.save(assistant);
-        }
-      },
-    );
   }
 
   private async resolveFolderScope(

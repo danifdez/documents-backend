@@ -22,6 +22,7 @@ import { CreateExecutionOutbox1757668140400 } from '../migrations/1757668140400-
 import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140410-CreateExecutionOperations';
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
+import { CreateConversationSessions1757668140730 } from '../migrations/1757668140730-CreateConversationSessions';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -67,6 +68,16 @@ import {
   projectExecutionProgress,
 } from '../src/execution/execution-progress';
 import { ExecutionProgressService } from '../src/execution/execution-progress.service';
+import { ConversationSessionEntity } from '../src/conversation/conversation-session.entity';
+import {
+  ConversationTurnEntity,
+  ConversationTurnStatus,
+} from '../src/conversation/conversation-turn.entity';
+import { ConversationArtifactRevisionEntity } from '../src/conversation/conversation-artifact-revision.entity';
+import { AssistantMessageEntity } from '../src/assistant/assistant-message.entity';
+import { AgentMessageEntity } from '../src/agent/agent-message.entity';
+import { AssistantEntity } from '../src/assistant/assistant.entity';
+import { AgentEntity } from '../src/agent/agent.entity';
 
 loadEnv({ path: '.env' });
 
@@ -106,6 +117,13 @@ describe('execution PostgreSQL integration', () => {
         ExecutionToolPlanEntity,
         ExecutionConfirmationEntity,
         WorkerEntity,
+        ConversationSessionEntity,
+        ConversationTurnEntity,
+        ConversationArtifactRevisionEntity,
+        AssistantMessageEntity,
+        AgentMessageEntity,
+        AssistantEntity,
+        AgentEntity,
       ],
     });
     await dataSource.initialize();
@@ -134,6 +152,15 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionOperations1757668140410().up(runner);
     await new CreateExecutionToolPlans1757668140420().up(runner);
     await new CreateExecutionConfirmations1757668140720().up(runner);
+    await new CreateConversationSessions1757668140730().up(runner);
+    await runner.query(`
+      INSERT INTO "assistants" ("id", "name", "icon", "sub")
+      VALUES (1, 'Assistant', '◇', 'Personal assistant')
+    `);
+    await runner.query(`
+      INSERT INTO "agents" ("id", "name", "pinned")
+      VALUES (1, 'Test agent', true)
+    `);
     await runner.release();
 
     const config = {
@@ -178,6 +205,17 @@ describe('execution PostgreSQL integration', () => {
     if (!dataSource?.isInitialized) return;
     await dataSource.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     await dataSource.destroy();
+  });
+
+  beforeEach(async () => {
+    await dataSource.query(`
+      TRUNCATE TABLE
+        "conversation_sessions",
+        "executions",
+        "assistant_messages",
+        "agent_messages"
+      RESTART IDENTITY CASCADE
+    `);
   });
 
   const progress = (context: any, instanceId: string) => ({
@@ -250,6 +288,19 @@ describe('execution PostgreSQL integration', () => {
       await executionRepo.save(execution);
     });
   };
+
+  const createChat = async (
+    kind: 'assistant_chat' | 'agent_chat',
+    message: string,
+    scope: { ownerPrincipal: string },
+    payload: Record<string, unknown> = {},
+  ): Promise<ExecutionEntity> =>
+    (
+      await service.createForChat(kind, message, scope, {
+        ownerId: 1,
+        ...payload,
+      })
+    ).execution;
 
   it('creates only canonical execution control columns', async () => {
     const columns = await dataSource.query(`
@@ -1043,7 +1094,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('creates, joins and incorporates a bounded durable child execution', async () => {
-    const created = await service.createForChat(
+    const created = await createChat(
       'assistant_chat',
       'Delegate a focused comparison',
       { ownerPrincipal: 'delegation-e2e' },
@@ -1253,7 +1304,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('executes documents.search and accepts its canonical ToolResult', async () => {
-    const created = await service.createForChat(
+    const created = await createChat(
       'assistant_chat',
       'Find the harness plan',
       { ownerPrincipal: 'tool-e2e' },
@@ -1464,7 +1515,7 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('routes a browser tool request through IA Browser and into the next inference', async () => {
-    const created = await service.createForChat(
+    const created = await createChat(
       'assistant_chat',
       'Find the harness plan',
       { ownerPrincipal: 'agent-loop-e2e' },
@@ -2151,124 +2202,267 @@ describe('execution PostgreSQL integration', () => {
 
   it('keeps assistant and agent chat as distinct execution types', async () => {
     const scope = { ownerPrincipal: 'e2e-user' };
-    const assistant = await service.createForChat(
+    const assistant = await createChat(
       'assistant_chat',
       'assistant message',
       scope,
       {},
     );
-    const agent = await service.createForChat(
-      'agent_chat',
-      'agent message',
-      scope,
-      {},
-    );
+    const agent = await createChat('agent_chat', 'agent message', scope, {});
 
     expect(assistant.taskType).toBe('assistant-chat');
     expect(agent.taskType).toBe('agent-chat');
   });
 
-  it('serializes concurrent producers, paginates, deduplicates, and enforces append-only rows', async () => {
-    const scope = { ownerPrincipal: 'e2e-user' };
-    const context = await service.createForChat(
-      'assistant_chat',
-      'Authorization: Bearer known-secret',
-      scope,
-      {},
+  it('retires an agent conversation while preserving execution evidence', async () => {
+    const execution = await createChat(
+      'agent_chat',
+      'Temporary agent message',
+      { ownerPrincipal: 'agent-delete-e2e' },
     );
-    const first = progress(context, 'worker-a');
-    const second = progress(context, 'worker-b');
 
-    await Promise.all([
-      service.acceptEvents(context.rootExecutionId, [first]),
-      service.acceptEvents(context.rootExecutionId, [second]),
-    ]);
-    await expect(
-      service.acceptEvents(context.rootExecutionId, [first]),
-    ).resolves.toMatchObject({
-      accepted: 0,
-      duplicates: 1,
-      lastSequence: 5,
-    });
+    await service.retireConversation('agent', 1);
 
-    const page1 = await service.readEvents(
-      context.rootExecutionId,
-      scope,
-      0,
-      2,
-    );
-    const page2 = await service.readEvents(
-      context.rootExecutionId,
-      scope,
-      page1.nextAfterSequence,
-      10,
-    );
-    expect(page1.events.map((event: any) => event.sequence)).toEqual([1, 2]);
-    expect(page2.events.map((event: any) => event.sequence)).toEqual([3, 4, 5]);
     await expect(
-      service.readEvents(context.rootExecutionId, {
-        ownerPrincipal: 'other-user',
+      dataSource.getRepository(ExecutionEntity).countBy({
+        executionId: execution.executionId,
       }),
-    ).rejects.toThrow('Execution not found');
-
+    ).resolves.toBe(1);
     await expect(
-      service.exportBundle(context.rootExecutionId, scope, false),
-    ).rejects.toThrow('Explicit consent');
-    const bundle = await service.exportBundle(
-      context.rootExecutionId,
-      scope,
-      true,
-    );
-    expect(JSON.stringify(bundle)).not.toContain('known-secret');
-    expect(bundle.embeddedArtifacts).toBeDefined();
-    expect(bundle.bundleCompleteness).toEqual({
-      status: 'reproducible',
-      reproducible: true,
-      missing: [],
-    });
-    expect(bundle.policySummary).toEqual({
-      decision: 'allow',
-      purpose: 'evaluation',
-      consent: {
-        status: 'granted',
-        basis: 'explicit_export_request',
-      },
-      allowedDestinations: ['ai-train'],
-      retentionClass: 'evaluation',
-      accessScope: scope,
-    });
-    const bundleEvents = bundle.events as Record<string, any>[];
-    const bundleArtifacts = bundle.artifacts as Record<string, any>[];
-    const userSource = bundleEvents.find(
-      (event: any) => event.eventType === 'source.observed',
-    );
-    const userArtifact = bundleArtifacts.find(
-      (artifact: any) => artifact.kind === 'user_message',
-    );
-    expect(userArtifact.inputSourceIds).toEqual([userSource.payload.sourceId]);
-
+      dataSource.getRepository(ExecutionEntity).findOneByOrFail({
+        executionId: execution.executionId,
+      }),
+    ).resolves.toMatchObject({ status: ExecutionStatus.CANCELLED });
     await expect(
-      dataSource.query(
-        `UPDATE "${schema}"."execution_events" SET "event_type" = 'changed' WHERE "event_id" = $1`,
-        [first.eventId],
-      ),
-    ).rejects.toThrow('append-only');
-    const stored = await dataSource
-      .getRepository(ExecutionEventEntity)
-      .findOneBy({
-        eventId: first.eventId,
-      });
-    expect(stored.eventType).toBe('progress.reported');
+      dataSource.getRepository(ConversationSessionEntity).countBy({
+        ownerType: 'agent',
+        ownerId: 1,
+      }),
+    ).resolves.toBe(1);
+    await expect(
+      dataSource.getRepository(ConversationSessionEntity).findOneByOrFail({
+        ownerType: 'agent',
+        ownerId: 1,
+      }),
+    ).resolves.toMatchObject({ activeTurnId: null });
   });
+
+  it('persists one conversation lane and promotes queued turns in order', async () => {
+    const scope = { ownerPrincipal: 'conversation-lane-e2e' };
+    const first = await createChat('assistant_chat', 'First message', scope);
+    const second = await createChat('assistant_chat', 'Second message', scope);
+    const third = await createChat('assistant_chat', 'Third message', scope);
+
+    const sessionRepo = dataSource.getRepository(ConversationSessionEntity);
+    const turnRepo = dataSource.getRepository(ConversationTurnEntity);
+    const stepRepo = dataSource.getRepository(ExecutionStepEntity);
+    const session = await sessionRepo.findOneByOrFail({
+      ownerType: 'assistant',
+      ownerId: 1,
+    });
+    expect(session.activeTurnId).toBe(first.turnId);
+    await expect(
+      turnRepo.findOneByOrFail({ turnId: first.turnId! }),
+    ).resolves.toMatchObject({
+      status: ConversationTurnStatus.ACTIVE,
+      startingConversationRevision: 1,
+    });
+    await expect(
+      turnRepo.findOneByOrFail({ turnId: second.turnId! }),
+    ).resolves.toMatchObject({
+      status: ConversationTurnStatus.QUEUED,
+      startingConversationRevision: 1,
+    });
+    await expect(
+      stepRepo.countBy({ executionId: first.executionId }),
+    ).resolves.toBe(1);
+    await expect(
+      stepRepo.countBy({ executionId: second.executionId }),
+    ).resolves.toBe(0);
+
+    await service.updateStatus(
+      second.executionId,
+      ExecutionStatus.CANCELLED,
+      undefined,
+      { cancellationReason: 'Cancel queued turn' },
+    );
+    expect(
+      (await sessionRepo.findOneByOrFail({ sessionId: session.sessionId }))
+        .activeTurnId,
+    ).toBe(first.turnId);
+
+    await service.updateStatus(
+      first.executionId,
+      ExecutionStatus.CANCELLED,
+      undefined,
+      { cancellationReason: 'Superseded in lane test' },
+    );
+
+    const promotedSession = await sessionRepo.findOneByOrFail({
+      sessionId: session.sessionId,
+    });
+    expect(promotedSession.activeTurnId).toBe(third.turnId);
+    expect(promotedSession.conversationRevision).toBe(2);
+    await expect(
+      turnRepo.findOneByOrFail({ turnId: first.turnId! }),
+    ).resolves.toMatchObject({
+      status: ConversationTurnStatus.CANCELLED,
+      terminalConversationRevision: 1,
+    });
+    await expect(
+      turnRepo.findOneByOrFail({ turnId: second.turnId! }),
+    ).resolves.toMatchObject({
+      status: ConversationTurnStatus.CANCELLED,
+      terminalConversationRevision: 1,
+    });
+    await expect(
+      turnRepo.findOneByOrFail({ turnId: third.turnId! }),
+    ).resolves.toMatchObject({
+      status: ConversationTurnStatus.ACTIVE,
+      startingConversationRevision: 2,
+    });
+    await expect(
+      stepRepo.countBy({ executionId: second.executionId }),
+    ).resolves.toBe(0);
+    await expect(
+      stepRepo.countBy({ executionId: third.executionId }),
+    ).resolves.toBe(1);
+  });
+
+  it('serializes concurrent messages into one session and one active turn', async () => {
+    await Promise.all([
+      createChat('assistant_chat', 'Concurrent message A', {
+        ownerPrincipal: 'conversation-concurrency-e2e',
+      }),
+      createChat('assistant_chat', 'Concurrent message B', {
+        ownerPrincipal: 'conversation-concurrency-e2e',
+      }),
+    ]);
+
+    const session = await dataSource
+      .getRepository(ConversationSessionEntity)
+      .findOneByOrFail({ ownerType: 'assistant', ownerId: 1 });
+    const turns = await dataSource
+      .getRepository(ConversationTurnEntity)
+      .findBy({
+        sessionId: session.sessionId,
+      });
+    expect(turns).toHaveLength(2);
+    expect(
+      turns.filter((turn) => turn.status === ConversationTurnStatus.ACTIVE),
+    ).toHaveLength(1);
+    expect(
+      turns.filter((turn) => turn.status === ConversationTurnStatus.QUEUED),
+    ).toHaveLength(1);
+    await expect(
+      dataSource.getRepository(ExecutionStepEntity).count(),
+    ).resolves.toBe(1);
+  });
+
+  it(
+    'serializes concurrent producers, paginates, deduplicates, ' +
+      'and enforces append-only rows',
+    async () => {
+      const scope = { ownerPrincipal: 'e2e-user' };
+      const context = await createChat(
+        'assistant_chat',
+        'Authorization: Bearer known-secret',
+        scope,
+        {},
+      );
+      const first = progress(context, 'worker-a');
+      const second = progress(context, 'worker-b');
+
+      await Promise.all([
+        service.acceptEvents(context.rootExecutionId, [first]),
+        service.acceptEvents(context.rootExecutionId, [second]),
+      ]);
+      await expect(
+        service.acceptEvents(context.rootExecutionId, [first]),
+      ).resolves.toMatchObject({
+        accepted: 0,
+        duplicates: 1,
+        lastSequence: 5,
+      });
+
+      const page1 = await service.readEvents(
+        context.rootExecutionId,
+        scope,
+        0,
+        2,
+      );
+      const page2 = await service.readEvents(
+        context.rootExecutionId,
+        scope,
+        page1.nextAfterSequence,
+        10,
+      );
+      expect(page1.events.map((event: any) => event.sequence)).toEqual([1, 2]);
+      expect(page2.events.map((event: any) => event.sequence)).toEqual([
+        3, 4, 5,
+      ]);
+      await expect(
+        service.readEvents(context.rootExecutionId, {
+          ownerPrincipal: 'other-user',
+        }),
+      ).rejects.toThrow('Execution not found');
+
+      await expect(
+        service.exportBundle(context.rootExecutionId, scope, false),
+      ).rejects.toThrow('Explicit consent');
+      const bundle = await service.exportBundle(
+        context.rootExecutionId,
+        scope,
+        true,
+      );
+      expect(JSON.stringify(bundle)).not.toContain('known-secret');
+      expect(bundle.embeddedArtifacts).toBeDefined();
+      expect(bundle.bundleCompleteness).toEqual({
+        status: 'reproducible',
+        reproducible: true,
+        missing: [],
+      });
+      expect(bundle.policySummary).toEqual({
+        decision: 'allow',
+        purpose: 'evaluation',
+        consent: {
+          status: 'granted',
+          basis: 'explicit_export_request',
+        },
+        allowedDestinations: ['ai-train'],
+        retentionClass: 'evaluation',
+        accessScope: scope,
+      });
+      const bundleEvents = bundle.events as Record<string, any>[];
+      const bundleArtifacts = bundle.artifacts as Record<string, any>[];
+      const userSource = bundleEvents.find(
+        (event: any) => event.eventType === 'source.observed',
+      );
+      const userArtifact = bundleArtifacts.find(
+        (artifact: any) => artifact.kind === 'user_message',
+      );
+      expect(userArtifact.inputSourceIds).toEqual([
+        userSource.payload.sourceId,
+      ]);
+
+      await expect(
+        dataSource.query(
+          `UPDATE "${schema}"."execution_events" SET "event_type" = 'changed' WHERE "event_id" = $1`,
+          [first.eventId],
+        ),
+      ).rejects.toThrow('append-only');
+      const stored = await dataSource
+        .getRepository(ExecutionEventEntity)
+        .findOneBy({
+          eventId: first.eventId,
+        });
+      expect(stored.eventType).toBe('progress.reported');
+    },
+  );
 
   it('serializes the last operation budget slots and fences stale attempts', async () => {
     const scope = { ownerPrincipal: 'e2e-user' };
-    const context = await service.createForChat(
-      'assistant_chat',
-      'budget me',
-      scope,
-      {},
-    );
+    const context = await createChat('assistant_chat', 'budget me', scope, {});
     const attemptId = randomUUID();
     await activateStepAttempt(context.executionId, attemptId);
 
@@ -2359,7 +2553,7 @@ describe('execution PostgreSQL integration', () => {
 
   it('records one soft-limit signal when concurrent tool reservations cross it', async () => {
     const scope = { ownerPrincipal: 'e2e-user' };
-    const context = await service.createForChat(
+    const context = await createChat(
       'assistant_chat',
       'cross the tool soft limit',
       scope,
@@ -2440,7 +2634,7 @@ describe('execution PostgreSQL integration', () => {
 
   it('records one soft-limit signal at the normal inference soft limit', async () => {
     const scope = { ownerPrincipal: 'e2e-user' };
-    const context = await service.createForChat(
+    const context = await createChat(
       'assistant_chat',
       'cross the normal inference soft limit',
       scope,
@@ -2517,7 +2711,7 @@ describe('execution PostgreSQL integration', () => {
 
   it('persists one exact-repeat signal and consumes its warning transactionally', async () => {
     const scope = { ownerPrincipal: 'e2e-user' };
-    const context = await service.createForChat(
+    const context = await createChat(
       'assistant_chat',
       'repeat one exact tool call',
       scope,
@@ -2873,7 +3067,7 @@ describe('execution PostgreSQL integration', () => {
 
   it('validates, fences, finalizes, and replays a deterministic partial', async () => {
     const scope = { ownerPrincipal: 'e2e-user' };
-    const context = await service.createForChat(
+    const context = await createChat(
       'assistant_chat',
       'materialize a deterministic partial',
       scope,

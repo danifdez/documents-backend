@@ -1,11 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AgentService } from '../../agent/agent.service';
-import { toAgentMessageDto } from '../../agent/dto/agent.dto';
-import { AssistantService } from '../../assistant/assistant.service';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { ExecutionService } from '../../execution/execution.service';
 import { ExecutionCompletion } from '../../execution/execution.types';
-import { ExecutionPublication } from '../../execution-outbox/execution-publication';
 import { ExecutionProcessor } from '../execution-processor.interface';
 
 type ChatExecutionResult = {
@@ -26,11 +22,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     'delegated-agent',
   ]);
 
-  constructor(
-    private readonly assistantService: AssistantService,
-    private readonly agentService: AgentService,
-    private readonly executionService: ExecutionService,
-  ) {}
+  constructor(private readonly executionService: ExecutionService) {}
 
   canProcess(taskType: string): boolean {
     return this.taskTypes.has(taskType);
@@ -87,16 +79,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     const result = this.result(execution);
     const reply = result.reply ?? '';
     const error = result.error ?? null;
-    const message = await this.assistantService.recordAssistantReply(
-      assistantId,
-      reply,
-      execution.executionId,
-      error,
-    );
-    await this.finalizeExecution(execution, reply, error, result, {
-      socketEvent: 'assistantResponse',
-      payload: { assistantId, executionId: execution.executionId, message },
-    });
+    await this.finalizeExecution(execution, reply, error, result);
     return { success: true };
   }
 
@@ -113,20 +96,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     const result = this.result(execution);
     const reply = result.reply ?? '';
     const error = result.error ?? null;
-    const message = await this.agentService.recordAgentReply(
-      agentId,
-      reply,
-      execution.executionId,
-      error,
-    );
-    await this.finalizeExecution(execution, reply, error, result, {
-      socketEvent: 'agentResponse',
-      payload: {
-        agentId,
-        executionId: execution.executionId,
-        message: toAgentMessageDto(message),
-      },
-    });
+    await this.finalizeExecution(execution, reply, error, result);
     return { success: true };
   }
 
@@ -140,7 +110,6 @@ export class AssistantChatProcessor implements ExecutionProcessor {
     reply: string,
     error: string | null,
     result: ChatExecutionResult,
-    publication: ExecutionPublication,
   ): Promise<void> {
     const completion = this.completion(result);
     if (completion?.source === 'runtime_template') {
@@ -156,7 +125,6 @@ export class AssistantChatProcessor implements ExecutionProcessor {
       reply,
       error,
       completion,
-      publication,
     );
   }
 

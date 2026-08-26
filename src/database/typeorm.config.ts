@@ -52,6 +52,9 @@ import { ExecutionConfirmationEntity } from '../execution/execution-confirmation
 import { ExecutionOperationEntity } from '../execution/execution-operation.entity';
 import { ExecutionToolInvocationEntity } from '../execution/execution-tool-invocation.entity';
 import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity';
+import { ConversationSessionEntity } from '../conversation/conversation-session.entity';
+import { ConversationTurnEntity } from '../conversation/conversation-turn.entity';
+import { ConversationArtifactRevisionEntity } from '../conversation/conversation-artifact-revision.entity';
 
 export const getTypeOrmConfig = async (
   configService: ConfigService,
@@ -116,6 +119,9 @@ export const getTypeOrmConfig = async (
       ExecutionOperationEntity,
       ExecutionToolInvocationEntity,
       ExecutionToolPlanEntity,
+      ConversationSessionEntity,
+      ConversationTurnEntity,
+      ConversationArtifactRevisionEntity,
     ],
     synchronize: false,
     // Apply pending migrations on every boot so that updates ship their schema

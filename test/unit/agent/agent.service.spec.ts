@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { AgentService } from '../../../src/agent/agent.service';
 import { AgentEntity } from '../../../src/agent/agent.entity';
 import { AgentMessageEntity } from '../../../src/agent/agent-message.entity';
@@ -80,14 +80,26 @@ describe('AgentService', () => {
   let service: AgentService;
   let agentRepo: ReturnType<typeof createMockRepo>;
   let messageRepo: ReturnType<typeof createMockRepo>;
-  let executionService: { createForChat: jest.Mock };
+  let executionService: {
+    createForChat: jest.Mock;
+    retireConversation: jest.Mock;
+  };
   let indexedFileService: { clearAllForOwner: jest.Mock };
 
   beforeEach(async () => {
     agentRepo = createMockRepo();
     messageRepo = createMockRepo();
     executionService = {
-      createForChat: jest.fn(async () => ({ executionId: EXECUTION_ID })),
+      createForChat: jest.fn(async (_kind, content) => ({
+        execution: { executionId: EXECUTION_ID },
+        userMessage: {
+          id: 1,
+          agentId: 1,
+          role: 'user',
+          content,
+        },
+      })),
+      retireConversation: jest.fn(async () => undefined),
     };
     indexedFileService = { clearAllForOwner: jest.fn(async () => undefined) };
 
@@ -247,63 +259,18 @@ describe('AgentService', () => {
     });
   });
 
-  describe('recordAgentReply', () => {
-    it('reuses the exact agent reply when an execution is replayed', async () => {
-      const a = await service.create({ name: 'A' });
-
-      const first = await service.recordAgentReply(a.id, 'reply', EXECUTION_ID);
-      const replay = await service.recordAgentReply(
-        a.id,
-        'reply',
-        EXECUTION_ID,
-      );
-
-      expect(replay).toBe(first);
-      expect(messageRepo.store.size).toBe(1);
-    });
-
-    it('rejects a different agent reply for the same execution', async () => {
-      const a = await service.create({ name: 'A' });
-      await service.recordAgentReply(a.id, 'reply', EXECUTION_ID);
-
-      await expect(
-        service.recordAgentReply(a.id, 'different', EXECUTION_ID),
-      ).rejects.toThrow(ConflictException);
-    });
-
-    it('resets expiresAt to now + 2 days when not pinned', async () => {
-      const a = await service.create({ name: 'A' });
-      const stale = new Date(Date.now() - 60_000);
-      (agentRepo.store.get(a.id) as any).expiresAt = stale;
-
-      const before = Date.now();
-      await service.recordAgentReply(a.id, 'reply', EXECUTION_ID);
-      const after = Date.now();
-
-      const refreshed = agentRepo.store.get(a.id) as any;
-      const ts = (refreshed.expiresAt as Date).getTime();
-      expect(ts).toBeGreaterThanOrEqual(before + AGENT_DEFAULT_TTL_MS - ALMOST);
-      expect(ts).toBeLessThanOrEqual(after + AGENT_DEFAULT_TTL_MS + ALMOST);
-    });
-
-    it('keeps expiresAt null when pinned', async () => {
-      const a = await service.create({ name: 'A', pinned: true });
-      await service.recordAgentReply(a.id, 'reply', EXECUTION_ID);
-      const refreshed = agentRepo.store.get(a.id) as any;
-      expect(refreshed.expiresAt).toBeNull();
-    });
-  });
-
   describe('remove', () => {
-    it('removes the agent, its messages (via repo) and clears indexed files', async () => {
+    it('removes the agent and clears indexed files', async () => {
       const a = await service.create({ name: 'A' });
       await service.sendMessage(a.id, 'hi');
       expect(agentRepo.store.size).toBe(1);
-      expect(messageRepo.store.size).toBe(1);
-
       await service.remove(a.id);
 
       expect(agentRepo.store.size).toBe(0);
+      expect(executionService.retireConversation).toHaveBeenCalledWith(
+        'agent',
+        a.id,
+      );
       // agent_messages are cascaded by the DB FK; the mock repo doesn't
       // model FK cascade so we only assert the cascade to IndexedFile.
       expect(indexedFileService.clearAllForOwner).toHaveBeenCalledWith({

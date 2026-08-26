@@ -15,6 +15,10 @@ import { AgentEntity } from './agent.entity';
   unique: true,
   where: '"execution_id" IS NOT NULL AND "role" = \'assistant\'',
 })
+@Index('UQ_agent_messages_turn_role', ['turnId', 'role'], {
+  unique: true,
+  where: "\"role\" IN ('user', 'assistant')",
+})
 export class AgentMessageEntity {
   @PrimaryGeneratedColumn()
   id: number;
@@ -32,6 +36,10 @@ export class AgentMessageEntity {
 
   @Column({ type: 'text' })
   content: string;
+
+  @Index('IDX_agent_messages_turn_id')
+  @Column({ name: 'turn_id', type: 'uuid', nullable: true })
+  turnId: string | null;
 
   @Index('IDX_agent_messages_execution_id')
   @Column({ name: 'execution_id', type: 'uuid', nullable: true })

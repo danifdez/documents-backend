@@ -39,9 +39,7 @@ export class AgentService {
     private readonly executionService: ExecutionService,
   ) {
     this.messages = new ChatMessageStore<AgentMessageEntity>(messageRepo, {
-      conflictLabel: 'agent',
       where: (agentId) => ({ agentId }),
-      attach: (agentId, message) => ({ agentId, ...message }),
     });
   }
 
@@ -123,6 +121,7 @@ export class AgentService {
 
   async remove(id: number): Promise<void> {
     const a = await this.findOne(id);
+    await this.executionService.retireConversation('agent', a.id);
     try {
       await this.indexedFileService.clearAllForOwner({
         ownerType: 'agent',
@@ -156,52 +155,25 @@ export class AgentService {
   }> {
     const agent = await this.findOne(agentId);
 
-    const userMsg = await this.messages.appendUser(agentId, content);
-
     this.touchInteraction(agent);
     await this.agentRepo.save(agent);
 
-    // Only ship a recent slice as transport — models decides the real context
-    // window (history_turns). Never send the whole thread.
-    const conversation = await this.messages.recentConversation(agentId);
-
-    const execution = await this.executionService.createForChat(
-      'agent_chat',
-      content,
-      accessScope,
-      {
-        ownerId: agent.id,
-        systemPrompt: agent.systemPrompt ?? null,
-        folderScope: agent.folderScope,
-        conversation,
-      },
-    );
+    const { execution, userMessage } =
+      await this.executionService.createForChat(
+        'agent_chat',
+        content,
+        accessScope,
+        {
+          ownerId: agent.id,
+          systemPrompt: agent.systemPrompt ?? null,
+          folderScope: agent.folderScope,
+        },
+      );
 
     return {
-      userMessage: userMsg,
+      userMessage: userMessage as AgentMessageEntity,
       executionId: execution.executionId,
     };
-  }
-
-  async recordAgentReply(
-    agentId: number,
-    reply: string,
-    executionId: string | null,
-    error: string | null = null,
-  ): Promise<AgentMessageEntity> {
-    return this.messages.recordReply(
-      agentId,
-      reply,
-      executionId,
-      error,
-      async () => {
-        const agent = await this.agentRepo.findOne({ where: { id: agentId } });
-        if (agent) {
-          this.touchInteraction(agent);
-          await this.agentRepo.save(agent);
-        }
-      },
-    );
   }
 
   private touchInteraction(agent: AgentEntity): void {

@@ -151,6 +151,7 @@ export function buildExecution(
     executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
     rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
     parentExecutionId: null,
+    sessionId: null,
     turnId: null,
     ownerPrincipal: 'test-user',
     schemaVersion: 'execution-event/1',

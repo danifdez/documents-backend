@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException } from '@nestjs/common';
 import { AssistantService } from '../../../src/assistant/assistant.service';
 import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { AssistantMessageEntity } from '../../../src/assistant/assistant-message.entity';
@@ -9,8 +8,6 @@ import { IndexedFileService } from '../../../src/indexed-file/indexed-file.servi
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-
-const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 
 function createMockRepo() {
   const store = new Map<number, any>();
@@ -68,7 +65,15 @@ describe('AssistantService — personal assistant', () => {
           provide: ExecutionService,
           useValue: {
             createForChat: jest.fn(async () => ({
-              executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+              execution: {
+                executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+              },
+              userMessage: {
+                id: 1,
+                assistantId: 1,
+                role: 'user',
+                content: 'message',
+              },
             })),
           },
         },
@@ -84,25 +89,6 @@ describe('AssistantService — personal assistant', () => {
       expect.objectContaining({ id: 1, name: 'Assistant' }),
     ]);
     expect(assistantRepo.store.size).toBe(1);
-  });
-
-  it('reuses the exact assistant reply when an execution is replayed', async () => {
-    assistantRepo.store.set(1, { id: 1, name: 'Assistant' });
-
-    const first = await service.recordAssistantReply(1, 'reply', EXECUTION_ID);
-    const replay = await service.recordAssistantReply(1, 'reply', EXECUTION_ID);
-
-    expect(replay).toBe(first);
-    expect(messageRepo.store.size).toBe(1);
-  });
-
-  it('rejects a different assistant reply for the same execution', async () => {
-    assistantRepo.store.set(1, { id: 1, name: 'Assistant' });
-    await service.recordAssistantReply(1, 'reply', EXECUTION_ID);
-
-    await expect(
-      service.recordAssistantReply(1, 'different', EXECUTION_ID),
-    ).rejects.toThrow(ConflictException);
   });
 
   it('configures a working folder on the singleton and clears stale indexed rows', async () => {
@@ -167,7 +153,15 @@ describe('AssistantService — getMessages() pagination', () => {
           provide: ExecutionService,
           useValue: {
             createForChat: jest.fn(async () => ({
-              executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+              execution: {
+                executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
+              },
+              userMessage: {
+                id: 1,
+                assistantId: 1,
+                role: 'user',
+                content: 'message',
+              },
             })),
           },
         },

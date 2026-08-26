@@ -55,6 +55,9 @@ import { ExecutionOperationEntity } from '../execution/execution-operation.entit
 import { ExecutionToolInvocationEntity } from '../execution/execution-tool-invocation.entity';
 import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity';
 import { ExecutionConfirmationEntity } from '../execution/execution-confirmation.entity';
+import { ConversationSessionEntity } from '../conversation/conversation-session.entity';
+import { ConversationTurnEntity } from '../conversation/conversation-turn.entity';
+import { ConversationArtifactRevisionEntity } from '../conversation/conversation-artifact-revision.entity';
 
 @Module({
   imports: [
@@ -118,6 +121,9 @@ import { ExecutionConfirmationEntity } from '../execution/execution-confirmation
       ExecutionToolInvocationEntity,
       ExecutionToolPlanEntity,
       ExecutionConfirmationEntity,
+      ConversationSessionEntity,
+      ConversationTurnEntity,
+      ConversationArtifactRevisionEntity,
     ]),
   ],
   providers: [...databaseProviders],

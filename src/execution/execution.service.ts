@@ -51,6 +51,21 @@ import {
   nextBackendProducerSequence,
 } from './execution-event.writer';
 import { WorkerEntity } from '../worker/worker.entity';
+import {
+  ConversationOwnerType,
+  ConversationSessionEntity,
+} from '../conversation/conversation-session.entity';
+import {
+  ConversationTurnEntity,
+  ConversationTurnStatus,
+} from '../conversation/conversation-turn.entity';
+import {
+  ConversationArtifactMessage,
+  ConversationArtifactRevisionEntity,
+} from '../conversation/conversation-artifact-revision.entity';
+import { AssistantMessageEntity } from '../assistant/assistant-message.entity';
+import { AgentMessageEntity } from '../agent/agent-message.entity';
+import { AGENT_DEFAULT_TTL_MS } from '../agent/agent.constants';
 
 export {
   canonicalHash,
@@ -169,6 +184,13 @@ export interface CreateChildInferenceInput {
   causedByEventId: string;
 }
 
+export type ChatMessageEntity = AssistantMessageEntity | AgentMessageEntity;
+
+export interface ChatExecutionAcceptance {
+  execution: ExecutionEntity;
+  userMessage: ChatMessageEntity;
+}
+
 export interface CancellationRequestView {
   rootExecutionId: string;
   status: ExecutionStatus;
@@ -203,6 +225,334 @@ export class ExecutionService {
       user && typeof user === 'object' ? (user as Record<string, unknown>) : {};
     const owner = record.userId ?? record.sub ?? 'standalone';
     return { ownerPrincipal: String(owner) };
+  }
+
+  private contextConversation(messages: ConversationArtifactMessage[]) {
+    return messages.slice(-40).map(({ role, content }) => ({ role, content }));
+  }
+
+  private async finishConversationTurn(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    status:
+      | ConversationTurnStatus.COMPLETED
+      | ConversationTurnStatus.FAILED
+      | ConversationTurnStatus.CANCELLED,
+    response?: { reply: string; error: string | null },
+  ): Promise<ChatMessageEntity | null> {
+    if (!['assistant-chat', 'agent-chat'].includes(execution.taskType)) {
+      return null;
+    }
+    if (!execution.sessionId || !execution.turnId) {
+      throw new ConflictException('session_turn_mismatch');
+    }
+
+    const sessionRepo = manager.getRepository(ConversationSessionEntity);
+    const turnRepo = manager.getRepository(ConversationTurnEntity);
+    const session = await sessionRepo.findOne({
+      where: { sessionId: execution.sessionId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const turn = await turnRepo.findOne({
+      where: { turnId: execution.turnId, sessionId: execution.sessionId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!session || !turn) throw new ConflictException('session_turn_mismatch');
+
+    if (
+      turn.status !== ConversationTurnStatus.ACTIVE ||
+      session.activeTurnId !== turn.turnId
+    ) {
+      if (
+        [
+          ConversationTurnStatus.COMPLETED,
+          ConversationTurnStatus.FAILED,
+          ConversationTurnStatus.CANCELLED,
+        ].includes(turn.status)
+      ) {
+        return this.findConversationReply(manager, execution);
+      }
+      if (
+        turn.status === ConversationTurnStatus.QUEUED &&
+        status === ConversationTurnStatus.CANCELLED
+      ) {
+        turn.status = ConversationTurnStatus.CANCELLED;
+        turn.terminalConversationRevision = session.conversationRevision;
+        turn.finishedAt = new Date();
+        turn.version += 1;
+        await turnRepo.save(turn);
+        return null;
+      }
+      throw new ConflictException('conversation_lane_conflict');
+    }
+
+    let message: ChatMessageEntity | null = null;
+    if (response) {
+      message = await this.saveConversationReply(manager, execution, response);
+      await this.appendConversationRevision(manager, session, {
+        messageId: message.id,
+        turnId: turn.turnId,
+        role: 'assistant',
+        content: response.reply,
+        executionId: execution.executionId,
+        error: response.error,
+        createdAt: message.createdAt.toISOString(),
+      });
+      if (execution.taskType === 'assistant-chat') {
+        await manager.query(
+          `UPDATE "assistants" SET "last_seen_at" = now(), "updated_at" = now() WHERE "id" = $1`,
+          [Number(execution.payload?.ownerId)],
+        );
+      } else {
+        await manager.query(
+          `UPDATE "agents"
+           SET "last_seen_at" = now(),
+               "expires_at" = CASE
+                 WHEN "pinned" THEN NULL
+                 ELSE now() + ($2 * interval '1 millisecond')
+               END,
+               "updated_at" = now()
+           WHERE "id" = $1`,
+          [Number(execution.payload?.ownerId), AGENT_DEFAULT_TTL_MS],
+        );
+      }
+    }
+
+    turn.status = status;
+    turn.terminalConversationRevision = session.conversationRevision;
+    turn.finishedAt = new Date();
+    turn.version += 1;
+    session.activeTurnId = null;
+    session.version += 1;
+    await turnRepo.save(turn);
+    await this.promoteNextConversationTurn(manager, session);
+    await sessionRepo.save(session);
+    return message;
+  }
+
+  private findConversationReply(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+  ): Promise<ChatMessageEntity | null> {
+    const where = { turnId: execution.turnId!, role: 'assistant' as const };
+    return execution.taskType === 'assistant-chat'
+      ? manager.getRepository(AssistantMessageEntity).findOne({ where })
+      : manager.getRepository(AgentMessageEntity).findOne({ where });
+  }
+
+  private async saveConversationReply(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    response: { reply: string; error: string | null },
+  ): Promise<ChatMessageEntity> {
+    const ownerId = Number(execution.payload?.ownerId);
+    if (!Number.isInteger(ownerId) || ownerId < 1) {
+      throw new ConflictException('invalid_conversation_owner');
+    }
+    const existing = await this.findConversationReply(manager, execution);
+    if (existing) {
+      if (
+        existing.content !== response.reply ||
+        existing.error !== response.error
+      ) {
+        throw new ConflictException('conversation_reply_conflict');
+      }
+      return existing;
+    }
+
+    if (execution.taskType === 'assistant-chat') {
+      const repo = manager.getRepository(AssistantMessageEntity);
+      return repo.save(
+        repo.create({
+          assistantId: ownerId,
+          role: 'assistant',
+          content: response.reply,
+          turnId: execution.turnId,
+          executionId: execution.executionId,
+          error: response.error,
+          event: null,
+        }),
+      );
+    }
+    const repo = manager.getRepository(AgentMessageEntity);
+    return repo.save(
+      repo.create({
+        agentId: ownerId,
+        role: 'assistant',
+        content: response.reply,
+        turnId: execution.turnId,
+        executionId: execution.executionId,
+        error: response.error,
+        event: null,
+      }),
+    );
+  }
+
+  private async appendConversationRevision(
+    manager: EntityManager,
+    session: ConversationSessionEntity,
+    message: ConversationArtifactMessage,
+  ): Promise<ConversationArtifactMessage[]> {
+    const revisionRepo = manager.getRepository(
+      ConversationArtifactRevisionEntity,
+    );
+    const previous = await revisionRepo.findOneByOrFail({
+      artifactId: session.conversationArtifactId,
+      revision: session.conversationRevision,
+    });
+    const messages = [...previous.messages, message];
+    const revision = session.conversationRevision + 1;
+    await revisionRepo.save(
+      revisionRepo.create({
+        artifactId: session.conversationArtifactId,
+        revision,
+        sessionId: session.sessionId,
+        parentRevision: session.conversationRevision,
+        contentHash: canonicalHash(messages),
+        messages,
+      }),
+    );
+    session.conversationRevision = revision;
+    session.version += 1;
+    return messages;
+  }
+
+  private async promoteNextConversationTurn(
+    manager: EntityManager,
+    session: ConversationSessionEntity,
+  ): Promise<void> {
+    const turnRepo = manager.getRepository(ConversationTurnEntity);
+    const next = await turnRepo.findOne({
+      where: {
+        sessionId: session.sessionId,
+        status: ConversationTurnStatus.QUEUED,
+      },
+      order: { createdAt: 'ASC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!next) return;
+
+    const userMessage =
+      session.ownerType === 'assistant'
+        ? await manager.getRepository(AssistantMessageEntity).findOneByOrFail({
+            turnId: next.turnId,
+            role: 'user',
+          })
+        : await manager.getRepository(AgentMessageEntity).findOneByOrFail({
+            turnId: next.turnId,
+            role: 'user',
+          });
+    const messages = await this.appendConversationRevision(manager, session, {
+      messageId: userMessage.id,
+      turnId: next.turnId,
+      role: 'user',
+      content: userMessage.content,
+      executionId: null,
+      error: null,
+      createdAt: userMessage.createdAt.toISOString(),
+    });
+
+    next.status = ConversationTurnStatus.ACTIVE;
+    next.startingConversationRevision = session.conversationRevision;
+    next.version += 1;
+    session.activeTurnId = next.turnId;
+    session.version += 1;
+    await turnRepo.save(next);
+
+    const executionRepo = manager.getRepository(ExecutionEntity);
+    const nextExecution = await executionRepo.findOne({
+      where: { executionId: next.rootExecutionId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!nextExecution?.lastEventId) {
+      throw new ConflictException('queued_turn_execution_missing');
+    }
+    nextExecution.payload = {
+      ...(nextExecution.payload ?? {}),
+      conversation: this.contextConversation(messages),
+    };
+    await executionRepo.save(nextExecution);
+    await createExecutionStep(manager, {
+      executionId: nextExecution.executionId,
+      stepKind: ExecutionStepKind.INFERENCE,
+      inputArtifactRefs: [
+        { role: 'user_message', artifactId: next.requestArtifactId },
+      ],
+      work: {
+        taskType: nextExecution.taskType,
+        payload: nextExecution.payload,
+      },
+      requiredCapabilities: [nextExecution.taskType],
+      priority: STEP_PRIORITY[ExecutionPriority.HIGH],
+      causedByEventId: nextExecution.lastEventId,
+    });
+  }
+
+  private chatPublication(
+    execution: ExecutionEntity,
+    message: ChatMessageEntity | null,
+  ): ExecutionPublication | undefined {
+    if (!message) return undefined;
+    const ownerId = Number(execution.payload?.ownerId);
+    const payload = {
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      executionId: message.executionId,
+      error: message.error,
+      event: message.event,
+      createdAt: message.createdAt.toISOString(),
+    };
+    return execution.taskType === 'assistant-chat'
+      ? {
+          socketEvent: 'assistantResponse',
+          payload: {
+            assistantId: ownerId,
+            executionId: execution.executionId,
+            message: { ...payload, assistantId: ownerId },
+          },
+        }
+      : {
+          socketEvent: 'agentResponse',
+          payload: {
+            agentId: ownerId,
+            executionId: execution.executionId,
+            message: { ...payload, agentId: ownerId },
+          },
+        };
+  }
+
+  async retireConversation(
+    ownerType: ConversationOwnerType,
+    ownerId: number,
+  ): Promise<void> {
+    const session = await this.dataSource
+      .getRepository(ConversationSessionEntity)
+      .findOneBy({ ownerType, ownerId });
+    if (!session) return;
+    const turns = await this.dataSource
+      .getRepository(ConversationTurnEntity)
+      .find({
+        where: {
+          sessionId: session.sessionId,
+          status: In([
+            ConversationTurnStatus.ACTIVE,
+            ConversationTurnStatus.QUEUED,
+          ]),
+        },
+        order: { createdAt: 'ASC' },
+      });
+    for (const turn of turns) {
+      await this.updateStatus(
+        turn.rootExecutionId,
+        ExecutionStatus.CANCELLED,
+        undefined,
+        {
+          cancellationReason: `${ownerType}_deleted`,
+          completionReason: `${ownerType}_deleted`,
+        },
+      );
+    }
   }
 
   async requestCancellation(
@@ -457,6 +807,7 @@ export class ExecutionService {
       executionId,
       rootExecutionId: root.rootExecutionId,
       parentExecutionId: parent.executionId,
+      sessionId: parent.sessionId,
       turnId: parent.turnId,
       ownerPrincipal: parent.ownerPrincipal,
       schemaVersion: EXECUTION_SCHEMA,
@@ -527,26 +878,139 @@ export class ExecutionService {
     message: string,
     scope: ExecutionAccessScope,
     payload: Record<string, unknown>,
-  ): Promise<ExecutionEntity> {
+  ): Promise<ChatExecutionAcceptance> {
     const executionId = randomUUID();
     const rootExecutionId = executionId;
+    const sessionId = randomUUID();
     const turnId = randomUUID();
     const artifactId = randomUUID();
+    const conversationArtifactId = randomUUID();
     const sourceId = randomUUID();
     const safeMessage = redactExecutionText(message);
     const body = Buffer.from(safeMessage, 'utf8');
+    const ownerType: ConversationOwnerType =
+      executionKind === 'assistant_chat' ? 'assistant' : 'agent';
+    const ownerId = Number(payload.ownerId);
+    if (!Number.isInteger(ownerId) || ownerId < 1) {
+      throw new BadRequestException('invalid_conversation_owner');
+    }
 
     return this.dataSource.transaction(async (manager) => {
+      const ownerTable = ownerType === 'assistant' ? 'assistants' : 'agents';
+      const ownerRows = await manager.query(
+        `SELECT "id" FROM "${ownerTable}" WHERE "id" = $1 FOR UPDATE`,
+        [ownerId],
+      );
+      if (!ownerRows.length)
+        throw new NotFoundException(`${ownerType}_not_found`);
+
+      const sessionRepo = manager.getRepository(ConversationSessionEntity);
+      let session = await sessionRepo.findOne({
+        where: { ownerType, ownerId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!session) {
+        session = await sessionRepo.save(
+          sessionRepo.create({
+            sessionId,
+            ownerType,
+            ownerId,
+            conversationArtifactId,
+            conversationRevision: 0,
+            activeTurnId: null,
+            version: 1,
+          }),
+        );
+      }
+
+      const obtainsLane = session.activeTurnId === null;
+      const startingRevision = obtainsLane
+        ? session.conversationRevision + 1
+        : session.conversationRevision;
+      const turnRepo = manager.getRepository(ConversationTurnEntity);
+      const turn = await turnRepo.save(
+        turnRepo.create({
+          turnId,
+          sessionId: session.sessionId,
+          rootExecutionId,
+          requestArtifactId: artifactId,
+          requestArtifactRevision: 1,
+          startingConversationRevision: startingRevision,
+          terminalConversationRevision: null,
+          status: obtainsLane
+            ? ConversationTurnStatus.ACTIVE
+            : ConversationTurnStatus.QUEUED,
+          version: 1,
+          finishedAt: null,
+        }),
+      );
+
+      const messageRepo = manager.getRepository(
+        ownerType === 'assistant' ? AssistantMessageEntity : AgentMessageEntity,
+      );
+      const userMessage = await messageRepo.save(
+        messageRepo.create({
+          [`${ownerType}Id`]: ownerId,
+          role: 'user',
+          content: safeMessage,
+          turnId,
+          executionId: null,
+          error: null,
+          event: null,
+        }),
+      );
+
+      const revisionRepo = manager.getRepository(
+        ConversationArtifactRevisionEntity,
+      );
+      const previous = session.conversationRevision
+        ? await revisionRepo.findOneByOrFail({
+            artifactId: session.conversationArtifactId,
+            revision: session.conversationRevision,
+          })
+        : null;
+      const userArtifactMessage: ConversationArtifactMessage = {
+        messageId: userMessage.id,
+        turnId,
+        role: 'user',
+        content: safeMessage,
+        executionId: null,
+        error: null,
+        createdAt: userMessage.createdAt.toISOString(),
+      };
+      const conversationMessages: ConversationArtifactMessage[] = obtainsLane
+        ? [...(previous?.messages ?? []), userArtifactMessage]
+        : (previous?.messages ?? []);
+      if (obtainsLane) {
+        await revisionRepo.save(
+          revisionRepo.create({
+            artifactId: session.conversationArtifactId,
+            revision: startingRevision,
+            sessionId: session.sessionId,
+            parentRevision: session.conversationRevision || null,
+            contentHash: canonicalHash(conversationMessages),
+            messages: conversationMessages,
+          }),
+        );
+        session.conversationRevision = startingRevision;
+      }
+      session.version += 1;
+      if (obtainsLane) session.activeTurnId = turn.turnId;
+      await sessionRepo.save(session);
+
+      const conversation = this.contextConversation(conversationMessages);
+      const executionPayload = { ...payload, conversation };
       const execution = manager.getRepository(ExecutionEntity).create({
         executionId,
         rootExecutionId,
         parentExecutionId: null,
+        sessionId: session.sessionId,
         turnId,
         ownerPrincipal: scope.ownerPrincipal,
         schemaVersion: EXECUTION_SCHEMA,
         taskType:
           executionKind === 'assistant_chat' ? 'assistant-chat' : 'agent-chat',
-        payload,
+        payload: executionPayload,
         status: ExecutionStatus.QUEUED,
         phase: null,
         cancellationRequestedAt: null,
@@ -652,16 +1116,18 @@ export class ExecutionService {
       );
       execution.lastSequence = '3';
       execution.lastEventId = sourceEvent.eventId;
-      await createExecutionStep(manager, {
-        executionId,
-        stepKind: ExecutionStepKind.INFERENCE,
-        inputArtifactRefs: [{ role: 'user_message', artifactId }],
-        work: { taskType: execution.taskType, payload },
-        requiredCapabilities: [execution.taskType],
-        priority: STEP_PRIORITY[ExecutionPriority.HIGH],
-        causedByEventId: sourceEvent.eventId,
-      });
-      return manager.save(execution);
+      if (obtainsLane) {
+        await createExecutionStep(manager, {
+          executionId,
+          stepKind: ExecutionStepKind.INFERENCE,
+          inputArtifactRefs: [{ role: 'user_message', artifactId }],
+          work: { taskType: execution.taskType, payload: executionPayload },
+          requiredCapabilities: [execution.taskType],
+          priority: STEP_PRIORITY[ExecutionPriority.HIGH],
+          causedByEventId: sourceEvent.eventId,
+        });
+      }
+      return { execution: await manager.save(execution), userMessage };
     });
   }
 
@@ -712,7 +1178,8 @@ export class ExecutionService {
         executionId,
         rootExecutionId,
         parentExecutionId: options?.parentExecutionId ?? null,
-        turnId: null,
+        sessionId: parent?.sessionId ?? null,
+        turnId: parent?.turnId ?? null,
         ownerPrincipal:
           eventRoot?.ownerPrincipal ?? options?.ownerPrincipal ?? 'system',
         schemaVersion: EXECUTION_SCHEMA,
@@ -1013,6 +1480,18 @@ export class ExecutionService {
           ).slice(0, 500);
           execution.error = null;
         }
+      }
+
+      if (TERMINAL_STATES.has(status)) {
+        await this.finishConversationTurn(
+          manager,
+          execution,
+          status === ExecutionStatus.COMPLETED
+            ? ConversationTurnStatus.COMPLETED
+            : status === ExecutionStatus.CANCELLED
+              ? ConversationTurnStatus.CANCELLED
+              : ConversationTurnStatus.FAILED,
+        );
       }
 
       const lastProducerEvent = await eventRepo.findOne({
@@ -1424,6 +1903,16 @@ export class ExecutionService {
         error,
         completion,
       );
+      const conversationMessage = await this.finishConversationTurn(
+        manager,
+        execution,
+        error
+          ? ConversationTurnStatus.FAILED
+          : ConversationTurnStatus.COMPLETED,
+        { reply: redactExecutionText(reply), error },
+      );
+      const resolvedPublication =
+        publication ?? this.chatPublication(execution, conversationMessage);
       let lastEventId = execution.lastEventId ?? root.lastEventId;
       let terminalEventId: string | null = null;
       let sequence = Number(root.lastSequence);
@@ -1616,7 +2105,7 @@ export class ExecutionService {
           manager,
           execution,
           terminalEventId,
-          publication,
+          resolvedPublication,
         );
       }
     });

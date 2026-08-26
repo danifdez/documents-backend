@@ -16,6 +16,7 @@ import type {
 @Index('IDX_executions_owner', ['ownerPrincipal'])
 @Index('IDX_executions_root', ['rootExecutionId'])
 @Index('IDX_executions_parent', ['parentExecutionId'])
+@Index('IDX_executions_session', ['sessionId'])
 export class ExecutionEntity {
   @PrimaryColumn({ name: 'execution_id', type: 'uuid' })
   executionId: string;
@@ -25,6 +26,9 @@ export class ExecutionEntity {
 
   @Column({ name: 'parent_execution_id', type: 'uuid', nullable: true })
   parentExecutionId: string | null;
+
+  @Column({ name: 'session_id', type: 'uuid', nullable: true })
+  sessionId: string | null;
 
   @Column({ name: 'turn_id', type: 'uuid', nullable: true })
   turnId: string | null;

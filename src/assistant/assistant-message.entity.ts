@@ -18,6 +18,10 @@ import { AssistantEntity } from './assistant.entity';
     where: '"execution_id" IS NOT NULL AND "role" = \'assistant\'',
   },
 )
+@Index('UQ_assistant_messages_turn_role', ['turnId', 'role'], {
+  unique: true,
+  where: "\"role\" IN ('user', 'assistant')",
+})
 export class AssistantMessageEntity {
   @PrimaryGeneratedColumn()
   id: number;
@@ -35,6 +39,10 @@ export class AssistantMessageEntity {
 
   @Column({ type: 'text' })
   content: string;
+
+  @Index()
+  @Column({ name: 'turn_id', type: 'uuid', nullable: true })
+  turnId: string | null;
 
   @Index()
   @Column({ name: 'execution_id', type: 'uuid', nullable: true })
