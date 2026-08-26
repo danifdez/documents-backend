@@ -59,6 +59,7 @@ export class WorkerService {
     maximumConcurrency: number,
     metadata: Record<string, unknown>,
   ): Promise<{ worker: WorkerEntity; credential: string }> {
+    this.assertModelsStepKinds(stepKinds);
     return this.register(
       id,
       name,
@@ -195,6 +196,7 @@ export class WorkerService {
     metadata: Record<string, unknown>,
   ): Promise<void> {
     this.assertMaximumConcurrency(maximumConcurrency);
+    this.assertModelsStepKinds(stepKinds);
     await this.repo.update(id, {
       capabilities: [...new Set(capabilities)],
       stepKinds: [...new Set(stepKinds)],
@@ -359,6 +361,12 @@ export class WorkerService {
   private assertMaximumConcurrency(value: number): void {
     if (!Number.isInteger(value) || value < 1 || value > 64) {
       throw new BadRequestException('invalid_worker_concurrency');
+    }
+  }
+
+  private assertModelsStepKinds(stepKinds: ExecutionStepKind[]): void {
+    if (stepKinds.includes(ExecutionStepKind.TOOL)) {
+      throw new BadRequestException('models_tool_steps_not_allowed');
     }
   }
 }

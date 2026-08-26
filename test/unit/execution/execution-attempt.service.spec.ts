@@ -18,6 +18,7 @@ import { ExecutionEventEntity } from '../../../src/execution/execution-event.ent
 import { ExecutionOperationKind } from '../../../src/execution/execution-operation-kind.enum';
 import { ExecutionArtifactEntity } from '../../../src/execution/execution-artifact.entity';
 import { WorkerEntity } from '../../../src/worker/worker.entity';
+import { WorkerKind } from '../../../src/worker/worker-kind.enum';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -686,6 +687,29 @@ describe('ExecutionAttemptService', () => {
       }),
     ).rejects.toThrow('claim_capabilities_not_registered');
     expect(attemptRepo.count).not.toHaveBeenCalled();
+  });
+
+  it('does not let a registered Models worker claim tool work', async () => {
+    workerRepo.findOne.mockResolvedValue({
+      id: WORKER_ID,
+      workerKind: WorkerKind.MODELS,
+      status: 'online',
+      stepKinds: [ExecutionStepKind.TOOL],
+      capabilities: ['tool.browser.read_current_page/1'],
+      maximumConcurrency: 1,
+    });
+
+    await expect(
+      service.claimReadyStep({
+        workerId: WORKER_ID,
+        stepKinds: [ExecutionStepKind.TOOL],
+        capabilities: ['tool.browser.read_current_page/1'],
+        leaseDurationMs: 30_000,
+        enforceRegisteredWorkerCapacity: true,
+      }),
+    ).rejects.toThrow('models_tool_steps_not_allowed');
+    expect(attemptRepo.count).not.toHaveBeenCalled();
+    expect(manager.query).not.toHaveBeenCalled();
   });
 
   it('does not grant work for a terminal execution', async () => {

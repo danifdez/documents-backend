@@ -13,6 +13,7 @@ import {
   MoreThan,
 } from 'typeorm';
 import { WorkerEntity } from '../worker/worker.entity';
+import { WorkerKind } from '../worker/worker-kind.enum';
 import {
   ClaimExecutionStepInput,
   GrantExecutionStepAttemptInput,
@@ -171,6 +172,12 @@ export class ExecutionAttemptService {
         });
         if (!worker || worker.status !== 'online' || worker.revokedAt) {
           throw new ConflictException('worker_not_available');
+        }
+        if (
+          worker.workerKind === WorkerKind.MODELS &&
+          stepKinds.includes(ExecutionStepKind.TOOL)
+        ) {
+          throw new BadRequestException('models_tool_steps_not_allowed');
         }
         if (
           stepKinds.some((kind) => !worker.stepKinds.includes(kind)) ||

@@ -78,6 +78,35 @@ describe('WorkerService', () => {
     expect(registration.credential).not.toContain('sha256:');
   });
 
+  it('does not register Models as a tool worker', async () => {
+    await expect(
+      service.registerModels(
+        '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+        'Models',
+        ['tool.browser.read_current_page/1'],
+        [ExecutionStepKind.TOOL],
+        1,
+        {},
+      ),
+    ).rejects.toThrow('models_tool_steps_not_allowed');
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('does not let a Models heartbeat escalate into tool work', async () => {
+    repo.update = jest.fn();
+
+    await expect(
+      service.heartbeat(
+        '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+        ['tool.browser.read_current_page/1'],
+        [ExecutionStepKind.TOOL],
+        1,
+        {},
+      ),
+    ).rejects.toThrow('models_tool_steps_not_allowed');
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
   it('revokes only a browser owned by the current principal', async () => {
     const queryBuilder = repo.createQueryBuilder!() as any;
     const worker = buildWorker({
