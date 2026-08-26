@@ -166,6 +166,13 @@ export interface CreateChildInferenceInput {
   causedByEventId: string;
 }
 
+export interface CancellationRequestView {
+  rootExecutionId: string;
+  status: ExecutionStatus;
+  cancellationRequestedAt: string;
+  cancellationReason: string;
+}
+
 type CreateSingleStepExecutionOptions = Omit<
   CreateExecutionOptions,
   'initialStep' | 'steps'
@@ -195,6 +202,227 @@ export class ExecutionService {
     return { ownerPrincipal: String(owner) };
   }
 
+  async requestCancellation(
+    rootExecutionId: string,
+    scope: ExecutionAccessScope,
+    reason?: string,
+  ): Promise<CancellationRequestView> {
+    const rawReason = String(reason ?? '').trim() || 'Cancelled by user';
+    const cancellationReason = redactExecutionText(rawReason).slice(0, 500);
+    const requested = await this.dataSource.transaction(async (manager) => {
+      const executionRepo = manager.getRepository(ExecutionEntity);
+      const root = await executionRepo.findOne({
+        where: {
+          executionId: rootExecutionId,
+          rootExecutionId,
+          ownerPrincipal: scope.ownerPrincipal,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!root) throw new NotFoundException('Execution not found');
+      if (root.status === ExecutionStatus.CANCELLED) return root;
+      if (
+        [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED].includes(
+          root.status,
+        )
+      ) {
+        throw new ConflictException('execution_terminal');
+      }
+      if (root.cancellationRequestedAt) return root;
+
+      const executions = await executionRepo.find({
+        where: { rootExecutionId },
+        order: { createdAt: 'ASC' },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const active = executions
+        .filter((execution) => !TERMINAL_STATES.has(execution.status))
+        .map((execution) =>
+          execution.executionId === root.executionId ? root : execution,
+        );
+      const now = new Date();
+      const eventRepo = manager.getRepository(ExecutionEventEntity);
+      const rows = await eventRepo.find({
+        where: { rootExecutionId },
+        order: { sequence: 'ASC' },
+      });
+      let producerSequence = nextBackendProducerSequence(rows);
+      let sequence = Number(root.lastSequence);
+      let lastEventId = root.lastEventId;
+
+      for (const execution of active) {
+        const previousPhase = execution.phase;
+        execution.cancellationRequestedAt = now;
+        execution.cancellationReason = cancellationReason;
+        execution.phase = 'cancellation_requested';
+        execution.waitReason = null;
+        execution.waitCondition = null;
+        execution.resumePhase = null;
+        execution.waitExpiresAt = null;
+        const event = await this.appendBackendEvent(
+          manager,
+          root,
+          producerSequence++,
+          {
+            eventType: 'execution.state_changed',
+            payloadSchema: 'execution.state_changed/1',
+            payload: {
+              from: execution.status,
+              to: execution.status,
+              phase: 'cancellation_requested',
+              reason: cancellationReason,
+              previousPhase,
+            },
+            actor: { type: 'user', principal: scope.ownerPrincipal },
+            executionId: execution.executionId,
+            turnId: execution.turnId,
+            causedByEventId: lastEventId,
+            artifactRefs: [],
+            redactionApplied: cancellationReason !== rawReason,
+          },
+          ++sequence,
+        );
+        execution.lastSequence = String(sequence);
+        execution.lastEventId = event.eventId;
+        lastEventId = event.eventId;
+      }
+
+      await manager.query(
+        `
+          UPDATE "execution_steps" step
+          SET "status" = 'cancelled',
+              "version" = "version" + 1,
+              "updated_at" = $2
+          FROM "executions" execution
+          WHERE step."execution_id" = execution."execution_id"
+            AND execution."root_execution_id" = $1
+            AND step."status" IN ('blocked', 'ready')
+        `,
+        [rootExecutionId, now],
+      );
+      await manager.query(
+        `
+          UPDATE "execution_operations" operation
+          SET "status" = 'cancelled',
+              "finished_at" = $2,
+              "updated_at" = $2
+          FROM "execution_steps" step, "executions" execution
+          WHERE operation."step_id" = step."step_id"
+            AND step."execution_id" = execution."execution_id"
+            AND execution."root_execution_id" = $1
+            AND step."status" = 'cancelled'
+            AND operation."status" IN ('planned', 'prepared')
+        `,
+        [rootExecutionId, now],
+      );
+      await manager.query(
+        `
+          UPDATE "execution_confirmations" confirmation
+          SET "status" = 'denied',
+              "decided_by" = $2,
+              "decided_at" = $3,
+              "updated_at" = $3
+          FROM "executions" execution
+          WHERE confirmation."execution_id" = execution."execution_id"
+            AND execution."root_execution_id" = $1
+            AND confirmation."status" = 'pending'
+        `,
+        [rootExecutionId, scope.ownerPrincipal, now],
+      );
+
+      root.lastSequence = String(sequence);
+      root.lastEventId = lastEventId;
+      await executionRepo.save(active);
+      const publicationEventId = lastEventId;
+      if (publicationEventId) {
+        const outboxRepo = manager.getRepository(ExecutionOutboxEntity);
+        await outboxRepo.save(
+          outboxRepo.create({
+            outboxId: randomUUID(),
+            executionId: rootExecutionId,
+            eventId: publicationEventId,
+            schemaVersion: 'execution-outbox/1',
+            socketEvent: 'executionCancellationRequested',
+            payload: {
+              rootExecutionId,
+              taskType: root.taskType,
+              ownerId: root.payload?.ownerId ?? null,
+              cancellationReason,
+              cancellationRequestedAt: now.toISOString(),
+            },
+            status: ExecutionOutboxStatus.PENDING,
+            attempts: 0,
+            availableAt: now,
+            leaseExpiresAt: null,
+            publishedAt: null,
+            lastError: null,
+          }),
+        );
+      }
+      return root;
+    });
+
+    await this.reconcileRequestedCancellations(100);
+    const current = await this.executionRepo.findOneByOrFail({
+      executionId: requested.executionId,
+    });
+    return {
+      rootExecutionId,
+      status: current.status,
+      cancellationRequestedAt: (
+        current.cancellationRequestedAt ??
+        current.completedAt ??
+        new Date()
+      ).toISOString(),
+      cancellationReason: current.cancellationReason ?? cancellationReason,
+    };
+  }
+
+  async reconcileRequestedCancellations(limit = 20): Promise<number> {
+    let reconciled = 0;
+    while (reconciled < limit) {
+      const rows = await this.dataSource.query(
+        `
+          SELECT execution."execution_id"
+          FROM "executions" execution
+          WHERE execution."cancellation_requested_at" IS NOT NULL
+            AND execution."status" NOT IN ('completed', 'failed', 'cancelled')
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "execution_steps" step
+              WHERE step."execution_id" = execution."execution_id"
+                AND step."status" IN ('blocked', 'ready', 'running', 'result_received')
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "executions" child
+              WHERE child."parent_execution_id" = execution."execution_id"
+                AND child."status" NOT IN ('completed', 'failed', 'cancelled')
+            )
+          ORDER BY execution."created_at" DESC
+          LIMIT 1
+        `,
+      );
+      if (!rows.length) break;
+      const execution = await this.executionRepo.findOneBy({
+        executionId: String(rows[0].execution_id),
+      });
+      if (!execution) continue;
+      await this.updateStatus(
+        execution.executionId,
+        ExecutionStatus.CANCELLED,
+        undefined,
+        {
+          completionReason: 'user_cancelled',
+          cancellationReason:
+            execution.cancellationReason ?? 'Cancelled by user',
+        },
+      );
+      reconciled += 1;
+    }
+    return reconciled;
+  }
+
   async createChildInference(
     manager: EntityManager,
     parent: ExecutionEntity,
@@ -212,6 +440,9 @@ export class ExecutionService {
             lock: { mode: 'pessimistic_write' },
           });
     if (!root) throw new NotFoundException('Root execution not found');
+    if (root.cancellationRequestedAt || parent.cancellationRequestedAt) {
+      throw new ConflictException('execution_cancellation_requested');
+    }
     const cause = await manager.getRepository(ExecutionEventEntity).findOneBy({
       eventId: input.causedByEventId,
       rootExecutionId: root.rootExecutionId,
@@ -234,6 +465,8 @@ export class ExecutionService {
       waitCondition: null,
       resumePhase: null,
       waitExpiresAt: null,
+      cancellationRequestedAt: null,
+      cancellationReason: null,
       completionKind: null,
       completionReason: null,
       result: null,
@@ -313,6 +546,8 @@ export class ExecutionService {
         payload,
         status: ExecutionStatus.QUEUED,
         phase: null,
+        cancellationRequestedAt: null,
+        cancellationReason: null,
         completionKind: null,
         completionReason: null,
         result: null,
@@ -448,6 +683,9 @@ export class ExecutionService {
           lock: { mode: 'pessimistic_write' },
         });
         if (!eventRoot) throw new NotFoundException('Root execution not found');
+        if (eventRoot.cancellationRequestedAt) {
+          throw new ConflictException('execution_cancellation_requested');
+        }
         parent = await executionRepo.findOne({
           where: {
             executionId: options.parentExecutionId,
@@ -455,6 +693,9 @@ export class ExecutionService {
           },
         });
         if (!parent) throw new NotFoundException('Parent execution not found');
+        if (parent.cancellationRequestedAt) {
+          throw new ConflictException('execution_cancellation_requested');
+        }
         if (
           options.ownerPrincipal &&
           options.ownerPrincipal !== eventRoot.ownerPrincipal
@@ -476,6 +717,8 @@ export class ExecutionService {
         payload,
         status: ExecutionStatus.QUEUED,
         phase: null,
+        cancellationRequestedAt: null,
+        cancellationReason: null,
         completionKind: null,
         completionReason: null,
         result: null,
@@ -703,6 +946,7 @@ export class ExecutionService {
     options?: {
       completionKind?: string;
       completionReason?: string;
+      cancellationReason?: string;
       publication?: ExecutionPublication;
     },
   ): Promise<ExecutionEntity | null> {
@@ -757,6 +1001,15 @@ export class ExecutionService {
             message: redactExecutionText(failureMessage ?? 'Execution failed'),
           };
         }
+        if (status === ExecutionStatus.CANCELLED) {
+          execution.cancellationRequestedAt ??= new Date();
+          execution.cancellationReason = redactExecutionText(
+            options?.cancellationReason ??
+              execution.cancellationReason ??
+              'Cancelled',
+          ).slice(0, 500);
+          execution.error = null;
+        }
       }
 
       const lastProducerEvent = await eventRepo.findOne({
@@ -786,6 +1039,10 @@ export class ExecutionService {
               : undefined,
             result: TERMINAL_STATES.has(status) ? execution.result : undefined,
             error: TERMINAL_STATES.has(status) ? execution.error : undefined,
+            reason:
+              status === ExecutionStatus.CANCELLED
+                ? execution.cancellationReason
+                : undefined,
           },
           actor: { type: 'system' },
           executionId: execution.executionId,

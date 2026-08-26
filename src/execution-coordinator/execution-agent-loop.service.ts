@@ -64,6 +64,7 @@ export class ExecutionAgentLoopService {
             AND step."budget_reservation_id" IS NULL
             AND execution."task_type" = ANY($1::text[])
             AND execution."status" IN ('queued', 'running')
+            AND execution."cancellation_requested_at" IS NULL
           ORDER BY step."priority" DESC, step."available_at", step."created_at"
           LIMIT 1
         `,
@@ -92,6 +93,7 @@ export class ExecutionAgentLoopService {
           AND receipt."result" #>> '{output,outcome,kind}' = 'tool_requests'
           AND execution."task_type" = ANY($2::text[])
           AND execution."status" IN ('queued', 'running')
+          AND execution."cancellation_requested_at" IS NULL
         ORDER BY receipt."received_at"
         LIMIT $1
       `,
@@ -118,6 +120,7 @@ export class ExecutionAgentLoopService {
           AND step."result" #>> '{outcome,kind}' = 'tool_requests'
           AND execution."task_type" = ANY($2::text[])
           AND execution."status" IN ('queued', 'running')
+          AND execution."cancellation_requested_at" IS NULL
           AND COALESCE(execution."phase", '') NOT LIKE 'terminal_pending_%'
         ORDER BY step."updated_at"
         LIMIT $1

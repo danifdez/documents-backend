@@ -75,6 +75,7 @@ export class ExecutionConfirmationService {
       ) {
         return 0;
       }
+      if (execution.cancellationRequestedAt) return 0;
       const confirmations = await manager
         .getRepository(ExecutionConfirmationEntity)
         .find({

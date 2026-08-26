@@ -491,6 +491,9 @@ export class ExecutionToolPlanService {
     ) {
       throw new ConflictException('execution_not_active');
     }
+    if (execution.cancellationRequestedAt) {
+      throw new ConflictException('execution_cancellation_requested');
+    }
     return execution;
   }
 

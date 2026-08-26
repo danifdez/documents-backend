@@ -17,6 +17,7 @@ import { AddExecutionOutputArtifacts1757668140600 } from '../migrations/17576681
 import { AddWorkerConcurrency1757668140700 } from '../migrations/1757668140700-AddWorkerConcurrency';
 import { RemoveExecutionWorkspaceScope1757668140710 } from '../migrations/1757668140710-RemoveExecutionWorkspaceScope';
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
+import { AddExecutionCancellation1757668140740 } from '../migrations/1757668140740-AddExecutionCancellation';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -134,6 +135,7 @@ describe('execution PostgreSQL integration', () => {
     await new AddWorkerConcurrency1757668140700().up(runner);
     await new RemoveExecutionWorkspaceScope1757668140710().up(runner);
     await new CreateExecutionConfirmations1757668140720().up(runner);
+    await new AddExecutionCancellation1757668140740().up(runner);
     await runner.release();
 
     const config = {
@@ -552,6 +554,115 @@ describe('execution PostgreSQL integration', () => {
       lastSequence: '4',
       lastEventId: treeEvents[3].eventId,
     });
+  });
+
+  it('propagates durable cancellation through active child attempts', async () => {
+    const ownerPrincipal = 'cancellation-tree-e2e';
+    const parent = await service.create(
+      'document-extraction',
+      ExecutionPriority.NORMAL,
+      { resourceId: 9 },
+      { ownerPrincipal },
+    );
+    const child = await service.createInference(
+      'transcribe',
+      ExecutionPriority.NORMAL,
+      { resourceId: 9 },
+      {
+        rootExecutionId: parent.executionId,
+        parentExecutionId: parent.executionId,
+        ownerPrincipal,
+      },
+    );
+    const childStep = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ executionId: child.executionId });
+    const workerId = randomUUID();
+    const attempt = await attemptService.grantAttempt({
+      stepId: childStep.stepId,
+      workerId,
+      leaseDurationMs: 30_000,
+    });
+
+    await expect(
+      service.requestCancellation(
+        parent.executionId,
+        { ownerPrincipal },
+        'User stopped the execution',
+      ),
+    ).resolves.toMatchObject({
+      rootExecutionId: parent.executionId,
+      status: ExecutionStatus.QUEUED,
+      cancellationReason: 'User stopped the execution',
+    });
+    await expect(
+      attemptService.readAttemptControl(attempt.attemptId, workerId),
+    ).resolves.toMatchObject({ cancelled: true });
+    await expect(
+      dataSource
+        .getRepository(ExecutionStepEntity)
+        .findOneByOrFail({ executionId: parent.executionId }),
+    ).resolves.toMatchObject({ status: ExecutionStepStatus.CANCELLED });
+    await expect(
+      dataSource
+        .getRepository(ExecutionStepEntity)
+        .findOneByOrFail({ executionId: child.executionId }),
+    ).resolves.toMatchObject({ status: ExecutionStepStatus.RUNNING });
+    await expect(service.reconcileRequestedCancellations()).resolves.toBe(0);
+
+    await expect(
+      attemptService.expireAttempt(
+        attempt.attemptId,
+        new Date(attempt.leaseExpiresAt.getTime() + 1),
+      ),
+    ).resolves.toBe(true);
+    await expect(service.finalizePendingTerminals()).resolves.toBe(1);
+    await expect(service.reconcileRequestedCancellations()).resolves.toBe(1);
+
+    const executions = await dataSource.getRepository(ExecutionEntity).find({
+      where: { rootExecutionId: parent.executionId },
+    });
+    expect(executions).toHaveLength(2);
+    expect(executions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          executionId: parent.executionId,
+          status: ExecutionStatus.CANCELLED,
+          cancellationReason: 'User stopped the execution',
+        }),
+        expect.objectContaining({
+          executionId: child.executionId,
+          status: ExecutionStatus.CANCELLED,
+          cancellationReason: 'User stopped the execution',
+        }),
+      ]),
+    );
+    await expect(
+      dataSource
+        .getRepository(ExecutionOperationEntity)
+        .findOneByOrFail({ operationId: childStep.operationId }),
+    ).resolves.toMatchObject({
+      status: ExecutionOperationStatus.CANCELLED,
+      currentAttemptId: null,
+    });
+    const cancellationEvents = await dataSource
+      .getRepository(ExecutionEventEntity)
+      .find({
+        where: { rootExecutionId: parent.executionId },
+        order: { sequence: 'ASC' },
+      });
+    const validator = new ExecutionContractValidator();
+    for (const event of cancellationEvents) {
+      validator.assertEvent(event.envelope);
+    }
+    expect(
+      cancellationEvents.filter(
+        (event) =>
+          event.eventType === 'execution.state_changed' &&
+          (event.envelope.payload as Record<string, unknown> | undefined)
+            ?.phase === 'cancellation_requested',
+      ),
+    ).toHaveLength(2);
   });
 
   it('commits terminal state, event and publication in one transaction', async () => {

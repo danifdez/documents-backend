@@ -38,6 +38,9 @@ export async function createExecutionStep(
     lock: { mode: 'pessimistic_write' },
   });
   if (!execution) throw new NotFoundException('execution_not_found');
+  if (execution.cancellationRequestedAt) {
+    throw new ConflictException('execution_cancellation_requested');
+  }
   const causedByEventId = input.causedByEventId ?? execution.lastEventId;
   if (!causedByEventId) {
     throw new BadRequestException('operation_cause_required');

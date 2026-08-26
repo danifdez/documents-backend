@@ -92,6 +92,9 @@ export class ExecutionProgressService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) throw new NotFoundException('Execution not found');
+      if (execution.cancellationRequestedAt) {
+        throw new ConflictException('execution_cancellation_requested');
+      }
       assertGrantScope(execution, request);
 
       const rows = await eventRepo.find({
@@ -255,6 +258,9 @@ export class ExecutionProgressService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) throw new NotFoundException('Execution not found');
+      if (execution.cancellationRequestedAt) {
+        throw new ConflictException('execution_cancellation_requested');
+      }
       assertReservationScope(execution, request);
 
       const rows = await eventRepo.find({

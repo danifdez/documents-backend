@@ -220,6 +220,7 @@ export class ExecutionAttemptService {
               FROM "executions"
               WHERE "executions"."execution_id" = "execution_steps"."execution_id"
                 AND "executions"."status" IN ('queued', 'running')
+                AND "executions"."cancellation_requested_at" IS NULL
             )
           ORDER BY "priority" DESC, "available_at", "created_at"
           LIMIT 1
@@ -466,6 +467,7 @@ export class ExecutionAttemptService {
         .findOneBy({ executionId: attempt.executionId });
       const cancelled =
         execution?.status === ExecutionStatus.CANCELLED ||
+        Boolean(execution?.cancellationRequestedAt) ||
         step.status === ExecutionStepStatus.CANCELLED;
       if (cancelled)
         return { leaseExpiresAt: attempt.leaseExpiresAt, cancelled };
@@ -510,6 +512,7 @@ export class ExecutionAttemptService {
     return {
       cancelled:
         execution.status === ExecutionStatus.CANCELLED ||
+        Boolean(execution.cancellationRequestedAt) ||
         step.status === ExecutionStepStatus.CANCELLED,
       leaseExpiresAt: attempt.leaseExpiresAt,
       deadline: step.deadline,
@@ -562,12 +565,24 @@ export class ExecutionAttemptService {
       step.currentAttemptId = null;
       step.version += 1;
       operation.currentAttemptId = null;
-      if (
-        [
-          ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
-          ExecutionOperationRecoveryClass.IDEMPOTENT,
-        ].includes(operation.recoveryClass)
-      ) {
+      const executionRepo = manager.getRepository(ExecutionEntity);
+      const execution = await executionRepo.findOne({
+        where: { executionId: step.executionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const cancellationRequested = Boolean(execution?.cancellationRequestedAt);
+      const safelyReplayable = [
+        ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
+        ExecutionOperationRecoveryClass.IDEMPOTENT,
+      ].includes(operation.recoveryClass);
+      if (cancellationRequested && safelyReplayable) {
+        assertStepTransition(step.status, ExecutionStepStatus.CANCELLED);
+        step.status = ExecutionStepStatus.CANCELLED;
+        operation.status = ExecutionOperationStatus.CANCELLED;
+        operation.finishedAt = now;
+        execution!.phase = 'terminal_pending_cancelled';
+        await executionRepo.save(execution!);
+      } else if (safelyReplayable) {
         assertStepTransition(step.status, ExecutionStepStatus.READY);
         step.status = ExecutionStepStatus.READY;
         operation.status = ExecutionOperationStatus.PREPARED;
@@ -583,14 +598,10 @@ export class ExecutionAttemptService {
         operation.status = ExecutionOperationStatus.UNKNOWN;
         operation.error = error;
         operation.finishedAt = now;
-        const execution = await manager.getRepository(ExecutionEntity).findOne({
-          where: { executionId: step.executionId },
-          lock: { mode: 'pessimistic_write' },
-        });
         if (execution && !this.isTerminalExecution(execution.status)) {
           execution.phase = 'terminal_pending_failed';
           execution.error = error;
-          await manager.getRepository(ExecutionEntity).save(execution);
+          await executionRepo.save(execution);
         }
       }
       await attemptRepo.save(attempt);
@@ -891,8 +902,12 @@ export class ExecutionAttemptService {
           ExecutionStatus.FAILED,
           ExecutionStatus.CANCELLED,
         ].includes(execution.status);
+        const cancellationRequested = Boolean(
+          execution.cancellationRequestedAt,
+        );
         const executionHasTerminalIntent =
           executionWasTerminal ||
+          cancellationRequested ||
           [
             'terminal_pending_failed',
             'terminal_pending_cancelled',
@@ -932,6 +947,21 @@ export class ExecutionAttemptService {
             execution.phase = step.finalizeOnFailure
               ? 'backend_failure_finalization'
               : 'terminal_pending_failed';
+          }
+        }
+        if (cancellationRequested && !executionWasTerminal) {
+          if (
+            ['succeeded', 'cancelled', 'not_executed'].includes(
+              String(acceptedStatus),
+            )
+          ) {
+            execution.phase = 'terminal_pending_cancelled';
+          } else {
+            execution.phase = 'terminal_pending_failed';
+            execution.error = acceptedError ?? {
+              code: 'operation_failed_during_cancellation',
+              message: 'An operation failed while cancellation was pending',
+            };
           }
         }
         assertAttemptTransition(
@@ -1070,6 +1100,9 @@ export class ExecutionAttemptService {
       )
     ) {
       throw new ConflictException('execution_not_active');
+    }
+    if (execution.cancellationRequestedAt) {
+      throw new ConflictException('execution_cancellation_requested');
     }
     if (
       step.stepKind === ExecutionStepKind.INFERENCE &&

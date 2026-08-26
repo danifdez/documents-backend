@@ -60,6 +60,21 @@ export class ExecutionEntity {
   waitExpiresAt: Date | null;
 
   @Column({
+    name: 'cancellation_requested_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  cancellationRequestedAt: Date | null;
+
+  @Column({
+    name: 'cancellation_reason',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
+  cancellationReason: string | null;
+
+  @Column({
     name: 'completion_kind',
     type: 'varchar',
     length: 20,
