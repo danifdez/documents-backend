@@ -322,6 +322,74 @@ describe('ExecutionAttemptService', () => {
     expect(artifactRepo.save).not.toHaveBeenCalled();
   });
 
+  it('rejects a new output artifact after cancellation was requested', async () => {
+    const body = Buffer.from('{"points":[]}');
+    attemptRepo.findOne.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      rootExecutionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: new Date(),
+    });
+
+    const ack = await service.uploadOutputArtifact(ATTEMPT_ID, WORKER_ID, {
+      artifactId: ARTIFACT_ID,
+      kind: 'vector_points',
+      contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
+      size: body.length,
+      mediaType: 'application/json',
+      bodyBase64: body.toString('base64'),
+      dataClassification: 'workspace',
+    });
+
+    expect(ack.code).toBe('stale_attempt');
+    expect(artifactRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps the duplicate artifact acknowledgement after cancellation', async () => {
+    const body = Buffer.from('{"points":[]}');
+    const contentHash = `sha256:${createHash('sha256').update(body).digest('hex')}`;
+    attemptRepo.findOne.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      rootExecutionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: new Date(),
+    });
+    artifactRepo.findOneBy.mockResolvedValue({
+      artifactId: ARTIFACT_ID,
+      rootExecutionId: EXECUTION_ID,
+      producedByAttemptId: ATTEMPT_ID,
+      kind: 'vector_points',
+      mediaType: 'application/json',
+      contentHash,
+      size: String(body.length),
+    });
+
+    const ack = await service.uploadOutputArtifact(ATTEMPT_ID, WORKER_ID, {
+      artifactId: ARTIFACT_ID,
+      kind: 'vector_points',
+      contentHash,
+      size: body.length,
+      mediaType: 'application/json',
+      bodyBase64: body.toString('base64'),
+      dataClassification: 'workspace',
+    });
+
+    expect(ack.code).toBe('duplicate');
+    expect(artifactRepo.save).not.toHaveBeenCalled();
+  });
+
   it('accepts only result artifacts produced by the same attempt', async () => {
     const attempt = runningAttempt();
     const step = {

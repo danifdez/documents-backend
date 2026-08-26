@@ -386,6 +386,13 @@ export class ExecutionAttemptService {
           ? ack('duplicate')
           : ack('artifact_conflict');
       }
+      if (
+        execution.status === ExecutionStatus.CANCELLED ||
+        execution.cancellationRequestedAt ||
+        step.status === ExecutionStepStatus.CANCELLED
+      ) {
+        return ack('stale_attempt');
+      }
 
       await artifactRepo.save(
         artifactRepo.create({
