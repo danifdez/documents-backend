@@ -481,8 +481,18 @@ export class IndexedFileService {
     const m = mimeType.toLowerCase();
     return (
       m.startsWith('text/') ||
-      m === 'application/json' ||
-      m === 'application/xml'
+      [
+        'application/json',
+        'application/xml',
+        'application/yaml',
+        'application/toml',
+        'application/javascript',
+        'application/typescript',
+        'application/x-sh',
+        'application/sql',
+        'application/x-httpd-php',
+        'image/svg+xml',
+      ].includes(m)
     );
   }
 

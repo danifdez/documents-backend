@@ -343,6 +343,26 @@ describe('IndexedFileService', () => {
       }
     });
 
+    it.each([
+      ['settings.yaml', 'application/yaml'],
+      ['workflow.ts', 'application/typescript'],
+      ['diagram.svg', 'image/svg+xml'],
+    ])('returns editable content for %s', async (filename, mimeType) => {
+      const f = await service.writeFile(owner, filename, 'editable', {
+        overwrite: false,
+      });
+
+      const result = await service.readWithSync(owner, { indexedFileId: f.id });
+
+      expect(result).toMatchObject({
+        ok: true,
+        filename,
+        mimeType,
+        content: 'editable',
+      });
+      if (result.ok) expect(result.derivedFromExtraction).toBeUndefined();
+    });
+
     it('returns not_found when the file is missing on disk and clears the index', async () => {
       const f = await service.writeFile(owner, 'a.md', 'hello', {
         overwrite: false,
