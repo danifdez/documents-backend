@@ -268,6 +268,25 @@ describe('ExecutionAttemptService', () => {
     expect(control.leaseExpiresAt).toEqual(expect.any(Date));
   });
 
+  it('revokes input artifact access after cancellation was requested', async () => {
+    attemptRepo.findOneBy.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      inputArtifactRefs: [{ role: 'source', artifactId: ARTIFACT_ID }],
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: new Date(),
+    });
+
+    await expect(
+      service.getInputArtifact(ATTEMPT_ID, WORKER_ID, ARTIFACT_ID),
+    ).rejects.toThrow('artifact_not_authorized');
+  });
+
   it('stores an output artifact under the active fenced attempt', async () => {
     const body = Buffer.from('{"points":[]}');
     attemptRepo.findOne.mockResolvedValue(runningAttempt());

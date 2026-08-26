@@ -447,6 +447,13 @@ export class ExecutionAttemptService {
       .getRepository(ExecutionEntity)
       .findOneBy({ executionId: attempt.executionId });
     if (!execution) throw new NotFoundException('execution_not_found');
+    if (
+      execution.status === ExecutionStatus.CANCELLED ||
+      execution.cancellationRequestedAt ||
+      step.status === ExecutionStepStatus.CANCELLED
+    ) {
+      throw new ConflictException('artifact_not_authorized');
+    }
     const artifact = await this.dataSource
       .getRepository(ExecutionArtifactEntity)
       .createQueryBuilder('artifact')
