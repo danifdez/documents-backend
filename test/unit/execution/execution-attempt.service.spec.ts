@@ -882,6 +882,67 @@ describe('ExecutionAttemptService', () => {
     });
   });
 
+  it('accepts a cancelled browser result before its lease expires', async () => {
+    const attempt = runningAttempt();
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue({
+      ...dispatchedOperation(),
+      operationKind: ExecutionOperationKind.TOOL_CALL,
+      recoveryClass: ExecutionOperationRecoveryClass.EFFECT_CHECKED,
+    });
+    const cancellationError = {
+      code: 'execution_cancelled',
+      message: 'Documents cancelled the assignment before the effect',
+      retryable: false,
+    };
+
+    const ack = await service.receiveResult({
+      executionId: EXECUTION_ID,
+      stepId: STEP_ID,
+      operationId: OPERATION_ID,
+      attemptId: ATTEMPT_ID,
+      workerId: WORKER_ID,
+      result: {
+        stepKind: ExecutionStepKind.TOOL,
+        status: 'cancelled',
+        output: {
+          kind: ExecutionStepKind.TOOL,
+          toolResult: {
+            schemaVersion: 'tool-result/1',
+            operationId: OPERATION_ID,
+            toolCallId: TOOL_CALL_ID,
+            status: 'cancelled',
+            content: '',
+            structuredContent: null,
+            artifactRefs: [],
+            sourceRefs: [],
+            effects: [
+              {
+                effectClass: 'external_reversible',
+                resourceKey: 'browser:active-page',
+                status: 'not_applied',
+              },
+            ],
+            error: cancellationError,
+          },
+        },
+        artifactRefs: [],
+        error: cancellationError,
+      },
+    });
+
+    expect(ack.code).toBe('received');
+    expect(attempt.status).toBe(ExecutionStepAttemptStatus.RESULT_RECEIVED);
+    expect(step.status).toBe(ExecutionStepStatus.RESULT_RECEIVED);
+  });
+
   it('rejects disagreement between StepResult and ToolResult status', async () => {
     await expect(
       service.receiveResult({
@@ -990,6 +1051,92 @@ describe('ExecutionAttemptService', () => {
             error: null,
           }),
         }),
+      }),
+    );
+  });
+
+  it('closes a cancelled browser effect as not applied during cancellation', async () => {
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RESULT_RECEIVED,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    const attempt = {
+      ...runningAttempt(),
+      status: ExecutionStepAttemptStatus.RESULT_RECEIVED,
+    };
+    const operation = {
+      ...dispatchedOperation(),
+      operationKind: ExecutionOperationKind.TOOL_CALL,
+      recoveryClass: ExecutionOperationRecoveryClass.EFFECT_CHECKED,
+    };
+    const execution = {
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      phase: 'cancellation_requested',
+      cancellationRequestedAt: new Date(),
+      result: null,
+      error: null,
+    };
+    const cancellationError = {
+      code: 'execution_cancelled',
+      message: 'Documents cancelled the assignment before the effect',
+      retryable: false,
+    };
+    const toolResult = {
+      schemaVersion: 'tool-result/1',
+      operationId: OPERATION_ID,
+      toolCallId: TOOL_CALL_ID,
+      status: 'cancelled',
+      content: '',
+      structuredContent: null,
+      artifactRefs: [],
+      sourceRefs: [],
+      effects: [
+        {
+          effectClass: 'external_reversible',
+          resourceKey: 'browser:active-page',
+          status: 'not_applied',
+        },
+      ],
+      error: cancellationError,
+    };
+    manager.query.mockResolvedValueOnce([{ step_id: STEP_ID }]);
+    stepRepo.findOneBy.mockResolvedValue(step);
+    attemptRepo.findOneBy.mockResolvedValue(attempt);
+    receiptRepo.findOne.mockResolvedValue({
+      result: {
+        stepKind: ExecutionStepKind.TOOL,
+        status: 'cancelled',
+        output: { kind: ExecutionStepKind.TOOL, toolResult },
+        artifactRefs: [],
+        error: cancellationError,
+      },
+    });
+    executionRepo.findOne.mockResolvedValue(execution);
+    operationRepo.findOne.mockResolvedValue(operation);
+
+    await expect(service.processReceivedResults()).resolves.toBe(1);
+    expect(step.status).toBe(ExecutionStepStatus.CANCELLED);
+    expect(attempt).toEqual(
+      expect.objectContaining({
+        status: ExecutionStepAttemptStatus.CLOSED,
+        finishReason: 'cancelled',
+      }),
+    );
+    expect(operation).toEqual(
+      expect.objectContaining({
+        status: ExecutionOperationStatus.CANCELLED,
+        result: toolResult,
+        currentAttemptId: null,
+      }),
+    );
+    expect(execution).toEqual(
+      expect.objectContaining({
+        status: ExecutionStatus.RUNNING,
+        phase: 'terminal_pending_cancelled',
+        error: null,
       }),
     );
   });
