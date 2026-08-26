@@ -337,9 +337,16 @@ describe('execution PostgreSQL integration', () => {
       WHERE table_schema = current_schema()
         AND table_name = 'executions'
         AND column_name IN (
+          'attempt_id',
           'checkpoint',
+          'claimed_by',
+          'heartbeat_at',
+          'lease_expires_at',
+          'lease_granted_at',
           'origin',
           'priority',
+          'result_receipt_id',
+          'worker_id',
           'workspace_id'
         )
     `);
