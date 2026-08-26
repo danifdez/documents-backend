@@ -25,6 +25,7 @@ import { ExecutionPriority } from '../execution/execution-priority.enum';
 import {
   ReceiveExecutionStepResultDto,
   RenewExecutionStepLeaseDto,
+  UploadExecutionOutputArtifactDto,
 } from '../execution/dto/execution-protocol.dto';
 import { WorkerKind } from './worker-kind.enum';
 import { WorkerService } from './worker.service';
@@ -168,6 +169,26 @@ export class BrowserWorkController {
       workerId,
       body.leaseDurationMs,
     );
+  }
+
+  @Public()
+  @Post('attempts/:attemptId/artifacts')
+  async uploadArtifact(
+    @Param('attemptId', new ParseUUIDPipe()) attemptId: string,
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+    @Body() body: UploadExecutionOutputArtifactDto,
+  ) {
+    this.assertEnabled();
+    await this.workers.authenticate(workerId, credential, WorkerKind.BROWSER);
+    return this.attempts.uploadOutputArtifact(attemptId, workerId, {
+      ...body,
+      encoding: 'identity',
+      dataClassification: 'workspace',
+      redaction: { applied: false },
+      retentionClass: 'execution',
+      inputSourceIds: [],
+    });
   }
 
   @Public()

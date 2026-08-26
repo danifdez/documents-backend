@@ -30,6 +30,8 @@ import {
 import { CreateExecutionStepInput } from './execution-control-plane.types';
 import { ExecutionStepEntity } from './execution-step.entity';
 import { ExecutionStepKind } from './execution-step-kind.enum';
+import { ExecutionStepStatus } from './execution-step-status.enum';
+import { ExecutionStepAttemptEntity } from './execution-step-attempt.entity';
 import { createExecutionStep } from './execution-step.service';
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionPriority } from './execution-priority.enum';
@@ -48,6 +50,7 @@ import {
   BackendExecutionEventData,
   nextBackendProducerSequence,
 } from './execution-event.writer';
+import { WorkerEntity } from '../worker/worker.entity';
 
 export {
   canonicalHash,
@@ -2016,9 +2019,77 @@ export class ExecutionService {
 
   async readProgress(rootExecutionId: string, scope: ExecutionAccessScope) {
     const execution = await this.findOwned(rootExecutionId, scope);
+    const tree = await this.executionRepo.find({
+      where: { rootExecutionId },
+      order: { createdAt: 'ASC' },
+    });
+    const activeSteps = await this.dataSource
+      .getRepository(ExecutionStepEntity)
+      .find({
+        where: {
+          executionId: In(tree.map((item) => item.executionId)),
+          status: In([
+            ExecutionStepStatus.BLOCKED,
+            ExecutionStepStatus.READY,
+            ExecutionStepStatus.RUNNING,
+            ExecutionStepStatus.RESULT_RECEIVED,
+          ]),
+        },
+        order: { createdAt: 'ASC' },
+      });
+    const attemptIds = activeSteps
+      .map((step) => step.currentAttemptId)
+      .filter((id): id is string => Boolean(id));
+    const attempts = attemptIds.length
+      ? await this.dataSource
+          .getRepository(ExecutionStepAttemptEntity)
+          .findBy({ attemptId: In(attemptIds) })
+      : [];
+    const attemptsById = new Map(
+      attempts.map((attempt) => [attempt.attemptId, attempt]),
+    );
+    const workerIds = [
+      ...new Set(attempts.map((attempt) => attempt.claimedBy)),
+    ];
+    const workers = workerIds.length
+      ? await this.dataSource
+          .getRepository(WorkerEntity)
+          .findBy({ id: In(workerIds) })
+      : [];
+    const workersById = new Map(workers.map((worker) => [worker.id, worker]));
     return {
       policy: execution.progressPolicy,
       ledger: execution.progressLedger,
+      runtime: {
+        status: execution.status,
+        activeSteps: activeSteps.map((step) => {
+          const attempt = step.currentAttemptId
+            ? attemptsById.get(step.currentAttemptId)
+            : undefined;
+          const worker = attempt
+            ? workersById.get(attempt.claimedBy)
+            : undefined;
+          return {
+            executionId: step.executionId,
+            stepId: step.stepId,
+            taskType:
+              typeof step.work?.taskType === 'string'
+                ? step.work.taskType
+                : null,
+            stepKind: step.stepKind,
+            stepStatus: step.status,
+            attemptId: attempt?.attemptId ?? null,
+            attemptStatus: attempt?.status ?? null,
+            worker: worker
+              ? {
+                  workerId: worker.id,
+                  name: worker.name,
+                  kind: worker.workerKind,
+                }
+              : null,
+          };
+        }),
+      },
     };
   }
 

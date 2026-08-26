@@ -1606,6 +1606,62 @@ describe('execution PostgreSQL integration', () => {
     await expect(
       attemptService.startAttempt(assignment!.attemptId, installationId),
     ).resolves.toMatchObject({ status: ExecutionStepAttemptStatus.RUNNING });
+    await expect(
+      service.readProgress(owned.rootExecutionId, {
+        ownerPrincipal: 'browser-owner',
+      }),
+    ).resolves.toMatchObject({
+      runtime: {
+        status: ExecutionStatus.RUNNING,
+        activeSteps: [
+          {
+            taskType: 'browser-read-current-page',
+            attemptStatus: ExecutionStepAttemptStatus.RUNNING,
+            worker: {
+              workerId: installationId,
+              name: 'ia-browser-e2e',
+              kind: WorkerKind.BROWSER,
+            },
+          },
+        ],
+      },
+    });
+
+    const pageArtifactId = randomUUID();
+    const pageBody = Buffer.from(
+      JSON.stringify({
+        url: 'https://example.test',
+        text: 'Example page',
+        truncated: false,
+      }),
+    );
+    const pageArtifact = {
+      artifactId: pageArtifactId,
+      kind: 'browser-page-snapshot',
+      contentHash: contentHash(pageBody),
+      size: pageBody.length,
+      mediaType: 'application/json' as const,
+      encoding: 'identity' as const,
+      dataClassification: 'workspace',
+      redaction: { applied: false },
+      retentionClass: 'execution',
+      inputSourceIds: [],
+      bodyBase64: pageBody.toString('base64'),
+    };
+    await expect(
+      attemptService.uploadOutputArtifact(
+        assignment!.attemptId,
+        installationId,
+        pageArtifact,
+      ),
+    ).resolves.toMatchObject({ code: 'received' });
+    await expect(
+      attemptService.uploadOutputArtifact(
+        assignment!.attemptId,
+        installationId,
+        pageArtifact,
+      ),
+    ).resolves.toMatchObject({ code: 'duplicate' });
 
     const result = {
       schemaVersion: 'step-result/1',
@@ -1616,14 +1672,16 @@ describe('execution PostgreSQL integration', () => {
       stepKind: ExecutionStepKind.VERIFICATION,
       status: 'succeeded',
       runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
-      artifactRefs: [],
+      artifactRefs: [{ role: 'browser_page', artifactId: pageArtifactId }],
       error: null,
       output: {
         kind: ExecutionStepKind.VERIFICATION,
         page: {
           url: 'https://example.test',
-          text: 'Example page',
           truncated: false,
+          contentArtifactId: pageArtifactId,
+          contentHash: contentHash(pageBody),
+          size: pageBody.length,
         },
       },
     };
