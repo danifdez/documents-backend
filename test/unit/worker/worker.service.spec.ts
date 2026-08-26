@@ -6,6 +6,8 @@ import { ExecutionStepAttemptEntity } from '../../../src/execution/execution-ste
 import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildWorker } from '../../factories';
 import { ExecutionContractValidator } from '../../../src/execution/execution-contract-validator';
+import { WorkerKind } from '../../../src/worker/worker-kind.enum';
+import { ExecutionStepKind } from '../../../src/execution/execution-step-kind.enum';
 
 describe('WorkerService', () => {
   let service: WorkerService;
@@ -41,6 +43,53 @@ describe('WorkerService', () => {
   it('should find by id', async () => {
     repo.findOneBy.mockResolvedValue(buildWorker());
     expect(await service.findById('test-uuid')).toBeDefined();
+  });
+
+  it('enrolls a browser with server-owned capabilities', async () => {
+    const queryBuilder = repo.createQueryBuilder!() as any;
+    queryBuilder.getOne.mockResolvedValue(null);
+    repo.create.mockImplementation((worker) => worker);
+    repo.save.mockImplementation((worker) => Promise.resolve(worker));
+
+    const registration = await service.enrollBrowser(
+      '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+      'IA Browser',
+      '7',
+      { version: 'test' },
+    );
+
+    expect(registration.worker).toMatchObject({
+      workerKind: WorkerKind.BROWSER,
+      ownerPrincipal: '7',
+      capabilities: ['browser.read'],
+      stepKinds: [ExecutionStepKind.TOOL, ExecutionStepKind.VERIFICATION],
+      maximumConcurrency: 1,
+      status: 'online',
+      revokedAt: null,
+    });
+    expect(registration.worker.credentialHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(registration.credential).not.toContain('sha256:');
+  });
+
+  it('revokes only a browser owned by the current principal', async () => {
+    const queryBuilder = repo.createQueryBuilder!() as any;
+    const worker = buildWorker({
+      workerKind: WorkerKind.BROWSER,
+      ownerPrincipal: '7',
+      credentialHash: `sha256:${'a'.repeat(64)}`,
+    });
+    queryBuilder.getOne.mockResolvedValue(worker);
+    repo.save.mockImplementation((saved) => Promise.resolve(saved));
+
+    await service.revokeBrowser(worker.id, '7');
+
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'revoked',
+        credentialHash: null,
+        revokedAt: expect.any(Date),
+      }),
+    );
   });
 
   it('derives active assignments and available concurrency', async () => {

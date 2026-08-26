@@ -19,6 +19,7 @@ import { TimelineEntity } from '../src/timeline/timeline.entity';
 import { UserTaskEntity } from '../src/user-task/user-task.entity';
 import { KnowledgeEntryEntity } from '../src/knowledge-base/knowledge-entry.entity';
 import { WorkerEntity } from '../src/worker/worker.entity';
+import { WorkerKind } from '../src/worker/worker-kind.enum';
 import { ThreadEntity } from '../src/thread/thread.entity';
 import { PendingEntityEntity } from '../src/pending-entity/pending-entity.entity';
 import { EntityTypeEntity } from '../src/entity-type/entity-type.entity';
@@ -419,6 +420,8 @@ export function buildWorker(
   return {
     id: 'test-worker-uuid',
     name: 'test-worker',
+    workerKind: WorkerKind.MODELS,
+    ownerPrincipal: null,
     capabilities: ['document-extraction'],
     protocolVersion: 'step-protocol/1',
     stepKinds: [ExecutionStepKind.SERVICE],
@@ -428,6 +431,7 @@ export function buildWorker(
     startedAt: now,
     metadata: null,
     credentialHash: null,
+    revokedAt: null,
     ...overrides,
   } as WorkerEntity;
 }

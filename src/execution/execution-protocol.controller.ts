@@ -14,6 +14,7 @@ import { timingSafeEqual } from 'crypto';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { WorkerService } from '../worker/worker.service';
+import { WorkerKind } from '../worker/worker-kind.enum';
 import {
   ClaimExecutionStepDto,
   ModelsWorkerHeartbeatDto,
@@ -39,7 +40,7 @@ export class ExecutionProtocolController {
     @Body() body: RegisterModelsWorkerDto,
   ) {
     this.assertEnrollmentToken(enrollmentToken);
-    const { worker, credential } = await this.workers.register(
+    const { worker, credential } = await this.workers.registerModels(
       body.workerId,
       body.name,
       body.capabilities,
@@ -56,7 +57,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-credential') credential: string | undefined,
     @Body() body: ModelsWorkerHeartbeatDto,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     await this.workers.heartbeat(
       workerId,
       body.capabilities,
@@ -73,7 +74,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-credential') credential: string | undefined,
     @Body() body: ClaimExecutionStepDto,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     const { waitTimeoutMs, ...claim } = body;
     return this.attempts.claimReadyStepWithWait(
       {
@@ -91,7 +92,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-id') workerId: string,
     @Headers('x-worker-credential') credential: string | undefined,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     return this.attempts.startAttempt(attemptId, workerId);
   }
 
@@ -102,7 +103,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-credential') credential: string | undefined,
     @Body() body: RenewExecutionStepLeaseDto,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     return this.attempts.renewAttemptLease(
       attemptId,
       workerId,
@@ -116,7 +117,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-id') workerId: string,
     @Headers('x-worker-credential') credential: string | undefined,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     return this.attempts.readAttemptControl(attemptId, workerId);
   }
 
@@ -128,7 +129,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-credential') credential: string | undefined,
     @Res({ passthrough: true }) response: Response,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     const artifact = await this.attempts.getInputArtifact(
       attemptId,
       workerId,
@@ -146,7 +147,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-credential') credential: string | undefined,
     @Body() body: ReceiveExecutionStepResultDto,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     return this.attempts.receiveResult({
       executionId: body.executionId,
       stepId: body.stepId,
@@ -164,7 +165,7 @@ export class ExecutionProtocolController {
     @Headers('x-worker-credential') credential: string | undefined,
     @Body() body: UploadExecutionOutputArtifactDto,
   ) {
-    await this.workers.authenticate(workerId, credential);
+    await this.workers.authenticate(workerId, credential, WorkerKind.MODELS);
     return this.attempts.uploadOutputArtifact(attemptId, workerId, {
       ...body,
       encoding: 'identity',

@@ -167,7 +167,7 @@ export class ExecutionAttemptService {
           where: { id: input.workerId },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!worker || worker.status !== 'online') {
+        if (!worker || worker.status !== 'online' || worker.revokedAt) {
           throw new ConflictException('worker_not_available');
         }
         if (

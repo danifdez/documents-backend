@@ -1,17 +1,21 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, MoreThan, Repository } from 'typeorm';
+import { In, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
 import { ExecutionStepAttemptStatus } from '../execution/execution-step-attempt-status.enum';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { WorkerEntity } from './worker.entity';
 import { WorkerRegistrationView } from './worker-registration.types';
+import { WorkerKind } from './worker-kind.enum';
 
 @Injectable()
 export class WorkerService {
@@ -39,9 +43,49 @@ export class WorkerService {
     return this.repo.findOneBy({ id });
   }
 
-  async register(
+  async registerModels(
     id: string,
     name: string,
+    capabilities: string[],
+    stepKinds: ExecutionStepKind[],
+    maximumConcurrency: number,
+    metadata: Record<string, unknown>,
+  ): Promise<{ worker: WorkerEntity; credential: string }> {
+    return this.register(
+      id,
+      name,
+      WorkerKind.MODELS,
+      null,
+      capabilities,
+      stepKinds,
+      maximumConcurrency,
+      metadata,
+    );
+  }
+
+  async enrollBrowser(
+    id: string,
+    name: string,
+    ownerPrincipal: string,
+    metadata: Record<string, unknown>,
+  ): Promise<{ worker: WorkerEntity; credential: string }> {
+    return this.register(
+      id,
+      name,
+      WorkerKind.BROWSER,
+      ownerPrincipal,
+      ['browser.read'],
+      [ExecutionStepKind.TOOL, ExecutionStepKind.VERIFICATION],
+      1,
+      metadata,
+    );
+  }
+
+  private async register(
+    id: string,
+    name: string,
+    workerKind: WorkerKind,
+    ownerPrincipal: string | null,
     capabilities: string[],
     stepKinds: ExecutionStepKind[],
     maximumConcurrency: number,
@@ -53,9 +97,20 @@ export class WorkerService {
       .addSelect('worker.credentialHash')
       .where('worker.id = :id', { id })
       .getOne();
+    if (existing && existing.workerKind !== workerKind) {
+      throw new ConflictException('worker_identity_kind_conflict');
+    }
+    if (
+      existing?.ownerPrincipal &&
+      existing.ownerPrincipal !== ownerPrincipal
+    ) {
+      throw new ForbiddenException('worker_identity_owner_mismatch');
+    }
     const credential = randomBytes(32).toString('base64url');
     const worker = existing ?? this.repo.create({ id });
     worker.name = name;
+    worker.workerKind = workerKind;
+    worker.ownerPrincipal = ownerPrincipal;
     worker.capabilities = [...new Set(capabilities)];
     worker.protocolVersion = 'step-protocol/1';
     worker.stepKinds = [...new Set(stepKinds)];
@@ -65,13 +120,15 @@ export class WorkerService {
     worker.startedAt = new Date();
     worker.metadata = metadata;
     worker.credentialHash = this.hashCredential(credential);
+    worker.revokedAt = null;
     return { worker: await this.repo.save(worker), credential };
   }
 
   async authenticate(
     id: string,
     credential: string | undefined,
-  ): Promise<void> {
+    expectedKind: WorkerKind,
+  ): Promise<WorkerEntity> {
     if (!credential)
       throw new UnauthorizedException('invalid_worker_credential');
     const worker = await this.repo
@@ -79,7 +136,11 @@ export class WorkerService {
       .addSelect('worker.credentialHash')
       .where('worker.id = :id', { id })
       .getOne();
-    if (!worker?.credentialHash) {
+    if (
+      !worker?.credentialHash ||
+      worker.revokedAt ||
+      worker.workerKind !== expectedKind
+    ) {
       throw new UnauthorizedException('invalid_worker_credential');
     }
     const actual = Buffer.from(this.hashCredential(credential));
@@ -90,6 +151,25 @@ export class WorkerService {
     ) {
       throw new UnauthorizedException('invalid_worker_credential');
     }
+    return worker;
+  }
+
+  async revokeBrowser(id: string, ownerPrincipal: string): Promise<void> {
+    const worker = await this.repo
+      .createQueryBuilder('worker')
+      .addSelect('worker.credentialHash')
+      .where('worker.id = :id', { id })
+      .getOne();
+    if (!worker || worker.workerKind !== WorkerKind.BROWSER) {
+      throw new NotFoundException('browser_installation_not_found');
+    }
+    if (worker.ownerPrincipal !== ownerPrincipal) {
+      throw new ForbiddenException('worker_identity_owner_mismatch');
+    }
+    worker.status = 'revoked';
+    worker.revokedAt = new Date();
+    worker.credentialHash = null;
+    await this.repo.save(worker);
   }
 
   async heartbeat(
@@ -108,6 +188,26 @@ export class WorkerService {
       status: 'online',
       lastHeartbeat: new Date(),
     });
+  }
+
+  async heartbeatBrowser(
+    id: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    const result = await this.repo.update(
+      { id, workerKind: WorkerKind.BROWSER, revokedAt: IsNull() },
+      {
+        capabilities: ['browser.read'],
+        stepKinds: [ExecutionStepKind.TOOL, ExecutionStepKind.VERIFICATION],
+        maximumConcurrency: 1,
+        metadata: metadata as any,
+        status: 'online',
+        lastHeartbeat: new Date(),
+      },
+    );
+    if (!result.affected) {
+      throw new ConflictException('worker_not_available');
+    }
   }
 
   async registrations(): Promise<WorkerRegistrationView[]> {

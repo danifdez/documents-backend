@@ -8,6 +8,7 @@ export const FEATURE_FLAGS = [
   'knowledge_base',
   'bibliography',
   'relationships',
+  'browser_federation',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
@@ -24,7 +25,10 @@ export function readFeaturesFromEnv(): FeatureMap {
   const result = {} as FeatureMap;
   for (const flag of FEATURE_FLAGS) {
     const envKey = `FEATURE_${flag.toUpperCase()}`;
-    result[flag] = process.env[envKey] !== 'false';
+    result[flag] =
+      flag === 'browser_federation'
+        ? process.env[envKey] === 'true'
+        : process.env[envKey] !== 'false';
   }
   return result;
 }

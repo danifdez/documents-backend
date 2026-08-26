@@ -8,7 +8,9 @@ export class FeatureFlagService {
 
   isEnabled(flag: FeatureFlag): boolean {
     const envKey = `FEATURE_${flag.toUpperCase()}`;
-    return this.configService.get(envKey) !== 'false';
+    return flag === 'browser_federation'
+      ? this.configService.get(envKey) === 'true'
+      : this.configService.get(envKey) !== 'false';
   }
 
   getEnabledFeatures(): FeatureMap {

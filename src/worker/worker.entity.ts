@@ -1,5 +1,6 @@
 import { Entity, PrimaryColumn, Column } from 'typeorm';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
+import { WorkerKind } from './worker-kind.enum';
 
 @Entity({ name: 'workers' })
 export class WorkerEntity {
@@ -8,6 +9,17 @@ export class WorkerEntity {
 
   @Column()
   name: string;
+
+  @Column({ name: 'worker_kind', type: 'varchar', length: 20 })
+  workerKind: WorkerKind;
+
+  @Column({
+    name: 'owner_principal',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  ownerPrincipal: string | null;
 
   @Column({ type: 'jsonb', default: [] })
   capabilities: string[];
@@ -46,4 +58,7 @@ export class WorkerEntity {
     select: false,
   })
   credentialHash: string | null;
+
+  @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true })
+  revokedAt: Date | null;
 }

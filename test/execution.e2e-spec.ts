@@ -18,6 +18,7 @@ import { AddWorkerConcurrency1757668140700 } from '../migrations/1757668140700-A
 import { RemoveExecutionWorkspaceScope1757668140710 } from '../migrations/1757668140710-RemoveExecutionWorkspaceScope';
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
 import { AddExecutionCancellation1757668140740 } from '../migrations/1757668140740-AddExecutionCancellation';
+import { AddWorkerIdentityScope1757668140750 } from '../migrations/1757668140750-AddWorkerIdentityScope';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -39,6 +40,7 @@ import {
 } from '../src/execution/execution.service';
 import { WorkerEntity } from '../src/worker/worker.entity';
 import { WorkerService } from '../src/worker/worker.service';
+import { WorkerKind } from '../src/worker/worker-kind.enum';
 import { ExecutionOutboxEntity } from '../src/execution-outbox/execution-outbox.entity';
 import { ExecutionOperationEntity } from '../src/execution/execution-operation.entity';
 import { ExecutionOperationStatus } from '../src/execution/execution-operation-status.enum';
@@ -136,6 +138,7 @@ describe('execution PostgreSQL integration', () => {
     await new RemoveExecutionWorkspaceScope1757668140710().up(runner);
     await new CreateExecutionConfirmations1757668140720().up(runner);
     await new AddExecutionCancellation1757668140740().up(runner);
+    await new AddWorkerIdentityScope1757668140750().up(runner);
     await runner.release();
 
     const config = {
@@ -1483,7 +1486,7 @@ describe('execution PostgreSQL integration', () => {
 
   it('registers and authenticates an isolated Models identity', async () => {
     const workerId = randomUUID();
-    const registration = await workerService.register(
+    const registration = await workerService.registerModels(
       workerId,
       'models-e2e',
       ['detect-language'],
@@ -1495,12 +1498,20 @@ describe('execution PostgreSQL integration', () => {
     expect(registration.worker.id).toBe(workerId);
     expect(registration.credential).not.toContain(workerId);
     await expect(
-      workerService.authenticate(workerId, registration.credential),
-    ).resolves.toBeUndefined();
+      workerService.authenticate(
+        workerId,
+        registration.credential,
+        WorkerKind.MODELS,
+      ),
+    ).resolves.toMatchObject({ id: workerId });
     await expect(
-      workerService.authenticate(workerId, 'wrong-credential'),
+      workerService.authenticate(
+        workerId,
+        'wrong-credential',
+        WorkerKind.MODELS,
+      ),
     ).rejects.toThrow('invalid_worker_credential');
-    const rotation = await workerService.register(
+    const rotation = await workerService.registerModels(
       workerId,
       'models-e2e',
       [],
@@ -1510,16 +1521,69 @@ describe('execution PostgreSQL integration', () => {
     );
     expect(rotation.credential).not.toBe(registration.credential);
     await expect(
-      workerService.authenticate(workerId, registration.credential),
+      workerService.authenticate(
+        workerId,
+        registration.credential,
+        WorkerKind.MODELS,
+      ),
     ).rejects.toThrow('invalid_worker_credential');
     await expect(
-      workerService.authenticate(workerId, rotation.credential),
-    ).resolves.toBeUndefined();
+      workerService.authenticate(
+        workerId,
+        rotation.credential,
+        WorkerKind.MODELS,
+      ),
+    ).resolves.toMatchObject({ id: workerId });
+  });
+
+  it('enrolls and revokes a browser identity without Models access', async () => {
+    const installationId = randomUUID();
+    const registration = await workerService.enrollBrowser(
+      installationId,
+      'ia-browser-e2e',
+      'browser-owner',
+      { runtime: 'test' },
+    );
+
+    await expect(
+      workerService.authenticate(
+        installationId,
+        registration.credential,
+        WorkerKind.BROWSER,
+      ),
+    ).resolves.toMatchObject({
+      id: installationId,
+      workerKind: WorkerKind.BROWSER,
+      ownerPrincipal: 'browser-owner',
+      capabilities: ['browser.read'],
+    });
+    await expect(
+      workerService.authenticate(
+        installationId,
+        registration.credential,
+        WorkerKind.MODELS,
+      ),
+    ).rejects.toThrow('invalid_worker_credential');
+
+    await workerService.revokeBrowser(installationId, 'browser-owner');
+    await expect(
+      workerService.authenticate(
+        installationId,
+        registration.credential,
+        WorkerKind.BROWSER,
+      ),
+    ).rejects.toThrow('invalid_worker_credential');
+    await expect(workerService.findById(installationId)).resolves.toMatchObject(
+      {
+        status: 'revoked',
+        revokedAt: expect.any(Date),
+      },
+    );
   });
 
   it('serializes concurrent claims at the registered worker limit', async () => {
     const workerId = randomUUID();
-    await workerService.register(
+    await workerService.registerModels(
       workerId,
       'models-concurrency-e2e',
       ['detect-language'],
