@@ -16,10 +16,18 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         "payload" jsonb,
         "status" varchar(20) NOT NULL DEFAULT 'queued',
         "phase" varchar(80),
+        "wait_reason" varchar(40),
+        "wait_condition" jsonb,
+        "resume_phase" varchar(80),
+        "wait_expires_at" timestamptz,
+        "cancellation_requested_at" timestamptz,
+        "cancellation_reason" varchar(500),
         "completion_kind" varchar(20),
         "completion_reason" varchar(100),
         "result" jsonb,
         "error" jsonb,
+        "progress_policy" jsonb,
+        "progress_ledger" jsonb,
         "completed_at" timestamptz,
         "last_sequence" bigint NOT NULL DEFAULT 0,
         "last_event_id" uuid,
@@ -29,7 +37,21 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         "updated_at" timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT "PK_executions" PRIMARY KEY ("execution_id"),
         CONSTRAINT "FK_executions_parent" FOREIGN KEY ("parent_execution_id")
-          REFERENCES "executions"("execution_id") ON DELETE SET NULL
+          REFERENCES "executions"("execution_id") ON DELETE SET NULL,
+        CONSTRAINT "CHK_executions_wait_state" CHECK (
+          (
+            "status" = 'waiting'
+            AND "wait_reason" IS NOT NULL
+            AND "wait_condition" IS NOT NULL
+            AND "resume_phase" IS NOT NULL
+          ) OR (
+            "status" <> 'waiting'
+            AND "wait_reason" IS NULL
+            AND "wait_condition" IS NULL
+            AND "resume_phase" IS NULL
+            AND "wait_expires_at" IS NULL
+          )
+        )
       )
     `);
     await queryRunner.query(
@@ -41,6 +63,12 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
     await queryRunner.query(
       `CREATE INDEX "IDX_executions_parent" ON "executions" ("parent_execution_id")`,
     );
+    await queryRunner.query(`
+      CREATE INDEX "IDX_executions_cancellation_pending"
+      ON "executions" ("cancellation_requested_at")
+      WHERE "cancellation_requested_at" IS NOT NULL
+        AND "status" NOT IN ('completed', 'failed', 'cancelled')
+    `);
     await queryRunner.query(`
       CREATE TABLE "execution_events" (
         "event_id" uuid NOT NULL,
@@ -104,6 +132,7 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         "redaction" jsonb NOT NULL DEFAULT '{"applied":false}'::jsonb,
         "retention_class" varchar(30) NOT NULL,
         "created_by_event_id" uuid,
+        "produced_by_attempt_id" uuid,
         "input_source_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
         "storage_ref" varchar(500) NOT NULL,
         "body" bytea,
@@ -115,6 +144,9 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
     `);
     await queryRunner.query(
       `CREATE INDEX "IDX_execution_artifacts_hash" ON "execution_artifacts" ("root_execution_id", "content_hash")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_execution_artifacts_attempt" ON "execution_artifacts" ("produced_by_attempt_id")`,
     );
     await queryRunner.query(`
       CREATE FUNCTION reject_execution_event_mutation()

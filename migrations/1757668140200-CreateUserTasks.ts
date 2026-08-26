@@ -2,12 +2,26 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateUserTasks1757668140200 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`CREATE TABLE "user_tasks" ("id" SERIAL NOT NULL, "title" character varying NOT NULL, "description" text, "status" character varying NOT NULL DEFAULT 'pending', "reminder_at" TIMESTAMP WITH TIME ZONE, "projectId" integer, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_user_tasks" PRIMARY KEY ("id"))`);
-    await queryRunner.query(`ALTER TABLE "user_tasks" ADD CONSTRAINT "FK_user_tasks_project" FOREIGN KEY ("projectId") REFERENCES "projects"("id") ON DELETE SET NULL ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `CREATE TABLE "user_tasks" ("id" SERIAL NOT NULL, "title" character varying NOT NULL, "description" text, "status" character varying NOT NULL DEFAULT 'pending', "reminder_at" TIMESTAMP WITH TIME ZONE, "execution_operation_id" uuid, "projectId" integer, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_user_tasks" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "user_tasks" ADD CONSTRAINT "FK_user_tasks_project" FOREIGN KEY ("projectId") REFERENCES "projects"("id") ON DELETE SET NULL ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "idx_user_tasks_reminder_at" ON "user_tasks" ("reminder_at") WHERE "reminder_at" IS NOT NULL`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_user_tasks_execution_operation" ON "user_tasks" ("execution_operation_id") WHERE "execution_operation_id" IS NOT NULL`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "user_tasks" DROP CONSTRAINT "FK_user_tasks_project"`);
+    await queryRunner.query(
+      `ALTER TABLE "user_tasks" DROP CONSTRAINT "FK_user_tasks_project"`,
+    );
+    await queryRunner.query(`DROP INDEX "UQ_user_tasks_execution_operation"`);
+    await queryRunner.query(`DROP INDEX "idx_user_tasks_reminder_at"`);
     await queryRunner.query(`DROP TABLE "user_tasks"`);
   }
 }

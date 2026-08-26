@@ -1,26 +1,27 @@
 import { randomUUID } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import { DataSource, In } from 'typeorm';
+import { CreateProjects1757668140000 } from '../migrations/1757668140000-CreateProjects';
 import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
+import { CreateWorkers1757668140002 } from '../migrations/1757668140002-CreateWorkers';
+import { CreatePermissionGroups1757668140003 } from '../migrations/1757668140003-CreatePermissionGroups';
+import { CreateUsers1757668140005 } from '../migrations/1757668140005-CreateUsers';
+import { CreateThreads1757668140010 } from '../migrations/1757668140010-CreateThreads';
+import { CreateResources1757668140011 } from '../migrations/1757668140011-CreateResources';
+import { CreateDocs1757668140012 } from '../migrations/1757668140012-CreateDocs';
 import { CreateResourceDates1757668140030 } from '../migrations/1757668140030-CreateResourceDates';
 import { CreateAssistantTables1757668140070 } from '../migrations/1757668140070-CreateAssistantTables';
+import { CreateAssistantMemoryEntries1757668140080 } from '../migrations/1757668140080-CreateAssistantMemoryEntries';
 import { CreateIndexedFiles1757668140100 } from '../migrations/1757668140100-CreateIndexedFiles';
 import { CreateAgents1757668140110 } from '../migrations/1757668140110-CreateAgents';
 import { CreateAgentMessages1757668140111 } from '../migrations/1757668140111-CreateAgentMessages';
-import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-AddExecutionProgress';
+import { CreateUserTasks1757668140200 } from '../migrations/1757668140200-CreateUserTasks';
+import { CreateVectorTables1757668140320 } from '../migrations/1757668140320-CreateVectorTables';
 import { CreateExecutionControlPlane1757668140370 } from '../migrations/1757668140370-CreateExecutionControlPlane';
-import { AddWorkerCredentials1757668140380 } from '../migrations/1757668140380-AddWorkerCredentials';
 import { CreateExecutionOutbox1757668140400 } from '../migrations/1757668140400-CreateExecutionOutbox';
 import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140410-CreateExecutionOperations';
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
-import { AddExecutionStepContinuation1757668140430 } from '../migrations/1757668140430-AddExecutionStepContinuation';
-import { AddExecutionStepContinuationTarget1757668140440 } from '../migrations/1757668140440-AddExecutionStepContinuationTarget';
-import { AddExecutionStepFailureFinalization1757668140470 } from '../migrations/1757668140470-AddExecutionStepFailureFinalization';
-import { AddExecutionOutputArtifacts1757668140600 } from '../migrations/1757668140600-AddExecutionOutputArtifacts';
-import { AddWorkerConcurrency1757668140700 } from '../migrations/1757668140700-AddWorkerConcurrency';
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
-import { AddExecutionCancellation1757668140740 } from '../migrations/1757668140740-AddExecutionCancellation';
-import { AddWorkerIdentityScope1757668140750 } from '../migrations/1757668140750-AddWorkerIdentityScope';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -89,7 +90,7 @@ describe('execution PostgreSQL integration', () => {
       password: process.env.POSTGRES_PASSWORD,
       database: process.env.POSTGRES_DB,
       schema,
-      extra: { options: `-c search_path=${schema}` },
+      extra: { options: `-c search_path=${schema},public` },
       synchronize: false,
       entities: [
         ExecutionEntity,
@@ -111,39 +112,28 @@ describe('execution PostgreSQL integration', () => {
     const runner = dataSource.createQueryRunner();
     await runner.connect();
     await runner.query(`CREATE SCHEMA "${schema}"`);
-    await runner.query(`SET search_path TO "${schema}"`);
+    await runner.query(`SET search_path TO "${schema}", public`);
     await new CreateExecutions1757668140001().up(runner);
-    await runner.query(`CREATE TABLE "resources" ("id" SERIAL PRIMARY KEY)`);
+    await new CreateProjects1757668140000().up(runner);
+    await new CreatePermissionGroups1757668140003().up(runner);
+    await new CreateUsers1757668140005().up(runner);
+    await new CreateThreads1757668140010().up(runner);
+    await new CreateResources1757668140011().up(runner);
+    await new CreateDocs1757668140012().up(runner);
     await new CreateResourceDates1757668140030().up(runner);
     await new CreateAssistantTables1757668140070().up(runner);
+    await new CreateAssistantMemoryEntries1757668140080().up(runner);
     await new CreateIndexedFiles1757668140100().up(runner);
     await new CreateAgents1757668140110().up(runner);
     await new CreateAgentMessages1757668140111().up(runner);
-    await new AddExecutionProgress1757668140350().up(runner);
+    await new CreateUserTasks1757668140200().up(runner);
+    await new CreateVectorTables1757668140320().up(runner);
+    await new CreateWorkers1757668140002().up(runner);
     await new CreateExecutionControlPlane1757668140370().up(runner);
     await new CreateExecutionOutbox1757668140400().up(runner);
     await new CreateExecutionOperations1757668140410().up(runner);
     await new CreateExecutionToolPlans1757668140420().up(runner);
-    await new AddExecutionStepContinuation1757668140430().up(runner);
-    await new AddExecutionStepContinuationTarget1757668140440().up(runner);
-    await new AddExecutionStepFailureFinalization1757668140470().up(runner);
-    await runner.query(`
-      CREATE TABLE "workers" (
-        "id" uuid PRIMARY KEY,
-        "name" varchar NOT NULL,
-        "capabilities" jsonb NOT NULL DEFAULT '[]'::jsonb,
-        "status" varchar NOT NULL DEFAULT 'online',
-        "last_heartbeat" timestamp NOT NULL DEFAULT now(),
-        "started_at" timestamp NOT NULL DEFAULT now(),
-        "metadata" jsonb
-      )
-    `);
-    await new AddWorkerCredentials1757668140380().up(runner);
-    await new AddExecutionOutputArtifacts1757668140600().up(runner);
-    await new AddWorkerConcurrency1757668140700().up(runner);
     await new CreateExecutionConfirmations1757668140720().up(runner);
-    await new AddExecutionCancellation1757668140740().up(runner);
-    await new AddWorkerIdentityScope1757668140750().up(runner);
     await runner.release();
 
     const config = {
@@ -275,6 +265,71 @@ describe('execution PostgreSQL integration', () => {
         )
     `);
     expect(columns).toEqual([]);
+  });
+
+  it('creates consolidated base columns and indexes directly', async () => {
+    const controlColumns = await dataSource.query(`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND (
+          (table_name = 'executions' AND column_name IN (
+            'progress_policy', 'progress_ledger', 'wait_reason',
+            'wait_condition', 'resume_phase', 'wait_expires_at',
+            'cancellation_requested_at', 'cancellation_reason'
+          ))
+          OR (table_name = 'execution_steps' AND column_name IN (
+            'output_artifact_refs', 'finalize_on_failure',
+            'continuation_processed_at', 'continuation_step_id'
+          ))
+          OR (table_name = 'execution_artifacts'
+            AND column_name = 'produced_by_attempt_id')
+          OR (table_name = 'workers' AND column_name IN (
+            'worker_kind', 'owner_principal', 'protocol_version',
+            'step_kinds', 'maximum_concurrency', 'credential_hash', 'revoked_at'
+          ))
+        )
+      ORDER BY table_name, column_name
+    `);
+    const domainColumns = await dataSource.query(`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND (table_name, column_name) IN (
+          ('users', 'avatar_path'),
+          ('projects', 'status'),
+          ('threads', 'status'),
+          ('docs', 'status'),
+          ('resources', 'archived_at'),
+          ('assistant_messages', 'event'),
+          ('user_tasks', 'execution_operation_id')
+        )
+      ORDER BY table_name, column_name
+    `);
+    const consolidatedIndexes = await dataSource.query(`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname IN (
+          'IDX_projects_status',
+          'IDX_threads_status',
+          'IDX_docs_status',
+          'IDX_resources_archived_at',
+          'IDX_assistant_messages_assistant_id_id',
+          'IDX_agent_messages_agent_id_id',
+          'idx_user_tasks_reminder_at',
+          'UQ_user_tasks_execution_operation',
+          'IDX_executions_cancellation_pending',
+          'IDX_execution_steps_continuation_step',
+          'IDX_execution_artifacts_attempt',
+          'IDX_workers_browser_owner'
+        )
+      ORDER BY indexname
+    `);
+
+    expect(controlColumns).toHaveLength(20);
+    expect(domainColumns).toHaveLength(7);
+    expect(consolidatedIndexes).toHaveLength(12);
   });
 
   it('creates current message and resource-date schemas directly', async () => {

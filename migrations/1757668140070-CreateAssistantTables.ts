@@ -25,6 +25,7 @@ export class CreateAssistantTables1757668140070 implements MigrationInterface {
                 "content" text NOT NULL,
                 "execution_id" uuid,
                 "error" text,
+                "event" jsonb,
                 "created_at" TIMESTAMP NOT NULL DEFAULT now(),
                 CONSTRAINT "FK_assistant_messages_assistant" FOREIGN KEY ("assistant_id") REFERENCES "assistants"("id") ON DELETE CASCADE ON UPDATE NO ACTION,
                 CONSTRAINT "FK_assistant_messages_execution" FOREIGN KEY ("execution_id") REFERENCES "executions"("execution_id") ON DELETE SET NULL ON UPDATE NO ACTION
@@ -38,6 +39,9 @@ export class CreateAssistantTables1757668140070 implements MigrationInterface {
       `CREATE INDEX "IDX_assistant_messages_execution_id" ON "assistant_messages" ("execution_id")`,
     );
     await queryRunner.query(
+      `CREATE INDEX "IDX_assistant_messages_assistant_id_id" ON "assistant_messages" ("assistant_id", "id")`,
+    );
+    await queryRunner.query(
       `CREATE UNIQUE INDEX "UQ_assistant_messages_execution_reply" ON "assistant_messages" ("assistant_id", "execution_id") WHERE "execution_id" IS NOT NULL AND "role" = 'assistant'`,
     );
   }
@@ -45,6 +49,9 @@ export class CreateAssistantTables1757668140070 implements MigrationInterface {
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `DROP INDEX "UQ_assistant_messages_execution_reply"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "IDX_assistant_messages_assistant_id_id"`,
     );
     await queryRunner.query(`DROP INDEX "IDX_assistant_messages_execution_id"`);
     await queryRunner.query(`DROP INDEX "IDX_assistant_messages_assistant_id"`);

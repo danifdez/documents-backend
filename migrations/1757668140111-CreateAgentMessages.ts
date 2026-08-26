@@ -28,12 +28,16 @@ export class CreateAgentMessages1757668140111 implements MigrationInterface {
       `CREATE INDEX "IDX_agent_messages_agent_id_created_at" ON "agent_messages" ("agent_id", "created_at")`,
     );
     await queryRunner.query(
+      `CREATE INDEX "IDX_agent_messages_agent_id_id" ON "agent_messages" ("agent_id", "id")`,
+    );
+    await queryRunner.query(
       `CREATE UNIQUE INDEX "UQ_agent_messages_execution_reply" ON "agent_messages" ("agent_id", "execution_id") WHERE "execution_id" IS NOT NULL AND "role" = 'assistant'`,
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP INDEX "UQ_agent_messages_execution_reply"`);
+    await queryRunner.query(`DROP INDEX "IDX_agent_messages_agent_id_id"`);
     await queryRunner.query(
       `DROP INDEX "IDX_agent_messages_agent_id_created_at"`,
     );

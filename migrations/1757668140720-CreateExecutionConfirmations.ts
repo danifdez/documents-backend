@@ -5,30 +5,6 @@ export class CreateExecutionConfirmations1757668140720 implements MigrationInter
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "executions"
-        ADD COLUMN "wait_reason" varchar(40),
-        ADD COLUMN "wait_condition" jsonb,
-        ADD COLUMN "resume_phase" varchar(80),
-        ADD COLUMN "wait_expires_at" timestamptz
-    `);
-    await queryRunner.query(`
-      ALTER TABLE "executions"
-        ADD CONSTRAINT "CHK_executions_wait_state" CHECK (
-          (
-            "status" = 'waiting'
-            AND "wait_reason" IS NOT NULL
-            AND "wait_condition" IS NOT NULL
-            AND "resume_phase" IS NOT NULL
-          ) OR (
-            "status" <> 'waiting'
-            AND "wait_reason" IS NULL
-            AND "wait_condition" IS NULL
-            AND "resume_phase" IS NULL
-            AND "wait_expires_at" IS NULL
-          )
-        )
-    `);
-    await queryRunner.query(`
       CREATE TABLE "execution_confirmations" (
         "confirmation_id" uuid NOT NULL,
         "execution_id" uuid NOT NULL,

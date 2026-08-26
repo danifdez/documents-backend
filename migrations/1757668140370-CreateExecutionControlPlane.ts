@@ -13,7 +13,9 @@ export class CreateExecutionControlPlane1757668140370 implements MigrationInterf
         "status" varchar(30) NOT NULL,
         "version" integer NOT NULL DEFAULT 1,
         "input_artifact_refs" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "output_artifact_refs" jsonb NOT NULL DEFAULT '[]'::jsonb,
         "work" jsonb NOT NULL,
+        "finalize_on_failure" boolean NOT NULL DEFAULT false,
         "required_capabilities" text[] NOT NULL DEFAULT '{}',
         "resource_keys" text[] NOT NULL DEFAULT '{}',
         "budget_reservation_id" uuid,
@@ -24,11 +26,15 @@ export class CreateExecutionControlPlane1757668140370 implements MigrationInterf
         "current_attempt_id" uuid,
         "result" jsonb,
         "error" jsonb,
+        "continuation_processed_at" timestamptz,
+        "continuation_step_id" uuid,
         "created_at" timestamptz NOT NULL DEFAULT now(),
         "updated_at" timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT "PK_execution_steps" PRIMARY KEY ("step_id"),
         CONSTRAINT "FK_execution_steps_execution" FOREIGN KEY ("execution_id")
           REFERENCES "executions"("execution_id") ON DELETE CASCADE,
+        CONSTRAINT "FK_execution_steps_continuation_step" FOREIGN KEY ("continuation_step_id")
+          REFERENCES "execution_steps"("step_id") ON DELETE SET NULL,
         CONSTRAINT "CHK_execution_steps_kind" CHECK (
           "step_kind" IN ('inference', 'tool', 'service', 'code', 'verification')
         ),
@@ -46,6 +52,11 @@ export class CreateExecutionControlPlane1757668140370 implements MigrationInterf
     await queryRunner.query(
       `CREATE INDEX "IDX_execution_steps_current_attempt" ON "execution_steps" ("current_attempt_id")`,
     );
+    await queryRunner.query(`
+      CREATE UNIQUE INDEX "IDX_execution_steps_continuation_step"
+      ON "execution_steps" ("continuation_step_id")
+      WHERE "continuation_step_id" IS NOT NULL
+    `);
 
     await queryRunner.query(`
       CREATE TABLE "execution_step_dependencies" (
@@ -104,6 +115,12 @@ export class CreateExecutionControlPlane1757668140370 implements MigrationInterf
     await queryRunner.query(
       `CREATE INDEX "IDX_execution_step_attempts_lease" ON "execution_step_attempts" ("status", "lease_expires_at")`,
     );
+    await queryRunner.query(`
+      ALTER TABLE "execution_artifacts"
+      ADD CONSTRAINT "FK_execution_artifacts_attempt"
+      FOREIGN KEY ("produced_by_attempt_id")
+      REFERENCES "execution_step_attempts"("attempt_id") ON DELETE CASCADE
+    `);
 
     await queryRunner.query(`
       CREATE TABLE "execution_result_receipts" (
@@ -152,6 +169,9 @@ export class CreateExecutionControlPlane1757668140370 implements MigrationInterf
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TABLE "execution_artifacts" DROP CONSTRAINT "FK_execution_artifacts_attempt"`,
+    );
     await queryRunner.query(
       `ALTER TABLE "execution_step_attempts" DROP CONSTRAINT "FK_execution_step_attempts_result_receipt"`,
     );

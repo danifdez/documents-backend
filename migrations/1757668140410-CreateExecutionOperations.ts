@@ -5,15 +5,6 @@ export class CreateExecutionOperations1757668140410 implements MigrationInterfac
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      DELETE FROM "executions" execution
-      WHERE execution."last_event_id" IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM "execution_steps" step
-          WHERE step."execution_id" = execution."execution_id"
-        )
-    `);
-    await queryRunner.query(`
       CREATE UNIQUE INDEX "UQ_execution_steps_operation_identity"
       ON "execution_steps" ("execution_id", "step_id", "operation_id")
     `);
@@ -58,52 +49,6 @@ export class CreateExecutionOperations1757668140410 implements MigrationInterfac
           "recovery_class" IN ('read_only_replayable', 'idempotent', 'effect_checked', 'non_resumable')
         )
       )
-    `);
-    await queryRunner.query(`
-      INSERT INTO "execution_operations" (
-        "operation_id", "execution_id", "step_id", "schema_version",
-        "operation_kind", "status", "recovery_class", "current_attempt_id",
-        "caused_by_event_id", "result", "error", "started_at", "finished_at",
-        "created_at", "updated_at"
-      )
-      SELECT
-        step."operation_id",
-        step."execution_id",
-        step."step_id",
-        'operation/1',
-        CASE step."step_kind"
-          WHEN 'inference' THEN 'inference'
-          WHEN 'tool' THEN 'tool_call'
-          WHEN 'service' THEN 'artifact_processing'
-          WHEN 'code' THEN 'tool_call'
-          WHEN 'verification' THEN 'verification'
-        END,
-        CASE step."status"
-          WHEN 'blocked' THEN 'planned'
-          WHEN 'ready' THEN 'prepared'
-          WHEN 'running' THEN 'dispatched'
-          WHEN 'result_received' THEN 'dispatched'
-          WHEN 'completed' THEN 'succeeded'
-          WHEN 'failed' THEN 'failed'
-          WHEN 'cancelled' THEN 'cancelled'
-        END,
-        CASE
-          WHEN step."step_kind" IN ('inference', 'service', 'verification')
-            THEN 'read_only_replayable'
-          ELSE 'non_resumable'
-        END,
-        step."current_attempt_id",
-        execution."last_event_id",
-        step."result",
-        step."error",
-        step."created_at",
-        CASE WHEN step."status" IN ('completed', 'failed', 'cancelled')
-          THEN step."updated_at" ELSE NULL END,
-        step."created_at",
-        step."updated_at"
-      FROM "execution_steps" step
-      INNER JOIN "executions" execution
-        ON execution."execution_id" = step."execution_id"
     `);
     await queryRunner.query(
       `CREATE UNIQUE INDEX "UQ_execution_operations_step" ON "execution_operations" ("step_id")`,
