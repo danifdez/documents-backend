@@ -2,7 +2,7 @@ export const EXECUTION_SCHEMA = 'execution/1';
 export const EXECUTION_EVENT_SCHEMA = 'execution-event/1';
 export const EXECUTION_BUNDLE_SCHEMA = 'execution-bundle/1';
 export const EXECUTION_CONTRACT_SET_HASH =
-  'sha256:21d3c7dc47b5dc3b3fabaf62d8420bf7ab043250a9afdff8f88597c31101868c';
+  'sha256:ee289bd1e00ca0c6ddd2fdcee89fff3bab9709f2a01f3b1b8dd56f2fde953655';
 export const EXECUTION_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const EXECUTION_CONTENT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;

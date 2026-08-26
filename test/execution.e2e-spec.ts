@@ -24,6 +24,7 @@ import { CreateExecutionToolPlans1757668140420 } from '../migrations/17576681404
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
 import { CreateConversationSessions1757668140730 } from '../migrations/1757668140730-CreateConversationSessions';
 import { ReplaceAssistantMemory1757668140740 } from '../migrations/1757668140740-ReplaceAssistantMemory';
+import { CreateSkillActivations1757668140750 } from '../migrations/1757668140750-CreateSkillActivations';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -80,6 +81,8 @@ import { AgentMessageEntity } from '../src/agent/agent-message.entity';
 import { AssistantEntity } from '../src/assistant/assistant.entity';
 import { AgentEntity } from '../src/agent/agent.entity';
 import { MemoryEntryEntity } from '../src/memory/memory-entry.entity';
+import { SkillActivationEntity } from '../src/conversation/skill-activation.entity';
+import { advanceSkillActivation } from '../src/conversation/skill-activation';
 
 loadEnv({ path: '.env' });
 
@@ -127,6 +130,7 @@ describe('execution PostgreSQL integration', () => {
         AssistantEntity,
         AgentEntity,
         MemoryEntryEntity,
+        SkillActivationEntity,
       ],
     });
     await dataSource.initialize();
@@ -157,6 +161,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionConfirmations1757668140720().up(runner);
     await new CreateConversationSessions1757668140730().up(runner);
     await new ReplaceAssistantMemory1757668140740().up(runner);
+    await new CreateSkillActivations1757668140750().up(runner);
     await runner.query(`
       INSERT INTO "assistants" ("id", "name", "icon", "sub")
       VALUES (1, 'Assistant', '◇', 'Personal assistant')
@@ -2577,6 +2582,76 @@ describe('execution PostgreSQL integration', () => {
     ).not.toHaveProperty('instructions');
   });
 
+  it('persists and closes a skill activation with its execution', async () => {
+    await dataSource.query(
+      `UPDATE "assistants" SET "folder_scope" = '/workspace/real' WHERE "id" = 1`,
+    );
+    const accepted = await service.createForChat(
+      'assistant_chat',
+      'Modify the budget document',
+      { ownerPrincipal: 'skill-activation-e2e' },
+      { ownerId: 1 },
+    );
+    const repo = dataSource.getRepository(SkillActivationEntity);
+    const active = await repo.findOneByOrFail({
+      executionId: accepted.execution.executionId,
+    });
+    expect(active).toMatchObject({
+      schemaVersion: 'skill-activation/1',
+      skillId: 'workspace-document-workflow',
+      skillVersion: 'workspace-document-workflow/1',
+      activationReason: 'objective_match',
+      inputBindings: { owner: { type: 'assistant', id: 1 } },
+      phase: 'instructions_loaded',
+      checkpoint: null,
+      status: 'active',
+      finishedAt: null,
+    });
+
+    await dataSource.transaction((manager) =>
+      advanceSkillActivation(
+        manager,
+        active.activationId,
+        'instructions_loaded',
+        'workspace_inspection',
+        { inspectedFiles: ['budget.xlsx'] },
+      ),
+    );
+    await expect(
+      repo.findOneByOrFail({ activationId: active.activationId }),
+    ).resolves.toMatchObject({
+      phase: 'workspace_inspection',
+      checkpoint: { inspectedFiles: ['budget.xlsx'] },
+      status: 'active',
+    });
+    await expect(
+      dataSource.transaction((manager) =>
+        advanceSkillActivation(
+          manager,
+          active.activationId,
+          'instructions_loaded',
+          'stale_overwrite',
+          {},
+        ),
+      ),
+    ).rejects.toThrow('skill_activation_phase_stale');
+
+    await service.completeExecution(
+      accepted.execution.executionId,
+      'The document is ready.',
+      null,
+    );
+
+    await expect(
+      repo.findOneByOrFail({ activationId: active.activationId }),
+    ).resolves.toMatchObject({
+      phase: 'finished',
+      checkpoint: { inspectedFiles: ['budget.xlsx'] },
+      status: 'completed',
+      finishedAt: expect.any(Date),
+    });
+  });
+
   it('persists one conversation lane and promotes queued turns in order', async () => {
     const scope = { ownerPrincipal: 'conversation-lane-e2e' };
     const first = await createChat('assistant_chat', 'First message', scope);
@@ -2796,6 +2871,7 @@ describe('execution PostgreSQL integration', () => {
       );
       expect(JSON.stringify(bundle)).not.toContain('known-secret');
       expect(bundle.embeddedArtifacts).toBeDefined();
+      expect(bundle.skillActivations).toEqual([]);
       expect(bundle.bundleCompleteness).toEqual({
         status: 'reproducible',
         reproducible: true,

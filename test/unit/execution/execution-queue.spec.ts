@@ -3,6 +3,7 @@ import { ExecutionStatus } from '../../../src/execution/execution-status.enum';
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
 import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
 import { ExecutionOutboxEntity } from '../../../src/execution-outbox/execution-outbox.entity';
+import { SkillActivationEntity } from '../../../src/conversation/skill-activation.entity';
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 
 describe('ExecutionService queue state', () => {
@@ -11,6 +12,7 @@ describe('ExecutionService queue state', () => {
   let eventRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
   let outboxRepo: Record<string, jest.Mock>;
+  let skillActivationRepo: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionRepo = {
@@ -28,6 +30,16 @@ describe('ExecutionService queue state', () => {
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
     };
+    const updateBuilder = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 0 }),
+    };
+    skillActivationRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue(updateBuilder),
+    };
     manager = {
       getRepository: jest.fn((entity) =>
         entity === ExecutionEntity
@@ -36,7 +48,9 @@ describe('ExecutionService queue state', () => {
             ? eventRepo
             : entity === ExecutionOutboxEntity
               ? outboxRepo
-              : undefined,
+              : entity === SkillActivationEntity
+                ? skillActivationRepo
+                : undefined,
       ),
       query: jest.fn(),
       save: jest.fn(async (value) => value),

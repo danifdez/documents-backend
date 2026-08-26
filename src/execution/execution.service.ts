@@ -74,6 +74,11 @@ import {
 import { buildActiveMemoryContext } from '../memory/active-memory';
 import { buildActiveCapabilitySet } from '../conversation/active-capabilities';
 import { buildContextInputWorkflow } from '../conversation/context-input-workflow';
+import {
+  createSkillActivations,
+  finishSkillActivations,
+} from '../conversation/skill-activation';
+import { SkillActivationEntity } from '../conversation/skill-activation.entity';
 
 export {
   canonicalHash,
@@ -477,6 +482,14 @@ export class ExecutionService {
       session.ownerType,
       session.ownerId,
     );
+    const activeCapabilities = await buildActiveCapabilitySet(manager, {
+      ownerType: session.ownerType,
+      ownerId: session.ownerId,
+      ownerPrincipal: nextExecution.ownerPrincipal,
+      folderScope: ownerConfig.folderScope,
+      browserFederationEnabled: this.browserFederationEnabled(),
+      objective: userMessage.content,
+    });
     nextExecution.payload = {
       ...(nextExecution.payload ?? {}),
       folderScope: ownerConfig.folderScope,
@@ -490,16 +503,14 @@ export class ExecutionService {
         session.ownerId,
         userMessage.content,
       ),
-      activeCapabilities: await buildActiveCapabilitySet(manager, {
-        ownerType: session.ownerType,
-        ownerId: session.ownerId,
-        ownerPrincipal: nextExecution.ownerPrincipal,
-        folderScope: ownerConfig.folderScope,
-        browserFederationEnabled: this.browserFederationEnabled(),
-        objective: userMessage.content,
-      }),
+      activeCapabilities,
     };
     await executionRepo.save(nextExecution);
+    await createSkillActivations(
+      manager,
+      nextExecution.executionId,
+      activeCapabilities,
+    );
     const requestArtifact = await manager
       .getRepository(ExecutionArtifactEntity)
       .findOneByOrFail({ artifactId: next.requestArtifactId });
@@ -1046,6 +1057,16 @@ export class ExecutionService {
       if (obtainsLane) session.activeTurnId = turn.turnId;
       await sessionRepo.save(session);
 
+      const activeCapabilities = activeRevision
+        ? await buildActiveCapabilitySet(manager, {
+            ownerType,
+            ownerId,
+            ownerPrincipal: scope.ownerPrincipal,
+            folderScope: ownerConfig.folderScope,
+            browserFederationEnabled: this.browserFederationEnabled(),
+            objective: safeMessage,
+          })
+        : null;
       const executionPayload = activeRevision
         ? {
             ...canonicalPayload,
@@ -1056,14 +1077,7 @@ export class ExecutionService {
               ownerId,
               safeMessage,
             ),
-            activeCapabilities: await buildActiveCapabilitySet(manager, {
-              ownerType,
-              ownerId,
-              ownerPrincipal: scope.ownerPrincipal,
-              folderScope: ownerConfig.folderScope,
-              browserFederationEnabled: this.browserFederationEnabled(),
-              objective: safeMessage,
-            }),
+            activeCapabilities,
           }
         : canonicalPayload;
       const execution = manager.getRepository(ExecutionEntity).create({
@@ -1183,6 +1197,11 @@ export class ExecutionService {
       execution.lastSequence = '3';
       execution.lastEventId = sourceEvent.eventId;
       if (obtainsLane) {
+        await createSkillActivations(
+          manager,
+          execution.executionId,
+          activeCapabilities!,
+        );
         await this.createInitialChatSteps(
           manager,
           execution,
@@ -1629,6 +1648,7 @@ export class ExecutionService {
       }
 
       if (TERMINAL_STATES.has(status)) {
+        await finishSkillActivations(manager, execution.executionId, status);
         await this.finishConversationTurn(
           manager,
           execution,
@@ -2238,6 +2258,11 @@ export class ExecutionService {
       execution.lastEventId = lastEventId;
       execution.completedAt = new Date();
       execution.phase = null;
+      await finishSkillActivations(
+        manager,
+        execution.executionId,
+        execution.status,
+      );
       await this.progress.refreshProjection(eventRepo, execution);
       await executionRepo.save(execution);
       if (root.executionId !== execution.executionId) {
@@ -2753,6 +2778,19 @@ export class ExecutionService {
       })
       .orderBy('artifact.created_at', 'ASC')
       .getMany();
+    const skillActivations = await this.dataSource
+      .getRepository(SkillActivationEntity)
+      .createQueryBuilder('activation')
+      .innerJoin(
+        ExecutionEntity,
+        'execution',
+        'execution.executionId = activation.executionId',
+      )
+      .where('execution.rootExecutionId = :rootExecutionId', {
+        rootExecutionId,
+      })
+      .orderBy('activation.activatedAt', 'ASC')
+      .getMany();
     const embeddedArtifacts: Record<
       string,
       { encoding: 'base64'; data: string }
@@ -2811,6 +2849,21 @@ export class ExecutionService {
       product: 'documents',
       eventRange: { firstSequence, lastSequence },
       events,
+      skillActivations: skillActivations.map((activation) => ({
+        schemaVersion: activation.schemaVersion,
+        activationId: activation.activationId,
+        executionId: activation.executionId,
+        skillId: activation.skillId,
+        skillVersion: activation.skillVersion,
+        contentHash: activation.contentHash,
+        activationReason: activation.activationReason,
+        inputBindings: activation.inputBindings,
+        phase: activation.phase,
+        checkpoint: activation.checkpoint,
+        status: activation.status,
+        activatedAt: activation.activatedAt.toISOString(),
+        finishedAt: activation.finishedAt?.toISOString() ?? null,
+      })),
       artifacts: artifactManifest,
       embeddedArtifacts,
       environment,

@@ -263,6 +263,9 @@ describe('execution v1 contract', () => {
   const validateActiveContext = ajv.getSchema(
     'https://documents.local/harness/v1/schemas/active-context.schema.json',
   )!;
+  const validateSkillActivation = ajv.getSchema(
+    'https://documents.local/harness/v1/schemas/skill-activation.schema.json',
+  )!;
   const validateContextChunkPlan = ajv.getSchema(
     'https://documents.local/harness/v1/schemas/context-chunk-plan.schema.json',
   )!;
@@ -299,6 +302,30 @@ describe('execution v1 contract', () => {
 
   it('keeps the runtime adapter pinned to the copied schema set', () => {
     expect(contractHash).toBe(EXECUTION_CONTRACT_SET_HASH);
+  });
+
+  it('requires terminal skill activations to carry their finished timestamp', () => {
+    const activation = {
+      schemaVersion: 'skill-activation/1',
+      activationId: '00000000-0000-4000-8000-000000000021',
+      executionId: '00000000-0000-4000-8000-000000000022',
+      skillId: 'workspace-document-workflow',
+      skillVersion: 'workspace-document-workflow/1',
+      contentHash:
+        'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+      activationReason: 'objective_match',
+      inputBindings: { owner: { type: 'assistant', id: 1 } },
+      phase: 'finished',
+      checkpoint: null,
+      status: 'completed',
+      activatedAt: '2026-08-26T10:00:00Z',
+      finishedAt: '2026-08-26T10:01:00Z',
+    };
+
+    expect(validateSkillActivation(activation)).toBe(true);
+    expect(validateSkillActivation({ ...activation, finishedAt: null })).toBe(
+      false,
+    );
   });
 
   it('validates the frozen active context and its continuity capsule', () => {
