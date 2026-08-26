@@ -42,6 +42,9 @@ export class ExecutionArtifactEntity {
   @Column({ name: 'created_by_event_id', type: 'uuid', nullable: true })
   createdByEventId: string | null;
 
+  @Column({ name: 'produced_by_attempt_id', type: 'uuid', nullable: true })
+  producedByAttemptId: string | null;
+
   @Column({
     name: 'input_source_ids',
     type: 'jsonb',

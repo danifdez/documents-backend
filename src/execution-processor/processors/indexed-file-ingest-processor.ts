@@ -9,6 +9,7 @@ import {
   VectorPointInput,
   VectorStoreService,
 } from '../../vector/vector-store.service';
+import { ExecutionArtifactService } from '../../execution/execution-artifact.service';
 
 @Injectable()
 export class IndexedFileIngestProcessor implements ExecutionProcessor {
@@ -19,6 +20,7 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
     @InjectRepository(IndexedFileEntity)
     private readonly repository: Repository<IndexedFileEntity>,
     private readonly vectorStore: VectorStoreService,
+    private readonly artifacts: ExecutionArtifactService,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -52,17 +54,37 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
 
     const result = execution.result as {
       chunks?: number;
+      pointCount?: number;
       sourceId?: string;
-      points?: unknown[];
     } | null;
     const chunks = Number(result?.chunks ?? 0);
-    if (!Array.isArray(result?.points) || chunks !== result.points.length) {
-      throw new Error('indexed-file-ingest result has invalid points');
+    const pointCount = Number(result?.pointCount);
+    const documents = await this.artifacts.readOutputJson(
+      execution,
+      'vector_points',
+      'vector_points',
+    );
+    const points = documents.flatMap((document) => {
+      if (!Array.isArray(document.points)) {
+        throw new Error(
+          'indexed-file-ingest vector_points artifact is invalid',
+        );
+      }
+      return document.points as VectorPointInput[];
+    });
+    if (
+      !Number.isInteger(chunks) ||
+      chunks < 0 ||
+      !Number.isInteger(pointCount) ||
+      pointCount !== chunks ||
+      points.length !== pointCount
+    ) {
+      throw new Error('indexed-file-ingest result has invalid point artifacts');
     }
     await this.vectorStore.replaceIndexedFile(
       indexedFileId,
       `${file.ownerType}:${file.ownerId}`,
-      result.points as VectorPointInput[],
+      points,
     );
 
     file.embeddingId = chunks > 0 ? sourceIdForIndexedFile(file.id) : null;

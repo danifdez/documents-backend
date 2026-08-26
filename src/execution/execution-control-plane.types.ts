@@ -72,3 +72,10 @@ export interface StepResultReceiptAck {
   receiptId?: string;
   acknowledgedAt: Date;
 }
+
+export interface OutputArtifactReceiptAck {
+  artifactId: string;
+  attemptId: string;
+  code: 'received' | 'duplicate' | 'stale_attempt' | 'artifact_conflict';
+  acknowledgedAt: Date;
+}

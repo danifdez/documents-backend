@@ -10,9 +10,11 @@ import {
   ClaimExecutionStepInput,
   GrantExecutionStepAttemptInput,
   ReceiveExecutionStepResultInput,
+  OutputArtifactReceiptAck,
   StepAssignment,
   StepResultReceiptAck,
 } from './execution-control-plane.types';
+import { IncomingExecutionArtifact } from './execution.types';
 import {
   assertAttemptTransition,
   assertStepTransition,
@@ -45,6 +47,9 @@ import { ExecutionOperationKind } from './execution-operation-kind.enum';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
+const MAX_OUTPUT_ARTIFACT_BYTES = 8 * 1024 * 1024;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalValue);
@@ -55,7 +60,7 @@ function canonicalValue(value: unknown): unknown {
         .map(([key, child]) => [key, canonicalValue(child)]),
     );
   }
-  if (typeof value === 'number' && !Number.isInteger(value)) {
+  if (typeof value === 'number' && !Number.isFinite(value)) {
     throw new BadRequestException('invalid_step_result');
   }
   return value;
@@ -236,6 +241,91 @@ export class ExecutionAttemptService {
       attempt.startedAt = now;
       attempt.heartbeatAt = now;
       return manager.getRepository(ExecutionStepAttemptEntity).save(attempt);
+    });
+  }
+
+  async uploadOutputArtifact(
+    attemptId: string,
+    workerId: string,
+    artifact: IncomingExecutionArtifact,
+  ): Promise<OutputArtifactReceiptAck> {
+    const acknowledgedAt = new Date();
+    const ack = (
+      code: OutputArtifactReceiptAck['code'],
+    ): OutputArtifactReceiptAck => ({
+      artifactId: artifact.artifactId,
+      attemptId,
+      code,
+      acknowledgedAt,
+    });
+    const body = this.validateOutputArtifact(artifact);
+
+    return this.dataSource.transaction(async (manager) => {
+      const attempt = await manager
+        .getRepository(ExecutionStepAttemptEntity)
+        .findOne({
+          where: { attemptId },
+          lock: { mode: 'pessimistic_write' },
+        });
+      if (!attempt || attempt.claimedBy !== workerId) {
+        return ack('stale_attempt');
+      }
+      const step = await manager.getRepository(ExecutionStepEntity).findOneBy({
+        stepId: attempt.stepId,
+      });
+      if (
+        !step ||
+        step.currentAttemptId !== attemptId ||
+        attempt.leaseExpiresAt <= acknowledgedAt ||
+        ![
+          ExecutionStepAttemptStatus.LEASED,
+          ExecutionStepAttemptStatus.RUNNING,
+        ].includes(attempt.status)
+      ) {
+        return ack('stale_attempt');
+      }
+      const execution = await manager
+        .getRepository(ExecutionEntity)
+        .findOneBy({ executionId: attempt.executionId });
+      if (!execution) return ack('stale_attempt');
+
+      const artifactRepo = manager.getRepository(ExecutionArtifactEntity);
+      const existing = await artifactRepo.findOneBy({
+        artifactId: artifact.artifactId,
+      });
+      if (existing) {
+        return existing.rootExecutionId === execution.rootExecutionId &&
+          existing.producedByAttemptId === attemptId &&
+          existing.kind === artifact.kind &&
+          existing.mediaType === artifact.mediaType &&
+          existing.contentHash === artifact.contentHash &&
+          Number(existing.size) === artifact.size
+          ? ack('duplicate')
+          : ack('artifact_conflict');
+      }
+
+      await artifactRepo.save(
+        artifactRepo.create({
+          artifactId: artifact.artifactId,
+          rootExecutionId: execution.rootExecutionId,
+          kind: artifact.kind,
+          contentHash: artifact.contentHash,
+          size: String(artifact.size),
+          mediaType: artifact.mediaType,
+          encoding: 'identity',
+          dataClassification: 'workspace',
+          redaction: { applied: false },
+          retentionClass: 'execution',
+          createdByEventId: null,
+          producedByAttemptId: attemptId,
+          inputSourceIds: [],
+          storageRef:
+            `execution:${execution.rootExecutionId}:artifact:` +
+            artifact.artifactId,
+          body,
+        }),
+      );
+      return ack('received');
     });
   }
 
@@ -559,6 +649,12 @@ export class ExecutionAttemptService {
         return ack('stale_attempt');
       }
 
+      const outputArtifactRefs = await this.validateResultArtifactRefs(
+        manager,
+        input.attemptId,
+        input.result['artifactRefs'],
+      );
+
       assertAttemptTransition(
         attempt.status,
         ExecutionStepAttemptStatus.RESULT_RECEIVED,
@@ -579,11 +675,90 @@ export class ExecutionAttemptService {
       attempt.status = ExecutionStepAttemptStatus.RESULT_RECEIVED;
       attempt.resultReceiptId = receipt.receiptId;
       step.status = ExecutionStepStatus.RESULT_RECEIVED;
+      step.outputArtifactRefs = outputArtifactRefs;
       step.version += 1;
       await attemptRepo.save(attempt);
       await stepRepo.save(step);
       return ack('received', receipt.receiptId);
     });
+  }
+
+  private validateOutputArtifact(artifact: IncomingExecutionArtifact): Buffer {
+    if (
+      !artifact ||
+      !UUID_PATTERN.test(String(artifact.artifactId ?? '')) ||
+      typeof artifact.kind !== 'string' ||
+      !artifact.kind.trim() ||
+      artifact.kind.length > 80 ||
+      !/^sha256:[0-9a-f]{64}$/.test(String(artifact.contentHash ?? '')) ||
+      !Number.isInteger(artifact.size) ||
+      artifact.size < 0 ||
+      artifact.size > MAX_OUTPUT_ARTIFACT_BYTES ||
+      artifact.mediaType !== 'application/json' ||
+      typeof artifact.bodyBase64 !== 'string'
+    ) {
+      throw new BadRequestException('invalid_output_artifact');
+    }
+    const body = Buffer.from(artifact.bodyBase64, 'base64');
+    if (
+      body.toString('base64') !== artifact.bodyBase64 ||
+      body.length !== artifact.size ||
+      `sha256:${createHash('sha256').update(body).digest('hex')}` !==
+        artifact.contentHash
+    ) {
+      throw new BadRequestException('output_artifact_integrity_mismatch');
+    }
+    return body;
+  }
+
+  private async validateResultArtifactRefs(
+    manager: EntityManager,
+    attemptId: string,
+    value: unknown,
+  ): Promise<ExecutionStepEntity['outputArtifactRefs']> {
+    const refs = Array.isArray(value) ? value : [];
+    if (refs.length > 100) {
+      throw new BadRequestException('too_many_result_artifacts');
+    }
+    const normalized = refs.map((value) => {
+      if (!value || typeof value !== 'object') {
+        throw new BadRequestException('invalid_result_artifact_ref');
+      }
+      const ref = value as Record<string, unknown>;
+      if (
+        typeof ref.role !== 'string' ||
+        !ref.role.trim() ||
+        !UUID_PATTERN.test(String(ref.artifactId ?? '')) ||
+        (ref.revision !== undefined &&
+          (!Number.isInteger(ref.revision) || Number(ref.revision) < 1))
+      ) {
+        throw new BadRequestException('invalid_result_artifact_ref');
+      }
+      return {
+        role: ref.role.trim(),
+        artifactId: String(ref.artifactId),
+        ...(ref.revision === undefined
+          ? {}
+          : { revision: Number(ref.revision) }),
+      };
+    });
+    const ids = normalized.map((ref) => ref.artifactId);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException('duplicate_result_artifact_ref');
+    }
+    if (!ids.length) return normalized;
+    const artifacts = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .findBy({ artifactId: In(ids) });
+    const ownedIds = new Set(
+      artifacts
+        .filter((artifact) => artifact.producedByAttemptId === attemptId)
+        .map((artifact) => artifact.artifactId),
+    );
+    if (ids.some((id) => !ownedIds.has(id))) {
+      throw new BadRequestException('result_artifact_not_owned_by_attempt');
+    }
+    return normalized;
   }
 
   async processReceivedResults(limit = 20): Promise<number> {

@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { VectorStoreService } from '../../vector/vector-store.service';
+import { ExecutionArtifactService } from '../../execution/execution-artifact.service';
 
 @Injectable()
 export class MemoryIngestProcessor implements ExecutionProcessor {
-  constructor(private readonly vectorStore: VectorStoreService) {}
+  constructor(
+    private readonly vectorStore: VectorStoreService,
+    private readonly artifacts: ExecutionArtifactService,
+  ) {}
 
   canProcess(taskType: string): boolean {
     return taskType === 'memory-ingest';
@@ -22,14 +26,22 @@ export class MemoryIngestProcessor implements ExecutionProcessor {
       memoryId <= 0 ||
       !Number.isInteger(assistantId) ||
       assistantId <= 0 ||
-      !Array.isArray(result?.embedding)
+      result?.artifactCount !== 1
     ) {
       throw new Error('memory-ingest result is invalid');
+    }
+    const documents = await this.artifacts.readOutputJson(
+      execution,
+      'memory_embedding',
+      'memory_embedding',
+    );
+    if (documents.length !== 1 || !Array.isArray(documents[0].embedding)) {
+      throw new Error('memory-ingest embedding artifact is invalid');
     }
     await this.vectorStore.replaceMemory(
       memoryId,
       assistantId,
-      result.embedding as number[],
+      documents[0].embedding as number[],
       {
         memory_id: memoryId,
         name: String(execution.payload['name'] ?? ''),

@@ -20,6 +20,7 @@ import {
   ReceiveExecutionStepResultDto,
   RegisterModelsWorkerDto,
   RenewExecutionStepLeaseDto,
+  UploadExecutionOutputArtifactDto,
 } from './dto/execution-protocol.dto';
 import { ExecutionAttemptService } from './execution-attempt.service';
 
@@ -137,6 +138,24 @@ export class ExecutionProtocolController {
       attemptId: body.attemptId,
       workerId,
       result: body as unknown as Record<string, unknown>,
+    });
+  }
+
+  @Post('attempts/:attemptId/artifacts')
+  async uploadArtifact(
+    @Param('attemptId') attemptId: string,
+    @Headers('x-worker-id') workerId: string,
+    @Headers('x-worker-credential') credential: string | undefined,
+    @Body() body: UploadExecutionOutputArtifactDto,
+  ) {
+    await this.workers.authenticate(workerId, credential);
+    return this.attempts.uploadOutputArtifact(attemptId, workerId, {
+      ...body,
+      encoding: 'identity',
+      dataClassification: 'workspace',
+      redaction: { applied: false },
+      retentionClass: 'execution',
+      inputSourceIds: [],
     });
   }
 

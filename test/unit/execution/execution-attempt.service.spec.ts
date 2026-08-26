@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { ExecutionAttemptService } from '../../../src/execution/execution-attempt.service';
 import { ExecutionResultReceiptEntity } from '../../../src/execution/execution-result-receipt.entity';
@@ -16,6 +16,7 @@ import { ExecutionOperationStatus } from '../../../src/execution/execution-opera
 import { ExecutionToolPlanEntity } from '../../../src/execution/execution-tool-plan.entity';
 import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
 import { ExecutionOperationKind } from '../../../src/execution/execution-operation-kind.enum';
+import { ExecutionArtifactEntity } from '../../../src/execution/execution-artifact.entity';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -23,6 +24,7 @@ const OPERATION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
 const ATTEMPT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca704';
 const WORKER_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca705';
 const TOOL_CALL_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca706';
+const ARTIFACT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca709';
 
 describe('ExecutionAttemptService', () => {
   let service: ExecutionAttemptService;
@@ -34,6 +36,7 @@ describe('ExecutionAttemptService', () => {
   let operationRepo: Record<string, jest.Mock>;
   let toolPlanRepo: Record<string, jest.Mock>;
   let eventRepo: Record<string, jest.Mock>;
+  let artifactRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
   const readyStep = () => ({
@@ -44,6 +47,7 @@ describe('ExecutionAttemptService', () => {
     version: 1,
     currentAttemptId: null,
     stepKind: ExecutionStepKind.SERVICE,
+    outputArtifactRefs: [],
     work: { taskType: 'detect-language' },
     resourceKeys: [],
     availableAt: new Date(Date.now() - 1_000),
@@ -151,6 +155,12 @@ describe('ExecutionAttemptService', () => {
       ]),
       create: jest.fn((value) => value),
     };
+    artifactRepo = {
+      findOneBy: jest.fn().mockResolvedValue(null),
+      findBy: jest.fn().mockResolvedValue([]),
+      create: jest.fn((value) => value),
+      save: jest.fn(async (value) => value),
+    };
     manager = {
       getRepository: jest.fn((entity) => {
         if (entity === ExecutionStepEntity) return stepRepo;
@@ -161,6 +171,7 @@ describe('ExecutionAttemptService', () => {
         if (entity === ExecutionOperationEntity) return operationRepo;
         if (entity === ExecutionToolPlanEntity) return toolPlanRepo;
         if (entity === ExecutionEventEntity) return eventRepo;
+        if (entity === ExecutionArtifactEntity) return artifactRepo;
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
       query: jest.fn().mockResolvedValue([]),
@@ -169,6 +180,132 @@ describe('ExecutionAttemptService', () => {
     service = new ExecutionAttemptService({
       transaction: jest.fn(async (callback) => callback(manager)),
     } as any);
+  });
+
+  it('stores an output artifact under the active fenced attempt', async () => {
+    const body = Buffer.from('{"points":[]}');
+    attemptRepo.findOne.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      currentAttemptId: ATTEMPT_ID,
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      rootExecutionId: EXECUTION_ID,
+    });
+
+    const ack = await service.uploadOutputArtifact(ATTEMPT_ID, WORKER_ID, {
+      artifactId: ARTIFACT_ID,
+      kind: 'vector_points',
+      contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
+      size: body.length,
+      mediaType: 'application/json',
+      bodyBase64: body.toString('base64'),
+      dataClassification: 'workspace',
+    });
+
+    expect(ack.code).toBe('received');
+    expect(artifactRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: ARTIFACT_ID,
+        producedByAttemptId: ATTEMPT_ID,
+        body,
+      }),
+    );
+  });
+
+  it('fences an output artifact after the attempt is superseded', async () => {
+    const body = Buffer.from('{"points":[]}');
+    attemptRepo.findOne.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      currentAttemptId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca799',
+    });
+
+    const ack = await service.uploadOutputArtifact(ATTEMPT_ID, WORKER_ID, {
+      artifactId: ARTIFACT_ID,
+      kind: 'vector_points',
+      contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
+      size: body.length,
+      mediaType: 'application/json',
+      bodyBase64: body.toString('base64'),
+      dataClassification: 'workspace',
+    });
+
+    expect(ack.code).toBe('stale_attempt');
+    expect(artifactRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('accepts only result artifacts produced by the same attempt', async () => {
+    const attempt = runningAttempt();
+    const step = {
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
+    artifactRepo.findBy.mockResolvedValue([
+      { artifactId: ARTIFACT_ID, producedByAttemptId: ATTEMPT_ID },
+    ]);
+
+    const ack = await service.receiveResult({
+      executionId: EXECUTION_ID,
+      stepId: STEP_ID,
+      operationId: OPERATION_ID,
+      attemptId: ATTEMPT_ID,
+      workerId: WORKER_ID,
+      result: {
+        status: 'succeeded',
+        stepKind: ExecutionStepKind.SERVICE,
+        output: { value: { score: 0.5 } },
+        artifactRefs: [
+          { role: 'vector_points', artifactId: ARTIFACT_ID, revision: 1 },
+        ],
+      },
+    });
+
+    expect(ack.code).toBe('received');
+    expect(step.outputArtifactRefs).toEqual([
+      { role: 'vector_points', artifactId: ARTIFACT_ID, revision: 1 },
+    ]);
+  });
+
+  it('rejects a result artifact produced by another attempt', async () => {
+    const attempt = runningAttempt();
+    const step = {
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(dispatchedOperation());
+    artifactRepo.findBy.mockResolvedValue([
+      {
+        artifactId: ARTIFACT_ID,
+        producedByAttemptId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca799',
+      },
+    ]);
+
+    await expect(
+      service.receiveResult({
+        executionId: EXECUTION_ID,
+        stepId: STEP_ID,
+        operationId: OPERATION_ID,
+        attemptId: ATTEMPT_ID,
+        workerId: WORKER_ID,
+        result: {
+          status: 'succeeded',
+          stepKind: ExecutionStepKind.SERVICE,
+          artifactRefs: [
+            { role: 'vector_points', artifactId: ARTIFACT_ID, revision: 1 },
+          ],
+        },
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(stepRepo.save).not.toHaveBeenCalled();
   });
 
   it('grants a fenced lease and marks the step running atomically', async () => {

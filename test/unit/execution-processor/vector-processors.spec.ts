@@ -16,18 +16,23 @@ describe('vector domain finalizers', () => {
     const vectorStore = {
       replaceWorkspaceSource: jest.fn().mockResolvedValue(undefined),
     };
+    const artifacts = {
+      readOutputJson: jest.fn().mockResolvedValue([{ points: [] }]),
+    };
+    const points = [{ id: 'resource_7:1', embedding: [], payload: {} }];
+    artifacts.readOutputJson.mockResolvedValue([{ points }]);
     const processor = new IngestContentProcessor(
       resourceService as any,
       vectorStore as any,
+      artifacts as any,
     );
-    const points = [{ id: 'resource_7:1', embedding: [], payload: {} }];
 
     await expect(
       processor.process(
         execution(
           'ingest-content',
           { resourceId: 7, projectId: 3 },
-          { points },
+          { pointCount: 1, chunks: 1 },
         ),
       ),
     ).resolves.toEqual(expect.objectContaining({ success: true }));
@@ -46,14 +51,22 @@ describe('vector domain finalizers', () => {
     const vectorStore = {
       replaceMemory: jest.fn().mockResolvedValue(undefined),
     };
-    const processor = new MemoryIngestProcessor(vectorStore as any);
+    const artifacts = {
+      readOutputJson: jest
+        .fn()
+        .mockResolvedValue([{ embedding: Array(384).fill(0) }]),
+    };
+    const processor = new MemoryIngestProcessor(
+      vectorStore as any,
+      artifacts as any,
+    );
 
     await expect(
       processor.process(
         execution(
           'memory-ingest',
           { memoryId: 4, ownerId: 2, name: 'Editor', type: 'fact' },
-          { embedding: Array(384).fill(0) },
+          { artifactCount: 1 },
         ),
       ),
     ).resolves.toEqual({ success: true, memoryId: 4 });
@@ -80,17 +93,21 @@ describe('vector domain finalizers', () => {
     const vectorStore = {
       replaceIndexedFile: jest.fn().mockResolvedValue(undefined),
     };
+    const points = [{ id: 'indexed_file_9:1', embedding: [], payload: {} }];
+    const artifacts = {
+      readOutputJson: jest.fn().mockResolvedValue([{ points }]),
+    };
     const processor = new IndexedFileIngestProcessor(
       repository as any,
       vectorStore as any,
+      artifacts as any,
     );
-    const points = [{ id: 'indexed_file_9:1', embedding: [], payload: {} }];
 
     await processor.process(
       execution(
         'indexed-file-ingest',
         { indexedFileId: 9, checksum: 'current' },
-        { chunks: 1, points },
+        { chunks: 1, pointCount: 1 },
       ),
     );
     expect(vectorStore.replaceIndexedFile).toHaveBeenCalledWith(

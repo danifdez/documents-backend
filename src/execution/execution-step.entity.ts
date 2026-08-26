@@ -45,6 +45,13 @@ export class ExecutionStepEntity {
   })
   inputArtifactRefs: ExecutionArtifactRef[];
 
+  @Column({
+    name: 'output_artifact_refs',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  outputArtifactRefs: ExecutionArtifactRef[];
+
   @Column({ type: 'jsonb' })
   work: Record<string, unknown>;
 

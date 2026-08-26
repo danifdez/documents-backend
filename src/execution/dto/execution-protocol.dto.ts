@@ -3,6 +3,7 @@ import {
   ArrayNotEmpty,
   Equals,
   IsArray,
+  IsBase64,
   IsEnum,
   IsInt,
   IsIn,
@@ -13,6 +14,7 @@ import {
   IsUUID,
   Matches,
   Max,
+  MaxLength,
   Min,
   ValidateIf,
 } from 'class-validator';
@@ -118,4 +120,30 @@ export class ReceiveExecutionStepResultDto {
   @IsOptional()
   @IsObject()
   inference?: Record<string, unknown>;
+}
+
+export class UploadExecutionOutputArtifactDto {
+  @IsUUID()
+  artifactId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  kind: string;
+
+  @IsString()
+  @Matches(/^sha256:[0-9a-f]{64}$/)
+  contentHash: string;
+
+  @IsInt()
+  @Min(0)
+  @Max(8 * 1024 * 1024)
+  size: number;
+
+  @Equals('application/json')
+  mediaType: 'application/json';
+
+  @IsString()
+  @IsBase64()
+  bodyBase64: string;
 }

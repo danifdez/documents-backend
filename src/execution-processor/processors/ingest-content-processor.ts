@@ -11,6 +11,7 @@ import {
   sourceIdForKnowledge,
   sourceIdForResource,
 } from '../../vector/vector-source-id.util';
+import { ExecutionArtifactService } from '../../execution/execution-artifact.service';
 
 @Injectable()
 export class IngestContentProcessor implements ExecutionProcessor {
@@ -20,6 +21,7 @@ export class IngestContentProcessor implements ExecutionProcessor {
   constructor(
     private readonly resourceService: ResourceService,
     private readonly vectorStore: VectorStoreService,
+    private readonly artifacts: ExecutionArtifactService,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -29,10 +31,24 @@ export class IngestContentProcessor implements ExecutionProcessor {
   async process(execution: ExecutionEntity): Promise<any> {
     const sourceType = execution.payload['sourceType'] || 'resource';
     const result = execution.result as Record<string, unknown> | null;
-    const points = Array.isArray(result?.points)
-      ? (result.points as VectorPointInput[])
-      : null;
-    if (!points) throw new Error('ingest-content result requires points');
+    const pointCount = Number(result?.pointCount);
+    if (!Number.isInteger(pointCount) || pointCount < 0) {
+      throw new Error('ingest-content result requires pointCount');
+    }
+    const documents = await this.artifacts.readOutputJson(
+      execution,
+      'vector_points',
+      'vector_points',
+    );
+    const points = documents.flatMap((document) => {
+      if (!Array.isArray(document.points)) {
+        throw new Error('ingest-content vector_points artifact is invalid');
+      }
+      return document.points as VectorPointInput[];
+    });
+    if (points.length !== pointCount) {
+      throw new Error('ingest-content artifact point count is invalid');
+    }
     let payload: Record<string, unknown>;
 
     if (sourceType === 'resource') {
