@@ -35,6 +35,11 @@ export const BROWSER_TYPE_TEXT_TOOL_NAME = 'browser.type_text';
 export const BROWSER_TYPE_TEXT_TOOL_VERSION = 'browser.type_text/1';
 export const BROWSER_TYPE_TEXT_TOOL_CAPABILITY = 'tool.browser.type_text/1';
 
+export const BROWSER_SELECT_OPTION_TOOL_NAME = 'browser.select_option';
+export const BROWSER_SELECT_OPTION_TOOL_VERSION = 'browser.select_option/1';
+export const BROWSER_SELECT_OPTION_TOOL_CAPABILITY =
+  'tool.browser.select_option/1';
+
 export const WORKSPACE_FILE_READ_TOOL_NAME = 'workspace_files.read';
 export const WORKSPACE_FILE_READ_TOOL_VERSION = 'workspace_files.read/1';
 export const WORKSPACE_FILE_READ_TOOL_CAPABILITY =

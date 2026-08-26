@@ -107,6 +107,7 @@ describe('ExecutionToolPlanService', () => {
             'browser.go_back',
             'browser.click',
             'browser.type_text',
+            'browser.select_option',
             'browser.read_current_page',
             'workspace_files.list',
             'workspace_files.search',
@@ -761,6 +762,45 @@ describe('ExecutionToolPlanService', () => {
         }),
       ),
     ).rejects.toThrow('invalid_arguments');
+  });
+
+  it('prepares an exact browser option selection without form submission', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'browser.select_option',
+        arguments: {
+          expectedCurrentUrl: 'https://example.test/profile',
+          elementIndex: 9,
+          expectedLabel: 'Country',
+          expectedCurrentValue: 'es',
+          expectedCurrentValueTruncated: false,
+          optionValue: 'pt',
+          expectedOptionLabel: 'Portugal',
+        },
+      }),
+    );
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'browser.select_option',
+        descriptorVersion: 'browser.select_option/1',
+        normalizedArguments: {
+          expectedCurrentUrl: 'https://example.test/profile',
+          elementIndex: 9,
+          expectedLabel: 'Country',
+          expectedCurrentValue: 'es',
+          expectedCurrentValueTruncated: false,
+          optionValue: 'pt',
+          expectedOptionLabel: 'Portugal',
+        },
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'paired_browser_select_option_requires_confirmation',
+        }),
+        recoveryClass: 'effect_checked',
+        idempotencyKey: `browser-select-option:${TOOL_CALL_ID}`,
+        requiredCapabilities: ['tool.browser.select_option/1'],
+      }),
+    );
   });
 
   it('prepares a working-folder read for the personal assistant', async () => {

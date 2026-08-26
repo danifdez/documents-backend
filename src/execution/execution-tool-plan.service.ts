@@ -42,6 +42,9 @@ import {
   BROWSER_READ_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_NAME,
   BROWSER_READ_TOOL_VERSION,
+  BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
+  BROWSER_SELECT_OPTION_TOOL_NAME,
+  BROWSER_SELECT_OPTION_TOOL_VERSION,
   BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
   BROWSER_TYPE_TEXT_TOOL_NAME,
   BROWSER_TYPE_TEXT_TOOL_VERSION,
@@ -389,6 +392,9 @@ export class ExecutionToolPlanService {
     }
     if (invocation.name === BROWSER_TYPE_TEXT_TOOL_NAME) {
       return this.prepareBrowserTypeText(invocation);
+    }
+    if (invocation.name === BROWSER_SELECT_OPTION_TOOL_NAME) {
+      return this.prepareBrowserSelectOption(invocation);
     }
     if (invocation.name === WORKSPACE_FILE_READ_TOOL_NAME) {
       return this.prepareWorkspaceFileRead(invocation, execution);
@@ -1240,6 +1246,112 @@ export class ExecutionToolPlanService {
       recoveryClass: 'effect_checked',
       idempotencyKey: `browser-type-text:${invocation.toolCallId}`,
       requiredCapabilities: [BROWSER_TYPE_TEXT_TOOL_CAPABILITY],
+      deadline: expiresAt.toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareBrowserSelectOption(
+    invocation: ToolInvocationContract,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    const allowedKeys = [
+      'expectedCurrentUrl',
+      'elementIndex',
+      'expectedLabel',
+      'expectedCurrentValue',
+      'expectedCurrentValueTruncated',
+      'optionValue',
+      'expectedOptionLabel',
+    ];
+    const expectedCurrentValue = invocation.arguments.expectedCurrentValue;
+    const optionValue = invocation.arguments.optionValue;
+    const expectedOptionLabel = invocation.arguments.expectedOptionLabel;
+    if (
+      Object.keys(invocation.arguments).some(
+        (key) => !allowedKeys.includes(key),
+      ) ||
+      typeof invocation.arguments.expectedCurrentUrl !== 'string' ||
+      !Number.isInteger(invocation.arguments.elementIndex) ||
+      typeof invocation.arguments.expectedLabel !== 'string' ||
+      typeof expectedCurrentValue !== 'string' ||
+      invocation.arguments.expectedCurrentValueTruncated !== false ||
+      typeof optionValue !== 'string' ||
+      typeof expectedOptionLabel !== 'string'
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const expectedCurrentUrl = invocation.arguments.expectedCurrentUrl.trim();
+    const elementIndex = Number(invocation.arguments.elementIndex);
+    const expectedLabel = invocation.arguments.expectedLabel.trim();
+    const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
+    if (
+      !this.isHttpUrl(expectedCurrentUrl) ||
+      elementIndex < 1 ||
+      elementIndex > 60 ||
+      !expectedLabel ||
+      expectedLabel.length > 120 ||
+      expectedCurrentValue !== normalize(expectedCurrentValue) ||
+      expectedCurrentValue.length > 60 ||
+      optionValue !== normalize(optionValue) ||
+      !optionValue ||
+      optionValue.length > 120 ||
+      expectedOptionLabel !== normalize(expectedOptionLabel) ||
+      !expectedOptionLabel ||
+      expectedOptionLabel.length > 120
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const preparedAt = new Date();
+    const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
+    const resourceKey = 'browser:active-page';
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: BROWSER_SELECT_OPTION_TOOL_NAME,
+      descriptorVersion: BROWSER_SELECT_OPTION_TOOL_VERSION,
+      normalizedArguments: {
+        expectedCurrentUrl,
+        elementIndex,
+        expectedLabel,
+        expectedCurrentValue,
+        expectedCurrentValueTruncated: false,
+        optionValue,
+        expectedOptionLabel,
+      },
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_irreversible',
+          resourceKey,
+          description:
+            `Select option "${expectedOptionLabel}" in field ` +
+            `"${expectedLabel}" (control ${elementIndex}) on ${expectedCurrentUrl}`,
+          reversible: false,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_select_option_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Selecting an option can trigger handlers on an external page.',
+        prompt:
+          `Select ${JSON.stringify(expectedOptionLabel)} in field ` +
+          `${JSON.stringify(expectedLabel)} (control ${elementIndex}) on ` +
+          `${JSON.stringify(expectedCurrentUrl)} without submitting?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-select-option:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_SELECT_OPTION_TOOL_CAPABILITY],
       deadline: expiresAt.toISOString(),
       preparedAt: preparedAt.toISOString(),
     };

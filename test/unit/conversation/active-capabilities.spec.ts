@@ -124,6 +124,11 @@ describe('active capability selection', () => {
       descriptorVersion: 'browser.type_text/1',
       availabilityBasis: 'paired_browser',
     });
+    expect(selected.tools).toContainEqual({
+      name: 'browser.select_option',
+      descriptorVersion: 'browser.select_option/1',
+      availabilityBasis: 'paired_browser',
+    });
     expect(query.andWhere).toHaveBeenCalledWith(
       'worker.ownerPrincipal = :ownerPrincipal',
       { ownerPrincipal: 'paired-user' },
@@ -137,6 +142,7 @@ describe('active capability selection', () => {
           'tool.browser.go_back/1',
           'tool.browser.click/1',
           'tool.browser.type_text/1',
+          'tool.browser.select_option/1',
         ]),
       },
     );
