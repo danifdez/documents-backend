@@ -1,71 +1,37 @@
-## Execution System
+# Background actions
 
-The backend uses one durable `Execution` domain for asynchronous work. Queueing
-is a capability of an execution; there is no parallel jobs table or API.
+Documents runs longer actions in the background so users can continue working. Examples include extracting a file, generating a summary, translating content, identifying entities, building a search index, and analyzing a dataset.
 
-### Lifecycle
+## Action states
+
+An action moves through the following observable states:
 
 ```text
 queued → running → waiting → running → completed
              ↘ failed      ↘ cancelled
 ```
 
-Backend creates root executions transactionally with their first
-`execution.created` event and step graph. Models workers request compatible
-ready steps through bounded long-poll HTTP claims. Backend retries outside any
-transaction, then locks the worker and step only for each atomic claim,
-enforces its declared concurrency, creates a lease-bound attempt and fences
-every result with that identity. Reentrant work is represented by
-successor steps or child executions that preserve `rootExecutionId` and
-reference `parentExecutionId`.
+- **Queued** means the action is waiting for a compatible processing service.
+- **Running** means one or more parts are being processed.
+- **Waiting** means the action is waiting for another required part or condition.
+- **Completed** means the final result has been accepted and applied.
+- **Failed** means Documents could not produce a valid result.
+- **Cancelled** means processing was stopped and its result will not be applied.
 
-### Storage
+Some actions are divided into several parts. Documents waits for every required part before producing the final result, so partial output is not presented as a completed action.
 
-| Table | Purpose |
-|---|---|
-| `executions` | UUID identity, tree links, owner, payload, lifecycle and semantic final result |
-| `execution_steps` | Durable work graph, dependencies, availability, deadlines and step results |
-| `execution_step_attempts` | Worker claims, leases and fencing identities |
-| `execution_result_receipts` | Idempotent result delivery and terminal ACK evidence |
-| `execution_operations` | Durable operation intent, recovery class, outcome and effect state |
-| `execution_events` | Append-only evidence ordered by root execution and sequence |
-| `execution_artifacts` | Evidence manifest and optional prompt, response, tool, or snapshot bytes |
+## Priorities and capacity
 
-Backend owns coordination and terminal finalization. A worker only returns a
-`StepResult`; receipt processing closes the attempt and the coordinator applies
-authorized effects, schedules successors or completes the execution.
+Work can have high, normal, or background priority. Documents also considers when the work becomes available, any deadline, the required capability, and the processing capacity currently in use. This lets interactive work take precedence without losing queued background work.
 
-### Scheduling and recovery
+## Interruptions and recovery
 
-| Interval | Action |
-|---|---|
-| Periodic coordinator tick | Resume executions whose dependencies or waits are now satisfied |
-| Attempt recovery tick | Expire stale leases and return eligible steps to `ready` |
-| Worker health tick | Mark workers without a recent heartbeat offline |
-| Outbox publisher tick | Publish pending notifications idempotently |
+Documents keeps a durable history of each action. If a processor stops responding, unfinished work can be made available for another attempt. Late results from an expired attempt are ignored, and repeated delivery of the same accepted result does not apply the result twice.
 
-Execution priorities are `high`, `normal`, and `background`; step selection
-also considers numeric step priority, `availableAt`, deadlines, step kind and
-declared task capabilities.
+Cancellation is checked before and after processing. Work already being calculated may need to finish locally, but its output is discarded if the cancellation was observed.
 
-### API and evidence
+## Progress and notifications
 
-- Product-specific asynchronous endpoints return `{ "executionId": "<uuid>" }`.
-- A Backend represents one workspace. Execution access is scoped by the
-  authenticated owner; no workspace identity is accepted or persisted by the
-  harness.
-- `GET /executions/:rootExecutionId/events` pages the evidence log.
-- `GET /executions/:rootExecutionId/bundle` exports an `ExecutionBundle` only
-  when the request includes `x-evaluation-consent: granted`. The bundle's
-  `policySummary` records that consent together with its evaluation purpose,
-  `ai-train` destination, retention class, and caller access scope.
-- Models registers, heartbeats, claims steps, downloads artifacts and submits
-  results through `/models-work`; a claim may wait up to 30 seconds and returns
-  `null` when its bounded wait expires. IA Browser never writes directly to
-  PostgreSQL.
-- `GET /workers` returns authenticated operational projections with effective
-  capabilities, maximum/available concurrency and active attempt IDs. Active
-  assignments are derived from unexpired `leased` and `running` attempts.
+The application receives progress, completion, failure, and cancellation updates in real time. A user can leave the current screen while an action runs and see its result once Documents has finalized it.
 
-The permanent v1 contract is pinned under `contracts/execution/v1/`, and its
-fixtures live under `test/contracts/execution/v1/fixtures/`.
+Action history is scoped to the signed-in owner when authentication is enabled. Evaluation evidence can only be exported when the caller explicitly grants the required evaluation consent.

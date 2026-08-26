@@ -89,12 +89,12 @@ yarn start:dev
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](./docs/getting-started.md) | Installation, setup, and available scripts |
-| [Architecture](./docs/architecture.md) | System modules, data model, and request flow |
-| [Execution System](./docs/execution-system.md) | Durable execution queue, evidence, and processors |
-| [File Storage](./docs/file-storage.md) | SHA256 content-addressed storage system |
-| [Configuration](./docs/configuration.md) | Environment variables and settings |
-| [Authentication](./docs/authentication.md) | Auth system, roles, and permissions |
+| [Getting Started](./docs/getting-started.md) | Connecting the application to a Documents server |
+| [How Documents Works](./docs/architecture.md) | Projects, imports, search, and background processing |
+| [Background Actions](./docs/execution-system.md) | Action states, priorities, recovery, and notifications |
+| [Uploaded Files](./docs/file-storage.md) | Duplicate handling, stored information, and storage responsibility |
+| [Installation Options](./docs/configuration.md) | Storage, access, sign-in, and AI availability |
+| [Accounts and Access](./docs/authentication.md) | Sign-in, roles, permissions, and user management |
 
 ## License
 

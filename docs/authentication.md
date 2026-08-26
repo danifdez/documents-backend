@@ -1,95 +1,47 @@
-## Authentication
+# Accounts and access
 
-The backend supports JWT-based authentication using Passport.js. Authentication can be fully
-enabled or disabled via an environment variable, so it can be turned off for local or single-user
-setups without changing any code.
+Documents can operate in two access modes chosen by the administrator:
 
-### Enabling authentication
+- **Open access**: no sign-in is required. This is the default and is intended for local or single-user installations.
+- **Authenticated access**: users sign in and can only use the capabilities granted to their account.
 
-Authentication is controlled by the `AUTH_ENABLED` environment variable:
+When authenticated access is enabled, Documents will not start with an unsafe or missing sign-in secret.
 
-- `AUTH_ENABLED=false` (default) — all endpoints are publicly accessible with no login required.
-  The server logs a warning at startup to make the open state visible.
-- `AUTH_ENABLED=true` — all endpoints require a valid JWT unless explicitly marked public.
-  The server will refuse to start if `JWT_SECRET` is missing or set to an insecure default value.
+## Signing in
 
-### Login flow
+Users sign in with a username and password. A successful sign-in creates a short-lived session that is renewed in the background by the application. Access sessions last 15 minutes by default, while the renewal session lasts 7 days by default; an administrator can change these periods.
 
-```
-POST /auth/login
-  { username, password }
-  → validates credentials
-  → returns { accessToken, refreshToken }
+Repeated failed sign-in attempts are limited to five per minute from the same network address.
 
-POST /auth/refresh
-  { refreshToken }
-  → returns { accessToken }
-```
+## Roles
 
-Access tokens expire after 15 minutes (configurable via `JWT_EXPIRES_IN`).
-Refresh tokens expire after 7 days (configurable via `JWT_REFRESH_EXPIRES_IN`).
+Every account has one of two roles:
 
-The login endpoint is rate-limited to 5 requests per minute per IP to prevent brute-force attacks.
+| Role | Access |
+|---|---|
+| **Administrator** | Full access, including user management and every protected capability. |
+| **User** | Access only to the capabilities granted to the account. |
 
-### Roles
+Administrators are not restricted by individual capability permissions.
 
-Every user has one of two roles:
+## User permissions
 
-| Role | Description |
-|------|-------------|
-| `admin` | Full access to all endpoints and operations. Bypasses permission checks. Can manage other users. |
-| `user` | Standard access. Subject to fine-grained permission checks. |
+A standard user can be granted access separately to:
 
-### Permissions
+- question answering;
+- summarization;
+- translation;
+- entity extraction;
+- key-point extraction;
+- keyword extraction;
+- project management;
+- file uploads;
+- exports;
+- creating and editing content;
+- deleting content.
 
-In addition to roles, each user account carries a `permissions` JSON field that controls access to
-specific capabilities. Permissions are checked by `PermissionsGuard` on every request.
+This makes it possible, for example, to let someone read and search a project without allowing uploads or deletion.
 
-`admin` users bypass permission checking entirely.
+## User management
 
-Available permissions:
-
-| Permission | Controls access to |
-|------------|--------------------|
-| `ask` | Question-answering (RAG) |
-| `summarize` | AI summarization |
-| `translate` | Translation |
-| `entity-extraction` | Named entity recognition |
-| `key-points` | Key point extraction |
-| `keywords` | Keyword extraction |
-| `projects` | Project management |
-| `upload` | File uploads |
-| `export` | Data export |
-| `write` | Create and update operations |
-| `delete` | Delete operations |
-
-### User management
-
-Users are managed through the following endpoints (admin only):
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /users` | List all users |
-| `POST /users` | Create a new user |
-| `PATCH /users/:id` | Update a user (role, permissions, password) |
-| `DELETE /users/:id` | Delete a user |
-
-### Creating the first admin user
-
-Since there are no users in a fresh installation, the `seed:admin` script creates the initial admin:
-
-```bash
-ADMIN_USERNAME=admin ADMIN_PASSWORD=your_password yarn seed:admin
-```
-
-Or set those variables in your `.env` file before running the script.
-
-### Guards
-
-The auth system uses three guards applied globally in `AppModule`:
-
-| Guard | Applied to | Description |
-|-------|------------|-------------|
-| `ConditionalAuthGuard` | All routes | Enforces JWT verification when `AUTH_ENABLED=true`. Routes decorated with `@Public()` are excluded. |
-| `PermissionsGuard` | All routes | Checks per-route permission requirements against the authenticated user's permissions. |
-| `ThrottlerGuard` | All routes | Rate limits requests (100 per 60 seconds globally; 5 per minute for login). |
+Administrators can list accounts, create users, change a user's role or permissions, reset a password, and delete an account. The first administrator is created during installation by the person operating the Documents server.

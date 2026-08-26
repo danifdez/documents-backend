@@ -1,75 +1,32 @@
-## Getting Started
+# Getting started with a Documents server
 
-This guide walks you through installing and running the Documents Backend locally.
+This guide explains what a user needs to know when a Documents workspace is provided by a shared server. Installing and maintaining the server itself is covered by the technical documentation in the `documents-dev` project.
 
-### Prerequisites
+## What you need
 
-- **Node.js** 22 or later
-- **Yarn** package manager
-- **PostgreSQL** 17.6 or later
+Ask the administrator for:
 
-### Running
+- the Documents server address;
+- a username and password, if sign-in is enabled;
+- confirmation of which AI and file-processing features are available to your account.
 
-**1. Install dependencies**
+If you want everything to run on your own computer, choose the desktop application's standalone mode instead of connecting to a shared server.
 
-```bash
-cd backend
-yarn install
-```
+## Connect the application
 
-**2. Set environment variables**
+On the first-launch screen, choose **Connect to server** and enter the address provided by the administrator. The application saves this as a workspace, so it can be reopened or used alongside other local and remote workspaces.
 
-Create a `.env` file in the project root (one level above `backend/`) or export the variables
-directly. At minimum:
+If authentication is enabled, sign in with the account supplied by the administrator. The features visible to you depend on that account's permissions.
 
-```bash
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your_password
-POSTGRES_DB=documents
-```
+## Confirm the connection
 
-See [Configuration](./configuration.md) for a full list of available variables.
+After connecting, the dashboard shows the projects available in that workspace. Create or open a project, then import a supported file to confirm that storage is available.
 
-**3. Run database migrations**
+AI actions run in the background and require a compatible processing service. If an action remains queued, ask the administrator whether that capability is installed and online.
 
-```bash
-yarn migration:run
-```
+## Common access problems
 
-This applies all pending migrations and seeds the initial data (resource types and entity types).
-
-**4. Start the server**
-
-```bash
-yarn start:dev
-```
-
-The API will be available at `http://localhost:3000`.
-
-### Available scripts
-
-| Script | Description |
-|--------|-------------|
-| `yarn start:dev` | Start with hot-reload (development) |
-| `yarn start:debug` | Start with hot-reload and debugger on port 9229 |
-| `yarn start:prod` | Start the compiled production build |
-| `yarn build` | Compile TypeScript to `dist/` |
-| `yarn test` | Run unit tests |
-| `yarn test:e2e` | Run end-to-end tests |
-| `yarn migration:run` | Apply all pending database migrations |
-| `yarn migration:revert` | Revert the last migration |
-| `yarn migration:generate` | Generate a new migration from entity changes |
-| `yarn seed:admin` | Create the initial admin user |
-
-### Creating the admin user
-
-On first run, create an admin account with:
-
-```bash
-yarn seed:admin
-```
-
-This script reads `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment (or `.env` file) and
-creates the initial admin user, which you can then use to log in.
+- **The server cannot be reached**: verify the workspace address and network connection.
+- **Sign-in fails repeatedly**: check the credentials and wait before retrying; repeated attempts are rate-limited.
+- **An action is unavailable**: the feature may be disabled for the installation or not granted to your account.
+- **An action stays queued**: the required processing service may be busy or offline.

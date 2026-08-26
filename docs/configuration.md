@@ -1,85 +1,29 @@
-## Configuration
+# Installation options
 
-All configuration is managed through environment variables. The backend loads them automatically from
-a `.env` file placed in the root of the repository (one level above `backend/`).
+The person who operates a Documents installation chooses how it connects to its data, who may access it, and which optional processing features are available. End users do not need to configure these services themselves.
 
-### Environment variables
+## Data and file storage
 
-#### Database
+Documents requires its application database and a directory for uploaded files. The database stores projects, metadata, content, relationships, user accounts, and processing history. Original uploads are kept in file storage and are not duplicated when the exact same file already exists.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_HOST` | `database` | PostgreSQL hostname or IP address |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_USER` | `postgres` | PostgreSQL username |
-| `POSTGRES_PASSWORD` | _(empty)_ | PostgreSQL password |
-| `POSTGRES_DB` | `documents` | Database name |
+The storage location and database connection are installation-wide choices. Changing them requires administrator access to the server.
 
-#### Server
+## Application access
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | HTTP port the API listens on |
-| `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin for browser requests |
-| `BODY_LIMIT` | `50mb` | Maximum request body size (applies to JSON and URL-encoded bodies) |
+An installation can be made available only on the local machine or to approved desktop applications on a network. The administrator also controls the maximum size of application requests; file imports are handled separately.
 
-#### Authentication
+## Sign-in policy
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AUTH_ENABLED` | `false` | Set to `true` to enable JWT authentication |
-| `JWT_SECRET` | _(none)_ | Secret key used to sign JWT tokens. **Required** when `AUTH_ENABLED=true` |
-| `JWT_EXPIRES_IN` | `15m` | Access token lifetime |
-| `JWT_REFRESH_EXPIRES_IN` | `7d` | Refresh token lifetime |
+Authentication is disabled by default for local or single-user use. When enabled, every protected action requires a signed-in account and the relevant permission. The administrator also chooses the lifetime of user sessions and creates the initial administrator account.
 
-> If `AUTH_ENABLED=true` and `JWT_SECRET` is missing or set to an insecure default,
-> the application will refuse to start.
+See [Accounts and access](./authentication.md) for the roles and available permissions.
 
-#### Admin seed
+## AI processing
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ADMIN_USERNAME` | _(none)_ | Username for the initial admin account (used by `yarn seed:admin`) |
-| `ADMIN_PASSWORD` | _(none)_ | Password for the initial admin account |
+AI-assisted actions require a compatible processing service connected to the installation. If no compatible processor is available, the rest of Documents remains usable, but the affected actions cannot be processed until one becomes available.
 
-#### Models service (AI processing)
+The enabled capabilities determine whether users can run features such as extraction, transcription, summarization, translation, entity detection, semantic search, and question answering.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODELS_SERVICE_URL` | `http://models:8000` | Base URL of the models/AI processing service |
+## Who should change these options
 
-### Example `.env` file
-
-```dotenv
-# Database
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your_secure_password
-POSTGRES_DB=documents
-
-# Server
-PORT=3000
-CORS_ORIGIN=http://localhost:5173
-BODY_LIMIT=50mb
-
-# Authentication
-AUTH_ENABLED=true
-JWT_SECRET=your-strong-random-secret-here
-
-# Models service
-MODELS_SERVICE_URL=http://localhost:8000
-```
-
-### Notes
-
-**CORS** — Only the origin specified in `CORS_ORIGIN` is allowed to make cross-origin requests.
-For production, set this to the exact URL of your frontend application.
-
-**Body limit** — The `BODY_LIMIT` setting controls how large a request body can be. Increase it
-if you need to upload large files through the API. This applies to both JSON and URL-encoded bodies;
-file uploads use multipart/form-data and are handled separately.
-
-**TypeORM CLI** — When running migrations from the command line, the CLI reads from `process.env`
-directly rather than through NestJS. Make sure the environment variables are exported or the `.env`
-file is present before running `yarn migration:run`.
+These are installation-level settings, not personal preferences. Font, language, appearance, workspace selection, and local-server controls are managed from the desktop application's Settings screen. Server, storage, security, and shared AI availability should be managed by the person responsible for the installation.

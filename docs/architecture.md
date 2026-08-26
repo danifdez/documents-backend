@@ -1,154 +1,45 @@
-## Architecture
+# How Documents works
 
-The Documents Backend is built with NestJS 11 and TypeScript. It follows NestJS module conventions:
-each feature area is encapsulated in its own module with a controller, service, and entity. All modules
-are wired together in `AppModule`.
+Documents keeps a project's information together and makes it available to the desktop application. It stores the user's work, coordinates longer-running processing, and keeps every connected application up to date.
 
-### Technology stack
+## Organizing work
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | NestJS 10 (TypeScript) |
-| Database | PostgreSQL 17.6 via TypeORM 0.3 |
-| Real-time | Socket.io (WebSocket gateway) |
-| Auth | Passport.js + JWT |
-| File uploads | Multer |
-| Scheduling | `@nestjs/schedule` (cron-based) |
-| Rate limiting | `@nestjs/throttler` (100 req / 60s globally) |
-| Security | Helmet middleware |
+Everything belongs to a project. Within a project, users can work with:
 
-### Module map
+- uploaded resources and their extracted content;
+- editable documents, highlights, and comments;
+- threads, notes, tasks, calendars, timelines, and visual canvases;
+- bibliographic references and links between resources;
+- confirmed entities and candidates awaiting review;
+- curated knowledge entries;
+- structured datasets and their analyses.
 
-The following modules make up the backend. Each maps to a directory under `src/`.
+This separation keeps one project's content and searches distinct from another project's content.
 
-#### Core infrastructure
+## From import to usable content
 
-| Module | Purpose |
-|--------|---------|
-| `DatabaseModule` | Configures and provides the TypeORM `DataSource` used by all repositories |
-| `AuthModule` | JWT authentication, user management, and access control guards |
-| `ExecutionModule` | Durable execution identity, queue state, events, artifacts, and bundles |
-| `ExecutionProcessorModule` | Auto-discovers backend finalizers through `ExecutionProcessorFactory` |
-| `TaskScheduleModule` | Finalizes worker results and recovers stale attempts |
-| `FileStorageModule` | SHA256 content-addressed file storage on disk (see [File Storage](./file-storage.md)) |
-| `NotificationModule` | Socket.io WebSocket gateway that pushes events to connected clients |
-| `WorkerModule` | Tracks worker instances, their capabilities, and heartbeat status |
+When a file is imported, Documents:
 
-#### Document and resource management
+1. checks whether the same file already exists;
+2. stores the original file;
+3. extracts the content and available metadata;
+4. makes the result available for reading, editing, searching, and analysis;
+5. reports progress and completion in the application.
 
-| Module | Purpose |
-|--------|---------|
-| `ResourceModule` | Core document management: upload, metadata, status, content, download |
-| `ResourceTypeModule` | Reference data for resource types (51 types seeded from CSV) |
-| `DocModule` | Rich text documents (composed notes, reports) linked to resources or threads |
-| `MarkModule` | Highlighted/marked passages within documents or docs |
-| `CommentModule` | Inline comments on documents or docs |
-| `ExportModule` | Export resources and their processed content to archive files |
+Depending on the file and the enabled AI features, additional actions can detect its language, create a summary, translate it, identify entities or dates, extract key points and keywords, or prepare it for semantic search.
 
-#### AI and analysis
+## Background processing
 
-| Module | Purpose |
-|--------|---------|
-| `ModelModule` | Proxy to the models service for triggering AI tasks and retrieving results |
-| `EntityModule` | Confirmed named entities (people, organizations, locations, etc.) |
-| `EntityTypeModule` | Reference data for entity types (11 NER categories) |
-| `PendingEntityModule` | Unconfirmed NER candidates awaiting user review |
-| `AuthorModule` | Document authors extracted and linked across resources |
-| `SearchModule` | Full-text search across resources, marks, references, and the knowledge base |
+Actions that can take time run in the background. The application can remain in use while they are queued or processed. Documents records their progress, retries work that was interrupted when possible, and only publishes a result after the complete action has finished.
 
-#### Project and workspace
+An action can finish successfully, fail, be cancelled, or temporarily wait for another step. Completion and failure notifications appear in the desktop application without requiring the user to refresh the current page.
 
-| Module | Purpose |
-|--------|---------|
-| `ProjectModule` | Top-level container; all content belongs to a project |
-| `ThreadModule` | Workspaces within a project for organizing discussions and documents |
-| `CanvasModule` | Visual boards (free-form canvas with JSON data) per project or thread |
-| `NoteModule` | Free-form text notes attached to a project |
-| `CalendarEventModule` | Calendar events with start/end dates, colors, and all-day support |
-| `TimelineModule` | Ordered event timelines stored as structured JSON |
-| `UserTaskModule` | Simple task lists (pending / completed) per project |
-| `KnowledgeBaseModule` | Manually curated knowledge entries with tags |
-| `BibliographyModule` | Bibliographic references (BibTeX-compatible) linked to resources |
-| `DatasetModule` | Structured data import (CSV), record storage, statistics, and querying |
-| `ReferenceModule` | Cross-references between resources |
+## Search and answers
 
-#### Auth and offline
+Documents supports both direct search and meaning-based search across the content available in the current project. Question answering uses relevant passages selected from that project and, when available, project-scoped relationships between entities. Answers are generated from this supplied context; the AI processing service does not broaden the search to other projects.
 
-| Module | Purpose |
-|--------|---------|
-| `OfflineModule` | Endpoints for syncing content and generating offline bundles |
+## Access and continuity
 
-### Database schema overview
+An installation can run without sign-in for a local or single-user setup, or require accounts for shared use. When accounts are enabled, roles and permissions control the available actions.
 
-The database is managed entirely through TypeORM migrations. The schema is split into these main areas:
-
-**Projects and workspaces**
-- `projects` — top-level containers
-- `threads` — nested workspaces within a project
-- `canvases` — visual boards
-- `notes` — free-form notes
-- `calendar_events` — timestamped events
-- `timelines` — ordered event sequences
-- `user_tasks` — to-do items
-
-**Documents and content**
-- `resources` — uploaded files with extracted content, summary, keywords, language, status
-- `resource_types` — reference table of 51 document categories
-- `docs` — composed text documents
-- `marks` — highlighted passages
-- `comments` — inline comments
-- `bibliography_entries` — full bibliographic records
-
-**People and entities**
-- `authors` — document authors
-- `resource_authors` — M2M join between resources and authors
-- `entities` — confirmed named entities with translations and aliases
-- `entity_types` — 11 NER categories (PERSON, ORGANIZATION, LOCATION, etc.)
-- `entity_projects` — M2M join between entities and projects
-- `resource_entities` — M2M join between entities and resources
-- `pending_entities` — unconfirmed NER candidates
-
-**AI and search**
-- `executions` — durable work and queue state
-- `execution_events` — append-only ordered evidence
-- `execution_artifacts` — manifests and optional evidence bodies
-- `workers` — registered worker instances
-- `knowledge_entries` — manually curated knowledge base entries
-
-**Data**
-- `datasets` — imported structured data files
-- `dataset_records` — individual rows with typed values
-- `dataset_relations` — links between datasets
-- `dataset_record_links` — cross-dataset record relationships
-
-### Request flow
-
-A typical REST request follows this path:
-
-```
-HTTP request
-  → Helmet (security headers)
-  → ThrottlerGuard (rate limit: 100 req / 60s)
-  → ConditionalAuthGuard (verify JWT if AUTH_ENABLED=true)
-  → PermissionsGuard (check fine-grained permissions)
-  → Controller method
-  → Service layer (business logic + TypeORM)
-  → PostgreSQL
-  → JSON response
-```
-
-For file uploads, Multer parses the multipart body before the controller method runs.
-
-For real-time events, the `NotificationGateway` pushes Socket.io events directly to connected clients
-at any point during request or execution processing.
-
-### Interaction with the models service
-
-The backend never runs AI models itself. AI tasks are delegated to the separate
-Models worker through an authenticated HTTP protocol. The flow is:
-
-1. Backend transactionally creates an execution, its initial step and evidence.
-2. A registered worker requests work; Backend atomically grants a compatible ready step and fenced attempt.
-3. Models downloads attempt-scoped artifacts, executes the handler and retries its result until Backend returns a terminal ACK.
-4. Backend stores the receipt, advances the durable coordinator and applies authorized domain effects.
-5. The publication outbox emits the resulting notification to the frontend.
+Documents stores application state independently from the desktop interface. This allows connected applications to reload the current information and supports offline bundles and later synchronization where those features are available.

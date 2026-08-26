@@ -1,44 +1,26 @@
-## File Storage
+# Uploaded files
 
-The backend uses a SHA256 content-addressed storage system to store uploaded files. Files are stored
-on disk, organized by their hash, which provides automatic deduplication: if the same file is uploaded
-twice, it is stored only once.
+Documents keeps the original files imported into a project so they can be downloaded and processed again when needed. File storage is separate from the project's searchable and editable content.
 
-### Storage layout
+## Duplicate files
 
-Files are stored under a configurable base directory. The path for each file is derived from its SHA256 hash:
+Each upload is identified from its contents, not only from its filename. If the exact same file already exists, Documents rejects the duplicate import and keeps the existing resource. Renaming an unchanged file does not create another stored copy.
 
-```
-{base_dir}/{hash[0:3]}/{hash[3:6]}/{hash}{extension}
-```
+Two files with the same name but different contents are treated as different files.
 
-For example, a PDF with hash `a1b2c3d4e5...` would be stored at:
+## What is stored
 
-```
-/app/documents/a1b/2c3/a1b2c3d4e5....pdf
-```
+Documents keeps:
 
-This two-level directory structure prevents any single directory from growing too large with many files.
+- the original uploaded file;
+- its original filename and resource metadata;
+- extracted content and available metadata produced during processing;
+- links to the project, documents, entities, comments, marks, and other related items.
 
-### Deduplication
+Deleting or replacing processed information does not silently create another copy of the original upload.
 
-When a file is uploaded, the backend computes its SHA256 hash and checks whether a resource with the
-same hash already exists in the database. If it does, the upload is rejected with a `409 Conflict`
-response — the existing resource is already there. If not, the file is written to disk and a new
-resource record is created.
+## Storage responsibility
 
-### FileStorageService API
+In a standalone workspace, application data and uploads are stored on the user's machine. In a remote workspace, they are stored by that Documents server. Users should follow the backup and retention policy of the installation that owns the workspace.
 
-The `FileStorageService` exposes the following methods
-used internally by other modules:
-
-| Method | Description |
-|--------|-------------|
-| `calculateHash(buffer)` | Computes the SHA256 hex digest of a file buffer |
-| `storeFile(hash, file, originalFilename)` | Writes the file to the correct path on disk |
-| `getFile(relativePath)` | Reads and returns a file from storage |
-| `deleteFile(relativePath)` | Deletes a file from disk |
-| `fileExists(hash, extension)` | Checks whether a file with the given hash exists |
-| `getRelativePath(hash, ext)` | Returns the relative storage path for a hash/extension pair |
-| `getFullPath(hash, ext)` | Returns the absolute path on disk |
-| `getFilePath(relativePath)` | Resolves a relative path to an absolute path |
+The precise storage location is an administrator setting and is intentionally hidden from normal application use.
