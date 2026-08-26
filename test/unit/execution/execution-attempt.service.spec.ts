@@ -1447,6 +1447,26 @@ describe('ExecutionAttemptService', () => {
     expect(stepRepo.save).not.toHaveBeenCalled();
   });
 
+  it('keeps start idempotent when the browser reconnects', async () => {
+    const startedAt = new Date(Date.now() - 5_000);
+    const heartbeatAt = new Date(Date.now() - 4_000);
+    const attempt = { ...runningAttempt(), startedAt, heartbeatAt };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+    });
+
+    await expect(service.startAttempt(ATTEMPT_ID, WORKER_ID)).resolves.toBe(
+      attempt,
+    );
+    expect(attempt).toEqual(
+      expect.objectContaining({ startedAt, heartbeatAt }),
+    );
+    expect(attemptRepo.save).not.toHaveBeenCalled();
+  });
+
   it('rejects starting an attempt that is no longer current', async () => {
     attemptRepo.findOne.mockResolvedValue(runningAttempt());
     stepRepo.findOne.mockResolvedValue({
