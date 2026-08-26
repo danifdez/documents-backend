@@ -124,6 +124,19 @@ describe('ExecutionToolPlanService', () => {
                 },
               ],
             },
+            {
+              skillId: 'evidence-research-workflow',
+              version: 'evidence-research-workflow/1',
+              contentHash:
+                'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
+              resources: [
+                {
+                  resourceId: 'source-evaluation',
+                  contentHash:
+                    'sha256:3c5472ac70881363440979f779dac8ad657c662a6666495a5f667ef4a8a79879',
+                },
+              ],
+            },
           ],
         },
       },
@@ -278,6 +291,38 @@ describe('ExecutionToolPlanService', () => {
         }),
       ),
     ).rejects.toThrow('skill_resource_not_active');
+  });
+
+  it('prepares resources for a second independently registered skill', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'skills.load_resource',
+        arguments: {
+          skillId: 'evidence-research-workflow',
+          skillVersion: 'evidence-research-workflow/1',
+          skillContentHash:
+            'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
+          resourceId: 'source-evaluation',
+          resourceContentHash:
+            'sha256:3c5472ac70881363440979f779dac8ad657c662a6666495a5f667ef4a8a79879',
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        normalizedArguments: expect.objectContaining({
+          skillId: 'evidence-research-workflow',
+          resourceId: 'source-evaluation',
+        }),
+        resources: [
+          expect.objectContaining({
+            kind: 'product_skill_resource',
+            id: 'source-evaluation',
+          }),
+        ],
+      }),
+    );
   });
 
   it('rejects a tool omitted from the frozen turn capability set', async () => {

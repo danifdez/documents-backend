@@ -109,4 +109,53 @@ describe('active capability selection', () => {
       { ownerPrincipal: 'paired-user' },
     );
   });
+
+  it('selects evidence research without requiring a configured folder', async () => {
+    const selected = await buildActiveCapabilitySet(
+      { getRepository: jest.fn() } as any,
+      {
+        ownerType: 'assistant',
+        ownerId: 1,
+        ownerPrincipal: 'user',
+        folderScope: null,
+        browserFederationEnabled: false,
+        objective: 'Compare the available sources and verify the evidence',
+      },
+    );
+
+    expect(selected.skills).toEqual([
+      expect.objectContaining({
+        skillId: 'evidence-research-workflow',
+        version: 'evidence-research-workflow/1',
+        contentHash:
+          'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
+        resources: [
+          expect.objectContaining({
+            resourceId: 'source-evaluation',
+            contentHash:
+              'sha256:3c5472ac70881363440979f779dac8ad657c662a6666495a5f667ef4a8a79879',
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('can freeze multiple independently applicable skills for one turn', async () => {
+    const selected = await buildActiveCapabilitySet(
+      { getRepository: jest.fn() } as any,
+      {
+        ownerType: 'agent',
+        ownerId: 7,
+        ownerPrincipal: 'user',
+        folderScope: '/workspace',
+        browserFederationEnabled: false,
+        objective: 'Compare evidence in the document files',
+      },
+    );
+
+    expect(selected.skills.map(({ skillId }) => skillId)).toEqual([
+      'workspace-document-workflow',
+      'evidence-research-workflow',
+    ]);
+  });
 });

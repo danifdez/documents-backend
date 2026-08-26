@@ -326,6 +326,20 @@ describe('execution v1 contract', () => {
     expect(validateSkillActivation({ ...activation, finishedAt: null })).toBe(
       false,
     );
+    const researchActivation = {
+      ...activation,
+      skillId: 'evidence-research-workflow',
+      skillVersion: 'evidence-research-workflow/1',
+      contentHash:
+        'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
+    };
+    expect(validateSkillActivation(researchActivation)).toBe(true);
+    expect(
+      validateSkillActivation({
+        ...researchActivation,
+        skillVersion: 'workspace-document-workflow/1',
+      }),
+    ).toBe(false);
   });
 
   it('validates the frozen active context and its continuity capsule', () => {

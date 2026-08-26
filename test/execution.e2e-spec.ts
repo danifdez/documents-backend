@@ -2652,6 +2652,51 @@ describe('execution PostgreSQL integration', () => {
     });
   });
 
+  it('persists every independently selected skill activation', async () => {
+    await dataSource.query(
+      `UPDATE "assistants" SET "folder_scope" = '/workspace/real' WHERE "id" = 1`,
+    );
+    const accepted = await service.createForChat(
+      'assistant_chat',
+      'Compare evidence in the document files',
+      { ownerPrincipal: 'multiple-skills-e2e' },
+      { ownerId: 1 },
+    );
+    const repo = dataSource.getRepository(SkillActivationEntity);
+    const active = await repo.find({
+      where: { executionId: accepted.execution.executionId },
+      order: { skillId: 'ASC' },
+    });
+
+    expect(active.map(({ skillId }) => skillId)).toEqual([
+      'evidence-research-workflow',
+      'workspace-document-workflow',
+    ]);
+    expect(active).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          skillId: 'evidence-research-workflow',
+          skillVersion: 'evidence-research-workflow/1',
+          contentHash:
+            'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
+          status: 'active',
+        }),
+      ]),
+    );
+
+    await service.completeExecution(
+      accepted.execution.executionId,
+      'Compared the evidence.',
+      null,
+    );
+    await expect(
+      repo.find({ where: { executionId: accepted.execution.executionId } }),
+    ).resolves.toEqual([
+      expect.objectContaining({ status: 'completed' }),
+      expect.objectContaining({ status: 'completed' }),
+    ]);
+  });
+
   it('persists one conversation lane and promotes queued turns in order', async () => {
     const scope = { ownerPrincipal: 'conversation-lane-e2e' };
     const first = await createChat('assistant_chat', 'First message', scope);
