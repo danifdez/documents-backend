@@ -70,6 +70,43 @@ describe('VectorStoreService', () => {
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
+  it('atomically replaces and verifies workspace vectors', async () => {
+    manager.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ point_count: 1, matches: true }]);
+
+    await expect(
+      service.replaceWorkspaceSourceVerified(
+        'knowledge',
+        'knowledge_4',
+        null,
+        [
+          {
+            id: 'knowledge_4:1',
+            embedding,
+            payload: { text: 'Verified knowledge' },
+          },
+        ],
+        manager as any,
+      ),
+    ).resolves.toEqual({
+      pointCount: 1,
+      pointIds: ['knowledge_4:1'],
+    });
+
+    expect(manager.query.mock.calls[2][0]).toContain(
+      'SELECT * FROM actual EXCEPT SELECT * FROM expected',
+    );
+    expect(manager.query.mock.calls[2][1]).toEqual([
+      'knowledge_4',
+      'knowledge',
+      null,
+      expect.any(String),
+    ]);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
   it('atomically replaces and verifies vectors for an assistant folder', async () => {
     manager.query
       .mockResolvedValueOnce([])

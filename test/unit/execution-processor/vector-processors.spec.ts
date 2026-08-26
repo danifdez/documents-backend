@@ -11,39 +11,62 @@ const execution = (
 
 describe('vector domain finalizers', () => {
   it('persists workspace points before marking a resource ready', async () => {
-    const resourceService = { update: jest.fn().mockResolvedValue(undefined) };
+    const resource = { id: 7, status: 'ingesting' };
+    const transactionalRepository = {
+      findOne: jest.fn().mockResolvedValue(resource),
+      save: jest.fn().mockResolvedValue(resource),
+      findOneBy: jest.fn().mockImplementation(async () => resource),
+    };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(transactionalRepository),
+    };
     const vectorStore = {
-      replaceWorkspaceSource: jest.fn().mockResolvedValue(undefined),
+      replaceWorkspaceSourceVerified: jest.fn().mockResolvedValue({
+        pointCount: 1,
+        pointIds: ['resource_7:1'],
+      }),
     };
     const artifacts = {
       readOutputJson: jest.fn().mockResolvedValue([{ points: [] }]),
     };
     const points = [{ id: 'resource_7:1', embedding: [], payload: {} }];
     artifacts.readOutputJson.mockResolvedValue([{ points }]);
+    const effectJournal = {
+      runVerified: jest.fn(async (_input, callback) => ({
+        applied: true,
+        observation: await callback(manager),
+      })),
+    };
     const processor = new IngestContentProcessor(
-      resourceService as any,
       vectorStore as any,
       artifacts as any,
+      effectJournal as any,
     );
 
-    await expect(
-      processor.process(
-        execution(
-          'ingest-content',
-          { resourceId: 7, projectId: 3 },
-          { pointCount: 1, chunks: 1 },
-        ),
-      ),
-    ).resolves.toEqual(expect.objectContaining({ success: true }));
-    expect(vectorStore.replaceWorkspaceSource).toHaveBeenCalledWith(
+    const ingestExecution = execution(
+      'ingest-content',
+      { resourceId: 7, projectId: 3 },
+      { pointCount: 1, chunks: 1 },
+    );
+    ingestExecution.executionId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca706';
+    await expect(processor.process(ingestExecution)).resolves.toEqual(
+      expect.objectContaining({ success: true }),
+    );
+    expect(vectorStore.replaceWorkspaceSourceVerified).toHaveBeenCalledWith(
       'resource',
       'resource_7',
       3,
       points,
+      manager,
     );
-    expect(resourceService.update).toHaveBeenCalledWith(7, {
-      status: 'ready',
-    });
+    expect(resource.status).toBe('ready');
+    expect(effectJournal.runVerified).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectKey: 'ingest-content:resource_7',
+        effectType: 'workspace_vectors_replace',
+      }),
+      expect.any(Function),
+    );
   });
 
   it('persists indexed-file points only for the current checksum', async () => {

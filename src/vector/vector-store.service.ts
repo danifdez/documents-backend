@@ -10,7 +10,7 @@ export interface VectorPointInput {
   payload: Record<string, unknown>;
 }
 
-export interface IndexedFileVectorObservation {
+export interface VectorReplacementObservation {
   pointCount: number;
   pointIds: string[];
 }
@@ -28,6 +28,89 @@ export class VectorStoreService {
     projectId: number | null,
     points: VectorPointInput[],
   ): Promise<void> {
+    const validated = this.workspacePoints(
+      sourceType,
+      sourceId,
+      projectId,
+      points,
+    );
+    await this.dataSource.transaction((manager) =>
+      this.replaceWorkspaceSourceWithManager(
+        sourceType,
+        sourceId,
+        projectId,
+        validated,
+        manager,
+      ),
+    );
+  }
+
+  async replaceWorkspaceSourceVerified(
+    sourceType: WorkspaceVectorSourceType,
+    sourceId: string,
+    projectId: number | null,
+    points: VectorPointInput[],
+    manager: EntityManager,
+  ): Promise<VectorReplacementObservation> {
+    const validated = this.workspacePoints(
+      sourceType,
+      sourceId,
+      projectId,
+      points,
+    );
+    await this.replaceWorkspaceSourceWithManager(
+      sourceType,
+      sourceId,
+      projectId,
+      validated,
+      manager,
+    );
+    const [observation] = await manager.query(
+      `WITH expected AS (
+         SELECT value->>'id' AS id,
+                (value->>'embedding')::vector::text AS embedding,
+                $2::text AS source_type,
+                $1::text AS source_id,
+                $3::text AS project_id,
+                value->'payload' AS payload
+         FROM jsonb_array_elements($4::jsonb) AS item(value)
+       ), actual AS (
+         SELECT id, embedding::text AS embedding, source_type, source_id,
+                project_id, payload
+         FROM rag_chunks
+         WHERE source_id = $1
+       )
+       SELECT (SELECT COUNT(*)::int FROM actual) AS point_count,
+              NOT EXISTS (
+                (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+                UNION ALL
+                (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+              ) AS matches`,
+      [
+        sourceId,
+        sourceType,
+        projectId == null ? null : String(projectId),
+        JSON.stringify(validated),
+      ],
+    );
+    if (
+      observation?.matches !== true ||
+      Number(observation.point_count) !== validated.length
+    ) {
+      throw new Error('workspace_vector_effect_not_verified');
+    }
+    return {
+      pointCount: validated.length,
+      pointIds: validated.map((point) => point.id),
+    };
+  }
+
+  private workspacePoints(
+    sourceType: WorkspaceVectorSourceType,
+    sourceId: string,
+    projectId: number | null,
+    points: VectorPointInput[],
+  ): VectorPointInput[] {
     if (!new RegExp(`^${sourceType}_[1-9][0-9]*$`).test(sourceId)) {
       throw new Error('Workspace vector source id is invalid');
     }
@@ -49,26 +132,34 @@ export class VectorStoreService {
         },
       };
     });
-    await this.dataSource.transaction(async (manager) => {
-      await manager.query('DELETE FROM rag_chunks WHERE source_id = $1', [
-        sourceId,
-      ]);
-      for (const point of validated) {
-        await manager.query(
-          `INSERT INTO rag_chunks
-             (id, embedding, source_type, source_id, project_id, payload)
-           VALUES ($1, $2::vector, $3, $4, $5, $6::jsonb)`,
-          [
-            point.id,
-            this.vectorLiteral(point.embedding),
-            sourceType,
-            sourceId,
-            projectId == null ? null : String(projectId),
-            JSON.stringify(point.payload),
-          ],
-        );
-      }
-    });
+    return validated;
+  }
+
+  private async replaceWorkspaceSourceWithManager(
+    sourceType: WorkspaceVectorSourceType,
+    sourceId: string,
+    projectId: number | null,
+    points: VectorPointInput[],
+    manager: EntityManager,
+  ): Promise<void> {
+    await manager.query('DELETE FROM rag_chunks WHERE source_id = $1', [
+      sourceId,
+    ]);
+    for (const point of points) {
+      await manager.query(
+        `INSERT INTO rag_chunks
+           (id, embedding, source_type, source_id, project_id, payload)
+         VALUES ($1, $2::vector, $3, $4, $5, $6::jsonb)`,
+        [
+          point.id,
+          this.vectorLiteral(point.embedding),
+          sourceType,
+          sourceId,
+          projectId == null ? null : String(projectId),
+          JSON.stringify(point.payload),
+        ],
+      );
+    }
   }
 
   async replaceIndexedFile(
@@ -92,7 +183,7 @@ export class VectorStoreService {
     ownerTag: string,
     points: VectorPointInput[],
     manager: EntityManager,
-  ): Promise<IndexedFileVectorObservation> {
+  ): Promise<VectorReplacementObservation> {
     const validated = this.indexedFilePoints(indexedFileId, ownerTag, points);
     await this.replaceIndexedFileWithManager(
       indexedFileId,

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
-import { ResourceService } from '../../resource/resource.service';
+import { ResourceEntity } from '../../resource/resource.entity';
 import {
   VectorPointInput,
   VectorStoreService,
@@ -12,6 +12,13 @@ import {
   sourceIdForResource,
 } from '../../vector/vector-source-id.util';
 import { ExecutionArtifactService } from '../../execution/execution-artifact.service';
+import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
+import {
+  canonicalHash,
+  contentHash,
+} from '../../execution/execution-canonical';
+
+class IngestContentResourceNotFoundError extends Error {}
 
 @Injectable()
 export class IngestContentProcessor implements ExecutionProcessor {
@@ -19,9 +26,9 @@ export class IngestContentProcessor implements ExecutionProcessor {
   private readonly TASK_TYPE = 'ingest-content';
 
   constructor(
-    private readonly resourceService: ResourceService,
     private readonly vectorStore: VectorStoreService,
     private readonly artifacts: ExecutionArtifactService,
+    private readonly effectJournal: ExecutionEffectJournalService,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -49,18 +56,13 @@ export class IngestContentProcessor implements ExecutionProcessor {
     if (points.length !== pointCount) {
       throw new Error('ingest-content artifact point count is invalid');
     }
+    const projectId = this.projectId(execution.payload['projectId']);
+    let sourceId: string;
     let payload: Record<string, unknown>;
 
     if (sourceType === 'resource') {
       const resourceId = Number(execution.payload['resourceId']);
-      await this.vectorStore.replaceWorkspaceSource(
-        'resource',
-        sourceIdForResource(resourceId),
-        this.projectId(execution.payload['projectId']),
-        points,
-      );
-      await this.resourceService.update(resourceId, { status: 'ready' });
-
+      sourceId = sourceIdForResource(resourceId);
       payload = {
         type: 'ingest-content',
         message:
@@ -70,13 +72,7 @@ export class IngestContentProcessor implements ExecutionProcessor {
       };
     } else if (sourceType === 'doc') {
       const docId = Number(execution.payload['docId']);
-      await this.vectorStore.replaceWorkspaceSource(
-        'doc',
-        sourceIdForDoc(docId),
-        this.projectId(execution.payload['projectId']),
-        points,
-      );
-
+      sourceId = sourceIdForDoc(docId);
       payload = {
         type: 'ingest-content',
         message: `Document ingestion completed for doc ${docId}.`,
@@ -84,13 +80,7 @@ export class IngestContentProcessor implements ExecutionProcessor {
       };
     } else if (sourceType === 'knowledge') {
       const knowledgeEntryId = Number(execution.payload['knowledgeEntryId']);
-      await this.vectorStore.replaceWorkspaceSource(
-        'knowledge',
-        sourceIdForKnowledge(knowledgeEntryId),
-        this.projectId(execution.payload['projectId']),
-        points,
-      );
-
+      sourceId = sourceIdForKnowledge(knowledgeEntryId);
       payload = {
         type: 'ingest-content',
         message: `Knowledge base entry ${knowledgeEntryId} ingested into RAG.`,
@@ -98,6 +88,63 @@ export class IngestContentProcessor implements ExecutionProcessor {
       };
     } else {
       throw new Error(`Unsupported ingest-content source type: ${sourceType}`);
+    }
+    try {
+      await this.effectJournal.runVerified(
+        {
+          executionId: execution.executionId,
+          effectKey: `ingest-content:${sourceId}`,
+          effectType: 'workspace_vectors_replace',
+          resourceKey: sourceId,
+          intent: {
+            sourceType,
+            sourceId,
+            projectId,
+            pointCount,
+            pointsHash: contentHash(JSON.stringify(points)),
+          },
+        },
+        async (manager) => {
+          let resource: ResourceEntity | null = null;
+          if (sourceType === 'resource') {
+            const repository = manager.getRepository(ResourceEntity);
+            resource = await repository.findOne({
+              where: { id: Number(execution.payload['resourceId']) },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!resource) throw new IngestContentResourceNotFoundError();
+          }
+          const vectors = await this.vectorStore.replaceWorkspaceSourceVerified(
+            sourceType,
+            sourceId,
+            projectId,
+            points,
+            manager,
+          );
+          if (resource) {
+            const repository = manager.getRepository(ResourceEntity);
+            resource.status = 'ready';
+            await repository.save(resource);
+            const observed = await repository.findOneBy({ id: resource.id });
+            if (observed?.status !== 'ready') {
+              throw new Error('ingest_content_resource_effect_not_verified');
+            }
+          }
+          return {
+            sourceType,
+            sourceId,
+            projectId,
+            pointCount: vectors.pointCount,
+            pointIdsHash: canonicalHash(vectors.pointIds),
+            resourceStatus: resource ? 'ready' : null,
+          };
+        },
+      );
+    } catch (error) {
+      if (error instanceof IngestContentResourceNotFoundError) {
+        return { success: false, reason: 'not_found' };
+      }
+      throw error;
     }
     return {
       success: true,
