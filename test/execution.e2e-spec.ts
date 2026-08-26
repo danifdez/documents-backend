@@ -2,6 +2,10 @@ import { randomUUID } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import { DataSource, In } from 'typeorm';
 import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
+import { CreateResourceDates1757668140030 } from '../migrations/1757668140030-CreateResourceDates';
+import { CreateAssistantTables1757668140070 } from '../migrations/1757668140070-CreateAssistantTables';
+import { CreateAgents1757668140110 } from '../migrations/1757668140110-CreateAgents';
+import { CreateAgentMessages1757668140111 } from '../migrations/1757668140111-CreateAgentMessages';
 import { AddExecutionProgress1757668140350 } from '../migrations/1757668140350-AddExecutionProgress';
 import { CreateExecutionControlPlane1757668140370 } from '../migrations/1757668140370-CreateExecutionControlPlane';
 import { AddWorkerCredentials1757668140380 } from '../migrations/1757668140380-AddWorkerCredentials';
@@ -10,12 +14,9 @@ import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
 import { AddExecutionStepContinuation1757668140430 } from '../migrations/1757668140430-AddExecutionStepContinuation';
 import { AddExecutionStepContinuationTarget1757668140440 } from '../migrations/1757668140440-AddExecutionStepContinuationTarget';
-import { DropObsoleteExecutionCheckpoint1757668140450 } from '../migrations/1757668140450-DropObsoleteExecutionCheckpoint';
-import { DropObsoleteExecutionRoutingFields1757668140460 } from '../migrations/1757668140460-DropObsoleteExecutionRoutingFields';
 import { AddExecutionStepFailureFinalization1757668140470 } from '../migrations/1757668140470-AddExecutionStepFailureFinalization';
 import { AddExecutionOutputArtifacts1757668140600 } from '../migrations/1757668140600-AddExecutionOutputArtifacts';
 import { AddWorkerConcurrency1757668140700 } from '../migrations/1757668140700-AddWorkerConcurrency';
-import { RemoveExecutionWorkspaceScope1757668140710 } from '../migrations/1757668140710-RemoveExecutionWorkspaceScope';
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
 import { AddExecutionCancellation1757668140740 } from '../migrations/1757668140740-AddExecutionCancellation';
 import { AddWorkerIdentityScope1757668140750 } from '../migrations/1757668140750-AddWorkerIdentityScope';
@@ -111,6 +112,11 @@ describe('execution PostgreSQL integration', () => {
     await runner.query(`CREATE SCHEMA "${schema}"`);
     await runner.query(`SET search_path TO "${schema}"`);
     await new CreateExecutions1757668140001().up(runner);
+    await runner.query(`CREATE TABLE "resources" ("id" SERIAL PRIMARY KEY)`);
+    await new CreateResourceDates1757668140030().up(runner);
+    await new CreateAssistantTables1757668140070().up(runner);
+    await new CreateAgents1757668140110().up(runner);
+    await new CreateAgentMessages1757668140111().up(runner);
     await new AddExecutionProgress1757668140350().up(runner);
     await new CreateExecutionControlPlane1757668140370().up(runner);
     await new CreateExecutionOutbox1757668140400().up(runner);
@@ -118,8 +124,6 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionToolPlans1757668140420().up(runner);
     await new AddExecutionStepContinuation1757668140430().up(runner);
     await new AddExecutionStepContinuationTarget1757668140440().up(runner);
-    await new DropObsoleteExecutionCheckpoint1757668140450().up(runner);
-    await new DropObsoleteExecutionRoutingFields1757668140460().up(runner);
     await new AddExecutionStepFailureFinalization1757668140470().up(runner);
     await runner.query(`
       CREATE TABLE "workers" (
@@ -135,7 +139,6 @@ describe('execution PostgreSQL integration', () => {
     await new AddWorkerCredentials1757668140380().up(runner);
     await new AddExecutionOutputArtifacts1757668140600().up(runner);
     await new AddWorkerConcurrency1757668140700().up(runner);
-    await new RemoveExecutionWorkspaceScope1757668140710().up(runner);
     await new CreateExecutionConfirmations1757668140720().up(runner);
     await new AddExecutionCancellation1757668140740().up(runner);
     await new AddWorkerIdentityScope1757668140750().up(runner);
@@ -256,7 +259,7 @@ describe('execution PostgreSQL integration', () => {
     });
   };
 
-  it('does not retain obsolete execution control columns', async () => {
+  it('creates only canonical execution control columns', async () => {
     const columns = await dataSource.query(`
       SELECT column_name
       FROM information_schema.columns
@@ -270,6 +273,32 @@ describe('execution PostgreSQL integration', () => {
         )
     `);
     expect(columns).toEqual([]);
+  });
+
+  it('creates current message and resource-date schemas directly', async () => {
+    const retiredDateColumns = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'resource_dates'
+        AND column_name IN ('resolver', 'is_relative', 'anchor_date_used')
+    `);
+    const replyIndexes = await dataSource.query(`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname IN (
+          'UQ_assistant_messages_execution_reply',
+          'UQ_agent_messages_execution_reply'
+        )
+      ORDER BY indexname
+    `);
+
+    expect(retiredDateColumns).toEqual([]);
+    expect(replyIndexes).toEqual([
+      { indexname: 'UQ_agent_messages_execution_reply' },
+      { indexname: 'UQ_assistant_messages_execution_reply' },
+    ]);
   });
 
   it('commits an execution and its initial step atomically', async () => {

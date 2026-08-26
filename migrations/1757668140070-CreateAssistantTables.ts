@@ -1,10 +1,10 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateAssistantTables1757668140070 implements MigrationInterface {
-    name = 'CreateAssistantTables1757668140070'
+  name = 'CreateAssistantTables1757668140070';
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
             CREATE TABLE "assistants" (
                 "id" SERIAL PRIMARY KEY,
                 "name" character varying(100) NOT NULL,
@@ -20,7 +20,7 @@ export class CreateAssistantTables1757668140070 implements MigrationInterface {
             )
         `);
 
-        await queryRunner.query(`
+    await queryRunner.query(`
             CREATE TABLE "assistant_messages" (
                 "id" SERIAL PRIMARY KEY,
                 "assistant_id" integer NOT NULL,
@@ -34,14 +34,24 @@ export class CreateAssistantTables1757668140070 implements MigrationInterface {
             )
         `);
 
-        await queryRunner.query(`CREATE INDEX "IDX_assistant_messages_assistant_id" ON "assistant_messages" ("assistant_id")`);
-        await queryRunner.query(`CREATE INDEX "IDX_assistant_messages_execution_id" ON "assistant_messages" ("execution_id")`);
-    }
+    await queryRunner.query(
+      `CREATE INDEX "IDX_assistant_messages_assistant_id" ON "assistant_messages" ("assistant_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_assistant_messages_execution_id" ON "assistant_messages" ("execution_id")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX "UQ_assistant_messages_execution_reply" ON "assistant_messages" ("assistant_id", "execution_id") WHERE "execution_id" IS NOT NULL AND "role" = 'assistant'`,
+    );
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DROP INDEX "IDX_assistant_messages_execution_id"`);
-        await queryRunner.query(`DROP INDEX "IDX_assistant_messages_assistant_id"`);
-        await queryRunner.query(`DROP TABLE "assistant_messages"`);
-        await queryRunner.query(`DROP TABLE "assistants"`);
-    }
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `DROP INDEX "UQ_assistant_messages_execution_reply"`,
+    );
+    await queryRunner.query(`DROP INDEX "IDX_assistant_messages_execution_id"`);
+    await queryRunner.query(`DROP INDEX "IDX_assistant_messages_assistant_id"`);
+    await queryRunner.query(`DROP TABLE "assistant_messages"`);
+    await queryRunner.query(`DROP TABLE "assistants"`);
+  }
 }
