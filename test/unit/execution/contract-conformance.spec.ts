@@ -208,11 +208,19 @@ function validateProtocolFixture(ajv: Ajv2020, fixture: any): string | null {
   if (!execution || !step || !attempt || !assignment || !result || !ack)
     return 'invalid_contract';
 
+  const terminalAttempt = ['expired', 'cancelled', 'failed', 'closed'].includes(
+    attempt.status,
+  );
+  const attemptIsCurrent = step.currentAttemptId === attempt.attemptId;
+  const attemptIsFenced =
+    terminalAttempt &&
+    !('currentAttemptId' in step) &&
+    !['running', 'result_received'].includes(step.status);
   if (
     (!execution.parentExecutionId &&
       execution.rootExecutionId !== execution.executionId) ||
     step.executionId !== execution.executionId ||
-    step.currentAttemptId !== attempt.attemptId
+    (!attemptIsCurrent && !attemptIsFenced)
   )
     return 'invalid_protocol_identity';
 
