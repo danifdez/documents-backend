@@ -30,6 +30,9 @@ import {
   AGENT_DELEGATE_TOOL_CAPABILITY,
   AGENT_DELEGATE_TOOL_NAME,
   AGENT_DELEGATE_TOOL_VERSION,
+  BROWSER_GO_BACK_TOOL_CAPABILITY,
+  BROWSER_GO_BACK_TOOL_NAME,
+  BROWSER_GO_BACK_TOOL_VERSION,
   BROWSER_NAVIGATE_TOOL_CAPABILITY,
   BROWSER_NAVIGATE_TOOL_NAME,
   BROWSER_NAVIGATE_TOOL_VERSION,
@@ -371,6 +374,9 @@ export class ExecutionToolPlanService {
     }
     if (invocation.name === BROWSER_NAVIGATE_TOOL_NAME) {
       return this.prepareBrowserNavigate(invocation);
+    }
+    if (invocation.name === BROWSER_GO_BACK_TOOL_NAME) {
+      return this.prepareBrowserGoBack(invocation);
     }
     if (invocation.name === WORKSPACE_FILE_READ_TOOL_NAME) {
       return this.prepareWorkspaceFileRead(invocation, execution);
@@ -972,6 +978,64 @@ export class ExecutionToolPlanService {
       recoveryClass: 'effect_checked',
       idempotencyKey: `browser-navigate:${invocation.toolCallId}`,
       requiredCapabilities: [BROWSER_NAVIGATE_TOOL_CAPABILITY],
+      deadline: expiresAt.toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareBrowserGoBack(
+    invocation: ToolInvocationContract,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    if (
+      Object.keys(invocation.arguments).some(
+        (key) => key !== 'expectedCurrentUrl',
+      ) ||
+      typeof invocation.arguments.expectedCurrentUrl !== 'string'
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const expectedCurrentUrl = invocation.arguments.expectedCurrentUrl.trim();
+    if (!this.isHttpUrl(expectedCurrentUrl)) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const preparedAt = new Date();
+    const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
+    const resourceKey = 'browser:active-page';
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: BROWSER_GO_BACK_TOOL_NAME,
+      descriptorVersion: BROWSER_GO_BACK_TOOL_VERSION,
+      normalizedArguments: { expectedCurrentUrl },
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_reversible',
+          resourceKey,
+          description: `Go back from: ${expectedCurrentUrl}`,
+          reversible: true,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_history_navigation_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Going back changes the active page in the paired IA Browser.',
+        prompt: `Go back from "${expectedCurrentUrl}" in IA Browser?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-go-back:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_GO_BACK_TOOL_CAPABILITY],
       deadline: expiresAt.toISOString(),
       preparedAt: preparedAt.toISOString(),
     };

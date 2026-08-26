@@ -104,6 +104,7 @@ describe('ExecutionToolPlanService', () => {
             'user_tasks.create',
             'agents.delegate',
             'browser.navigate',
+            'browser.go_back',
             'browser.read_current_page',
             'workspace_files.list',
             'workspace_files.search',
@@ -532,6 +533,63 @@ describe('ExecutionToolPlanService', () => {
         invocation({
           name: 'browser.navigate',
           arguments: { url: 'javascript:alert(1)' },
+        }),
+      ),
+    ).rejects.toThrow('invalid_arguments');
+  });
+
+  it('prepares browser history navigation as a confirmed checked effect', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'browser.go_back',
+        arguments: {
+          expectedCurrentUrl: '  https://example.test/current  ',
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'browser.go_back',
+        descriptorVersion: 'browser.go_back/1',
+        normalizedArguments: {
+          expectedCurrentUrl: 'https://example.test/current',
+        },
+        resources: [
+          {
+            resourceKey: 'browser:active-page',
+            mode: 'exclusive',
+            kind: 'browser_page',
+          },
+        ],
+        effects: [
+          expect.objectContaining({
+            effectClass: 'external_reversible',
+            resourceKey: 'browser:active-page',
+            verificationRequired: true,
+          }),
+        ],
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'paired_browser_history_navigation_requires_confirmation',
+        }),
+        confirmationRequirement: expect.objectContaining({
+          prompt: 'Go back from "https://example.test/current" in IA Browser?',
+          scope: 'once',
+        }),
+        recoveryClass: 'effect_checked',
+        idempotencyKey: `browser-go-back:${TOOL_CALL_ID}`,
+        requiredCapabilities: ['tool.browser.go_back/1'],
+      }),
+    );
+  });
+
+  it('requires an exact current page for browser history navigation', async () => {
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'browser.go_back',
+          arguments: {},
         }),
       ),
     ).rejects.toThrow('invalid_arguments');

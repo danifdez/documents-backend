@@ -27,6 +27,7 @@ import {
 import { WorkerKind } from './worker-kind.enum';
 import { WorkerService } from './worker.service';
 import {
+  BROWSER_GO_BACK_TOOL_CAPABILITY,
   BROWSER_NAVIGATE_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_CAPABILITY,
 } from '../execution/execution-tool.constants';
@@ -93,6 +94,7 @@ export class BrowserWorkController {
         capabilities: [
           BROWSER_READ_TOOL_CAPABILITY,
           BROWSER_NAVIGATE_TOOL_CAPABILITY,
+          BROWSER_GO_BACK_TOOL_CAPABILITY,
         ],
         leaseDurationMs: body.leaseDurationMs,
         enforceRegisteredWorkerCapacity: true,

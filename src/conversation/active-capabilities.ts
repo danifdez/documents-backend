@@ -2,6 +2,9 @@ import { EntityManager } from 'typeorm';
 import {
   AGENT_DELEGATE_TOOL_NAME,
   AGENT_DELEGATE_TOOL_VERSION,
+  BROWSER_GO_BACK_TOOL_CAPABILITY,
+  BROWSER_GO_BACK_TOOL_NAME,
+  BROWSER_GO_BACK_TOOL_VERSION,
   BROWSER_NAVIGATE_TOOL_CAPABILITY,
   BROWSER_NAVIGATE_TOOL_NAME,
   BROWSER_NAVIGATE_TOOL_VERSION,
@@ -126,6 +129,11 @@ export async function buildActiveCapabilitySet(
         BROWSER_NAVIGATE_TOOL_VERSION,
         'paired_browser',
       ),
+      tool(
+        BROWSER_GO_BACK_TOOL_NAME,
+        BROWSER_GO_BACK_TOOL_VERSION,
+        'paired_browser',
+      ),
     );
   }
   return {
@@ -168,6 +176,7 @@ async function hasPairedBrowser(
       capabilities: JSON.stringify([
         BROWSER_READ_TOOL_CAPABILITY,
         BROWSER_NAVIGATE_TOOL_CAPABILITY,
+        BROWSER_GO_BACK_TOOL_CAPABILITY,
       ]),
     })
     .getExists();
