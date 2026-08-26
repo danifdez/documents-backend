@@ -69,4 +69,37 @@ describe('VectorStoreService', () => {
     ).rejects.toThrow('384 finite values');
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
+
+  it('atomically replaces and verifies vectors for an assistant folder', async () => {
+    manager.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ point_count: 1, matches: true }]);
+
+    await expect(
+      service.replaceIndexedFileVerified(
+        9,
+        'assistant:2',
+        [
+          {
+            id: 'indexed_file_9:1',
+            embedding,
+            payload: { text: 'Workspace context' },
+          },
+        ],
+        manager as any,
+      ),
+    ).resolves.toEqual({
+      pointCount: 1,
+      pointIds: ['indexed_file_9:1'],
+    });
+
+    expect(manager.query.mock.calls[1][0]).toContain(
+      'INSERT INTO indexed_file_chunks',
+    );
+    expect(manager.query.mock.calls[2][0]).toContain(
+      'SELECT * FROM actual EXCEPT SELECT * FROM expected',
+    );
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
 });

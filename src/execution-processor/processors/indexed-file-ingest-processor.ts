@@ -10,6 +10,14 @@ import {
   VectorStoreService,
 } from '../../vector/vector-store.service';
 import { ExecutionArtifactService } from '../../execution/execution-artifact.service';
+import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
+import {
+  canonicalHash,
+  contentHash,
+} from '../../execution/execution-canonical';
+
+class IndexedFileIngestNotFoundError extends Error {}
+class IndexedFileIngestStaleError extends Error {}
 
 @Injectable()
 export class IndexedFileIngestProcessor implements ExecutionProcessor {
@@ -21,6 +29,7 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
     private readonly repository: Repository<IndexedFileEntity>,
     private readonly vectorStore: VectorStoreService,
     private readonly artifacts: ExecutionArtifactService,
+    private readonly effectJournal: ExecutionEffectJournalService,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -81,14 +90,72 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
     ) {
       throw new Error('indexed-file-ingest result has invalid point artifacts');
     }
-    await this.vectorStore.replaceIndexedFile(
-      indexedFileId,
-      `${file.ownerType}:${file.ownerId}`,
-      points,
-    );
-
-    file.embeddingId = chunks > 0 ? sourceIdForIndexedFile(file.id) : null;
-    await this.repository.save(file);
+    const ownerTag = `${file.ownerType}:${file.ownerId}`;
+    try {
+      await this.effectJournal.runVerified(
+        {
+          executionId: execution.executionId,
+          effectKey: `indexed-file-ingest:${indexedFileId}`,
+          effectType: 'indexed_file_vectors_replace',
+          resourceKey: `indexed-file:${indexedFileId}`,
+          intent: {
+            indexedFileId,
+            checksum: executionChecksum ?? file.checksum,
+            ownerTag,
+            pointCount,
+            pointsHash: contentHash(JSON.stringify(points)),
+          },
+        },
+        async (manager) => {
+          const repository = manager.getRepository(IndexedFileEntity);
+          const current = await repository.findOne({
+            where: { id: indexedFileId },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!current) throw new IndexedFileIngestNotFoundError();
+          if (executionChecksum && executionChecksum !== current.checksum) {
+            throw new IndexedFileIngestStaleError();
+          }
+          const currentOwnerTag = `${current.ownerType}:${current.ownerId}`;
+          if (currentOwnerTag !== ownerTag) {
+            throw new IndexedFileIngestStaleError();
+          }
+          const vectors = await this.vectorStore.replaceIndexedFileVerified(
+            indexedFileId,
+            ownerTag,
+            points,
+            manager,
+          );
+          const embeddingId =
+            chunks > 0 ? sourceIdForIndexedFile(current.id) : null;
+          current.embeddingId = embeddingId;
+          await repository.save(current);
+          const observed = await repository.findOneBy({ id: indexedFileId });
+          if (
+            observed?.embeddingId !== embeddingId ||
+            observed.checksum !== current.checksum
+          ) {
+            throw new Error('indexed_file_ingest_effect_not_verified');
+          }
+          return {
+            indexedFileId,
+            checksum: current.checksum,
+            ownerTag,
+            embeddingId,
+            pointCount: vectors.pointCount,
+            pointIdsHash: canonicalHash(vectors.pointIds),
+          };
+        },
+      );
+    } catch (error) {
+      if (error instanceof IndexedFileIngestNotFoundError) {
+        return { success: false, reason: 'not_found' };
+      }
+      if (error instanceof IndexedFileIngestStaleError) {
+        return { success: false, reason: 'stale' };
+      }
+      throw error;
+    }
 
     this.logger.log(
       `[indexed-file] ingested vectors id=${indexedFileId} chunks=${chunks}`,

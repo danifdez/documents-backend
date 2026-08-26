@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 const EMBEDDING_DIMENSIONS = 384;
 const MAX_CANDIDATES = 5_000;
@@ -8,6 +8,11 @@ export interface VectorPointInput {
   id: string;
   embedding: number[];
   payload: Record<string, unknown>;
+}
+
+export interface IndexedFileVectorObservation {
+  pointCount: number;
+  pointIds: string[];
 }
 
 export type VectorCandidate = VectorPointInput;
@@ -71,10 +76,71 @@ export class VectorStoreService {
     ownerTag: string,
     points: VectorPointInput[],
   ): Promise<void> {
+    const validated = this.indexedFilePoints(indexedFileId, ownerTag, points);
+    await this.dataSource.transaction((manager) =>
+      this.replaceIndexedFileWithManager(
+        indexedFileId,
+        ownerTag,
+        validated,
+        manager,
+      ),
+    );
+  }
+
+  async replaceIndexedFileVerified(
+    indexedFileId: number,
+    ownerTag: string,
+    points: VectorPointInput[],
+    manager: EntityManager,
+  ): Promise<IndexedFileVectorObservation> {
+    const validated = this.indexedFilePoints(indexedFileId, ownerTag, points);
+    await this.replaceIndexedFileWithManager(
+      indexedFileId,
+      ownerTag,
+      validated,
+      manager,
+    );
+    const [observation] = await manager.query(
+      `WITH expected AS (
+         SELECT value->>'id' AS id,
+                (value->>'embedding')::vector::text AS embedding,
+                $2::text AS owner_tag,
+                value->'payload' AS payload
+         FROM jsonb_array_elements($3::jsonb) AS item(value)
+       ), actual AS (
+         SELECT id, embedding::text AS embedding, owner_tag, payload
+         FROM indexed_file_chunks
+         WHERE indexed_file_id = $1
+       )
+       SELECT (SELECT COUNT(*)::int FROM actual) AS point_count,
+              NOT EXISTS (
+                (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+                UNION ALL
+                (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+              ) AS matches`,
+      [indexedFileId, ownerTag, JSON.stringify(validated)],
+    );
+    if (
+      observation?.matches !== true ||
+      Number(observation.point_count) !== validated.length
+    ) {
+      throw new Error('indexed_file_vector_effect_not_verified');
+    }
+    return {
+      pointCount: validated.length,
+      pointIds: validated.map((point) => point.id),
+    };
+  }
+
+  private indexedFilePoints(
+    indexedFileId: number,
+    ownerTag: string,
+    points: VectorPointInput[],
+  ): VectorPointInput[] {
     if (!Number.isInteger(indexedFileId) || indexedFileId <= 0) {
       throw new Error('Indexed file id is invalid');
     }
-    if (!/^agent:[1-9][0-9]*$/.test(ownerTag)) {
+    if (!/^(assistant|agent):[1-9][0-9]*$/.test(ownerTag)) {
       throw new Error('Indexed file owner is invalid');
     }
     const sourceId = `indexed_file_${indexedFileId}`;
@@ -93,26 +159,33 @@ export class VectorStoreService {
         },
       };
     });
-    await this.dataSource.transaction(async (manager) => {
+    return validated;
+  }
+
+  private async replaceIndexedFileWithManager(
+    indexedFileId: number,
+    ownerTag: string,
+    points: VectorPointInput[],
+    manager: EntityManager,
+  ): Promise<void> {
+    await manager.query(
+      'DELETE FROM indexed_file_chunks WHERE indexed_file_id = $1',
+      [indexedFileId],
+    );
+    for (const point of points) {
       await manager.query(
-        'DELETE FROM indexed_file_chunks WHERE indexed_file_id = $1',
-        [indexedFileId],
+        `INSERT INTO indexed_file_chunks
+           (id, embedding, indexed_file_id, owner_tag, payload)
+         VALUES ($1, $2::vector, $3, $4, $5::jsonb)`,
+        [
+          point.id,
+          this.vectorLiteral(point.embedding),
+          indexedFileId,
+          ownerTag,
+          JSON.stringify(point.payload),
+        ],
       );
-      for (const point of validated) {
-        await manager.query(
-          `INSERT INTO indexed_file_chunks
-             (id, embedding, indexed_file_id, owner_tag, payload)
-           VALUES ($1, $2::vector, $3, $4, $5::jsonb)`,
-          [
-            point.id,
-            this.vectorLiteral(point.embedding),
-            indexedFileId,
-            ownerTag,
-            JSON.stringify(point.payload),
-          ],
-        );
-      }
-    });
+    }
   }
 
   async deleteWorkspaceSource(sourceId: string): Promise<void> {

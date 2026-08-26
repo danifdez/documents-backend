@@ -59,31 +59,57 @@ describe('vector domain finalizers', () => {
       save: jest.fn().mockResolvedValue(file),
     };
     const vectorStore = {
-      replaceIndexedFile: jest.fn().mockResolvedValue(undefined),
+      replaceIndexedFileVerified: jest.fn().mockResolvedValue({
+        pointCount: 1,
+        pointIds: ['indexed_file_9:1'],
+      }),
     };
     const points = [{ id: 'indexed_file_9:1', embedding: [], payload: {} }];
     const artifacts = {
       readOutputJson: jest.fn().mockResolvedValue([{ points }]),
     };
+    const transactionalRepository = {
+      findOne: jest.fn().mockResolvedValue(file),
+      save: jest.fn().mockResolvedValue(file),
+      findOneBy: jest.fn().mockImplementation(async () => file),
+    };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(transactionalRepository),
+    };
+    const effectJournal = {
+      runVerified: jest.fn(async (_input, callback) => ({
+        applied: true,
+        observation: await callback(manager),
+      })),
+    };
     const processor = new IndexedFileIngestProcessor(
       repository as any,
       vectorStore as any,
       artifacts as any,
+      effectJournal as any,
     );
 
-    await processor.process(
-      execution(
-        'indexed-file-ingest',
-        { indexedFileId: 9, checksum: 'current' },
-        { chunks: 1, pointCount: 1 },
-      ),
+    const ingestExecution = execution(
+      'indexed-file-ingest',
+      { indexedFileId: 9, checksum: 'current' },
+      { chunks: 1, pointCount: 1 },
     );
-    expect(vectorStore.replaceIndexedFile).toHaveBeenCalledWith(
+    ingestExecution.executionId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
+    await processor.process(ingestExecution);
+    expect(vectorStore.replaceIndexedFileVerified).toHaveBeenCalledWith(
       9,
       'agent:5',
       points,
+      manager,
     );
     expect(file.embeddingId).toBe('indexed_file_9');
+    expect(effectJournal.runVerified).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectKey: 'indexed-file-ingest:9',
+        effectType: 'indexed_file_vectors_replace',
+      }),
+      expect.any(Function),
+    );
   });
 
   it('requires a structured result for vector searches', async () => {
