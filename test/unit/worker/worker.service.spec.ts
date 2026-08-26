@@ -2,17 +2,28 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { WorkerService } from '../../../src/worker/worker.service';
 import { WorkerEntity } from '../../../src/worker/worker.entity';
+import { ExecutionStepAttemptEntity } from '../../../src/execution/execution-step-attempt.entity';
 import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildWorker } from '../../factories';
+import { ExecutionContractValidator } from '../../../src/execution/execution-contract-validator';
 
 describe('WorkerService', () => {
   let service: WorkerService;
   let repo: MockRepository<WorkerEntity>;
+  let attemptRepo: MockRepository<ExecutionStepAttemptEntity>;
 
   beforeEach(async () => {
     repo = createMockRepository();
+    attemptRepo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [WorkerService, { provide: getRepositoryToken(WorkerEntity), useValue: repo }],
+      providers: [
+        WorkerService,
+        { provide: getRepositoryToken(WorkerEntity), useValue: repo },
+        {
+          provide: getRepositoryToken(ExecutionStepAttemptEntity),
+          useValue: attemptRepo,
+        },
+      ],
     }).compile();
     service = module.get(WorkerService);
   });
@@ -30,5 +41,32 @@ describe('WorkerService', () => {
   it('should find by id', async () => {
     repo.findOneBy.mockResolvedValue(buildWorker());
     expect(await service.findById('test-uuid')).toBeDefined();
+  });
+
+  it('derives active assignments and available concurrency', async () => {
+    const worker = buildWorker({ maximumConcurrency: 2 });
+    repo.find.mockResolvedValue([worker]);
+    attemptRepo.find.mockResolvedValue([
+      {
+        attemptId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+        claimedBy: worker.id,
+      } as ExecutionStepAttemptEntity,
+    ]);
+
+    const registrations = await service.registrations();
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        schemaVersion: 'worker-registration/1',
+        workerId: worker.id,
+        concurrency: { maximum: 2, available: 1 },
+        activeAssignments: ['018f1d8a-54d7-7d63-a1ee-5e9a6adca704'],
+        loadSummary: { state: 'available', active: 1 },
+      }),
+    ]);
+    expect(() =>
+      new ExecutionContractValidator().assertWorkerRegistration(
+        registrations[0] as unknown as Record<string, unknown>,
+      ),
+    ).not.toThrow();
   });
 });

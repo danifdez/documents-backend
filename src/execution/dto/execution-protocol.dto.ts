@@ -21,6 +21,9 @@ import {
 import { ExecutionStepKind } from '../execution-step-kind.enum';
 
 export class RegisterModelsWorkerDto {
+  @Equals('step-protocol/1')
+  protocolVersion: 'step-protocol/1';
+
   @IsUUID()
   workerId: string;
 
@@ -32,14 +35,37 @@ export class RegisterModelsWorkerDto {
   @IsString({ each: true })
   capabilities: string[];
 
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsEnum(ExecutionStepKind, { each: true })
+  stepKinds: ExecutionStepKind[];
+
+  @IsInt()
+  @Min(1)
+  @Max(64)
+  maximumConcurrency: number;
+
   @IsObject()
   metadata: Record<string, unknown>;
 }
 
 export class ModelsWorkerHeartbeatDto {
+  @Equals('step-protocol/1')
+  protocolVersion: 'step-protocol/1';
+
   @IsArray()
   @IsString({ each: true })
   capabilities: string[];
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsEnum(ExecutionStepKind, { each: true })
+  stepKinds: ExecutionStepKind[];
+
+  @IsInt()
+  @Min(1)
+  @Max(64)
+  maximumConcurrency: number;
 
   @IsObject()
   metadata: Record<string, unknown>;

@@ -43,6 +43,8 @@ export class ExecutionProtocolController {
       body.workerId,
       body.name,
       body.capabilities,
+      body.stepKinds,
+      body.maximumConcurrency,
       body.metadata,
     );
     return { workerId: worker.id, credential };
@@ -55,7 +57,13 @@ export class ExecutionProtocolController {
     @Body() body: ModelsWorkerHeartbeatDto,
   ) {
     await this.workers.authenticate(workerId, credential);
-    await this.workers.heartbeat(workerId, body.capabilities, body.metadata);
+    await this.workers.heartbeat(
+      workerId,
+      body.capabilities,
+      body.stepKinds,
+      body.maximumConcurrency,
+      body.metadata,
+    );
     return { acknowledgedAt: new Date() };
   }
 
@@ -66,7 +74,11 @@ export class ExecutionProtocolController {
     @Body() body: ClaimExecutionStepDto,
   ) {
     await this.workers.authenticate(workerId, credential);
-    return this.attempts.claimReadyStep({ workerId, ...body });
+    return this.attempts.claimReadyStep({
+      workerId,
+      ...body,
+      enforceRegisteredWorkerCapacity: true,
+    });
   }
 
   @Post('attempts/:attemptId/start')

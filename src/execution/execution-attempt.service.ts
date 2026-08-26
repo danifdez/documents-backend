@@ -5,7 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
-import { DataSource, EntityManager, In, LessThanOrEqual } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  In,
+  LessThanOrEqual,
+  MoreThan,
+} from 'typeorm';
+import { WorkerEntity } from '../worker/worker.entity';
 import {
   ClaimExecutionStepInput,
   GrantExecutionStepAttemptInput,
@@ -153,6 +160,36 @@ export class ExecutionAttemptService {
     const capabilities = [...new Set(input.capabilities)];
 
     return this.dataSource.transaction(async (manager) => {
+      if (input.enforceRegisteredWorkerCapacity) {
+        const worker = await manager.getRepository(WorkerEntity).findOne({
+          where: { id: input.workerId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!worker || worker.status !== 'online') {
+          throw new ConflictException('worker_not_available');
+        }
+        if (
+          stepKinds.some((kind) => !worker.stepKinds.includes(kind)) ||
+          capabilities.some(
+            (capability) => !worker.capabilities.includes(capability),
+          )
+        ) {
+          throw new BadRequestException('claim_capabilities_not_registered');
+        }
+        const activeAssignments = await manager
+          .getRepository(ExecutionStepAttemptEntity)
+          .count({
+            where: {
+              claimedBy: input.workerId,
+              status: In([
+                ExecutionStepAttemptStatus.LEASED,
+                ExecutionStepAttemptStatus.RUNNING,
+              ]),
+              leaseExpiresAt: MoreThan(new Date()),
+            },
+          });
+        if (activeAssignments >= worker.maximumConcurrency) return null;
+      }
       const rows = await manager.query(
         `
           SELECT "step_id"

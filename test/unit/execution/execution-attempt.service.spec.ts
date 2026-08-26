@@ -17,6 +17,7 @@ import { ExecutionToolPlanEntity } from '../../../src/execution/execution-tool-p
 import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
 import { ExecutionOperationKind } from '../../../src/execution/execution-operation-kind.enum';
 import { ExecutionArtifactEntity } from '../../../src/execution/execution-artifact.entity';
+import { WorkerEntity } from '../../../src/worker/worker.entity';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -37,6 +38,7 @@ describe('ExecutionAttemptService', () => {
   let toolPlanRepo: Record<string, jest.Mock>;
   let eventRepo: Record<string, jest.Mock>;
   let artifactRepo: Record<string, jest.Mock>;
+  let workerRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
   const readyStep = () => ({
@@ -87,6 +89,7 @@ describe('ExecutionAttemptService', () => {
     attemptRepo = {
       findOne: jest.fn(),
       findOneBy: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
     };
@@ -161,6 +164,9 @@ describe('ExecutionAttemptService', () => {
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
     };
+    workerRepo = {
+      findOne: jest.fn(),
+    };
     manager = {
       getRepository: jest.fn((entity) => {
         if (entity === ExecutionStepEntity) return stepRepo;
@@ -172,6 +178,7 @@ describe('ExecutionAttemptService', () => {
         if (entity === ExecutionToolPlanEntity) return toolPlanRepo;
         if (entity === ExecutionEventEntity) return eventRepo;
         if (entity === ExecutionArtifactEntity) return artifactRepo;
+        if (entity === WorkerEntity) return workerRepo;
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
       query: jest.fn().mockResolvedValue([]),
@@ -397,6 +404,49 @@ describe('ExecutionAttemptService', () => {
       expect.stringContaining(`"executions"."status" IN ('queued', 'running')`),
       [[ExecutionStepKind.SERVICE], ['detect-language']],
     );
+  });
+
+  it('does not claim beyond the registered worker concurrency', async () => {
+    workerRepo.findOne.mockResolvedValue({
+      id: WORKER_ID,
+      status: 'online',
+      stepKinds: [ExecutionStepKind.SERVICE],
+      capabilities: ['detect-language'],
+      maximumConcurrency: 1,
+    });
+    attemptRepo.count.mockResolvedValue(1);
+
+    await expect(
+      service.claimReadyStep({
+        workerId: WORKER_ID,
+        stepKinds: [ExecutionStepKind.SERVICE],
+        capabilities: ['detect-language'],
+        leaseDurationMs: 30_000,
+        enforceRegisteredWorkerCapacity: true,
+      }),
+    ).resolves.toBeNull();
+    expect(manager.query).not.toHaveBeenCalled();
+  });
+
+  it('rejects claim capabilities absent from worker registration', async () => {
+    workerRepo.findOne.mockResolvedValue({
+      id: WORKER_ID,
+      status: 'online',
+      stepKinds: [ExecutionStepKind.SERVICE],
+      capabilities: ['detect-language'],
+      maximumConcurrency: 1,
+    });
+
+    await expect(
+      service.claimReadyStep({
+        workerId: WORKER_ID,
+        stepKinds: [ExecutionStepKind.SERVICE],
+        capabilities: ['detect-language', 'embedding'],
+        leaseDurationMs: 30_000,
+        enforceRegisteredWorkerCapacity: true,
+      }),
+    ).rejects.toThrow('claim_capabilities_not_registered');
+    expect(attemptRepo.count).not.toHaveBeenCalled();
   });
 
   it('does not grant work for a terminal execution', async () => {

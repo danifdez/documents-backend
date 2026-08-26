@@ -34,6 +34,7 @@ export interface ClaimExecutionStepInput {
   stepKinds: ExecutionStepKind[];
   capabilities: string[];
   leaseDurationMs: number;
+  enforceRegisteredWorkerCapacity?: boolean;
 }
 
 export interface StepAssignment {

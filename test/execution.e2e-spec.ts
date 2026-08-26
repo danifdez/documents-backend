@@ -13,6 +13,8 @@ import { AddExecutionStepContinuationTarget1757668140440 } from '../migrations/1
 import { DropObsoleteExecutionCheckpoint1757668140450 } from '../migrations/1757668140450-DropObsoleteExecutionCheckpoint';
 import { DropObsoleteExecutionRoutingFields1757668140460 } from '../migrations/1757668140460-DropObsoleteExecutionRoutingFields';
 import { AddExecutionStepFailureFinalization1757668140470 } from '../migrations/1757668140470-AddExecutionStepFailureFinalization';
+import { AddExecutionOutputArtifacts1757668140600 } from '../migrations/1757668140600-AddExecutionOutputArtifacts';
+import { AddWorkerConcurrency1757668140700 } from '../migrations/1757668140700-AddWorkerConcurrency';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -121,6 +123,8 @@ describe('execution PostgreSQL integration', () => {
       )
     `);
     await new AddWorkerCredentials1757668140380().up(runner);
+    await new AddExecutionOutputArtifacts1757668140600().up(runner);
+    await new AddWorkerConcurrency1757668140700().up(runner);
     await runner.release();
 
     const config = {
@@ -140,7 +144,10 @@ describe('execution PostgreSQL integration', () => {
       dataSource,
       new ExecutionContractValidator(),
     );
-    workerService = new WorkerService(dataSource.getRepository(WorkerEntity));
+    workerService = new WorkerService(
+      dataSource.getRepository(WorkerEntity),
+      dataSource.getRepository(ExecutionStepAttemptEntity),
+    );
     toolPlanService = new ExecutionToolPlanService(
       dataSource,
       new ExecutionContractValidator(),
@@ -980,6 +987,8 @@ describe('execution PostgreSQL integration', () => {
       workerId,
       'models-e2e',
       ['detect-language'],
+      [ExecutionStepKind.SERVICE],
+      1,
       { runtime: 'test' },
     );
 
@@ -995,6 +1004,8 @@ describe('execution PostgreSQL integration', () => {
       workerId,
       'models-e2e',
       [],
+      [ExecutionStepKind.SERVICE],
+      1,
       {},
     );
     expect(rotation.credential).not.toBe(registration.credential);
@@ -1004,6 +1015,64 @@ describe('execution PostgreSQL integration', () => {
     await expect(
       workerService.authenticate(workerId, rotation.credential),
     ).resolves.toBeUndefined();
+  });
+
+  it('serializes concurrent claims at the registered worker limit', async () => {
+    const workerId = randomUUID();
+    await workerService.register(
+      workerId,
+      'models-concurrency-e2e',
+      ['detect-language'],
+      [ExecutionStepKind.SERVICE],
+      1,
+      { runtime: 'test' },
+    );
+    await Promise.all(
+      ['worker-limit-first', 'worker-limit-second'].map((name) =>
+        service.create(
+          name,
+          ExecutionPriority.NORMAL,
+          {},
+          {
+            initialStep: {
+              stepKind: ExecutionStepKind.SERVICE,
+              work: { taskType: 'detect-language' },
+              requiredCapabilities: ['detect-language'],
+            },
+          },
+        ),
+      ),
+    );
+
+    const claims = await Promise.all([
+      attemptService.claimReadyStep({
+        workerId,
+        stepKinds: [ExecutionStepKind.SERVICE],
+        capabilities: ['detect-language'],
+        leaseDurationMs: 30_000,
+        enforceRegisteredWorkerCapacity: true,
+      }),
+      attemptService.claimReadyStep({
+        workerId,
+        stepKinds: [ExecutionStepKind.SERVICE],
+        capabilities: ['detect-language'],
+        leaseDurationMs: 30_000,
+        enforceRegisteredWorkerCapacity: true,
+      }),
+    ]);
+
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(claims.filter((claim) => claim === null)).toHaveLength(1);
+    const registration = (await workerService.registrations()).find(
+      (worker) => worker.workerId === workerId,
+    );
+    expect(registration).toEqual(
+      expect.objectContaining({
+        concurrency: { maximum: 1, available: 0 },
+        activeAssignments: [claims.find(Boolean)?.attemptId],
+        loadSummary: { state: 'busy', active: 1 },
+      }),
+    );
   });
 
   it('serializes resource claims and acknowledges result retries', async () => {

@@ -5,6 +5,7 @@ import { AuthorEntity } from '../src/author/author.entity';
 import { UserEntity } from '../src/auth/user.entity';
 import { ExecutionEntity } from '../src/execution/execution.entity';
 import { ExecutionStatus } from '../src/execution/execution-status.enum';
+import { ExecutionStepKind } from '../src/execution/execution-step-kind.enum';
 import { DocEntity } from '../src/doc/doc.entity';
 import { CommentEntity } from '../src/comment/comment.entity';
 import { NoteEntity } from '../src/note/note.entity';
@@ -420,10 +421,14 @@ export function buildWorker(
     id: 'test-worker-uuid',
     name: 'test-worker',
     capabilities: ['document-extraction'],
+    protocolVersion: 'step-protocol/1',
+    stepKinds: [ExecutionStepKind.SERVICE],
+    maximumConcurrency: 1,
     status: 'online',
     lastHeartbeat: now,
     startedAt: now,
     metadata: null,
+    credentialHash: null,
     ...overrides,
   } as WorkerEntity;
 }

@@ -1,8 +1,17 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { In, LessThan, MoreThan, Repository } from 'typeorm';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
+import { ExecutionStepAttemptStatus } from '../execution/execution-step-attempt-status.enum';
+import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { WorkerEntity } from './worker.entity';
+import { WorkerRegistrationView } from './worker-registration.types';
 
 @Injectable()
 export class WorkerService {
@@ -11,6 +20,8 @@ export class WorkerService {
   constructor(
     @InjectRepository(WorkerEntity)
     private readonly repo: Repository<WorkerEntity>,
+    @InjectRepository(ExecutionStepAttemptEntity)
+    private readonly attempts: Repository<ExecutionStepAttemptEntity>,
   ) {}
 
   async findAll(): Promise<WorkerEntity[]> {
@@ -32,8 +43,11 @@ export class WorkerService {
     id: string,
     name: string,
     capabilities: string[],
+    stepKinds: ExecutionStepKind[],
+    maximumConcurrency: number,
     metadata: Record<string, unknown>,
   ): Promise<{ worker: WorkerEntity; credential: string }> {
+    this.assertMaximumConcurrency(maximumConcurrency);
     const existing = await this.repo
       .createQueryBuilder('worker')
       .addSelect('worker.credentialHash')
@@ -43,6 +57,9 @@ export class WorkerService {
     const worker = existing ?? this.repo.create({ id });
     worker.name = name;
     worker.capabilities = [...new Set(capabilities)];
+    worker.protocolVersion = 'step-protocol/1';
+    worker.stepKinds = [...new Set(stepKinds)];
+    worker.maximumConcurrency = maximumConcurrency;
     worker.status = 'online';
     worker.lastHeartbeat = new Date();
     worker.startedAt = new Date();
@@ -78,14 +95,51 @@ export class WorkerService {
   async heartbeat(
     id: string,
     capabilities: string[],
+    stepKinds: ExecutionStepKind[],
+    maximumConcurrency: number,
     metadata: Record<string, unknown>,
   ): Promise<void> {
+    this.assertMaximumConcurrency(maximumConcurrency);
     await this.repo.update(id, {
       capabilities: [...new Set(capabilities)],
+      stepKinds: [...new Set(stepKinds)],
+      maximumConcurrency,
       metadata: metadata as any,
       status: 'online',
       lastHeartbeat: new Date(),
     });
+  }
+
+  async registrations(): Promise<WorkerRegistrationView[]> {
+    const workers = await this.repo.find({
+      order: { lastHeartbeat: 'DESC' },
+    });
+    if (!workers.length) return [];
+    const activeAttempts = await this.attempts.find({
+      select: {
+        attemptId: true,
+        claimedBy: true,
+        createdAt: true,
+      },
+      where: {
+        claimedBy: In(workers.map((worker) => worker.id)),
+        status: In([
+          ExecutionStepAttemptStatus.LEASED,
+          ExecutionStepAttemptStatus.RUNNING,
+        ]),
+        leaseExpiresAt: MoreThan(new Date()),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    const assignments = new Map<string, string[]>();
+    for (const attempt of activeAttempts) {
+      const current = assignments.get(attempt.claimedBy) ?? [];
+      current.push(attempt.attemptId);
+      assignments.set(attempt.claimedBy, current);
+    }
+    return workers.map((worker) =>
+      this.registrationView(worker, assignments.get(worker.id) ?? []),
+    );
   }
 
   async markStaleOffline(thresholdSeconds: number = 60): Promise<number> {
@@ -102,7 +156,8 @@ export class WorkerService {
     for (const worker of staleWorkers) {
       worker.status = 'offline';
       this.logger.warn(
-        `Marking worker ${worker.name} (${worker.id}) as offline — last heartbeat: ${worker.lastHeartbeat.toISOString()}`,
+        `Marking worker ${worker.name} (${worker.id}) as offline — ` +
+          `last heartbeat: ${worker.lastHeartbeat.toISOString()}`,
       );
     }
 
@@ -112,5 +167,76 @@ export class WorkerService {
 
   private hashCredential(credential: string): string {
     return `sha256:${createHash('sha256').update(credential).digest('hex')}`;
+  }
+
+  private registrationView(
+    worker: WorkerEntity,
+    activeAssignments: string[],
+  ): WorkerRegistrationView {
+    const metadata =
+      worker.metadata && typeof worker.metadata === 'object'
+        ? (worker.metadata as Record<string, unknown>)
+        : {};
+    const runtimeVersions: Record<string, string> = {};
+    if (typeof metadata.codeFingerprint === 'string') {
+      runtimeVersions['documents-models'] = metadata.codeFingerprint;
+    }
+    if (typeof metadata.runtimeFingerprint === 'string') {
+      runtimeVersions['runtime'] = metadata.runtimeFingerprint;
+    }
+    const installedArtifacts = Array.isArray(metadata.installedArtifacts)
+      ? metadata.installedArtifacts.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [];
+    const hardware = Object.fromEntries(
+      ['cpuCount', 'ramGb', 'hasCuda', 'gpuName', 'vramGb']
+        .filter((key) => metadata[key] !== undefined)
+        .map((key) => [key, metadata[key]]),
+    );
+    const available =
+      worker.status === 'online'
+        ? Math.max(worker.maximumConcurrency - activeAssignments.length, 0)
+        : 0;
+    return {
+      schemaVersion: 'worker-registration/1',
+      workerId: worker.id,
+      protocolVersion: worker.protocolVersion,
+      runtimeVersions,
+      installedArtifacts,
+      effectiveStepCapabilities: worker.stepKinds.length
+        ? [
+            {
+              schemaVersion: 'worker-capability/1',
+              capabilityId: `${worker.id}:effective`,
+              stepKinds: worker.stepKinds,
+              taskTypes: worker.capabilities,
+              maxConcurrency: worker.maximumConcurrency,
+            },
+          ]
+        : [],
+      hardware,
+      concurrency: {
+        maximum: worker.maximumConcurrency,
+        available,
+      },
+      activeAssignments,
+      heartbeat: worker.lastHeartbeat.toISOString(),
+      loadSummary: {
+        state:
+          worker.status !== 'online'
+            ? 'offline'
+            : available > 0
+              ? 'available'
+              : 'busy',
+        active: activeAssignments.length,
+      },
+    };
+  }
+
+  private assertMaximumConcurrency(value: number): void {
+    if (!Number.isInteger(value) || value < 1 || value > 64) {
+      throw new BadRequestException('invalid_worker_concurrency');
+    }
   }
 }

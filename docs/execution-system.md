@@ -12,8 +12,9 @@ queued → running → waiting → running → completed
 
 Backend creates root executions transactionally with their first
 `execution.created` event and step graph. Models workers request compatible
-ready steps over HTTP; Backend locks the step, creates a lease-bound attempt
-and fences every result with that identity. Reentrant work is represented by
+ready steps over HTTP; Backend locks the worker and step, enforces its declared
+concurrency, creates a lease-bound attempt and fences every result with that
+identity. Reentrant work is represented by
 successor steps or child executions that preserve `rootExecutionId` and
 reference `parentExecutionId`.
 
@@ -56,6 +57,9 @@ declared task capabilities.
   `ai-train` destination, retention class, and caller access scope.
 - Models registers, heartbeats, claims steps, downloads artifacts and submits
   results through `/models-work`; IA Browser never writes directly to PostgreSQL.
+- `GET /workers` returns authenticated operational projections with effective
+  capabilities, maximum/available concurrency and active attempt IDs. Active
+  assignments are derived from unexpired `leased` and `running` attempts.
 
 The permanent v1 contract is pinned under `contracts/execution/v1/`, and its
 fixtures live under `test/contracts/execution/v1/fixtures/`.

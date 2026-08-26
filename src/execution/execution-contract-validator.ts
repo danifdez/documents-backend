@@ -14,6 +14,7 @@ export class ExecutionContractValidator {
   private readonly toolInvocationValidator: ValidateFunction;
   private readonly toolPlanValidator: ValidateFunction;
   private readonly toolResultValidator: ValidateFunction;
+  private readonly workerRegistrationValidator: ValidateFunction;
 
   constructor() {
     const root = this.resolveSchemaRoot();
@@ -46,6 +47,9 @@ export class ExecutionContractValidator {
     this.toolResultValidator = ajv.getSchema(
       'https://documents.local/harness/v1/schemas/tool-result.schema.json',
     );
+    this.workerRegistrationValidator = ajv.getSchema(
+      'https://documents.local/harness/v1/schemas/worker-registration.schema.json',
+    );
     if (
       !this.eventValidator ||
       !this.artifactValidator ||
@@ -54,7 +58,8 @@ export class ExecutionContractValidator {
       !this.resultValidator ||
       !this.toolInvocationValidator ||
       !this.toolPlanValidator ||
-      !this.toolResultValidator
+      !this.toolResultValidator ||
+      !this.workerRegistrationValidator
     ) {
       throw new Error('Canonical execution v1 schemas are incomplete');
     }
@@ -90,6 +95,10 @@ export class ExecutionContractValidator {
 
   assertToolResult(value: Record<string, unknown>): void {
     this.assert(this.toolResultValidator, value, 'tool result');
+  }
+
+  assertWorkerRegistration(value: Record<string, unknown>): void {
+    this.assert(this.workerRegistrationValidator, value, 'worker registration');
   }
 
   private assert(
