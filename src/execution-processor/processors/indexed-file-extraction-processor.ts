@@ -2,10 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ExecutionEntity } from 'src/execution/execution.entity';
-import { ExecutionService } from 'src/execution/execution.service';
-import { ExecutionPriority } from 'src/execution/execution-priority.enum';
-import { IndexedFileEntity } from 'src/indexed-file/indexed-file.entity';
+import { ExecutionEntity } from '../../execution/execution.entity';
+import { ExecutionService } from '../../execution/execution.service';
+import { IndexedFileEntity } from '../../indexed-file/indexed-file.entity';
+import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
+import { canonicalHash } from '../../execution/execution-canonical';
+
+class IndexedFileExtractionNotFoundError extends Error {}
+class IndexedFileExtractionStaleError extends Error {}
 
 @Injectable()
 export class IndexedFileExtractionProcessor implements ExecutionProcessor {
@@ -16,6 +20,7 @@ export class IndexedFileExtractionProcessor implements ExecutionProcessor {
     @InjectRepository(IndexedFileEntity)
     private readonly repository: Repository<IndexedFileEntity>,
     private readonly executionService: ExecutionService,
+    private readonly effectJournal: ExecutionEffectJournalService,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -55,24 +60,108 @@ export class IndexedFileExtractionProcessor implements ExecutionProcessor {
     } | null;
     const text = typeof result?.content === 'string' ? result.content : '';
 
-    file.extractedText = text;
-    await this.repository.save(file);
+    let observation: Record<string, unknown>;
+    try {
+      const effect = await this.effectJournal.runVerified(
+        {
+          executionId: execution.executionId,
+          effectKey: `indexed-file-extraction:${indexedFileId}`,
+          effectType: 'indexed_file_text_replace',
+          resourceKey: `indexed-file:${indexedFileId}`,
+          intent: {
+            indexedFileId,
+            checksum: executionChecksum ?? file.checksum,
+            text,
+          },
+        },
+        async (manager) => {
+          const repository = manager.getRepository(IndexedFileEntity);
+          const current = await repository.findOne({
+            where: { id: indexedFileId },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!current) throw new IndexedFileExtractionNotFoundError();
+          if (executionChecksum && executionChecksum !== current.checksum) {
+            throw new IndexedFileExtractionStaleError();
+          }
+          const before = current.extractedText;
+          current.extractedText = text;
+          await repository.save(current);
+          const observed = await repository.findOneBy({ id: indexedFileId });
+          if (
+            observed?.extractedText !== text ||
+            observed.checksum !== current.checksum
+          ) {
+            throw new Error('indexed_file_extraction_effect_not_verified');
+          }
+          return {
+            indexedFileId,
+            ownerType: current.ownerType,
+            ownerId: current.ownerId,
+            filename: current.filename,
+            checksum: current.checksum,
+            textLength: text.length,
+            beforeTextHash: canonicalHash(before),
+            afterTextHash: canonicalHash(text),
+          };
+        },
+      );
+      observation = effect.observation;
+    } catch (error) {
+      if (error instanceof IndexedFileExtractionNotFoundError) {
+        return { success: false, reason: 'not_found' };
+      }
+      if (error instanceof IndexedFileExtractionStaleError) {
+        return { success: false, reason: 'stale' };
+      }
+      throw error;
+    }
 
     this.logger.log(
       `[indexed-file] extracted text for id=${indexedFileId} length=${text.length}`,
     );
 
     if (text) {
-      await this.executionService.create(
-        'indexed-file-ingest',
-        ExecutionPriority.NORMAL,
+      const ownerType = observation.ownerType;
+      const ownerId = Number(observation.ownerId);
+      const filename = observation.filename;
+      const checksum = observation.checksum;
+      if (
+        !['assistant', 'agent'].includes(String(ownerType)) ||
+        !Number.isInteger(ownerId) ||
+        ownerId <= 0 ||
+        typeof filename !== 'string' ||
+        typeof checksum !== 'string'
+      ) {
+        throw new Error('indexed_file_extraction_observation_invalid');
+      }
+      const current = await this.repository.findOne({
+        where: { id: indexedFileId },
+      });
+      if (!current) return { success: false, reason: 'not_found' };
+      if (current.checksum !== checksum) {
+        return { success: false, reason: 'stale' };
+      }
+      if (!execution.lastEventId) {
+        throw new Error('Indexed-file extraction has no causal event');
+      }
+      const payload = {
+        indexedFileId,
+        ownerType,
+        ownerId,
+        content: text,
+        filename,
+        checksum,
+      };
+      await this.executionService.createChildInferenceOnce(
+        execution.executionId,
+        `indexed-file-extraction:ingest:${indexedFileId}:${checksum}`,
         {
-          indexedFileId: file.id,
-          ownerType: file.ownerType,
-          ownerId: file.ownerId,
-          content: text,
-          filename: file.filename,
-          checksum: file.checksum,
+          taskType: 'indexed-file-ingest',
+          payload,
+          work: { taskType: 'indexed-file-ingest', payload },
+          requiredCapability: 'indexed-file-ingest',
+          causedByEventId: execution.lastEventId,
         },
       );
     }
