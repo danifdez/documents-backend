@@ -20,8 +20,7 @@ export class CreateIndexedFiles1757668140100 implements MigrationInterface {
                 "created_at" TIMESTAMP NOT NULL DEFAULT now(),
                 "updated_at" TIMESTAMP NOT NULL DEFAULT now(),
                 CONSTRAINT "UQ_indexed_files_owner_filename" UNIQUE ("owner_type", "owner_id", "filename"),
-                CONSTRAINT "UQ_indexed_files_file_path" UNIQUE ("file_path"),
-                CONSTRAINT "CHK_indexed_files_agent_owner" CHECK ("owner_type" = 'agent')
+                CONSTRAINT "CHK_indexed_files_owner_type" CHECK ("owner_type" IN ('assistant', 'agent'))
             )
         `);
     await queryRunner.query(

@@ -5,6 +5,10 @@ import { AssistantService } from '../../../src/assistant/assistant.service';
 import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { AssistantMessageEntity } from '../../../src/assistant/assistant-message.entity';
 import { ExecutionService } from '../../../src/execution/execution.service';
+import { IndexedFileService } from '../../../src/indexed-file/indexed-file.service';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 
@@ -38,10 +42,12 @@ describe('AssistantService — personal assistant', () => {
   let service: AssistantService;
   let assistantRepo: ReturnType<typeof createMockRepo>;
   let messageRepo: ReturnType<typeof createMockRepo>;
+  let indexedFiles: { clearAllForOwner: jest.Mock };
 
   beforeEach(async () => {
     assistantRepo = createMockRepo();
     messageRepo = createMockRepo();
+    indexedFiles = { clearAllForOwner: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -53,6 +59,10 @@ describe('AssistantService — personal assistant', () => {
         {
           provide: getRepositoryToken(AssistantMessageEntity),
           useValue: messageRepo,
+        },
+        {
+          provide: IndexedFileService,
+          useValue: indexedFiles,
         },
         {
           provide: ExecutionService,
@@ -94,6 +104,27 @@ describe('AssistantService — personal assistant', () => {
       service.recordAssistantReply(1, 'different', EXECUTION_ID),
     ).rejects.toThrow(ConflictException);
   });
+
+  it('configures a working folder on the singleton and clears stale indexed rows', async () => {
+    const scope = await fs.mkdtemp(path.join(os.tmpdir(), 'assistant-scope-'));
+    try {
+      assistantRepo.store.set(1, {
+        id: 1,
+        name: 'Assistant',
+        folderScope: null,
+      });
+
+      const assistant = await service.updateWorkingFolder(1, scope);
+
+      expect(assistant.folderScope).toBe(scope);
+      expect(indexedFiles.clearAllForOwner).toHaveBeenCalledWith({
+        ownerType: 'assistant',
+        ownerId: 1,
+      });
+    } finally {
+      await fs.rm(scope, { recursive: true, force: true });
+    }
+  });
 });
 // A message repo whose `find` honours where.assistantId, the LessThan(id)
 // cursor, `order.id` and `take` — enough to exercise keyset pagination.
@@ -127,6 +158,10 @@ describe('AssistantService — getMessages() pagination', () => {
         {
           provide: getRepositoryToken(AssistantMessageEntity),
           useValue: messageRepo,
+        },
+        {
+          provide: IndexedFileService,
+          useValue: { clearAllForOwner: jest.fn() },
         },
         {
           provide: ExecutionService,

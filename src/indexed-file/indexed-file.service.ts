@@ -12,9 +12,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { IndexedFileEntity, IndexedFileOwnerType } from './indexed-file.entity';
+import { AssistantEntity } from '../assistant/assistant.entity';
 import { AgentEntity } from '../agent/agent.entity';
-import { ExecutionEntity } from '../execution/execution.entity';
-import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { VectorStoreService } from '../vector/vector-store.service';
@@ -77,6 +76,8 @@ export class IndexedFileService {
   constructor(
     @InjectRepository(IndexedFileEntity)
     private readonly repository: Repository<IndexedFileEntity>,
+    @InjectRepository(AssistantEntity)
+    private readonly assistantRepository: Repository<AssistantEntity>,
     @InjectRepository(AgentEntity)
     private readonly agentRepository: Repository<AgentEntity>,
     private readonly executionService: ExecutionService,
@@ -283,11 +284,16 @@ export class IndexedFileService {
     return !!scope;
   }
 
+  async folderScopeKey(owner: OwnerRef): Promise<string | null> {
+    const scope = await this.resolveFolderScope(owner);
+    if (!scope) return null;
+    return crypto.createHash('sha256').update(scope).digest('hex').slice(0, 32);
+  }
+
   async search(
     owner: OwnerRef,
     query: string,
     limit = 10,
-    timeoutMs = 4000,
   ): Promise<
     Array<{
       indexedFileId: number;
@@ -299,53 +305,43 @@ export class IndexedFileService {
     const { ownerType, ownerId } = owner;
     const q = (query ?? '').trim();
     if (!q) return [];
-
-    let execution;
-    try {
-      const candidates = await this.vectorStore.indexedFileCandidates(
-        `${ownerType}:${ownerId}`,
-      );
-      execution = await this.executionService.create(
-        'indexed-file-search',
-        ExecutionPriority.HIGH,
-        { ownerType, ownerId, query: q, limit },
-        {
-          inputArtifacts: [
-            this.vectorStore.vectorCandidatesArtifact(candidates),
-          ],
-        },
-      );
-    } catch (e: any) {
-      this.logger.warn(
-        `folder search: failed to enqueue execution: ${e?.message ?? e}`,
-      );
-      return [];
-    }
-    if (!execution) return [];
-
-    const start = Date.now();
-    const poll = 100;
-    while (Date.now() - start < timeoutMs) {
-      const current = (await this.executionService.findOne(
-        execution.executionId,
-      )) as ExecutionEntity | null;
-      if (!current) return [];
-      if (current.status === ExecutionStatus.COMPLETED) {
-        const r = current.result as { results?: any[] } | null;
-        return Array.isArray(r?.results) ? (r!.results as any[]) : [];
-      }
-      if (current.status === ExecutionStatus.FAILED) {
-        this.logger.warn(
-          `folder search execution ${execution.executionId} failed`,
-        );
-        return [];
-      }
-      await new Promise((resolve) => setTimeout(resolve, poll));
-    }
-    this.logger.warn(
-      `folder search execution ${execution.executionId} timed out`,
-    );
-    return [];
+    const normalizedQuery = q.toLocaleLowerCase();
+    const terms = normalizedQuery
+      .split(/\s+/)
+      .filter((term) => term.length > 1);
+    const rows = await this.repository.find({
+      where: { ownerType, ownerId },
+      select: ['id', 'filename', 'extractedText'],
+    });
+    return rows
+      .flatMap((row) => {
+        if (!row.extractedText) return [];
+        const normalized = row.extractedText.toLocaleLowerCase();
+        const positions = terms
+          .map((term) => normalized.indexOf(term))
+          .filter((position) => position >= 0);
+        if (positions.length === 0) return [];
+        const phraseMatch = normalized.includes(normalizedQuery);
+        const start = Math.max(0, Math.min(...positions) - 160);
+        const snippet = row.extractedText
+          .slice(start, start + 640)
+          .replace(/\s+/g, ' ')
+          .trim();
+        return [
+          {
+            indexedFileId: row.id,
+            filename: row.filename,
+            snippet,
+            score: Math.min(
+              1,
+              (positions.length + (phraseMatch ? 2 : 0)) /
+                Math.max(terms.length + 2, 1),
+            ),
+          },
+        ];
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   async readWithSync(
@@ -688,7 +684,16 @@ export class IndexedFileService {
    * exist.
    */
   private async resolveFolderScope(owner: OwnerRef): Promise<string | null> {
-    const { ownerId } = owner;
+    const { ownerType, ownerId } = owner;
+    if (ownerType === 'assistant') {
+      const assistant = await this.assistantRepository.findOne({
+        where: { id: ownerId },
+      });
+      if (!assistant) {
+        throw new NotFoundException(`Assistant ${ownerId} not found`);
+      }
+      return assistant.folderScope ?? null;
+    }
     const agent = await this.agentRepository.findOne({
       where: { id: ownerId },
     });

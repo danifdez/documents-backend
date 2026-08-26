@@ -334,6 +334,196 @@ describe('ExecutionToolPlanService', () => {
     ).rejects.toThrow('invalid_arguments');
   });
 
+  it('prepares a working-folder read for the personal assistant', async () => {
+    execution.taskType = 'assistant-chat';
+    execution.payload = { ownerId: 1, folderScope: '/workspace/project' };
+
+    const prepared = await service.prepare(
+      invocation({
+        name: 'workspace_files.read',
+        arguments: { filename: 'notes.md', maxChars: 6_000 },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'workspace_files.read',
+        normalizedArguments: {
+          ownerType: 'assistant',
+          ownerId: 1,
+          scopeKey: expect.any(String),
+          filename: 'notes.md',
+          offset: 0,
+          maxChars: 6_000,
+        },
+        policyDecision: {
+          decision: 'allowed',
+          rule: 'working_folder_read',
+        },
+        recoveryClass: 'read_only_replayable',
+        requiredCapabilities: ['tool.workspace_files.read/1'],
+      }),
+    );
+  });
+
+  it('prepares an agent working-folder write as a confirmed verified effect', async () => {
+    execution.taskType = 'agent-chat';
+    execution.payload = { ownerId: 42, folderScope: '/workspace/project' };
+
+    const prepared = await service.prepare(
+      invocation({
+        name: 'workspace_files.write',
+        arguments: {
+          filename: 'notes.md',
+          content: '# Updated',
+          overwrite: true,
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'workspace_files.write',
+        normalizedArguments: {
+          ownerType: 'agent',
+          ownerId: 42,
+          scopeKey: expect.any(String),
+          filename: 'notes.md',
+          content: '# Updated',
+          overwrite: true,
+        },
+        effects: [
+          expect.objectContaining({
+            effectClass: 'local_destructive',
+            verificationRequired: true,
+          }),
+        ],
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'working_folder_write_requires_confirmation',
+        }),
+        recoveryClass: 'effect_checked',
+        requiredCapabilities: ['tool.workspace_files.write/1'],
+      }),
+    );
+  });
+
+  it('prepares indexed folder search as optional scoped context', async () => {
+    execution.taskType = 'assistant-chat';
+    execution.payload = { ownerId: 1, folderScope: '/workspace/project' };
+
+    const prepared = await service.prepare(
+      invocation({
+        name: 'workspace_files.search',
+        arguments: { query: 'quarterly revenue', limit: 5 },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'workspace_files.search',
+        normalizedArguments: {
+          ownerType: 'assistant',
+          ownerId: 1,
+          scopeKey: expect.any(String),
+          query: 'quarterly revenue',
+          limit: 5,
+        },
+        effects: [],
+        policyDecision: {
+          decision: 'allowed',
+          rule: 'working_folder_search',
+        },
+        requiredCapabilities: ['tool.workspace_files.search/1'],
+      }),
+    );
+  });
+
+  it('accepts binary content and prepares deletion as a destructive effect', async () => {
+    execution.taskType = 'agent-chat';
+    execution.payload = { ownerId: 42, folderScope: '/workspace/project' };
+
+    const binary = await service.prepare(
+      invocation({
+        name: 'workspace_files.write',
+        arguments: {
+          filename: 'report.pdf',
+          contentBase64: Buffer.from('%PDF-1.7').toString('base64'),
+        },
+      }),
+    );
+    expect(binary.plan.plan.normalizedArguments).toEqual(
+      expect.objectContaining({
+        filename: 'report.pdf',
+        contentBase64: Buffer.from('%PDF-1.7').toString('base64'),
+      }),
+    );
+
+    const deletion = await service.prepare(
+      invocation({
+        toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca799',
+        name: 'workspace_files.delete',
+        arguments: { filename: 'report.pdf' },
+      }),
+    );
+    expect(deletion.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'workspace_files.delete',
+        effects: [
+          expect.objectContaining({
+            effectClass: 'local_destructive',
+            reversible: false,
+            verificationRequired: true,
+          }),
+        ],
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'working_folder_delete_requires_confirmation',
+        }),
+        requiredCapabilities: ['tool.workspace_files.delete/1'],
+      }),
+    );
+  });
+
+  it('uses the same physical resource lock when different owners share a folder', async () => {
+    execution.taskType = 'assistant-chat';
+    execution.payload = { ownerId: 1, folderScope: '/workspace/shared' };
+    const assistantRead = await service.prepare(
+      invocation({
+        name: 'workspace_files.read',
+        arguments: { filename: 'shared.docx' },
+      }),
+    );
+
+    execution.taskType = 'agent-chat';
+    execution.payload = { ownerId: 42, folderScope: '/workspace/shared' };
+    const agentWrite = await service.prepare(
+      invocation({
+        toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca798',
+        name: 'workspace_files.write',
+        arguments: { filename: 'shared.docx', content: 'replacement' },
+      }),
+    );
+
+    expect(assistantRead.plan.plan.resources[0].resourceKey).toBe(
+      agentWrite.plan.plan.resources[0].resourceKey,
+    );
+  });
+
+  it('rejects working-folder tools when the chat has no configured folder', async () => {
+    execution.taskType = 'assistant-chat';
+    execution.payload = { ownerId: 1, folderScope: null };
+
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'workspace_files.read',
+          arguments: { filename: 'notes.md' },
+        }),
+      ),
+    ).rejects.toThrow('working_folder_not_configured');
+  });
+
   it('rejects reuse of a tool call identity with different arguments', async () => {
     invocationRepo.findOne.mockResolvedValue({
       toolCallId: TOOL_CALL_ID,

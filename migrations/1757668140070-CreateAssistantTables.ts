@@ -8,6 +8,7 @@ export class CreateAssistantTables1757668140070 implements MigrationInterface {
             CREATE TABLE "assistants" (
                 "id" integer PRIMARY KEY DEFAULT 1,
                 "name" character varying(100) NOT NULL,
+                "folder_scope" character varying(500),
                 "icon" character varying(16),
                 "sub" character varying(300),
                 "last_seen_at" TIMESTAMP,

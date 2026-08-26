@@ -13,6 +13,7 @@ import { ExecutionAgentLoopService } from './execution-agent-loop.service';
 import { UserTaskModule } from '../user-task/user-task.module';
 import { UserTaskService } from '../user-task/user-task.service';
 import { USER_TASK_CREATE_PROVIDER } from './execution-tool-runtime.service';
+import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { USER_TASK_CREATE_PROVIDER } from './execution-tool-runtime.service';
     ExecutionOutboxModule,
     SearchModule,
     UserTaskModule,
+    IndexedFileModule,
   ],
   providers: [
     ExecutionCoordinatorService,

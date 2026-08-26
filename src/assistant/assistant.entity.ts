@@ -16,6 +16,9 @@ export class AssistantEntity {
   @Column({ length: 100 })
   name: string;
 
+  @Column({ name: 'folder_scope', length: 500, nullable: true })
+  folderScope: string | null;
+
   @Column({ length: 16, nullable: true })
   icon: string | null;
 

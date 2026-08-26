@@ -8,11 +8,10 @@ import {
   Unique,
 } from 'typeorm';
 
-export type IndexedFileOwnerType = 'agent';
+export type IndexedFileOwnerType = 'assistant' | 'agent';
 
 @Entity({ name: 'indexed_files' })
 @Unique('UQ_indexed_files_owner_filename', ['ownerType', 'ownerId', 'filename'])
-@Unique('UQ_indexed_files_file_path', ['filePath'])
 export class IndexedFileEntity {
   @PrimaryGeneratedColumn()
   id: number;

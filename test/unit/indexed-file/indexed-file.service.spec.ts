@@ -10,6 +10,7 @@ import {
 } from '../../../src/indexed-file/indexed-file.service';
 import { IndexedFileEntity } from '../../../src/indexed-file/indexed-file.entity';
 import { AgentEntity } from '../../../src/agent/agent.entity';
+import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { ExecutionService } from '../../../src/execution/execution.service';
 import { VectorStoreService } from '../../../src/vector/vector-store.service';
 
@@ -68,6 +69,7 @@ describe('IndexedFileService', () => {
   const owner: OwnerRef = { ownerType: OWNER_TYPE, ownerId: agentId };
   let indexedRepo: ReturnType<typeof createMockRepo>;
   let agentRepo: ReturnType<typeof createMockRepo>;
+  let assistantRepo: ReturnType<typeof createMockRepo>;
   let executionService: { create: jest.Mock };
   let vectorStore: Record<string, jest.Mock>;
 
@@ -75,6 +77,7 @@ describe('IndexedFileService', () => {
     tmpScope = await fs.mkdtemp(path.join(os.tmpdir(), 'indexed-file-test-'));
     indexedRepo = createMockRepo();
     agentRepo = createMockRepo();
+    assistantRepo = createMockRepo();
     agentRepo.store.set(agentId, {
       id: agentId,
       folderScope: tmpScope,
@@ -100,6 +103,10 @@ describe('IndexedFileService', () => {
           useValue: indexedRepo,
         },
         { provide: getRepositoryToken(AgentEntity), useValue: agentRepo },
+        {
+          provide: getRepositoryToken(AssistantEntity),
+          useValue: assistantRepo,
+        },
         { provide: ExecutionService, useValue: executionService },
         { provide: VectorStoreService, useValue: vectorStore },
       ],
@@ -186,6 +193,55 @@ describe('IndexedFileService', () => {
     await service.writeFile(owner, 'b.md', 'b', { overwrite: false });
     await service.clearAllForOwner(owner);
     expect(indexedRepo.store.size).toBe(0);
+  });
+
+  it('searches extracted folder content without starting a nested execution', async () => {
+    const report = await service.writeFile(owner, 'report.pdf', 'binary', {
+      overwrite: false,
+    });
+    const notes = await service.writeFile(owner, 'notes.md', 'source', {
+      overwrite: false,
+    });
+    report.extractedText = 'Quarterly revenue increased by twenty percent.';
+    notes.extractedText = 'Meeting notes without financial figures.';
+
+    const hits = await service.search(owner, 'quarterly revenue', 5);
+
+    expect(hits).toEqual([
+      expect.objectContaining({
+        indexedFileId: report.id,
+        filename: 'report.pdf',
+        snippet: expect.stringContaining('Quarterly revenue'),
+      }),
+    ]);
+    expect(executionService.create).not.toHaveBeenCalledWith(
+      'indexed-file-search',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('keeps independent indexes when assistant and agent share one folder', async () => {
+    assistantRepo.store.set(1, { id: 1, folderScope: tmpScope });
+    await service.writeFile(owner, 'shared.docx', Buffer.from('document'), {
+      overwrite: false,
+    });
+
+    const result = await service.scanFolder({
+      ownerType: 'assistant',
+      ownerId: 1,
+    });
+
+    expect(result).toEqual({
+      status: 'done',
+      added: 1,
+      updated: 0,
+      removed: 0,
+    });
+    expect(
+      [...indexedRepo.store.values()].map((row) => row.ownerType).sort(),
+    ).toEqual(['agent', 'assistant']);
   });
 
   describe('scanFolder', () => {

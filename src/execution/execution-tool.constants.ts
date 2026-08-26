@@ -13,3 +13,28 @@ export const AGENT_DELEGATE_TOOL_CAPABILITY = 'tool.agents.delegate/1';
 export const BROWSER_READ_TOOL_NAME = 'browser.read_current_page';
 export const BROWSER_READ_TOOL_VERSION = 'browser.read_current_page/1';
 export const BROWSER_READ_TOOL_CAPABILITY = 'tool.browser.read_current_page/1';
+
+export const WORKSPACE_FILE_READ_TOOL_NAME = 'workspace_files.read';
+export const WORKSPACE_FILE_READ_TOOL_VERSION = 'workspace_files.read/1';
+export const WORKSPACE_FILE_READ_TOOL_CAPABILITY =
+  'tool.workspace_files.read/1';
+
+export const WORKSPACE_FILE_LIST_TOOL_NAME = 'workspace_files.list';
+export const WORKSPACE_FILE_LIST_TOOL_VERSION = 'workspace_files.list/1';
+export const WORKSPACE_FILE_LIST_TOOL_CAPABILITY =
+  'tool.workspace_files.list/1';
+
+export const WORKSPACE_FILE_SEARCH_TOOL_NAME = 'workspace_files.search';
+export const WORKSPACE_FILE_SEARCH_TOOL_VERSION = 'workspace_files.search/1';
+export const WORKSPACE_FILE_SEARCH_TOOL_CAPABILITY =
+  'tool.workspace_files.search/1';
+
+export const WORKSPACE_FILE_WRITE_TOOL_NAME = 'workspace_files.write';
+export const WORKSPACE_FILE_WRITE_TOOL_VERSION = 'workspace_files.write/1';
+export const WORKSPACE_FILE_WRITE_TOOL_CAPABILITY =
+  'tool.workspace_files.write/1';
+
+export const WORKSPACE_FILE_DELETE_TOOL_NAME = 'workspace_files.delete';
+export const WORKSPACE_FILE_DELETE_TOOL_VERSION = 'workspace_files.delete/1';
+export const WORKSPACE_FILE_DELETE_TOOL_CAPABILITY =
+  'tool.workspace_files.delete/1';

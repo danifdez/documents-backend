@@ -8,12 +8,14 @@ const OPERATION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca703';
 const ATTEMPT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca704';
 const TOOL_CALL_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca705';
 const CHILD_EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca706';
+const SCOPE_KEY = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 describe('ExecutionToolRuntimeService', () => {
   let attempts: Record<string, jest.Mock>;
   let contracts: Record<string, jest.Mock>;
   let search: Record<string, jest.Mock>;
   let userTasks: Record<string, jest.Mock>;
+  let indexedFiles: Record<string, jest.Mock>;
   let executions: Record<string, jest.Mock>;
   let service: ExecutionToolRuntimeService;
 
@@ -146,6 +148,96 @@ describe('ExecutionToolRuntimeService', () => {
     },
   });
 
+  const workspaceReadAssignment = () => ({
+    ...assignment(),
+    work: {
+      taskType: 'workspace_files.read',
+      toolPlan: {
+        schemaVersion: 'tool-plan/1' as const,
+        operationId: OPERATION_ID,
+        toolCallId: TOOL_CALL_ID,
+        toolName: 'workspace_files.read',
+        descriptorVersion: 'workspace_files.read/1',
+        normalizedArguments: {
+          ownerType: 'assistant',
+          ownerId: 1,
+          scopeKey: SCOPE_KEY,
+          filename: 'notes.md',
+          offset: 0,
+          maxChars: 8_000,
+        },
+        resources: [],
+        effects: [],
+        policyDecision: {
+          decision: 'allowed' as const,
+          rule: 'working_folder_read',
+        },
+        confirmationRequirement: null,
+        recoveryClass: 'read_only_replayable' as const,
+        idempotencyKey: null,
+        requiredCapabilities: ['tool.workspace_files.read/1'],
+        deadline: '2026-08-25T00:10:00.000Z',
+        preparedAt: '2026-08-25T00:00:00.000Z',
+      },
+    },
+  });
+
+  const workspaceWriteAssignment = () => {
+    const plan = {
+      schemaVersion: 'tool-plan/1' as const,
+      operationId: OPERATION_ID,
+      toolCallId: TOOL_CALL_ID,
+      toolName: 'workspace_files.write',
+      descriptorVersion: 'workspace_files.write/1',
+      normalizedArguments: {
+        ownerType: 'agent',
+        ownerId: 42,
+        scopeKey: SCOPE_KEY,
+        filename: 'notes.md',
+        content: '# Updated',
+        overwrite: true,
+      },
+      resources: [],
+      effects: [
+        {
+          effectClass: 'local_destructive' as const,
+          resourceKey: 'working-folder:agent:42:notes.md',
+          description: 'Replace file: notes.md',
+          reversible: false,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required' as const,
+        rule: 'working_folder_write_requires_confirmation',
+      },
+      confirmationRequirement: {
+        confirmationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
+        reason: 'Local mutation',
+        prompt: 'Replace the file?',
+        scope: 'once' as const,
+      },
+      recoveryClass: 'effect_checked' as const,
+      idempotencyKey: `working-file:${TOOL_CALL_ID}`,
+      requiredCapabilities: ['tool.workspace_files.write/1'],
+      deadline: '2026-08-25T00:15:00.000Z',
+      preparedAt: '2026-08-25T00:00:00.000Z',
+    };
+    return {
+      ...assignment(),
+      work: {
+        taskType: 'workspace_files.write',
+        toolPlan: plan,
+        confirmationDecision: {
+          confirmationId: plan.confirmationRequirement.confirmationId,
+          planHash: canonicalHash(plan),
+          status: 'approved',
+          decidedAt: '2026-08-25T00:01:00.000Z',
+        },
+      },
+    };
+  };
+
   beforeEach(() => {
     attempts = {
       claimReadyStep: jest
@@ -171,11 +263,23 @@ describe('ExecutionToolRuntimeService', () => {
       findByExecutionOperation: jest.fn(),
     };
     executions = { findOne: jest.fn() };
+    indexedFiles = {
+      readWithSync: jest.fn(),
+      scanFolder: jest.fn(),
+      findByOwner: jest.fn(),
+      folderScopeKey: jest.fn().mockResolvedValue(SCOPE_KEY),
+      search: jest.fn(),
+      writeFile: jest.fn(),
+      readContent: jest.fn(),
+      getByFilename: jest.fn(),
+      deleteByFilename: jest.fn(),
+    };
     service = new ExecutionToolRuntimeService(
       attempts as any,
       contracts as any,
       search as any,
       userTasks as any,
+      indexedFiles as any,
       executions as any,
     );
   });
@@ -190,6 +294,11 @@ describe('ExecutionToolRuntimeService', () => {
         'tool.documents.search/1',
         'tool.user_tasks.create/1',
         'tool.agents.delegate/1',
+        'tool.workspace_files.read/1',
+        'tool.workspace_files.list/1',
+        'tool.workspace_files.search/1',
+        'tool.workspace_files.write/1',
+        'tool.workspace_files.delete/1',
       ],
       leaseDurationMs: 30_000,
     });
@@ -329,6 +438,176 @@ describe('ExecutionToolRuntimeService', () => {
                 childStatus: 'completed',
                 joinPolicy: 'all',
               },
+            }),
+          },
+        }),
+      }),
+    );
+  });
+
+  it('reads a file through the trusted assistant working-folder owner', async () => {
+    attempts.claimReadyStep
+      .mockReset()
+      .mockResolvedValueOnce(workspaceReadAssignment())
+      .mockResolvedValueOnce(null);
+    indexedFiles.readWithSync.mockResolvedValue({
+      ok: true,
+      indexedFileId: 7,
+      filename: 'notes.md',
+      content: '# Notes',
+      mimeType: 'text/markdown',
+      size: 7,
+      mtime: new Date('2026-08-25T00:00:00.000Z'),
+    });
+
+    await expect(service.executeReady()).resolves.toBe(1);
+
+    expect(indexedFiles.readWithSync).toHaveBeenCalledWith(
+      { ownerType: 'assistant', ownerId: 1 },
+      { filename: 'notes.md' },
+    );
+    expect(attempts.receiveResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          output: {
+            kind: ExecutionStepKind.TOOL,
+            toolResult: expect.objectContaining({
+              status: 'succeeded',
+              content: '# Notes',
+            }),
+          },
+        }),
+      }),
+    );
+  });
+
+  it('writes and verifies a file only after exact-plan confirmation', async () => {
+    attempts.claimReadyStep
+      .mockReset()
+      .mockResolvedValueOnce(workspaceWriteAssignment())
+      .mockResolvedValueOnce(null);
+    indexedFiles.writeFile.mockResolvedValue({
+      id: 8,
+      filename: 'notes.md',
+      size: 9,
+      checksum: 'checksum',
+    });
+    indexedFiles.readContent.mockResolvedValue({
+      content: Buffer.from('# Updated'),
+    });
+
+    await expect(service.executeReady()).resolves.toBe(1);
+
+    expect(indexedFiles.writeFile).toHaveBeenCalledWith(
+      { ownerType: 'agent', ownerId: 42 },
+      'notes.md',
+      Buffer.from('# Updated'),
+      { overwrite: true },
+    );
+    expect(attempts.receiveResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          output: {
+            kind: ExecutionStepKind.TOOL,
+            toolResult: expect.objectContaining({
+              status: 'succeeded',
+              effects: [expect.objectContaining({ status: 'applied' })],
+            }),
+          },
+        }),
+      }),
+    );
+  });
+
+  it('retrieves indexed folder context through the scoped owner', async () => {
+    const request: any = workspaceReadAssignment();
+    request.work.taskType = 'workspace_files.search';
+    request.work.toolPlan.toolName = 'workspace_files.search';
+    request.work.toolPlan.descriptorVersion = 'workspace_files.search/1';
+    request.work.toolPlan.normalizedArguments = {
+      ownerType: 'assistant',
+      ownerId: 1,
+      scopeKey: SCOPE_KEY,
+      query: 'quarterly revenue',
+      limit: 5,
+    };
+    request.work.toolPlan.policyDecision.rule = 'working_folder_search';
+    request.work.toolPlan.requiredCapabilities = [
+      'tool.workspace_files.search/1',
+    ];
+    attempts.claimReadyStep
+      .mockReset()
+      .mockResolvedValueOnce(request)
+      .mockResolvedValueOnce(null);
+    indexedFiles.scanFolder.mockResolvedValue({
+      status: 'done',
+      added: 0,
+      updated: 0,
+      removed: 0,
+    });
+    indexedFiles.search.mockResolvedValue([
+      {
+        indexedFileId: 9,
+        filename: 'report.pdf',
+        snippet: 'Revenue increased',
+        score: 0.9,
+      },
+    ]);
+
+    await expect(service.executeReady()).resolves.toBe(1);
+
+    expect(indexedFiles.search).toHaveBeenCalledWith(
+      { ownerType: 'assistant', ownerId: 1 },
+      'quarterly revenue',
+      5,
+    );
+  });
+
+  it('deletes and verifies a file only after exact-plan confirmation', async () => {
+    const request: any = workspaceWriteAssignment();
+    const plan = request.work.toolPlan;
+    request.work.taskType = 'workspace_files.delete';
+    plan.toolName = 'workspace_files.delete';
+    plan.descriptorVersion = 'workspace_files.delete/1';
+    plan.normalizedArguments = {
+      ownerType: 'agent',
+      ownerId: 42,
+      scopeKey: SCOPE_KEY,
+      filename: 'report.pdf',
+    };
+    plan.effects[0].resourceKey = 'working-folder:agent:42:report.pdf';
+    plan.effects[0].description = 'Delete file: report.pdf';
+    plan.requiredCapabilities = ['tool.workspace_files.delete/1'];
+    plan.policyDecision.rule = 'working_folder_delete_requires_confirmation';
+    request.work.confirmationDecision.planHash = canonicalHash(plan);
+    attempts.claimReadyStep
+      .mockReset()
+      .mockResolvedValueOnce(request)
+      .mockResolvedValueOnce(null);
+    indexedFiles.getByFilename
+      .mockResolvedValueOnce({ id: 12, filename: 'report.pdf' })
+      .mockResolvedValueOnce(null);
+    indexedFiles.scanFolder.mockResolvedValue({
+      status: 'done',
+      added: 0,
+      updated: 0,
+      removed: 0,
+    });
+
+    await expect(service.executeReady()).resolves.toBe(1);
+
+    expect(indexedFiles.deleteByFilename).toHaveBeenCalledWith(
+      { ownerType: 'agent', ownerId: 42 },
+      'report.pdf',
+    );
+    expect(attempts.receiveResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          output: {
+            kind: ExecutionStepKind.TOOL,
+            toolResult: expect.objectContaining({
+              status: 'succeeded',
+              effects: [expect.objectContaining({ status: 'applied' })],
             }),
           },
         }),

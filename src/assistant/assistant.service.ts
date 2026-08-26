@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   Logger,
@@ -14,6 +15,11 @@ import {
   ChatMessageStore,
   DEFAULT_CHAT_MESSAGE_PAGE_SIZE,
 } from '../common/chat-message.store';
+import { IndexedFileService } from '../indexed-file/indexed-file.service';
+import {
+  folderScopeReasonToMessage,
+  validateFolderScope,
+} from './folder-scope.validator';
 
 export const MESSAGE_PAGE_SIZE = DEFAULT_CHAT_MESSAGE_PAGE_SIZE;
 
@@ -27,6 +33,7 @@ export class AssistantService implements OnApplicationBootstrap {
     private readonly assistantRepo: Repository<AssistantEntity>,
     @InjectRepository(AssistantMessageEntity)
     private readonly messageRepo: Repository<AssistantMessageEntity>,
+    private readonly indexedFileService: IndexedFileService,
     private readonly executionService: ExecutionService,
   ) {
     this.messages = new ChatMessageStore<AssistantMessageEntity>(messageRepo, {
@@ -73,6 +80,22 @@ export class AssistantService implements OnApplicationBootstrap {
     return a;
   }
 
+  async updateWorkingFolder(
+    id: number,
+    folderScope: string | null,
+  ): Promise<AssistantEntity> {
+    const assistant = await this.findOne(id);
+    const nextScope = await this.resolveFolderScope(folderScope);
+    if (assistant.folderScope === nextScope) return assistant;
+    assistant.folderScope = nextScope;
+    const saved = await this.assistantRepo.save(assistant);
+    await this.indexedFileService.clearAllForOwner({
+      ownerType: 'assistant',
+      ownerId: assistant.id,
+    });
+    return saved;
+  }
+
   async getMessages(
     assistantId: number,
     opts: { limit?: number; before?: number } = {},
@@ -109,6 +132,7 @@ export class AssistantService implements OnApplicationBootstrap {
       accessScope,
       {
         ownerId: assistantId,
+        folderScope: assistant.folderScope,
         conversation,
       },
     );
@@ -140,5 +164,14 @@ export class AssistantService implements OnApplicationBootstrap {
         }
       },
     );
+  }
+
+  private async resolveFolderScope(
+    input: string | null,
+  ): Promise<string | null> {
+    if (input === null || input.trim() === '') return null;
+    const result = await validateFolderScope(input);
+    if (result.ok === true) return result.absolutePath;
+    throw new BadRequestException(folderScopeReasonToMessage(result.reason));
   }
 }

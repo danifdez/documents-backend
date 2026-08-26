@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -10,7 +11,10 @@ import {
 import { AssistantService } from './assistant.service';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
-import { SendMessageDto } from './dto/assistant.dto';
+import {
+  SendMessageDto,
+  UpdateAssistantWorkingFolderDto,
+} from './dto/assistant.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ExecutionService } from '../execution/execution.service';
 
@@ -31,6 +35,14 @@ export class AssistantController {
     @Param('id', ParseIntPipe) id: number,
   ): Promise<AssistantEntity> {
     return this.service.findOne(id);
+  }
+
+  @Patch(':id/working-folder')
+  async updateWorkingFolder(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateAssistantWorkingFolderDto,
+  ): Promise<AssistantEntity> {
+    return this.service.updateWorkingFolder(id, dto.folderScope);
   }
 
   @Get(':id/messages')

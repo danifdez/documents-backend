@@ -358,9 +358,15 @@ describe('execution PostgreSQL integration', () => {
         AND column_name IN (
           'is_system',
           'pinned',
-          'system_prompt',
-          'folder_scope'
+          'system_prompt'
         )
+    `);
+    const assistantFolderColumns = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'assistants'
+        AND column_name = 'folder_scope'
     `);
     const indexedFileOwnerColumns = await dataSource.query(`
       SELECT column_name
@@ -376,9 +382,22 @@ describe('execution PostgreSQL integration', () => {
       WHERE conrelid = 'assistants'::regclass
         AND conname = 'CHK_assistants_singleton'
     `);
+    const indexedOwnerConstraint = await dataSource.query(`
+      SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = 'indexed_files'::regclass
+        AND conname = 'CHK_indexed_files_owner_type'
+    `);
+    const retiredIndexedFileConstraint = await dataSource.query(`
+      SELECT conname
+      FROM pg_constraint
+      WHERE conrelid = 'indexed_files'::regclass
+        AND conname = 'UQ_indexed_files_file_path'
+    `);
 
     expect(retiredDateColumns).toEqual([]);
     expect(retiredAssistantColumns).toEqual([]);
+    expect(assistantFolderColumns).toEqual([{ column_name: 'folder_scope' }]);
     expect(indexedFileOwnerColumns).toEqual([
       { column_name: 'owner_id' },
       { column_name: 'owner_type' },
@@ -386,6 +405,10 @@ describe('execution PostgreSQL integration', () => {
     expect(singletonConstraint).toEqual([
       { conname: 'CHK_assistants_singleton' },
     ]);
+    expect(indexedOwnerConstraint).toHaveLength(1);
+    expect(indexedOwnerConstraint[0].definition).toContain("'assistant'");
+    expect(indexedOwnerConstraint[0].definition).toContain("'agent'");
+    expect(retiredIndexedFileConstraint).toEqual([]);
     expect(replyIndexes).toEqual([
       { indexname: 'UQ_agent_messages_execution_reply' },
       { indexname: 'UQ_assistant_messages_execution_reply' },
@@ -1204,6 +1227,7 @@ describe('execution PostgreSQL integration', () => {
         },
         findByExecutionOperation: async () => null,
       },
+      {} as any,
       service,
     );
     await expect(runtime.executeReady(1)).resolves.toBe(1);
@@ -1308,6 +1332,7 @@ describe('execution PostgreSQL integration', () => {
         },
         findByExecutionOperation: async () => null,
       },
+      {} as any,
       service,
     );
 

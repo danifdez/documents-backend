@@ -155,6 +155,103 @@ abstract class IndexedFileBaseController {
   }
 }
 
+@Controller('assistants/:assistantId/indexed-files')
+export class AssistantIndexedFileController extends IndexedFileBaseController {
+  protected ownerType: IndexedFileOwnerType = 'assistant';
+
+  constructor(indexedFileService: IndexedFileService) {
+    super(indexedFileService);
+  }
+
+  @Get()
+  async list(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+  ): Promise<IndexedFileDto[]> {
+    const files = await this.indexedFileService.findByOwner(
+      this.owner(assistantId),
+    );
+    return files.map(toIndexedFileDto);
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  async write(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+    @Body() dto: WriteIndexedFileDto,
+  ): Promise<IndexedFileDto> {
+    return this.writeImpl(assistantId, dto);
+  }
+
+  @Post('upload')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 250 * 1024 * 1024 } }),
+  )
+  async upload(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('filename') filenameOverride?: string,
+  ): Promise<IndexedFileDto> {
+    return this.uploadImpl(assistantId, file, filenameOverride);
+  }
+
+  @Get('search')
+  async search(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+    @Query('query') query: string,
+    @Query('limit') limit?: string,
+  ): Promise<{
+    hits: Array<{
+      indexedFileId: number;
+      filename: string;
+      snippet: string;
+      score: number;
+    }>;
+  }> {
+    return this.searchImpl(assistantId, query, limit);
+  }
+
+  @Get('by-filename')
+  async readByFilename(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+    @Query('filename') filename: string,
+  ): Promise<ReadWithSyncResult> {
+    return this.handleRead(
+      await this.indexedFileService.readWithSync(this.owner(assistantId), {
+        filename: filename ?? '',
+      }),
+    );
+  }
+
+  @Get(':id/content')
+  async readContent(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ReadWithSyncResult> {
+    return this.handleRead(
+      await this.indexedFileService.readWithSync(this.owner(assistantId), {
+        indexedFileId: id,
+      }),
+    );
+  }
+
+  @Delete(':id')
+  async remove(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<{ deleted: boolean }> {
+    await this.indexedFileService.deleteFile(id, this.owner(assistantId));
+    return { deleted: true };
+  }
+
+  @Post('reconcile')
+  async reconcile(
+    @Param('assistantId', ParseIntPipe) assistantId: number,
+  ): Promise<ScanFolderResult> {
+    return this.indexedFileService.scanFolder(this.owner(assistantId));
+  }
+}
+
 @Controller('agents/:agentId/indexed-files')
 export class AgentIndexedFileController extends IndexedFileBaseController {
   protected ownerType: IndexedFileOwnerType = 'agent';
