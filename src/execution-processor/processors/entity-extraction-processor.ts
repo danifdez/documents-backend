@@ -1,44 +1,36 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ResourceService } from 'src/resource/resource.service';
-import { EntityTypeService } from 'src/entity-type/entity-type.service';
-import { ExecutionEntity } from 'src/execution/execution.entity';
-import { PendingEntityService } from 'src/pending-entity/pending-entity.service';
-import { ExecutionService } from 'src/execution/execution.service';
-import { ExecutionPriority } from 'src/execution/execution-priority.enum';
+import { ExecutionEntity } from '../../execution/execution.entity';
+import { ResourceEntity } from '../../resource/resource.entity';
+import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
+import {
+  canonicalHash,
+  contentHash,
+} from '../../execution/execution-canonical';
+
+class EntityExtractionResourceNotFoundError extends Error {}
+class EntityExtractionResourceChangedError extends Error {}
 
 @Injectable()
 export class EntityExtractionProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(EntityExtractionProcessor.name);
   private readonly TASK_TYPE = 'entity-extraction';
 
-  // Map the NER labels emitted by the LLM extractor to standardized database
-  // entity types. The label set is kept in sync with the worker's ENTITIES_GBNF.
-  private readonly entityTypeMapping = {
-    // Geographic and political entities
-    GPE: 'GEOPOLITICAL', // Countries, cities, states
-    LOC: 'LOCATION', // Non-GPE locations, mountain ranges, bodies of water
-    NORP: 'NATIONALITY', // Nationalities or religious or political groups
-
-    // Human and organizational entities
-    PERSON: 'PERSON', // People, including fictional
-    ORG: 'ORGANIZATION', // Companies, agencies, institutions, etc.
-
-    // Cultural and creative entities
-    EVENT: 'EVENT', // Named hurricanes, battles, wars, sports events, etc.
-    FAC: 'FACILITY', // Buildings, airports, highways, bridges, etc.
-    PRODUCT: 'PRODUCT', // Objects, vehicles, foods, etc. (not services)
-    WORK_OF_ART: 'WORK_OF_ART', // Titles of books, songs, etc.
-    LANGUAGE: 'LANGUAGE', // Any named language
-    LAW: 'LAW', // Named documents made into laws
+  private readonly entityTypeMapping: Record<string, string> = {
+    GPE: 'GEOPOLITICAL',
+    LOC: 'LOCATION',
+    NORP: 'NATIONALITY',
+    PERSON: 'PERSON',
+    ORG: 'ORGANIZATION',
+    EVENT: 'EVENT',
+    FAC: 'FACILITY',
+    PRODUCT: 'PRODUCT',
+    WORK_OF_ART: 'WORK_OF_ART',
+    LANGUAGE: 'LANGUAGE',
+    LAW: 'LAW',
   };
 
-  constructor(
-    private readonly resourceService: ResourceService,
-    private readonly entityTypeService: EntityTypeService,
-    private readonly pendingEntityService: PendingEntityService,
-    private readonly executionService: ExecutionService,
-  ) {}
+  constructor(private readonly effectJournal: ExecutionEffectJournalService) {}
 
   canProcess(taskType: string): boolean {
     return taskType === this.TASK_TYPE;
@@ -46,131 +38,161 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
 
   async process(execution: ExecutionEntity): Promise<any> {
     const resourceId = Number(execution.payload['resourceId']) as number;
-    const result = execution.result as {
-      entities?: Array<{ word: string; entity: string }>;
-    };
-
-    // Validate resourceId
-    if (!resourceId || isNaN(resourceId)) {
-      const errorMessage = `Invalid resource ID: ${resourceId}`;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
+    const result = execution.result as { entities?: unknown } | null;
+    const sourceContentHash = execution.payload['sourceContentHash'];
+    const sourceLanguage = execution.payload['sourceLanguage'];
+    if (!Number.isInteger(resourceId) || resourceId <= 0) {
+      throw new Error('entity-extraction resourceId is invalid');
     }
-
-    // Get the resource and validate it exists. Avoid double DB calls (resourceExists + findOne).
-    const resource = await this.resourceService.findOne(resourceId);
-    if (!resource) {
-      const errorMessage = `Resource with id ${resourceId} does not exist or could not be loaded`;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
+    if (
+      typeof sourceContentHash !== 'string' ||
+      !/^sha256:[0-9a-f]{64}$/.test(sourceContentHash) ||
+      typeof sourceLanguage !== 'string' ||
+      !sourceLanguage.trim()
+    ) {
+      throw new Error('entity-extraction source identity is invalid');
     }
-
-    // Validate execution result shape early to fail fast and avoid unnecessary DB work
-    if (!result || !Array.isArray(result.entities)) {
-      const errorMessage =
-        `Invalid execution result for entity-extraction on resource ` +
-        resourceId;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
+    if (!Array.isArray(result?.entities)) {
+      throw new Error('entity-extraction result is invalid');
     }
+    const entities = result.entities.map((value) => {
+      if (!value || typeof value !== 'object') {
+        throw new Error('entity-extraction entity is invalid');
+      }
+      const item = value as Record<string, unknown>;
+      const word = typeof item.word === 'string' ? item.word.trim() : '';
+      const entityType =
+        typeof item.entity === 'string'
+          ? this.entityTypeMapping[item.entity]
+          : undefined;
+      if (!word || !entityType) {
+        throw new Error('entity-extraction entity is invalid');
+      }
+      return { word, entityType };
+    });
 
     try {
-      // Clear existing pending entities for this resource
-      await this.pendingEntityService.clearByResourceId(resourceId);
-    } catch (error) {
-      this.logger.error(
-        `Failed to clear pending entities for resource ${resourceId}:`,
-        error.message,
+      await this.effectJournal.runVerified(
+        {
+          executionId: execution.executionId,
+          effectKey: `entity-extraction:${resourceId}`,
+          effectType: 'pending_entities_replace',
+          resourceKey: `resource:${resourceId}`,
+          intent: {
+            resourceId,
+            sourceContentHash,
+            sourceLanguage,
+            entitiesHash: canonicalHash(entities),
+          },
+        },
+        async (manager) => {
+          const resources = manager.getRepository(ResourceEntity);
+          const resource = await resources.findOne({
+            where: { id: resourceId },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!resource) throw new EntityExtractionResourceNotFoundError();
+          if (
+            contentHash(resource.content ?? '') !== sourceContentHash ||
+            (resource.language || 'en') !== sourceLanguage
+          ) {
+            throw new EntityExtractionResourceChangedError();
+          }
+          const typeNames = [
+            ...new Set(entities.map((item) => item.entityType)),
+          ];
+          const typeRows = await manager.query(
+            'SELECT id, name FROM entity_types WHERE name = ANY($1::text[])',
+            [typeNames],
+          );
+          const typeIds = new Map(
+            typeRows.map((row) => [String(row.name), Number(row.id)]),
+          );
+          if (typeIds.size !== typeNames.length) {
+            throw new Error('entity_extraction_type_mapping_incomplete');
+          }
+          await manager.query(
+            'DELETE FROM pending_entities WHERE resource_id = $1',
+            [resourceId],
+          );
+          const pendingIds: number[] = [];
+          for (const entity of entities) {
+            const [inserted] = await manager.query(
+              `INSERT INTO pending_entities
+                 (resource_id, name, language, translations, entity_type_id,
+                  scope, status)
+               VALUES ($1, $2, $3, $4::jsonb, $5, 'document', 'pending')
+               RETURNING id`,
+              [
+                resourceId,
+                entity.word,
+                sourceLanguage,
+                JSON.stringify({ [sourceLanguage]: entity.word }),
+                typeIds.get(entity.entityType),
+              ],
+            );
+            const pendingId = Number(inserted?.id);
+            if (!Number.isInteger(pendingId) || pendingId <= 0) {
+              throw new Error('entity_extraction_pending_entity_not_persisted');
+            }
+            pendingIds.push(pendingId);
+          }
+          resource.status = 'entities';
+          await resources.save(resource);
+          const observedResource = await resources.findOneBy({
+            id: resourceId,
+          });
+          const observedEntities = await manager.query(
+            `SELECT pending.name, pending.language, pending.translations,
+                    pending.scope, pending.status, type.name AS entity_type
+             FROM pending_entities pending
+             JOIN entity_types type ON type.id = pending.entity_type_id
+             WHERE pending.resource_id = $1
+             ORDER BY pending.id`,
+            [resourceId],
+          );
+          const expectedEntities = entities.map((entity) => ({
+            name: entity.word,
+            language: sourceLanguage,
+            translations: { [sourceLanguage]: entity.word },
+            scope: 'document',
+            status: 'pending',
+            entity_type: entity.entityType,
+          }));
+          if (
+            observedResource?.status !== 'entities' ||
+            canonicalHash(observedEntities) !== canonicalHash(expectedEntities)
+          ) {
+            throw new Error('entity_extraction_effect_not_verified');
+          }
+          return {
+            resourceId,
+            sourceContentHash,
+            sourceLanguage,
+            entityCount: pendingIds.length,
+            pendingIdsHash: canonicalHash(pendingIds),
+            entitiesHash: canonicalHash(expectedEntities),
+            resourceStatus: 'entities',
+          };
+        },
       );
+    } catch (error) {
+      if (error instanceof EntityExtractionResourceNotFoundError) {
+        return { success: false, reason: 'not_found' };
+      }
+      if (error instanceof EntityExtractionResourceChangedError) {
+        return { success: false, reason: 'stale' };
+      }
       throw error;
     }
 
-    // Entities are extracted from the resource content in its original language
-    const sourceLanguage: string = resource.language || 'en';
-    const targetLanguage: string = 'es'; // TODO: Get from settings API
-
-    // Build texts array for translation
-    const textsForTranslation: Array<{ text: string }> = result.entities.map(
-      (entity) => ({
-        text: entity.word,
-      }),
+    this.logger.log(
+      `Published ${entities.length} pending entities for resource ${resourceId}`,
     );
-
-    // Store entity data temporarily in the execution payload for the translation processor
-    const entityDataByIndex = result.entities.map((entity) => ({
-      word: entity.word,
-      entityType: entity.entity,
-    }));
-
-    // Determine which languages we need to translate to
-    const languagesToTranslate = new Set<string>();
-    // Translate to English if source is not English
-    if (sourceLanguage !== 'en') {
-      languagesToTranslate.add('en');
-    }
-    // Translate to target language if different from source and English
-    if (targetLanguage !== sourceLanguage && targetLanguage !== 'en') {
-      languagesToTranslate.add(targetLanguage);
-    }
-
-    if (languagesToTranslate.size > 0) {
-      // Create translation execution for entity names
-      await this.executionService.createInference(
-        'translate',
-        ExecutionPriority.HIGH,
-        {
-          translationType: 'entities-pending-batch',
-          sourceLanguage,
-          targetLanguages: Array.from(languagesToTranslate),
-          texts: textsForTranslation,
-          entityDataByIndex,
-          resourceId,
-        },
-      );
-
-      this.logger.log(
-        `Created translation execution for ${result.entities.length} ` +
-          `entities to languages: ${Array.from(languagesToTranslate).join(', ')}`,
-      );
-    } else {
-      // No translation needed, create pending entities directly
-      await this.createPendingEntitiesDirectly(
-        resourceId,
-        result.entities,
-        sourceLanguage,
-      );
-      this.logger.log(
-        `Created ${result.entities.length} pending entities directly (no translation needed)`,
-      );
-    }
 
     return {
       success: true,
-      entitiesProcessed: result.entities.length,
+      entitiesProcessed: entities.length,
     };
-  }
-
-  private async createPendingEntitiesDirectly(
-    resourceId: number,
-    entities: Array<{ word: string; entity: string }>,
-    language: string,
-  ) {
-    for (const entity of entities) {
-      const mappedType = this.entityTypeMapping[entity.entity];
-      if (!mappedType) continue;
-
-      const entityType = await this.entityTypeService.findByName(mappedType);
-      if (!entityType) continue;
-
-      await this.pendingEntityService.create({
-        resourceId,
-        name: entity.word,
-        entityTypeId: entityType.id,
-        translations: { [language]: entity.word },
-        scope: 'document',
-      });
-    }
-
-    await this.resourceService.update(resourceId, { status: 'entities' });
   }
 }

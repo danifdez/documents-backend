@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { ExecutionEntity } from 'src/execution/execution.entity';
-import { PendingEntityService } from 'src/pending-entity/pending-entity.service';
-import { PendingEntityEntity } from 'src/pending-entity/pending-entity.entity';
+import { ExecutionEntity } from '../../../execution/execution.entity';
+import { PendingEntityService } from '../../../pending-entity/pending-entity.service';
+import { PendingEntityEntity } from '../../../pending-entity/pending-entity.entity';
+import { ExecutionEffectJournalService } from '../../../execution/execution-effect-journal.service';
+import { canonicalHash } from '../../../execution/execution-canonical';
 import {
   SingleEntityTranslationStrategyBase,
   TranslationResults,
@@ -9,7 +11,10 @@ import {
 
 @Injectable()
 export class EntityRetranslationStrategy extends SingleEntityTranslationStrategyBase<PendingEntityEntity> {
-  constructor(private readonly pendingEntityService: PendingEntityService) {
+  constructor(
+    private readonly pendingEntityService: PendingEntityService,
+    private readonly effectJournal: ExecutionEffectJournalService,
+  ) {
     super();
   }
 
@@ -75,9 +80,40 @@ export class EntityRetranslationStrategy extends SingleEntityTranslationStrategy
       }
     }
 
-    await this.pendingEntityService.updateTranslations(
-      entityId,
-      translationsToMerge,
+    await this.effectJournal.runVerified(
+      {
+        executionId: execution.executionId,
+        effectKey: `entity-retranslation:${entityId}`,
+        effectType: 'pending_entity_translations_merge',
+        resourceKey: `pending-entity:${entityId}`,
+        intent: { entityId, translations: translationsToMerge },
+      },
+      async (manager) => {
+        const repository = manager.getRepository(PendingEntityEntity);
+        const current = await repository.findOne({
+          where: { id: entityId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!current) {
+          throw new Error(`Pending entity with id ${entityId} not found`);
+        }
+        const before = current.translations ?? {};
+        current.translations = { ...before, ...translationsToMerge };
+        await repository.save(current);
+        const observed = await repository.findOneBy({ id: entityId });
+        if (
+          canonicalHash(observed?.translations ?? {}) !==
+          canonicalHash(current.translations)
+        ) {
+          throw new Error('pending_entity_translation_effect_not_verified');
+        }
+        return {
+          entityId,
+          beforeHash: canonicalHash(before),
+          afterHash: canonicalHash(current.translations),
+          updatedLanguages: Object.keys(translationsToMerge).sort(),
+        };
+      },
     );
 
     this.logger.log(

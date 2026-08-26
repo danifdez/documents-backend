@@ -3,6 +3,7 @@ import { buildSummarizeWorkflowSteps } from '../../../src/model/summarize-workfl
 import { buildEntityExtractionWorkflowSteps } from '../../../src/model/entity-extraction-workflow';
 import { buildKeywordsWorkflowSteps } from '../../../src/model/keywords-workflow';
 import { buildKeyPointWorkflowSteps } from '../../../src/model/key-point-workflow';
+import { contentHash } from '../../../src/execution/execution-canonical';
 
 describe('ModelService execution identities', () => {
   const executionIds = {
@@ -151,7 +152,12 @@ describe('ModelService execution identities', () => {
     expect(executionService.create).toHaveBeenCalledWith(
       'entity-extraction',
       expect.any(String),
-      { resourceId: 7, chunkCount: 1 },
+      {
+        resourceId: 7,
+        chunkCount: 1,
+        sourceContentHash: contentHash('<p>Hola mundo</p>'),
+        sourceLanguage: 'es',
+      },
       {
         steps: [
           expect.objectContaining({

@@ -21,6 +21,27 @@ export interface VerifiedExecutionEffectResult {
 export class ExecutionEffectJournalService {
   constructor(private readonly dataSource: DataSource) {}
 
+  async getVerifiedObservation(
+    executionId: string,
+    effectKey: string,
+    effectType: string,
+    resourceKey: string,
+  ): Promise<Record<string, unknown> | null> {
+    const existing = await this.dataSource
+      .getRepository(ExecutionEffectJournalEntity)
+      .findOneBy({ executionId, effectKey });
+    if (!existing) return null;
+    if (
+      existing.effectType !== effectType ||
+      existing.resourceKey !== resourceKey ||
+      existing.status !== 'verified' ||
+      !existing.observation
+    ) {
+      throw new Error('execution_effect_journal_conflict');
+    }
+    return existing.observation;
+  }
+
   runVerified(
     input: VerifiedExecutionEffectInput,
     applyAndVerify: (

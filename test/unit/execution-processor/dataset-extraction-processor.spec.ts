@@ -3,14 +3,26 @@ import { ExecutionEntity } from '../../../src/execution/execution.entity';
 
 describe('DatasetExtractionProcessor', () => {
   it('reconciles a failed inference onto the dataset row', async () => {
-    const extractionService = {
-      markExtractionFailed: jest.fn().mockResolvedValue({
-        datasetId: 3,
-        status: 'failed',
-      }),
-      applyExtractionResult: jest.fn(),
+    const record = {
+      id: 5,
+      dataset: { id: 3 },
+      data: {},
+      cellMetadata: {},
+      extractionStatus: 'in_progress',
+      extractionError: null,
     };
-    const processor = new DatasetExtractionProcessor(extractionService as any);
+    const repository = {
+      findOne: jest.fn().mockImplementation(async () => record),
+      save: jest.fn().mockImplementation(async (value) => value),
+    };
+    const manager = { getRepository: jest.fn().mockReturnValue(repository) };
+    const effectJournal = {
+      runVerified: jest.fn(async (_input, callback) => ({
+        applied: true,
+        observation: await callback(manager),
+      })),
+    };
+    const processor = new DatasetExtractionProcessor(effectJournal as any);
     const execution = {
       executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
       taskType: 'dataset.extract-row',
@@ -32,22 +44,38 @@ describe('DatasetExtractionProcessor', () => {
         }),
       }),
     );
-    expect(extractionService.markExtractionFailed).toHaveBeenCalledWith(
-      5,
-      'Model failed',
+    expect(record.extractionStatus).toBe('failed');
+    expect(record.extractionError).toBe('Model failed');
+    expect(effectJournal.runVerified).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectKey: 'dataset-extraction:5',
+        effectType: 'dataset_record_extraction_replace',
+      }),
+      expect.any(Function),
     );
-    expect(extractionService.applyExtractionResult).not.toHaveBeenCalled();
   });
 
   it('applies a structured extraction result without a domain error field', async () => {
-    const extractionService = {
-      markExtractionFailed: jest.fn(),
-      applyExtractionResult: jest.fn().mockResolvedValue({
-        datasetId: 3,
-        status: 'extracted',
-      }),
+    const record = {
+      id: 5,
+      dataset: { id: 3 },
+      data: { preserved: true },
+      cellMetadata: {},
+      extractionStatus: 'in_progress',
+      extractionError: null,
     };
-    const processor = new DatasetExtractionProcessor(extractionService as any);
+    const repository = {
+      findOne: jest.fn().mockImplementation(async () => record),
+      save: jest.fn().mockImplementation(async (value) => value),
+    };
+    const manager = { getRepository: jest.fn().mockReturnValue(repository) };
+    const effectJournal = {
+      runVerified: jest.fn(async (_input, callback) => ({
+        applied: true,
+        observation: await callback(manager),
+      })),
+    };
+    const processor = new DatasetExtractionProcessor(effectJournal as any);
     const result = {
       data: { name: 'Ada' },
       cellMetadata: { name: { quote: 'Ada' } },
@@ -66,11 +94,13 @@ describe('DatasetExtractionProcessor', () => {
     await expect(processor.process(execution)).resolves.toEqual(
       expect.objectContaining({ success: true }),
     );
-    expect(extractionService.applyExtractionResult).toHaveBeenCalledWith(
-      5,
-      result,
-      ['name'],
+    expect(record).toEqual(
+      expect.objectContaining({
+        data: { preserved: true, name: 'Ada' },
+        cellMetadata: { name: { quote: 'Ada' } },
+        extractionStatus: 'extracted',
+        extractionError: null,
+      }),
     );
-    expect(extractionService.markExtractionFailed).not.toHaveBeenCalled();
   });
 });

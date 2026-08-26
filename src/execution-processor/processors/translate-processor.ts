@@ -3,10 +3,7 @@ import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from 'src/execution/execution.entity';
 import { TranslationStrategy } from './translate/translation-strategy.interface';
 import { ContentTranslationStrategy } from './translate/content-translation.strategy';
-import { EntitiesPendingBatchTranslationStrategy } from './translate/entities-pending-batch-translation.strategy';
 import { EntityRetranslationStrategy } from './translate/entity-retranslation.strategy';
-import { EntitiesBatchTranslationStrategy } from './translate/entities-batch-translation.strategy';
-import { EntityTranslationStrategy } from './translate/entity-translation.strategy';
 
 @Injectable()
 export class TranslateProcessor implements ExecutionProcessor {
@@ -19,13 +16,7 @@ export class TranslateProcessor implements ExecutionProcessor {
     // translation (the core path) still works without them. Entity-translation
     // execution types are only ever created when the feature is on.
     @Optional()
-    private readonly entitiesPendingBatchStrategy: EntitiesPendingBatchTranslationStrategy,
-    @Optional()
     private readonly entityRetranslationStrategy: EntityRetranslationStrategy,
-    @Optional()
-    private readonly entitiesBatchStrategy: EntitiesBatchTranslationStrategy,
-    @Optional()
-    private readonly entityStrategy: EntityTranslationStrategy,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -36,10 +27,7 @@ export class TranslateProcessor implements ExecutionProcessor {
     const translationType = execution.payload['translationType'];
 
     const entityStrategies: Record<string, TranslationStrategy> = {
-      'entities-pending-batch': this.entitiesPendingBatchStrategy,
       'entity-retranslate': this.entityRetranslationStrategy,
-      'entities-batch': this.entitiesBatchStrategy,
-      entity: this.entityStrategy,
     };
 
     if (translationType in entityStrategies) {

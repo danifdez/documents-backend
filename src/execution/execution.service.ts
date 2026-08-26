@@ -81,6 +81,7 @@ import {
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
 
 export {
+  canonicalDomainHash,
   canonicalHash,
   canonicalJson,
   contentHash,

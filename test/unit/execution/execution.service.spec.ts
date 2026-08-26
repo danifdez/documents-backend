@@ -1,5 +1,6 @@
 import {
   canonicalHash,
+  canonicalDomainHash,
   canonicalJson,
   contentHash,
   redactExecutionText,
@@ -265,6 +266,9 @@ describe('ExecutionService primitives', () => {
 
   it('produces stable sha256 identifiers', () => {
     expect(canonicalHash({ b: 2, a: 1 })).toBe(canonicalHash({ a: 1, b: 2 }));
+    expect(canonicalDomainHash({ b: 0.5, a: 1 })).toBe(
+      canonicalDomainHash({ a: 1, b: 0.5 }),
+    );
     expect(contentHash('execution')).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 

@@ -1,14 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
-import { DatasetExtractionService } from '../../dataset/dataset-extraction.service';
 import { CellAnchor } from '../../dataset/cell-anchor.type';
+import { DatasetRecordEntity } from '../../dataset/dataset-record.entity';
+import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
+import { canonicalDomainHash } from '../../execution/execution-canonical';
+import { isDeepStrictEqual } from 'node:util';
+
+class DatasetExtractionRecordNotFoundError extends Error {}
+class DatasetExtractionRecordChangedError extends Error {}
 
 @Injectable()
 export class DatasetExtractionProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(DatasetExtractionProcessor.name);
 
-  constructor(private readonly extractionService: DatasetExtractionService) {}
+  constructor(private readonly effectJournal: ExecutionEffectJournalService) {}
 
   canProcess(taskType: string): boolean {
     return taskType === 'dataset.extract-row';
@@ -49,10 +55,6 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
         typeof executionError?.message === 'string'
           ? executionError.message
           : 'Dataset extraction failed';
-      await this.extractionService.markExtractionFailed(
-        recordId,
-        failureMessage,
-      );
       status = 'failed';
     } else if (
       !result ||
@@ -64,21 +66,106 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
       Array.isArray(result.cellMetadata)
     ) {
       failureMessage = 'Invalid dataset extraction result';
-      await this.extractionService.markExtractionFailed(
-        recordId,
-        failureMessage,
-      );
       status = 'failed';
     } else {
-      ({ status } = await this.extractionService.applyExtractionResult(
-        recordId,
+      status = 'extracted';
+    }
+
+    try {
+      await this.effectJournal.runVerified(
         {
-          ...result,
-          data: result.data,
-          cellMetadata: result.cellMetadata,
+          executionId: execution.executionId,
+          effectKey: `dataset-extraction:${recordId}`,
+          effectType: 'dataset_record_extraction_replace',
+          resourceKey: `dataset-record:${recordId}`,
+          intent: {
+            datasetId,
+            recordId,
+            status,
+            resultHash: canonicalDomainHash({
+              result,
+              columns,
+              failureMessage,
+            }),
+          },
         },
-        columns,
-      ));
+        async (manager) => {
+          const repository = manager.getRepository(DatasetRecordEntity);
+          const record = await repository.findOne({
+            where: { id: recordId },
+            relations: ['dataset'],
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!record) throw new DatasetExtractionRecordNotFoundError();
+          if (record.dataset?.id !== datasetId) {
+            throw new DatasetExtractionRecordChangedError();
+          }
+          const before = {
+            data: record.data,
+            cellMetadata: record.cellMetadata,
+            extractionStatus: record.extractionStatus,
+            extractionError: record.extractionError,
+          };
+          if (status === 'failed') {
+            record.extractionStatus = 'failed';
+            record.extractionError = failureMessage;
+          } else {
+            const data = { ...(record.data || {}) };
+            const cellMetadata = { ...(record.cellMetadata || {}) };
+            for (const fieldKey of columns) {
+              const currentAnchor = cellMetadata[fieldKey];
+              if (currentAnchor?.editedByUser || !(fieldKey in result!.data!)) {
+                continue;
+              }
+              const newValue = result!.data![fieldKey];
+              data[fieldKey] = newValue;
+              if (newValue == null) {
+                delete cellMetadata[fieldKey];
+              } else if (result!.cellMetadata![fieldKey]) {
+                cellMetadata[fieldKey] = result!.cellMetadata![fieldKey];
+              }
+            }
+            record.data = data;
+            record.cellMetadata = cellMetadata;
+            record.extractionStatus = 'extracted';
+            record.extractionError = null;
+          }
+          await repository.save(record);
+          const observed = await repository.findOne({
+            where: { id: recordId },
+            relations: ['dataset'],
+          });
+          if (
+            observed?.dataset?.id !== datasetId ||
+            observed.extractionStatus !== record.extractionStatus ||
+            observed.extractionError !== record.extractionError ||
+            !isDeepStrictEqual(observed.data, record.data) ||
+            !isDeepStrictEqual(observed.cellMetadata, record.cellMetadata)
+          ) {
+            throw new Error('dataset_extraction_effect_not_verified');
+          }
+          return {
+            datasetId,
+            recordId,
+            beforeHash: canonicalDomainHash(before),
+            afterHash: canonicalDomainHash({
+              data: record.data,
+              cellMetadata: record.cellMetadata,
+              extractionStatus: record.extractionStatus,
+              extractionError: record.extractionError,
+            }),
+            status,
+          };
+        },
+      );
+    } catch (error) {
+      if (error instanceof DatasetExtractionRecordNotFoundError) {
+        return { success: false, reason: 'not_found' };
+      }
+      if (error instanceof DatasetExtractionRecordChangedError) {
+        return { success: false, reason: 'stale' };
+      }
+      throw error;
     }
 
     const publication = {

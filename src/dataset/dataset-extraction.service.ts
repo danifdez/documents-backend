@@ -10,7 +10,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DatasetEntity, DatasetField } from './dataset.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
-import { CellAnchor } from './cell-anchor.type';
 import { ResourceService } from '../resource/resource.service';
 import { ResourceEntity } from '../resource/resource.entity';
 import { ExecutionService } from '../execution/execution.service';
@@ -333,82 +332,5 @@ export class DatasetExtractionService {
       payload,
       { finalizeOnFailure: true },
     );
-  }
-
-  /**
-   * Apply a completed worker result onto the target record.
-   *
-   * Called by the processor (see `DatasetExtractionProcessor`).
-   * Honours the "skip editedByUser cell" invariant — manual edits win
-   * over extraction unless the user explicitly forced a re-extract.
-   */
-  async applyExtractionResult(
-    recordId: number,
-    result: {
-      data: Record<string, any>;
-      cellMetadata: Record<string, CellAnchor>;
-      model?: string;
-      promptVersion?: string;
-    },
-    columnsExtracted: string[],
-  ): Promise<{ datasetId: number; status: 'extracted' }> {
-    const record = await this.recordRepository.findOne({
-      where: { id: recordId },
-      relations: ['dataset'],
-    });
-    if (!record) {
-      throw new NotFoundException(`Record with id ${recordId} not found`);
-    }
-
-    const data = { ...(record.data || {}) };
-    const cellMetadata = { ...(record.cellMetadata || {}) };
-    const incomingData = result.data;
-    const incomingAnchors = result.cellMetadata;
-
-    for (const fieldKey of columnsExtracted) {
-      const currentAnchor = cellMetadata[fieldKey];
-      if (currentAnchor?.editedByUser) {
-        this.logger.log(
-          `dataset.extract-row: skipped editedByUser cell '${fieldKey}' on record ${recordId}`,
-        );
-        continue;
-      }
-      if (!(fieldKey in incomingData)) continue;
-
-      const newValue = incomingData[fieldKey];
-      data[fieldKey] = newValue;
-
-      if (newValue === null || newValue === undefined) {
-        delete cellMetadata[fieldKey];
-      } else if (incomingAnchors[fieldKey]) {
-        cellMetadata[fieldKey] = incomingAnchors[fieldKey];
-      }
-    }
-
-    record.data = data;
-    record.cellMetadata = cellMetadata;
-    record.extractionStatus = 'extracted';
-    record.extractionError = null;
-    await this.recordRepository.save(record);
-
-    return { datasetId: record.dataset.id, status: 'extracted' };
-  }
-
-  async markExtractionFailed(
-    recordId: number,
-    message: string,
-  ): Promise<{ datasetId: number; status: 'failed' }> {
-    const record = await this.recordRepository.findOne({
-      where: { id: recordId },
-      relations: ['dataset'],
-    });
-    if (!record) {
-      throw new NotFoundException(`Record with id ${recordId} not found`);
-    }
-
-    record.extractionStatus = 'failed';
-    record.extractionError = message;
-    await this.recordRepository.save(record);
-    return { datasetId: record.dataset.id, status: 'failed' };
   }
 }

@@ -16,6 +16,7 @@ describe('ExecutionEffectJournalService', () => {
     const saved: Record<string, unknown>[] = [];
     const journalRepository = {
       findOne: jest.fn().mockResolvedValue(existing),
+      findOneBy: jest.fn().mockResolvedValue(existing),
       create: jest.fn((value) => ({ journalId: 'journal-1', ...value })),
       save: jest.fn(async (value) => {
         saved.push({ ...value });
@@ -32,6 +33,7 @@ describe('ExecutionEffectJournalService', () => {
     };
     const dataSource = {
       transaction: jest.fn((callback) => callback(manager)),
+      getRepository: jest.fn().mockReturnValue(journalRepository),
     };
     return {
       service: new ExecutionEffectJournalService(dataSource as any),
@@ -94,5 +96,23 @@ describe('ExecutionEffectJournalService', () => {
       ),
     ).rejects.toThrow('execution_effect_journal_conflict');
     expect(retry.apply).not.toHaveBeenCalled();
+  });
+
+  it('reads an already verified observation before external preparation', async () => {
+    const context = setup({
+      effectType: input.effectType,
+      resourceKey: input.resourceKey,
+      status: 'verified',
+      observation: { documentId: 7 },
+    });
+
+    await expect(
+      context.service.getVerifiedObservation(
+        input.executionId,
+        input.effectKey,
+        input.effectType,
+        input.resourceKey,
+      ),
+    ).resolves.toEqual({ documentId: 7 });
   });
 });

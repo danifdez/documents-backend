@@ -87,8 +87,7 @@ export class DataSourceController {
 
     @Post(':id/sync')
     async triggerSync(@Param('id', ParseIntPipe) id: number) {
-        const syncLog = await this.syncService.syncDataSource(id);
-        return syncLog;
+        return this.syncService.syncDataSource(id);
     }
 
     @Get(':id/sync-logs')

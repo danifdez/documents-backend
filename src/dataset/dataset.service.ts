@@ -278,6 +278,23 @@ export class DatasetService {
         return { dataset: savedDataset, ...result };
     }
 
+    prepareValidRecords(
+        schema: DatasetField[],
+        records: Record<string, any>[],
+    ): { records: Record<string, any>[]; errors: { row: number; messages: string[] }[] } {
+        const valid: Record<string, any>[] = [];
+        const errors: { row: number; messages: string[] }[] = [];
+        for (let index = 0; index < records.length; index++) {
+            const messages = this.validateRecordData(schema, records[index]);
+            if (messages.length) {
+                errors.push({ row: index + 1, messages });
+            } else {
+                valid.push(this.cleanRecordData(schema, records[index]));
+            }
+        }
+        return { records: valid, errors };
+    }
+
     private async importValidatedRecords(
         datasetId: number,
         schema: DatasetField[],

@@ -6,13 +6,18 @@ import {
   ExtractedRelationshipInput,
   RelationshipEntityInput,
 } from '../../graph/age-graph.service';
+import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
+import { canonicalDomainHash } from '../../execution/execution-canonical';
 
 @Injectable()
 export class RelationshipExtractionProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(RelationshipExtractionProcessor.name);
   private readonly taskType = 'relationship-extraction';
 
-  constructor(private readonly graphService: AgeGraphService) {}
+  constructor(
+    private readonly graphService: AgeGraphService,
+    private readonly effectJournal: ExecutionEffectJournalService,
+  ) {}
 
   canProcess(taskType: string): boolean {
     return taskType === this.taskType;
@@ -32,11 +37,30 @@ export class RelationshipExtractionProcessor implements ExecutionProcessor {
     const relationships = this.parseRelationships(
       (execution.result as Record<string, unknown> | null)?.relationships,
     );
-    await this.graphService.replaceExtractedRelationships(
-      resourceId,
-      projectId,
-      entities,
-      relationships,
+    await this.effectJournal.runVerified(
+      {
+        executionId: execution.executionId,
+        effectKey: `relationship-extraction:${resourceId}`,
+        effectType: 'resource_relationship_graph_replace',
+        resourceKey: `resource:${resourceId}`,
+        intent: {
+          resourceId,
+          projectId,
+          entitiesHash: canonicalDomainHash(entities),
+          relationshipsHash: canonicalDomainHash(relationships),
+        },
+      },
+      async (manager) => {
+        const observation =
+          await this.graphService.replaceExtractedRelationshipsVerified(
+            resourceId,
+            projectId,
+            entities,
+            relationships,
+            manager,
+          );
+        return { resourceId, projectId, ...observation };
+      },
     );
     this.logger.log(
       `Stored ${relationships.length} relationships for resource ${resourceId}`,

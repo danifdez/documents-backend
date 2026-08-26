@@ -19,9 +19,22 @@ describe('RelationshipExtractionProcessor', () => {
 
   it('replaces graph relationships during backend finalization', async () => {
     const graphService = {
-      replaceExtractedRelationships: jest.fn().mockResolvedValue(undefined),
+      replaceExtractedRelationshipsVerified: jest.fn().mockResolvedValue({
+        relationshipCount: 1,
+        relationshipsHash: 'sha256:observed',
+      }),
     };
-    const processor = new RelationshipExtractionProcessor(graphService as any);
+    const manager = {};
+    const effectJournal = {
+      runVerified: jest.fn(async (_input, callback) => ({
+        applied: true,
+        observation: await callback(manager),
+      })),
+    };
+    const processor = new RelationshipExtractionProcessor(
+      graphService as any,
+      effectJournal as any,
+    );
     const relationships = [
       {
         subject: 'Ada Lovelace',
@@ -43,21 +56,37 @@ describe('RelationshipExtractionProcessor', () => {
         payload: { resourceId: 7, relationships },
       },
     });
-    expect(graphService.replaceExtractedRelationships).toHaveBeenCalledWith(
+    expect(
+      graphService.replaceExtractedRelationshipsVerified,
+    ).toHaveBeenCalledWith(
       7,
       3,
       expect.arrayContaining([{ id: 1, name: 'Ada Lovelace', type: 'PERSON' }]),
       relationships,
+      manager,
+    );
+    expect(effectJournal.runVerified).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectKey: 'relationship-extraction:7',
+        effectType: 'resource_relationship_graph_replace',
+      }),
+      expect.any(Function),
     );
   });
 
   it('rejects the removed error-as-result contract', async () => {
-    const graphService = { replaceExtractedRelationships: jest.fn() };
-    const processor = new RelationshipExtractionProcessor(graphService as any);
+    const graphService = { replaceExtractedRelationshipsVerified: jest.fn() };
+    const effectJournal = { runVerified: jest.fn() };
+    const processor = new RelationshipExtractionProcessor(
+      graphService as any,
+      effectJournal as any,
+    );
 
     await expect(
       processor.process(execution({ error: 'old graph failure' })),
     ).rejects.toThrow('Invalid relationship extraction result');
-    expect(graphService.replaceExtractedRelationships).not.toHaveBeenCalled();
+    expect(
+      graphService.replaceExtractedRelationshipsVerified,
+    ).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource, QueryRunner } from 'typeorm';
+import { DataSource, EntityManager, QueryRunner } from 'typeorm';
+import { isDeepStrictEqual } from 'node:util';
+import { canonicalDomainHash } from '../execution/execution-canonical';
 
 const GRAPH_NAME = 'documents';
+
+interface GraphQueryTarget {
+  query(query: string, parameters?: unknown[]): Promise<any>;
+}
 
 export interface GraphEntity {
   id: number | string;
@@ -226,7 +232,89 @@ export class AgeGraphService {
     );
   }
 
-  async replaceExtractedRelationships(
+  async replaceExtractedRelationshipsVerified(
+    resourceId: number,
+    projectId: number | null,
+    entityInputs: RelationshipEntityInput[],
+    relationships: ExtractedRelationshipInput[],
+    manager: EntityManager,
+  ): Promise<{ relationshipCount: number; relationshipsHash: string }> {
+    await manager.query("LOAD 'age'");
+    await manager.query('SET search_path = ag_catalog, "$user", public');
+    await this.replaceExtractedRelationshipsWithTarget(
+      manager,
+      resourceId,
+      projectId,
+      entityInputs,
+      relationships,
+    );
+    const rows = await this.cypher(
+      manager,
+      `MATCH (s:Entity)-[r:REL {resource_id: $resource_id}]->(o:Entity)
+       RETURN s.entity_id AS subject_id, s.name AS subject,
+              s.entity_type AS subject_type, r.predicate AS predicate,
+              r.confidence AS confidence, r.context AS context,
+              r.project_id AS project_id, o.entity_id AS object_id,
+              o.name AS object, o.entity_type AS object_type`,
+      { resource_id: resourceId },
+      'subject_id agtype, subject agtype, subject_type agtype, ' +
+        'predicate agtype, confidence agtype, context agtype, ' +
+        'project_id agtype, object_id agtype, object agtype, ' +
+        'object_type agtype',
+    );
+    const entities = new Map(
+      entityInputs.map((entity) => [entity.name, entity] as const),
+    );
+    const expected = relationships
+      .map((relationship) => {
+        const subject = entities.get(relationship.subject)!;
+        const object = entities.get(relationship.object)!;
+        return {
+          subject_id: subject.id,
+          subject: subject.name,
+          subject_type: subject.type,
+          predicate: relationship.predicate,
+          confidence: relationship.confidence,
+          context: relationship.context ?? '',
+          project_id: projectId,
+          object_id: object.id,
+          object: object.name,
+          object_type: object.type,
+        };
+      })
+      .sort((left, right) =>
+        this.relationshipKey(left).localeCompare(this.relationshipKey(right)),
+      );
+    const observed = rows
+      .map((row) => ({
+        subject_id: Number(this.ageValue(row.subject_id)),
+        subject: String(this.ageValue(row.subject)),
+        subject_type: String(this.ageValue(row.subject_type)),
+        predicate: String(this.ageValue(row.predicate)),
+        confidence: Number(this.ageValue(row.confidence)),
+        context: String(this.ageValue(row.context) ?? ''),
+        project_id:
+          this.ageValue(row.project_id) == null
+            ? null
+            : Number(this.ageValue(row.project_id)),
+        object_id: Number(this.ageValue(row.object_id)),
+        object: String(this.ageValue(row.object)),
+        object_type: String(this.ageValue(row.object_type)),
+      }))
+      .sort((left, right) =>
+        this.relationshipKey(left).localeCompare(this.relationshipKey(right)),
+      );
+    if (!isDeepStrictEqual(observed, expected)) {
+      throw new Error('relationship_graph_effect_not_verified');
+    }
+    return {
+      relationshipCount: observed.length,
+      relationshipsHash: canonicalDomainHash(observed),
+    };
+  }
+
+  private async replaceExtractedRelationshipsWithTarget(
+    target: GraphQueryTarget,
     resourceId: number,
     projectId: number | null,
     entityInputs: RelationshipEntityInput[],
@@ -235,45 +323,39 @@ export class AgeGraphService {
     const entities = new Map(
       entityInputs.map((entity) => [entity.name, entity] as const),
     );
-    await this.write(async (runner) => {
-      await this.exec(
-        runner,
-        'MATCH ()-[r:REL {resource_id: $resource_id}]->() DELETE r',
-        { resource_id: resourceId },
-      );
-      const referencedNames = new Set(
-        relationships.flatMap((relationship) => [
-          relationship.subject,
-          relationship.object,
-        ]),
-      );
-      for (const name of referencedNames) {
-        const entity = entities.get(name);
-        if (!entity) {
-          throw new Error(`Unknown relationship entity: ${name}`);
-        }
-        await this.upsertEntity(runner, entity);
+    await this.exec(
+      target,
+      'MATCH ()-[r:REL {resource_id: $resource_id}]->() DELETE r',
+      { resource_id: resourceId },
+    );
+    const referencedNames = new Set(
+      relationships.flatMap((relationship) => [
+        relationship.subject,
+        relationship.object,
+      ]),
+    );
+    for (const name of referencedNames) {
+      const entity = entities.get(name);
+      if (!entity) throw new Error(`Unknown relationship entity: ${name}`);
+      await this.upsertEntity(target, entity);
+    }
+    for (const relationship of relationships) {
+      const subject = entities.get(relationship.subject);
+      const object = entities.get(relationship.object);
+      if (!subject || !object) {
+        throw new Error('Relationship endpoints must reference known entities');
       }
-      for (const relationship of relationships) {
-        const subject = entities.get(relationship.subject);
-        const object = entities.get(relationship.object);
-        if (!subject || !object) {
-          throw new Error(
-            'Relationship endpoints must reference known entities',
-          );
-        }
-        await this.upsertRelationship(
-          runner,
-          subject.id,
-          relationship.predicate,
-          object.id,
-          resourceId,
-          projectId,
-          relationship.confidence,
-          relationship.context ?? '',
-        );
-      }
-    });
+      await this.upsertRelationship(
+        target,
+        subject.id,
+        relationship.predicate,
+        object.id,
+        resourceId,
+        projectId,
+        relationship.confidence,
+        relationship.context ?? '',
+      );
+    }
   }
 
   private async queryTriples(
@@ -326,7 +408,7 @@ export class AgeGraphService {
   }
 
   private async upsertEntity(
-    runner: QueryRunner,
+    runner: GraphQueryTarget,
     entity: RelationshipEntityInput,
   ): Promise<void> {
     await this.exec(
@@ -343,7 +425,7 @@ export class AgeGraphService {
   }
 
   private async upsertRelationship(
-    runner: QueryRunner,
+    runner: GraphQueryTarget,
     subjectId: number,
     predicate: string,
     objectId: number,
@@ -400,7 +482,7 @@ export class AgeGraphService {
   }
 
   private async exec(
-    runner: QueryRunner,
+    runner: GraphQueryTarget,
     body: string,
     params: Record<string, unknown>,
   ): Promise<void> {
@@ -408,7 +490,7 @@ export class AgeGraphService {
   }
 
   private cypher(
-    runner: QueryRunner,
+    runner: GraphQueryTarget,
     body: string,
     params: Record<string, unknown>,
     columns: string,
@@ -431,5 +513,13 @@ export class AgeGraphService {
   private safeLimit(value: number, fallback: number): number {
     if (!Number.isFinite(value)) return fallback;
     return Math.max(1, Math.min(Math.trunc(value), 1_000));
+  }
+
+  private relationshipKey(value: {
+    subject_id: number;
+    predicate: string;
+    object_id: number;
+  }): string {
+    return `${value.subject_id}:${value.predicate}:${value.object_id}`;
   }
 }

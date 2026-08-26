@@ -10,6 +10,7 @@ import { buildKeyPointWorkflowSteps } from './key-point-workflow';
 import { VectorStoreService } from '../vector/vector-store.service';
 import { AgeGraphService } from '../graph/age-graph.service';
 import { readFeaturesFromEnv } from '../common/feature-flags';
+import { contentHash } from '../execution/execution-canonical';
 
 @Injectable()
 export class ModelService {
@@ -147,6 +148,8 @@ export class ModelService {
       {
         resourceId,
         chunkCount: steps.length - 1,
+        sourceContentHash: contentHash(content),
+        sourceLanguage: resource.language || 'en',
       },
       { steps },
     );

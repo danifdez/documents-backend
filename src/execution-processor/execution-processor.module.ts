@@ -33,12 +33,7 @@ import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 import { AgentModule } from '../agent/agent.module';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 import { ContentTranslationStrategy } from './processors/translate/content-translation.strategy';
-// eslint-disable-next-line max-len
-import { EntitiesPendingBatchTranslationStrategy } from './processors/translate/entities-pending-batch-translation.strategy';
 import { EntityRetranslationStrategy } from './processors/translate/entity-retranslation.strategy';
-// eslint-disable-next-line max-len
-import { EntitiesBatchTranslationStrategy } from './processors/translate/entities-batch-translation.strategy';
-import { EntityTranslationStrategy } from './processors/translate/entity-translation.strategy';
 import { ExecutionModule } from '../execution/execution.module';
 import { VectorModule } from '../vector/vector.module';
 import { VectorSearchProcessor } from './processors/vector-search-processor';
@@ -104,10 +99,7 @@ export class ExecutionProcessorModule {
       providers.push(
         EntityExtractionProcessor,
         RelationshipExtractionProcessor,
-        EntitiesPendingBatchTranslationStrategy,
         EntityRetranslationStrategy,
-        EntitiesBatchTranslationStrategy,
-        EntityTranslationStrategy,
       );
     }
     return {

@@ -86,34 +86,4 @@ describe('DatasetExtractionService', () => {
       { finalizeOnFailure: true },
     );
   });
-
-  it('stores a canonical step failure on the dataset row', async () => {
-    const record = {
-      id: 5,
-      dataset: { id: 3 },
-      extractionStatus: 'in_progress',
-      extractionError: null,
-    };
-    const recordRepository = {
-      findOne: jest.fn().mockResolvedValue(record),
-      save: jest.fn(async (value) => value),
-    };
-    const service = new DatasetExtractionService(
-      {} as any,
-      recordRepository as any,
-      {} as any,
-      {} as any,
-    );
-
-    await expect(
-      service.markExtractionFailed(5, 'Model failed'),
-    ).resolves.toEqual({ datasetId: 3, status: 'failed' });
-    expect(record).toEqual(
-      expect.objectContaining({
-        extractionStatus: 'failed',
-        extractionError: 'Model failed',
-      }),
-    );
-    expect(recordRepository.save).toHaveBeenCalledWith(record);
-  });
 });
