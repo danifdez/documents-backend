@@ -1380,7 +1380,7 @@ export class ExecutionAttemptService {
         toolCallId: toolResult?.toolCallId ?? null,
         attemptId: attempt.attemptId,
         causedByEventId: started.eventId,
-        artifactRefs: [],
+        artifactRefs: step.outputArtifactRefs.map((ref) => ref.artifactId),
       },
     );
     this.contractValidator?.assertEvent(event.envelope);

@@ -3,9 +3,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsObject,
-  IsOptional,
   IsString,
-  IsUrl,
   IsUUID,
   Max,
   MaxLength,
@@ -49,17 +47,4 @@ export class ClaimBrowserWorkDto {
   @Min(0)
   @Max(30_000)
   waitTimeoutMs: number;
-}
-
-export class RequestBrowserPageReadDto {
-  @IsOptional()
-  @IsUrl({ require_protocol: true, protocols: ['http', 'https'] })
-  @MaxLength(2_048)
-  expectedUrl?: string;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(50_000)
-  maxChars?: number;
 }

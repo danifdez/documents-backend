@@ -30,6 +30,9 @@ import {
   AGENT_DELEGATE_TOOL_CAPABILITY,
   AGENT_DELEGATE_TOOL_NAME,
   AGENT_DELEGATE_TOOL_VERSION,
+  BROWSER_READ_TOOL_CAPABILITY,
+  BROWSER_READ_TOOL_NAME,
+  BROWSER_READ_TOOL_VERSION,
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
@@ -43,6 +46,7 @@ import { ExecutionService } from './execution.service';
 const PLAN_TIMEOUT_MS = 30_000;
 const CONFIRMATION_TIMEOUT_MS = 15 * 60_000;
 const DELEGATION_TIMEOUT_MS = 10 * 60_000;
+const BROWSER_READ_TIMEOUT_MS = 2 * 60_000;
 
 export interface PreparedToolPlan {
   invocation: ExecutionToolInvocationEntity;
@@ -314,6 +318,9 @@ export class ExecutionToolPlanService {
     if (invocation.name === AGENT_DELEGATE_TOOL_NAME) {
       return this.prepareAgentDelegation(invocation);
     }
+    if (invocation.name === BROWSER_READ_TOOL_NAME) {
+      return this.prepareBrowserRead(invocation);
+    }
     throw new BadRequestException('tool_not_available');
   }
 
@@ -358,6 +365,68 @@ export class ExecutionToolPlanService {
       idempotencyKey: null,
       requiredCapabilities: [DOCUMENT_SEARCH_TOOL_CAPABILITY],
       deadline: new Date(preparedAt.getTime() + PLAN_TIMEOUT_MS).toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareBrowserRead(
+    invocation: ToolInvocationContract,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    const keys = Object.keys(invocation.arguments);
+    if (keys.some((key) => !['expectedUrl', 'maxChars'].includes(key))) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const rawExpectedUrl = invocation.arguments.expectedUrl;
+    if (
+      rawExpectedUrl !== undefined &&
+      rawExpectedUrl !== null &&
+      typeof rawExpectedUrl !== 'string'
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const expectedUrl =
+      typeof rawExpectedUrl === 'string' ? rawExpectedUrl.trim() || null : null;
+    if (expectedUrl && !this.isHttpUrl(expectedUrl)) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const requestedMaxChars = invocation.arguments.maxChars ?? 20_000;
+    if (
+      !Number.isInteger(requestedMaxChars) ||
+      Number(requestedMaxChars) < 1 ||
+      Number(requestedMaxChars) > 50_000
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const preparedAt = new Date();
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: BROWSER_READ_TOOL_NAME,
+      descriptorVersion: BROWSER_READ_TOOL_VERSION,
+      normalizedArguments: {
+        expectedUrl,
+        maxChars: Number(requestedMaxChars),
+      },
+      resources: [
+        {
+          resourceKey: 'browser:active-page',
+          mode: 'shared',
+          kind: 'browser_page',
+        },
+      ],
+      effects: [],
+      policyDecision: { decision: 'allowed', rule: 'paired_browser_read' },
+      confirmationRequirement: null,
+      recoveryClass: 'read_only_replayable',
+      idempotencyKey: null,
+      requiredCapabilities: [BROWSER_READ_TOOL_CAPABILITY],
+      deadline: new Date(
+        preparedAt.getTime() + BROWSER_READ_TIMEOUT_MS,
+      ).toISOString(),
       preparedAt: preparedAt.toISOString(),
     };
   }
@@ -553,6 +622,15 @@ export class ExecutionToolPlanService {
   private assertUuid(value: string, field: string): void {
     if (!EXECUTION_UUID_PATTERN.test(value)) {
       throw new BadRequestException(`${field} must be a UUID`);
+    }
+  }
+
+  private isHttpUrl(value: string): boolean {
+    if (value.length > 2_048) return false;
+    try {
+      return ['http:', 'https:'].includes(new URL(value).protocol);
+    } catch {
+      return false;
     }
   }
 }

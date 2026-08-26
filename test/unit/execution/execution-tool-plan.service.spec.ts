@@ -285,6 +285,55 @@ describe('ExecutionToolPlanService', () => {
     );
   });
 
+  it('prepares a paired browser read as governed read-only work', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'browser.read_current_page',
+        arguments: {
+          expectedUrl: '  https://example.test/page  ',
+          maxChars: 12_000,
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'browser.read_current_page',
+        descriptorVersion: 'browser.read_current_page/1',
+        normalizedArguments: {
+          expectedUrl: 'https://example.test/page',
+          maxChars: 12_000,
+        },
+        resources: [
+          {
+            resourceKey: 'browser:active-page',
+            mode: 'shared',
+            kind: 'browser_page',
+          },
+        ],
+        effects: [],
+        policyDecision: {
+          decision: 'allowed',
+          rule: 'paired_browser_read',
+        },
+        confirmationRequirement: null,
+        recoveryClass: 'read_only_replayable',
+        requiredCapabilities: ['tool.browser.read_current_page/1'],
+      }),
+    );
+  });
+
+  it('rejects non-http browser targets', async () => {
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'browser.read_current_page',
+          arguments: { expectedUrl: 'file:///etc/passwd' },
+        }),
+      ),
+    ).rejects.toThrow('invalid_arguments');
+  });
+
   it('rejects reuse of a tool call identity with different arguments', async () => {
     invocationRepo.findOne.mockResolvedValue({
       toolCallId: TOOL_CALL_ID,

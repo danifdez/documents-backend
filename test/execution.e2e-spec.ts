@@ -1318,7 +1318,7 @@ describe('execution PostgreSQL integration', () => {
     ).not.toThrow();
   });
 
-  it('turns an accepted tool_requests outcome into governed tool work', async () => {
+  it('routes a browser tool request through IA Browser and into the next inference', async () => {
     const created = await service.createForChat(
       'assistant_chat',
       'Find the harness plan',
@@ -1364,8 +1364,11 @@ describe('execution PostgreSQL integration', () => {
             calls: [
               {
                 toolCallId,
-                name: 'documents.search',
-                arguments: { query: 'harness', limit: 2 },
+                name: 'browser.read_current_page',
+                arguments: {
+                  expectedUrl: 'https://example.test/harness',
+                  maxChars: 12_000,
+                },
               },
             ],
           },
@@ -1406,9 +1409,10 @@ describe('execution PostgreSQL integration', () => {
       stepKind: ExecutionStepKind.TOOL,
       budgetReservationId: expect.any(String),
       work: {
-        taskType: 'documents.search',
+        taskType: 'browser.read_current_page',
         toolPlan: { toolCallId, operationId: plan.operationId },
       },
+      requiredCapabilities: ['tool.browser.read_current_page/1'],
     });
     await expect(
       agentLoopService.materializeAcceptedToolRequests(),
@@ -1419,29 +1423,117 @@ describe('execution PostgreSQL integration', () => {
         .findOneByOrFail({ stepId: assignment!.stepId }),
     ).resolves.toMatchObject({ continuationProcessedAt: expect.any(Date) });
 
-    const runtime = new ExecutionToolRuntimeService(
-      attemptService,
-      new ExecutionContractValidator(),
-      {
-        globalSearch: async () => [
-          {
-            id: 23,
-            name: 'Harness plan',
-            score: 0.9,
-            collection: 'docs',
-          },
-        ],
-      },
-      {
-        createFromExecution: async () => {
-          throw new Error('unexpected_user_task_creation');
-        },
-        findByExecutionOperation: async () => null,
-      },
-      service,
+    const browserId = randomUUID();
+    await workerService.enrollBrowser(
+      browserId,
+      'ia-browser-agent-loop-e2e',
+      'agent-loop-e2e',
+      { runtime: 'test' },
     );
-    await expect(runtime.executeReady()).resolves.toBe(1);
+    const browserAssignment = await attemptService.claimReadyStep({
+      workerId: browserId,
+      ownerPrincipal: 'agent-loop-e2e',
+      stepKinds: [ExecutionStepKind.TOOL],
+      capabilities: ['tool.browser.read_current_page/1'],
+      leaseDurationMs: 60_000,
+      enforceRegisteredWorkerCapacity: true,
+    });
+    expect(browserAssignment).toMatchObject({
+      executionId: created.executionId,
+      stepKind: ExecutionStepKind.TOOL,
+      work: {
+        taskType: 'browser.read_current_page',
+        toolPlan: {
+          operationId: plan.operationId,
+          toolCallId,
+          normalizedArguments: {
+            expectedUrl: 'https://example.test/harness',
+            maxChars: 12_000,
+          },
+        },
+      },
+    });
+    await attemptService.startAttempt(browserAssignment!.attemptId, browserId);
+
+    const pageArtifactId = randomUUID();
+    const pageArtifactRole = `browser_page:${toolCallId}`;
+    const pageBody = Buffer.from(
+      JSON.stringify({
+        url: 'https://example.test/harness',
+        text: 'The harness plan is ready.',
+        truncated: false,
+      }),
+    );
+    await attemptService.uploadOutputArtifact(
+      browserAssignment!.attemptId,
+      browserId,
+      {
+        artifactId: pageArtifactId,
+        kind: 'browser-page-snapshot',
+        contentHash: contentHash(pageBody),
+        size: pageBody.length,
+        mediaType: 'application/json',
+        encoding: 'identity',
+        dataClassification: 'workspace',
+        redaction: { applied: false },
+        retentionClass: 'execution',
+        inputSourceIds: [],
+        bodyBase64: pageBody.toString('base64'),
+      },
+    );
+    await attemptService.receiveResult({
+      executionId: browserAssignment!.executionId,
+      stepId: browserAssignment!.stepId,
+      operationId: browserAssignment!.operationId,
+      attemptId: browserAssignment!.attemptId,
+      workerId: browserId,
+      result: {
+        schemaVersion: 'step-result/1',
+        executionId: browserAssignment!.executionId,
+        stepId: browserAssignment!.stepId,
+        operationId: browserAssignment!.operationId,
+        attemptId: browserAssignment!.attemptId,
+        stepKind: ExecutionStepKind.TOOL,
+        status: 'succeeded',
+        runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
+        output: {
+          kind: ExecutionStepKind.TOOL,
+          toolResult: {
+            schemaVersion: 'tool-result/1',
+            operationId: plan.operationId,
+            toolCallId,
+            status: 'succeeded',
+            content: '',
+            structuredContent: {
+              url: 'https://example.test/harness',
+              truncated: false,
+              contentArtifactId: pageArtifactId,
+              contentHash: contentHash(pageBody),
+              size: pageBody.length,
+            },
+            artifactRefs: [
+              { role: pageArtifactRole, artifactId: pageArtifactId },
+            ],
+            sourceRefs: [],
+            effects: [],
+            error: null,
+          },
+        },
+        artifactRefs: [{ role: pageArtifactRole, artifactId: pageArtifactId }],
+        error: null,
+      },
+    });
     await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+    await expect(
+      dataSource.getRepository(ExecutionEventEntity).findOneByOrFail({
+        eventType: 'operation.finished',
+        operationId: plan.operationId,
+      }),
+    ).resolves.toMatchObject({
+      envelope: {
+        artifactRefs: [pageArtifactId],
+      },
+    });
     await expect(
       agentLoopService.materializeReadyToolContinuations(),
     ).resolves.toBe(1);
@@ -1458,6 +1550,9 @@ describe('execution PostgreSQL integration', () => {
       status: ExecutionStepStatus.READY,
       stepKind: ExecutionStepKind.INFERENCE,
       budgetReservationId: null,
+      inputArtifactRefs: expect.arrayContaining([
+        { role: pageArtifactRole, artifactId: pageArtifactId },
+      ]),
       work: {
         taskType: 'assistant-chat',
         agentName: 'assistant',
@@ -1465,12 +1560,21 @@ describe('execution PostgreSQL integration', () => {
           toolHistory: [
             {
               round: 1,
-              calls: [{ toolCallId, name: 'documents.search' }],
+              calls: [{ toolCallId, name: 'browser.read_current_page' }],
               results: [
                 {
                   toolCallId,
                   status: 'succeeded',
-                  structuredContent: { count: 1 },
+                  structuredContent: {
+                    url: 'https://example.test/harness',
+                    truncated: false,
+                    contentArtifactId: pageArtifactId,
+                    contentHash: contentHash(pageBody),
+                    size: pageBody.length,
+                  },
+                  artifactRefs: [
+                    { role: pageArtifactRole, artifactId: pageArtifactId },
+                  ],
                 },
               ],
             },
@@ -1555,7 +1659,8 @@ describe('execution PostgreSQL integration', () => {
       id: installationId,
       workerKind: WorkerKind.BROWSER,
       ownerPrincipal: 'browser-owner',
-      capabilities: ['browser.read'],
+      capabilities: ['tool.browser.read_current_page/1'],
+      stepKinds: [ExecutionStepKind.TOOL],
     });
     await expect(
       workerService.authenticate(
@@ -1564,148 +1669,6 @@ describe('execution PostgreSQL integration', () => {
         WorkerKind.MODELS,
       ),
     ).rejects.toThrow('invalid_worker_credential');
-
-    await service.create(
-      'browser-read-current-page',
-      ExecutionPriority.NORMAL,
-      {},
-      {
-        ownerPrincipal: 'different-owner',
-        initialStep: {
-          stepKind: ExecutionStepKind.VERIFICATION,
-          work: { taskType: 'browser-read-current-page', payload: {} },
-          requiredCapabilities: ['browser.read'],
-        },
-      },
-    );
-    const owned = await service.create(
-      'browser-read-current-page',
-      ExecutionPriority.NORMAL,
-      {},
-      {
-        ownerPrincipal: 'browser-owner',
-        initialStep: {
-          stepKind: ExecutionStepKind.VERIFICATION,
-          work: { taskType: 'browser-read-current-page', payload: {} },
-          requiredCapabilities: ['browser.read'],
-        },
-      },
-    );
-    const assignment = await attemptService.claimReadyStep({
-      workerId: installationId,
-      ownerPrincipal: 'browser-owner',
-      stepKinds: [ExecutionStepKind.VERIFICATION],
-      capabilities: ['browser.read'],
-      leaseDurationMs: 60_000,
-      enforceRegisteredWorkerCapacity: true,
-    });
-    expect(assignment).toMatchObject({ executionId: owned.executionId });
-    await expect(
-      attemptService.startAttempt(assignment!.attemptId, installationId),
-    ).resolves.toMatchObject({ status: ExecutionStepAttemptStatus.RUNNING });
-    await expect(
-      attemptService.startAttempt(assignment!.attemptId, installationId),
-    ).resolves.toMatchObject({ status: ExecutionStepAttemptStatus.RUNNING });
-    await expect(
-      service.readProgress(owned.rootExecutionId, {
-        ownerPrincipal: 'browser-owner',
-      }),
-    ).resolves.toMatchObject({
-      runtime: {
-        status: ExecutionStatus.RUNNING,
-        activeSteps: [
-          {
-            taskType: 'browser-read-current-page',
-            attemptStatus: ExecutionStepAttemptStatus.RUNNING,
-            worker: {
-              workerId: installationId,
-              name: 'ia-browser-e2e',
-              kind: WorkerKind.BROWSER,
-            },
-          },
-        ],
-      },
-    });
-
-    const pageArtifactId = randomUUID();
-    const pageBody = Buffer.from(
-      JSON.stringify({
-        url: 'https://example.test',
-        text: 'Example page',
-        truncated: false,
-      }),
-    );
-    const pageArtifact = {
-      artifactId: pageArtifactId,
-      kind: 'browser-page-snapshot',
-      contentHash: contentHash(pageBody),
-      size: pageBody.length,
-      mediaType: 'application/json' as const,
-      encoding: 'identity' as const,
-      dataClassification: 'workspace',
-      redaction: { applied: false },
-      retentionClass: 'execution',
-      inputSourceIds: [],
-      bodyBase64: pageBody.toString('base64'),
-    };
-    await expect(
-      attemptService.uploadOutputArtifact(
-        assignment!.attemptId,
-        installationId,
-        pageArtifact,
-      ),
-    ).resolves.toMatchObject({ code: 'received' });
-    await expect(
-      attemptService.uploadOutputArtifact(
-        assignment!.attemptId,
-        installationId,
-        pageArtifact,
-      ),
-    ).resolves.toMatchObject({ code: 'duplicate' });
-
-    const result = {
-      schemaVersion: 'step-result/1',
-      executionId: assignment!.executionId,
-      stepId: assignment!.stepId,
-      operationId: assignment!.operationId,
-      attemptId: assignment!.attemptId,
-      stepKind: ExecutionStepKind.VERIFICATION,
-      status: 'succeeded',
-      runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
-      artifactRefs: [{ role: 'browser_page', artifactId: pageArtifactId }],
-      error: null,
-      output: {
-        kind: ExecutionStepKind.VERIFICATION,
-        page: {
-          url: 'https://example.test',
-          truncated: false,
-          contentArtifactId: pageArtifactId,
-          contentHash: contentHash(pageBody),
-          size: pageBody.length,
-        },
-      },
-    };
-    await expect(
-      attemptService.receiveResult({
-        executionId: assignment!.executionId,
-        stepId: assignment!.stepId,
-        operationId: assignment!.operationId,
-        attemptId: assignment!.attemptId,
-        workerId: installationId,
-        result,
-      }),
-    ).resolves.toMatchObject({ code: 'received' });
-    await expect(
-      attemptService.receiveResult({
-        executionId: assignment!.executionId,
-        stepId: assignment!.stepId,
-        operationId: assignment!.operationId,
-        attemptId: assignment!.attemptId,
-        workerId: installationId,
-        result,
-      }),
-    ).resolves.toMatchObject({ code: 'duplicate' });
-    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
 
     await workerService.revokeBrowser(installationId, 'browser-owner');
     await expect(

@@ -398,11 +398,11 @@ describe('ExecutionAttemptService', () => {
     );
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining('FOR UPDATE SKIP LOCKED'),
-      [[ExecutionStepKind.SERVICE], ['detect-language']],
+      [[ExecutionStepKind.SERVICE], ['detect-language'], null],
     );
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining(`"executions"."status" IN ('queued', 'running')`),
-      [[ExecutionStepKind.SERVICE], ['detect-language']],
+      [[ExecutionStepKind.SERVICE], ['detect-language'], null],
     );
   });
 

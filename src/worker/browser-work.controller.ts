@@ -16,12 +16,9 @@ import {
   BrowserWorkerHeartbeatDto,
   ClaimBrowserWorkDto,
   EnrollBrowserWorkerDto,
-  RequestBrowserPageReadDto,
 } from './dto/browser-worker.dto';
 import { ExecutionAttemptService } from '../execution/execution-attempt.service';
-import { ExecutionService } from '../execution/execution.service';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
-import { ExecutionPriority } from '../execution/execution-priority.enum';
 import {
   ReceiveExecutionStepResultDto,
   RenewExecutionStepLeaseDto,
@@ -29,6 +26,7 @@ import {
 } from '../execution/dto/execution-protocol.dto';
 import { WorkerKind } from './worker-kind.enum';
 import { WorkerService } from './worker.service';
+import { BROWSER_READ_TOOL_CAPABILITY } from '../execution/execution-tool.constants';
 
 @Controller('browser-work')
 export class BrowserWorkController {
@@ -36,7 +34,6 @@ export class BrowserWorkController {
     private readonly workers: WorkerService,
     private readonly features: FeatureFlagService,
     private readonly attempts: ExecutionAttemptService,
-    private readonly executions: ExecutionService,
   ) {}
 
   @Post('enroll')
@@ -57,38 +54,6 @@ export class BrowserWorkController {
       capabilities: worker.capabilities,
       acknowledgedAt: new Date(),
     };
-  }
-
-  @Post('reads')
-  async requestPageRead(
-    @Body() body: RequestBrowserPageReadDto,
-    @CurrentUser() user: unknown,
-  ) {
-    this.assertEnabled();
-    const scope = this.executions.resolveAccessScope(user);
-    return this.executions.create(
-      'browser-read-current-page',
-      ExecutionPriority.NORMAL,
-      {
-        expectedUrl: body.expectedUrl ?? null,
-        maxChars: body.maxChars ?? 20_000,
-      },
-      {
-        ownerPrincipal: scope.ownerPrincipal,
-        initialStep: {
-          stepKind: ExecutionStepKind.VERIFICATION,
-          work: {
-            taskType: 'browser-read-current-page',
-            payload: {
-              expectedUrl: body.expectedUrl ?? null,
-              maxChars: body.maxChars ?? 20_000,
-            },
-          },
-          requiredCapabilities: ['browser.read'],
-          finalizeOnFailure: true,
-        },
-      },
-    );
   }
 
   @Public()
@@ -121,8 +86,8 @@ export class BrowserWorkController {
       {
         workerId,
         ownerPrincipal: worker.ownerPrincipal ?? undefined,
-        stepKinds: [ExecutionStepKind.VERIFICATION],
-        capabilities: ['browser.read'],
+        stepKinds: [ExecutionStepKind.TOOL],
+        capabilities: [BROWSER_READ_TOOL_CAPABILITY],
         leaseDurationMs: body.leaseDurationMs,
         enforceRegisteredWorkerCapacity: true,
       },

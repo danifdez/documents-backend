@@ -436,6 +436,17 @@ export class ExecutionAgentLoopService {
         if (!result) throw new ConflictException('tool_result_missing');
         return result;
       });
+      const continuationArtifacts = [
+        ...source.inputArtifactRefs,
+        ...orderedToolSteps.flatMap(
+          (toolStep) => toolStep?.outputArtifactRefs ?? [],
+        ),
+      ].filter(
+        (ref, index, refs) =>
+          refs.findIndex(
+            (candidate) => candidate.artifactId === ref.artifactId,
+          ) === index,
+      );
       const execution = await manager.getRepository(ExecutionEntity).findOne({
         where: { executionId: source.executionId },
         lock: { mode: 'pessimistic_write' },
@@ -472,7 +483,7 @@ export class ExecutionAgentLoopService {
         executionId: execution.executionId,
         stepKind: ExecutionStepKind.INFERENCE,
         dependsOnStepIds: toolStepIds as string[],
-        inputArtifactRefs: source.inputArtifactRefs,
+        inputArtifactRefs: continuationArtifacts,
         work: {
           taskType: execution.taskType,
           agentName:
