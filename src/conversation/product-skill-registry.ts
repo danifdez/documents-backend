@@ -19,6 +19,24 @@ export const WORKSPACE_DOCUMENT_SKILL_INSTRUCTIONS = [
     'tool is absent, explain the limitation instead of inventing an effect.',
 ].join('\n');
 
+export const DOCUMENT_FORMAT_RESOURCE_ID = 'document-format-handling';
+export const DOCUMENT_FORMAT_RESOURCE_CONTENT = [
+  'Document format handling',
+  '',
+  'Inspect the existing file and its extension before changing it. Keep the ' +
+    'original format unless the user explicitly asks for a conversion.',
+  '',
+  'For plain-text formats, write UTF-8 text. For binary or container formats ' +
+    'such as PDF, DOCX, XLSX, PPTX, or images, use contentBase64 only when ' +
+    'complete valid bytes have been produced by a compatible document ' +
+    'processor. Never place a textual description inside a binary file or ' +
+    'pretend that changing an extension converts the format.',
+  '',
+  'When replacing an existing document, preserve unrelated content and ' +
+    'formatting. If the available tools cannot safely produce the requested ' +
+    'format, explain the limitation instead of corrupting the file.',
+].join('\n');
+
 const WORKSPACE_OBJECTIVE_TERMS = new Set([
   'file',
   'files',
@@ -46,13 +64,23 @@ export interface ProductSkillDefinition {
   title: string;
   description: string;
   requiredCapabilities: string[];
-  resourceManifest: [];
+  resourceManifest: ProductSkillResource[];
   dataPolicy: 'preserve_source_policy';
   effectPolicy: 'explicit_user_intent';
   instructions: string;
   contentHash: string;
   isApplicable: (objective: string) => boolean;
 }
+
+export interface ProductSkillResource {
+  resourceId: string;
+  title: string;
+  description: string;
+  contentHash: string;
+  content: string;
+}
+
+export type ActiveProductSkillResource = Omit<ProductSkillResource, 'content'>;
 
 export interface ActiveProductSkill {
   skillId: string;
@@ -61,6 +89,7 @@ export interface ActiveProductSkill {
   description: string;
   contentHash: string;
   activationReason: 'objective_match';
+  resources: ActiveProductSkillResource[];
 }
 
 export const PRODUCT_SKILL_REGISTRY: readonly ProductSkillDefinition[] = [
@@ -77,7 +106,16 @@ export const PRODUCT_SKILL_REGISTRY: readonly ProductSkillDefinition[] = [
       'workspace_files.write',
       'workspace_files.delete',
     ],
-    resourceManifest: [],
+    resourceManifest: [
+      {
+        resourceId: DOCUMENT_FORMAT_RESOURCE_ID,
+        title: 'Document format handling',
+        description:
+          'Safety and preservation rules for editing text, binary, and container document formats.',
+        contentHash: canonicalHash(DOCUMENT_FORMAT_RESOURCE_CONTENT),
+        content: DOCUMENT_FORMAT_RESOURCE_CONTENT,
+      },
+    ],
     dataPolicy: 'preserve_source_policy',
     effectPolicy: 'explicit_user_intent',
     instructions: WORKSPACE_DOCUMENT_SKILL_INSTRUCTIONS,
@@ -100,12 +138,52 @@ export function selectProductSkills(
       skill.requiredCapabilities.every((capability) =>
         availableCapabilities.has(capability),
       ),
-  ).map(({ skillId, version, title, description, contentHash }) => ({
-    skillId,
-    version,
-    title,
-    description,
-    contentHash,
-    activationReason: 'objective_match',
-  }));
+  ).map(
+    ({
+      skillId,
+      version,
+      title,
+      description,
+      contentHash,
+      resourceManifest,
+    }) => ({
+      skillId,
+      version,
+      title,
+      description,
+      contentHash,
+      activationReason: 'objective_match',
+      resources: resourceManifest.map(
+        ({ resourceId, title, description, contentHash }) => ({
+          resourceId,
+          title,
+          description,
+          contentHash,
+        }),
+      ),
+    }),
+  );
+}
+
+export function resolveProductSkillResource(identity: {
+  skillId: unknown;
+  skillVersion: unknown;
+  skillContentHash: unknown;
+  resourceId: unknown;
+  resourceContentHash: unknown;
+}): (ProductSkillResource & { skillId: string; skillVersion: string }) | null {
+  const skill = PRODUCT_SKILL_REGISTRY.find(
+    (candidate) =>
+      candidate.skillId === identity.skillId &&
+      candidate.version === identity.skillVersion &&
+      candidate.contentHash === identity.skillContentHash,
+  );
+  const resource = skill?.resourceManifest.find(
+    (candidate) =>
+      candidate.resourceId === identity.resourceId &&
+      candidate.contentHash === identity.resourceContentHash,
+  );
+  return skill && resource
+    ? { ...resource, skillId: skill.skillId, skillVersion: skill.version }
+    : null;
 }

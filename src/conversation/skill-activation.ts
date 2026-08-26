@@ -99,6 +99,59 @@ export async function advanceSkillActivation(
   return repo.save(activation);
 }
 
+export async function recordLoadedSkillResource(
+  manager: EntityManager,
+  executionId: string,
+  resource: {
+    skillId: string;
+    skillVersion: string;
+    skillContentHash: string;
+    resourceId: string;
+    resourceContentHash: string;
+    operationId: string;
+  },
+): Promise<SkillActivationEntity> {
+  const repo = manager.getRepository(SkillActivationEntity);
+  const activation = await repo.findOne({
+    where: { executionId, skillId: resource.skillId },
+    lock: { mode: 'pessimistic_write' },
+  });
+  if (
+    !activation ||
+    activation.skillVersion !== resource.skillVersion ||
+    activation.contentHash !== resource.skillContentHash
+  ) {
+    throw new ConflictException('skill_activation_resource_mismatch');
+  }
+  if (activation.status !== 'active') {
+    throw new ConflictException('skill_activation_not_active');
+  }
+  const checkpoint = activation.checkpoint ?? {};
+  const loadedResources = Array.isArray(checkpoint.loadedResources)
+    ? checkpoint.loadedResources.filter(
+        (value): value is Record<string, unknown> =>
+          Boolean(value) && typeof value === 'object',
+      )
+    : [];
+  const identity = `${resource.resourceId}\0${resource.resourceContentHash}`;
+  if (
+    !loadedResources.some(
+      (value) =>
+        `${String(value.resourceId)}\0${String(value.contentHash)}` ===
+        identity,
+    )
+  ) {
+    loadedResources.push({
+      resourceId: resource.resourceId,
+      contentHash: resource.resourceContentHash,
+      operationId: resource.operationId,
+    });
+  }
+  activation.phase = 'resource_loaded';
+  activation.checkpoint = { ...checkpoint, loadedResources };
+  return repo.save(activation);
+}
+
 function terminalSkillStatus(
   status: ExecutionStatus,
 ): SkillActivationStatus | null {

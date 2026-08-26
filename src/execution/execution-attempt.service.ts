@@ -51,6 +51,8 @@ import {
 } from './execution-event.writer';
 import { ProgressEvent, projectExecutionProgress } from './execution-progress';
 import { ExecutionOperationKind } from './execution-operation-kind.enum';
+import { recordLoadedSkillResource } from '../conversation/skill-activation';
+import { SKILL_RESOURCE_LOAD_TOOL_NAME } from './execution-tool.constants';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -904,6 +906,11 @@ export class ExecutionAttemptService {
         const result = receipt.result as Record<string, unknown>;
         const status = result.status;
         const canonicalToolResult = toolResultFromStepResult(result);
+        const toolPlan = canonicalToolResult
+          ? await manager.getRepository(ExecutionToolPlanEntity).findOneBy({
+              operationId: operation.operationId,
+            })
+          : null;
         const acceptedStatus = canonicalToolResult?.status ?? status;
         const acceptedError = canonicalToolResult
           ? canonicalToolResult.error
@@ -985,6 +992,37 @@ export class ExecutionAttemptService {
         operation.currentAttemptId = null;
         operation.finishedAt = finishedAt;
         step.version += 1;
+        if (
+          acceptedStatus === 'succeeded' &&
+          canonicalToolResult &&
+          toolPlan?.toolName === SKILL_RESOURCE_LOAD_TOOL_NAME
+        ) {
+          const loaded = canonicalToolResult.structuredContent as Record<
+            string,
+            unknown
+          > | null;
+          const planned = toolPlan.plan.normalizedArguments as Record<
+            string,
+            unknown
+          >;
+          if (
+            loaded?.schemaVersion !== 'skill-resource/1' ||
+            loaded.skillId !== planned.skillId ||
+            loaded.skillVersion !== planned.skillVersion ||
+            loaded.resourceId !== planned.resourceId ||
+            loaded.contentHash !== planned.resourceContentHash
+          ) {
+            throw new ConflictException('skill_resource_result_mismatch');
+          }
+          await recordLoadedSkillResource(manager, execution.executionId, {
+            skillId: String(planned.skillId),
+            skillVersion: String(planned.skillVersion),
+            skillContentHash: String(planned.skillContentHash),
+            resourceId: String(planned.resourceId),
+            resourceContentHash: String(planned.resourceContentHash),
+            operationId: operation.operationId,
+          });
+        }
         await attemptRepo.save(attempt);
         await stepRepo.save(step);
         await operationRepo.save(operation);

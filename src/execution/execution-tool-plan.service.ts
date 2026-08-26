@@ -36,6 +36,9 @@ import {
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
+  SKILL_RESOURCE_LOAD_TOOL_CAPABILITY,
+  SKILL_RESOURCE_LOAD_TOOL_NAME,
+  SKILL_RESOURCE_LOAD_TOOL_VERSION,
   USER_TASK_CREATE_TOOL_CAPABILITY,
   USER_TASK_CREATE_TOOL_NAME,
   USER_TASK_CREATE_TOOL_VERSION,
@@ -55,6 +58,7 @@ import {
   WORKSPACE_FILE_DELETE_TOOL_NAME,
   WORKSPACE_FILE_DELETE_TOOL_VERSION,
 } from './execution-tool.constants';
+import { resolveProductSkillResource } from '../conversation/product-skill-registry';
 import { ExecutionConfirmationService } from './execution-confirmation.service';
 import { ExecutionService } from './execution.service';
 import { IndexedFileOwnerType } from '../indexed-file/indexed-file.entity';
@@ -349,6 +353,9 @@ export class ExecutionToolPlanService {
     }
     if (invocation.name === DOCUMENT_SEARCH_TOOL_NAME) {
       return this.prepareDocumentsSearch(invocation);
+    }
+    if (invocation.name === SKILL_RESOURCE_LOAD_TOOL_NAME) {
+      return this.prepareSkillResourceLoad(invocation, execution);
     }
     if (invocation.name === USER_TASK_CREATE_TOOL_NAME) {
       return this.prepareUserTaskCreate(invocation);
@@ -739,6 +746,97 @@ export class ExecutionToolPlanService {
       recoveryClass: 'read_only_replayable',
       idempotencyKey: null,
       requiredCapabilities: [DOCUMENT_SEARCH_TOOL_CAPABILITY],
+      deadline: new Date(preparedAt.getTime() + PLAN_TIMEOUT_MS).toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareSkillResourceLoad(
+    invocation: ToolInvocationContract,
+    execution: ExecutionEntity,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    if (
+      Object.keys(invocation.arguments).some(
+        (key) =>
+          ![
+            'skillId',
+            'skillVersion',
+            'skillContentHash',
+            'resourceId',
+            'resourceContentHash',
+          ].includes(key),
+      )
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const identity = {
+      skillId: invocation.arguments.skillId,
+      skillVersion: invocation.arguments.skillVersion,
+      skillContentHash: invocation.arguments.skillContentHash,
+      resourceId: invocation.arguments.resourceId,
+      resourceContentHash: invocation.arguments.resourceContentHash,
+    };
+    const selectedSkills = Array.isArray(
+      execution.payload?.activeCapabilities?.skills,
+    )
+      ? (execution.payload.activeCapabilities.skills as Array<{
+          skillId?: unknown;
+          version?: unknown;
+          contentHash?: unknown;
+          resources?: unknown;
+        }>)
+      : [];
+    const selected = selectedSkills.some(
+      (skill) =>
+        skill.skillId === identity.skillId &&
+        skill.version === identity.skillVersion &&
+        skill.contentHash === identity.skillContentHash &&
+        Array.isArray(skill.resources) &&
+        skill.resources.some(
+          (resource: Record<string, unknown>) =>
+            resource.resourceId === identity.resourceId &&
+            resource.contentHash === identity.resourceContentHash,
+        ),
+    );
+    const resource = resolveProductSkillResource(identity);
+    if (!selected || !resource) {
+      throw new BadRequestException('skill_resource_not_active');
+    }
+    const preparedAt = new Date();
+    const resourceKey = [
+      'product-skill',
+      resource.skillVersion,
+      resource.resourceId,
+      resource.contentHash,
+    ].join(':');
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: SKILL_RESOURCE_LOAD_TOOL_NAME,
+      descriptorVersion: SKILL_RESOURCE_LOAD_TOOL_VERSION,
+      normalizedArguments: identity as Record<string, unknown>,
+      resources: [
+        {
+          resourceKey,
+          mode: 'shared',
+          kind: 'product_skill_resource',
+          id: resource.resourceId,
+          version: resource.contentHash,
+        },
+      ],
+      effects: [],
+      policyDecision: {
+        decision: 'allowed',
+        rule: 'active_product_skill_resource_read',
+      },
+      confirmationRequirement: null,
+      recoveryClass: 'read_only_replayable',
+      idempotencyKey: null,
+      requiredCapabilities: [SKILL_RESOURCE_LOAD_TOOL_CAPABILITY],
       deadline: new Date(preparedAt.getTime() + PLAN_TIMEOUT_MS).toISOString(),
       preparedAt: preparedAt.toISOString(),
     };

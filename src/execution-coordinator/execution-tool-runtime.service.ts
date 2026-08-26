@@ -10,6 +10,9 @@ import {
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
+  SKILL_RESOURCE_LOAD_TOOL_CAPABILITY,
+  SKILL_RESOURCE_LOAD_TOOL_NAME,
+  SKILL_RESOURCE_LOAD_TOOL_VERSION,
   USER_TASK_CREATE_TOOL_CAPABILITY,
   USER_TASK_CREATE_TOOL_NAME,
   USER_TASK_CREATE_TOOL_VERSION,
@@ -29,6 +32,7 @@ import {
   WORKSPACE_FILE_DELETE_TOOL_NAME,
   WORKSPACE_FILE_DELETE_TOOL_VERSION,
 } from '../execution/execution-tool.constants';
+import { resolveProductSkillResource } from '../conversation/product-skill-registry';
 import {
   ToolPlanContract,
   ToolResultContract,
@@ -85,6 +89,7 @@ export class ExecutionToolRuntimeService {
         stepKinds: [ExecutionStepKind.TOOL],
         capabilities: [
           DOCUMENT_SEARCH_TOOL_CAPABILITY,
+          SKILL_RESOURCE_LOAD_TOOL_CAPABILITY,
           USER_TASK_CREATE_TOOL_CAPABILITY,
           AGENT_DELEGATE_TOOL_CAPABILITY,
           WORKSPACE_FILE_READ_TOOL_CAPABILITY,
@@ -117,6 +122,8 @@ export class ExecutionToolRuntimeService {
         result = await this.executeDocumentsSearch(plan);
       } else if (plan.toolName === AGENT_DELEGATE_TOOL_NAME) {
         result = await this.executeAgentDelegation(assignment, plan);
+      } else if (plan.toolName === SKILL_RESOURCE_LOAD_TOOL_NAME) {
+        result = this.executeSkillResourceLoad(plan);
       } else if (plan.toolName === WORKSPACE_FILE_READ_TOOL_NAME) {
         result = await this.executeWorkspaceFileRead(plan);
       } else if (plan.toolName === WORKSPACE_FILE_LIST_TOOL_NAME) {
@@ -200,6 +207,17 @@ export class ExecutionToolRuntimeService {
     if (plan.toolName === DOCUMENT_SEARCH_TOOL_NAME) {
       if (
         plan.descriptorVersion !== DOCUMENT_SEARCH_TOOL_VERSION ||
+        plan.policyDecision.decision !== 'allowed' ||
+        plan.confirmationRequirement !== null ||
+        plan.effects.length !== 0
+      ) {
+        throw new Error('tool_plan_not_executable');
+      }
+      return { plan, confirmationStatus: null };
+    }
+    if (plan.toolName === SKILL_RESOURCE_LOAD_TOOL_NAME) {
+      if (
+        plan.descriptorVersion !== SKILL_RESOURCE_LOAD_TOOL_VERSION ||
         plan.policyDecision.decision !== 'allowed' ||
         plan.confirmationRequirement !== null ||
         plan.effects.length !== 0
@@ -363,6 +381,37 @@ export class ExecutionToolRuntimeService {
       },
       artifactRefs: [],
       sourceRefs: [],
+      effects: [],
+      error: null,
+    };
+  }
+
+  private executeSkillResourceLoad(plan: ToolPlanContract): ToolResultContract {
+    const resource = resolveProductSkillResource({
+      skillId: plan.normalizedArguments.skillId,
+      skillVersion: plan.normalizedArguments.skillVersion,
+      skillContentHash: plan.normalizedArguments.skillContentHash,
+      resourceId: plan.normalizedArguments.resourceId,
+      resourceContentHash: plan.normalizedArguments.resourceContentHash,
+    });
+    if (!resource) throw new Error('skill_resource_integrity_mismatch');
+    return {
+      schemaVersion: 'tool-result/1',
+      operationId: plan.operationId,
+      toolCallId: plan.toolCallId,
+      status: 'succeeded',
+      content: resource.content,
+      structuredContent: {
+        schemaVersion: 'skill-resource/1',
+        skillId: resource.skillId,
+        skillVersion: resource.skillVersion,
+        resourceId: resource.resourceId,
+        contentHash: resource.contentHash,
+      },
+      artifactRefs: [],
+      sourceRefs: [
+        `product-skill:${resource.skillVersion}:${resource.resourceId}:${resource.contentHash}`,
+      ],
       effects: [],
       error: null,
     };

@@ -100,6 +100,7 @@ describe('ExecutionToolPlanService', () => {
         activeCapabilities: {
           tools: [
             'documents.search',
+            'skills.load_resource',
             'user_tasks.create',
             'agents.delegate',
             'browser.read_current_page',
@@ -109,6 +110,21 @@ describe('ExecutionToolPlanService', () => {
             'workspace_files.write',
             'workspace_files.delete',
           ].map((name) => ({ name })),
+          skills: [
+            {
+              skillId: 'workspace-document-workflow',
+              version: 'workspace-document-workflow/1',
+              contentHash:
+                'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+              resources: [
+                {
+                  resourceId: 'document-format-handling',
+                  contentHash:
+                    'sha256:ccb06824a5ed7559cac8327619cb3f8de834ee44f2fda7f0460c7501df1b179c',
+                },
+              ],
+            },
+          ],
         },
       },
     };
@@ -214,6 +230,54 @@ describe('ExecutionToolPlanService', () => {
     expect(operationRepo.save).not.toHaveBeenCalled();
     expect(execution.phase).toBe('tool_planning');
     expect(confirmations.createPending).toHaveBeenCalled();
+  });
+
+  it('pins a selected skill resource as a read-only plan', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'skills.load_resource',
+        arguments: {
+          skillId: 'workspace-document-workflow',
+          skillVersion: 'workspace-document-workflow/1',
+          skillContentHash:
+            'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+          resourceId: 'document-format-handling',
+          resourceContentHash:
+            'sha256:ccb06824a5ed7559cac8327619cb3f8de834ee44f2fda7f0460c7501df1b179c',
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'skills.load_resource',
+        descriptorVersion: 'skills.load_resource/1',
+        policyDecision: {
+          decision: 'allowed',
+          rule: 'active_product_skill_resource_read',
+        },
+        recoveryClass: 'read_only_replayable',
+        requiredCapabilities: ['tool.skills.load_resource/1'],
+      }),
+    );
+  });
+
+  it('rejects a resource that was not frozen in the active skill', async () => {
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'skills.load_resource',
+          arguments: {
+            skillId: 'workspace-document-workflow',
+            skillVersion: 'workspace-document-workflow/1',
+            skillContentHash:
+              'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+            resourceId: 'unknown',
+            resourceContentHash: 'sha256:' + '0'.repeat(64),
+          },
+        }),
+      ),
+    ).rejects.toThrow('skill_resource_not_active');
   });
 
   it('rejects a tool omitted from the frozen turn capability set', async () => {

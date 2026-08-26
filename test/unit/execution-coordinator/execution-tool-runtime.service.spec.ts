@@ -182,6 +182,41 @@ describe('ExecutionToolRuntimeService', () => {
     },
   });
 
+  const skillResourceAssignment = () => ({
+    ...assignment(),
+    work: {
+      taskType: 'skills.load_resource',
+      toolPlan: {
+        schemaVersion: 'tool-plan/1' as const,
+        operationId: OPERATION_ID,
+        toolCallId: TOOL_CALL_ID,
+        toolName: 'skills.load_resource',
+        descriptorVersion: 'skills.load_resource/1',
+        normalizedArguments: {
+          skillId: 'workspace-document-workflow',
+          skillVersion: 'workspace-document-workflow/1',
+          skillContentHash:
+            'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+          resourceId: 'document-format-handling',
+          resourceContentHash:
+            'sha256:ccb06824a5ed7559cac8327619cb3f8de834ee44f2fda7f0460c7501df1b179c',
+        },
+        resources: [],
+        effects: [],
+        policyDecision: {
+          decision: 'allowed' as const,
+          rule: 'active_product_skill_resource_read',
+        },
+        confirmationRequirement: null,
+        recoveryClass: 'read_only_replayable' as const,
+        idempotencyKey: null,
+        requiredCapabilities: ['tool.skills.load_resource/1'],
+        deadline: '2026-08-25T00:10:00.000Z',
+        preparedAt: '2026-08-25T00:00:00.000Z',
+      },
+    },
+  });
+
   const workspaceWriteAssignment = () => {
     const plan = {
       schemaVersion: 'tool-plan/1' as const,
@@ -292,6 +327,7 @@ describe('ExecutionToolRuntimeService', () => {
       stepKinds: [ExecutionStepKind.TOOL],
       capabilities: [
         'tool.documents.search/1',
+        'tool.skills.load_resource/1',
         'tool.user_tasks.create/1',
         'tool.agents.delegate/1',
         'tool.workspace_files.read/1',
@@ -345,6 +381,39 @@ describe('ExecutionToolRuntimeService', () => {
             }),
           },
           error: expect.objectContaining({ code: 'tool_execution_failed' }),
+        }),
+      }),
+    );
+  });
+
+  it('loads only the immutable packaged skill resource', async () => {
+    attempts.claimReadyStep
+      .mockReset()
+      .mockResolvedValueOnce(skillResourceAssignment())
+      .mockResolvedValueOnce(null);
+
+    await expect(service.executeReady()).resolves.toBe(1);
+
+    expect(attempts.receiveResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          output: {
+            kind: ExecutionStepKind.TOOL,
+            toolResult: expect.objectContaining({
+              status: 'succeeded',
+              content: expect.stringContaining('Document format handling'),
+              structuredContent: {
+                schemaVersion: 'skill-resource/1',
+                skillId: 'workspace-document-workflow',
+                skillVersion: 'workspace-document-workflow/1',
+                resourceId: 'document-format-handling',
+                contentHash:
+                  'sha256:ccb06824a5ed7559cac8327619cb3f8de834ee44f2fda7f0460c7501df1b179c',
+              },
+              effects: [],
+              error: null,
+            }),
+          },
         }),
       }),
     );

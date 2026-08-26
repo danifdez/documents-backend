@@ -23,6 +23,7 @@ describe('active capability selection', () => {
 
     expect(withoutFolder.tools.map(({ name }) => name)).toEqual([
       'documents.search',
+      'skills.load_resource',
       'user_tasks.create',
       'agents.delegate',
     ]);
@@ -68,6 +69,13 @@ describe('active capability selection', () => {
       }),
     ]);
     expect(withFolder.skills[0]).not.toHaveProperty('instructions');
+    expect(withFolder.skills[0].resources).toEqual([
+      expect.objectContaining({
+        resourceId: 'document-format-handling',
+        contentHash:
+          'sha256:ccb06824a5ed7559cac8327619cb3f8de834ee44f2fda7f0460c7501df1b179c',
+      }),
+    ]);
   });
 
   it('selects browser read only for a live paired browser', async () => {
