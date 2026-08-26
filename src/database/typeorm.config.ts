@@ -55,6 +55,7 @@ import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity
 import { ConversationSessionEntity } from '../conversation/conversation-session.entity';
 import { ConversationTurnEntity } from '../conversation/conversation-turn.entity';
 import { ConversationArtifactRevisionEntity } from '../conversation/conversation-artifact-revision.entity';
+import { ExecutionEffectJournalEntity } from '../execution/execution-effect-journal.entity';
 
 export const getTypeOrmConfig = async (
   configService: ConfigService,
@@ -122,6 +123,7 @@ export const getTypeOrmConfig = async (
       ConversationSessionEntity,
       ConversationTurnEntity,
       ConversationArtifactRevisionEntity,
+      ExecutionEffectJournalEntity,
     ],
     synchronize: false,
     // Apply pending migrations on every boot so that updates ship their schema

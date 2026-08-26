@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ResourceService } from 'src/resource/resource.service';
-import { ExecutionEntity } from 'src/execution/execution.entity';
-import { DocService } from 'src/doc/doc.service';
+import { ResourceService } from '../../resource/resource.service';
+import { ExecutionEntity } from '../../execution/execution.entity';
+import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
+import { DocEntity } from '../../doc/doc.entity';
+import { canonicalHash } from '../../execution/execution-canonical';
+
+class TargetDocumentNotFoundError extends Error {}
 
 @Injectable()
 export class SummarizeProcessor implements ExecutionProcessor {
@@ -11,7 +15,7 @@ export class SummarizeProcessor implements ExecutionProcessor {
 
   constructor(
     private readonly resourceService: ResourceService,
-    private readonly docService: DocService,
+    private readonly effectJournal: ExecutionEffectJournalService,
   ) {}
 
   canProcess(taskType: string): boolean {
@@ -50,17 +54,45 @@ export class SummarizeProcessor implements ExecutionProcessor {
 
     let message: string;
     if (targetDocId) {
-      const doc = await this.docService.findOne(targetDocId);
-      if (!doc) {
+      try {
+        await this.effectJournal.runVerified(
+          {
+            executionId: execution.executionId,
+            effectKey: `summarize-document-append:${targetDocId}`,
+            effectType: 'document_content_append',
+            resourceKey: `document:${targetDocId}`,
+            intent: { targetDocId, summary },
+          },
+          async (manager) => {
+            const repository = manager.getRepository(DocEntity);
+            const doc = await repository.findOne({
+              where: { id: targetDocId },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!doc) throw new TargetDocumentNotFoundError();
+            const before = doc.content || '';
+            const content = `${before}\n\n${summary}`;
+            doc.content = content;
+            await repository.save(doc);
+            const observed = await repository.findOneBy({ id: targetDocId });
+            if (observed?.content !== content) {
+              throw new Error('document_summary_effect_not_verified');
+            }
+            return {
+              documentId: targetDocId,
+              beforeContentHash: canonicalHash(before),
+              appendedContentHash: canonicalHash(summary),
+              afterContentHash: canonicalHash(content),
+            };
+          },
+        );
+      } catch (error) {
+        if (!(error instanceof TargetDocumentNotFoundError)) throw error;
         return {
           success: false,
           message: `Target document ${targetDocId} not found`,
         };
       }
-      const existing = doc.content || '';
-      await this.docService.update(targetDocId, {
-        content: `${existing}\n\n${summary}`,
-      });
       message = 'Document summarization appended to workspace document';
     } else {
       if (resourceId) {

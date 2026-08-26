@@ -13,6 +13,7 @@ import { ExecutionArtifactService } from './execution-artifact.service';
 import { ExecutionConfirmationController } from './execution-confirmation.controller';
 import { ExecutionConfirmationService } from './execution-confirmation.service';
 import { BrowserWorkController } from '../worker/browser-work.controller';
+import { ExecutionEffectJournalService } from './execution-effect-journal.service';
 
 @Module({
   imports: [DatabaseModule, WorkerModule],
@@ -31,6 +32,7 @@ import { BrowserWorkController } from '../worker/browser-work.controller';
     ExecutionProgressService,
     ExecutionArtifactService,
     ExecutionConfirmationService,
+    ExecutionEffectJournalService,
   ],
   exports: [
     ExecutionService,
@@ -41,6 +43,7 @@ import { BrowserWorkController } from '../worker/browser-work.controller';
     ExecutionProgressService,
     ExecutionArtifactService,
     ExecutionConfirmationService,
+    ExecutionEffectJournalService,
   ],
 })
 export class ExecutionModule {}

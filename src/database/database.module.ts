@@ -59,6 +59,7 @@ import { ConversationSessionEntity } from '../conversation/conversation-session.
 import { ConversationTurnEntity } from '../conversation/conversation-turn.entity';
 import { ConversationArtifactRevisionEntity } from '../conversation/conversation-artifact-revision.entity';
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
+import { ExecutionEffectJournalEntity } from '../execution/execution-effect-journal.entity';
 
 @Module({
   imports: [
@@ -126,6 +127,7 @@ import { SkillActivationEntity } from '../conversation/skill-activation.entity';
       ConversationTurnEntity,
       ConversationArtifactRevisionEntity,
       SkillActivationEntity,
+      ExecutionEffectJournalEntity,
     ]),
   ],
   providers: [...databaseProviders],
