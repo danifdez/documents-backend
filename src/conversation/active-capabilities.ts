@@ -2,6 +2,9 @@ import { EntityManager } from 'typeorm';
 import {
   AGENT_DELEGATE_TOOL_NAME,
   AGENT_DELEGATE_TOOL_VERSION,
+  BROWSER_NAVIGATE_TOOL_CAPABILITY,
+  BROWSER_NAVIGATE_TOOL_NAME,
+  BROWSER_NAVIGATE_TOOL_VERSION,
   BROWSER_READ_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_NAME,
   BROWSER_READ_TOOL_VERSION,
@@ -118,6 +121,11 @@ export async function buildActiveCapabilitySet(
   ) {
     tools.push(
       tool(BROWSER_READ_TOOL_NAME, BROWSER_READ_TOOL_VERSION, 'paired_browser'),
+      tool(
+        BROWSER_NAVIGATE_TOOL_NAME,
+        BROWSER_NAVIGATE_TOOL_VERSION,
+        'paired_browser',
+      ),
     );
   }
   return {
@@ -157,7 +165,10 @@ async function hasPairedBrowser(
       threshold: new Date(Date.now() - BROWSER_HEARTBEAT_MAX_AGE_MS),
     })
     .andWhere('worker.capabilities @> :capabilities::jsonb', {
-      capabilities: JSON.stringify([BROWSER_READ_TOOL_CAPABILITY]),
+      capabilities: JSON.stringify([
+        BROWSER_READ_TOOL_CAPABILITY,
+        BROWSER_NAVIGATE_TOOL_CAPABILITY,
+      ]),
     })
     .getExists();
 }

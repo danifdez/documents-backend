@@ -103,6 +103,7 @@ describe('ExecutionToolPlanService', () => {
             'skills.load_resource',
             'user_tasks.create',
             'agents.delegate',
+            'browser.navigate',
             'browser.read_current_page',
             'workspace_files.list',
             'workspace_files.search',
@@ -472,6 +473,70 @@ describe('ExecutionToolPlanService', () => {
     ).rejects.toThrow('invalid_arguments');
   });
 
+  it('prepares browser navigation as a confirmed effect-checked operation', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'browser.navigate',
+        arguments: {
+          url: '  https://example.test/next  ',
+          expectedCurrentUrl: 'https://example.test/current',
+        },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'browser.navigate',
+        descriptorVersion: 'browser.navigate/1',
+        normalizedArguments: {
+          url: 'https://example.test/next',
+          expectedCurrentUrl: 'https://example.test/current',
+        },
+        resources: [
+          {
+            resourceKey: 'browser:active-page',
+            mode: 'exclusive',
+            kind: 'browser_page',
+          },
+        ],
+        effects: [
+          expect.objectContaining({
+            effectClass: 'external_reversible',
+            resourceKey: 'browser:active-page',
+            verificationRequired: true,
+          }),
+        ],
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'paired_browser_navigation_requires_confirmation',
+        }),
+        confirmationRequirement: expect.objectContaining({
+          prompt: 'Navigate IA Browser to "https://example.test/next"?',
+          scope: 'once',
+        }),
+        recoveryClass: 'effect_checked',
+        idempotencyKey: `browser-navigate:${TOOL_CALL_ID}`,
+        requiredCapabilities: ['tool.browser.navigate/1'],
+      }),
+    );
+    expect(confirmations.createPending).toHaveBeenCalledWith(
+      manager,
+      execution,
+      prepared.plan,
+    );
+  });
+
+  it('rejects unsafe browser navigation URLs', async () => {
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'browser.navigate',
+          arguments: { url: 'javascript:alert(1)' },
+        }),
+      ),
+    ).rejects.toThrow('invalid_arguments');
+  });
+
   it('prepares a working-folder read for the personal assistant', async () => {
     execution.taskType = 'assistant-chat';
     execution.payload = {
@@ -764,6 +829,101 @@ describe('ExecutionToolPlanService', () => {
     ).rejects.toThrow('tool_budget_not_reserved');
     expect(stepRepo.save).not.toHaveBeenCalled();
     expect(operationRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('materializes approved browser navigation with its durable decision', async () => {
+    const confirmationId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca709';
+    const plan: ToolPlanContract = {
+      ...planContract(),
+      toolName: 'browser.navigate',
+      descriptorVersion: 'browser.navigate/1',
+      normalizedArguments: {
+        url: 'https://example.test/next',
+        expectedCurrentUrl: 'https://example.test/current',
+      },
+      resources: [
+        {
+          resourceKey: 'browser:active-page',
+          mode: 'exclusive',
+          kind: 'browser_page',
+        },
+      ],
+      effects: [
+        {
+          effectClass: 'external_reversible',
+          resourceKey: 'browser:active-page',
+          description: 'Navigate IA Browser',
+          reversible: true,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_navigation_requires_confirmation',
+      },
+      confirmationRequirement: {
+        confirmationId,
+        reason: 'Navigation changes the active page.',
+        prompt: 'Navigate?',
+        scope: 'once',
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-navigate:${TOOL_CALL_ID}`,
+      requiredCapabilities: ['tool.browser.navigate/1'],
+    };
+    execution.progressLedger = {
+      operationBudget: {
+        grants: {},
+        reservations: {
+          [TOOL_OPERATION_ID]: {
+            reservationId: RESERVATION_ID,
+            operationId: TOOL_OPERATION_ID,
+            operationKind: 'tool_call',
+            toolCallId: TOOL_CALL_ID,
+            status: 'reserved',
+          },
+        },
+      },
+    };
+    planRepo.findOne.mockResolvedValue({
+      operationId: TOOL_OPERATION_ID,
+      executionId: EXECUTION_ID,
+      toolCallId: TOOL_CALL_ID,
+      stepId: null,
+      plan,
+    });
+    invocationRepo.findOneBy.mockResolvedValue({
+      toolCallId: TOOL_CALL_ID,
+      causedByEventId: EVENT_ID,
+      invocation: invocation({ name: 'browser.navigate' }),
+    });
+    confirmations.decisionForPlan.mockResolvedValue({
+      confirmationId,
+      planHash: canonicalHash(plan),
+      status: 'approved',
+      decidedAt: new Date('2026-08-26T10:00:00.000Z'),
+    });
+
+    const step = await service.materialize(TOOL_CALL_ID, RESERVATION_ID);
+
+    expect(step).toEqual(
+      expect.objectContaining({
+        requiredCapabilities: ['tool.browser.navigate/1'],
+        resourceKeys: ['browser:active-page'],
+        work: expect.objectContaining({
+          taskType: 'browser.navigate',
+          confirmationDecision: expect.objectContaining({
+            confirmationId,
+            status: 'approved',
+          }),
+        }),
+      }),
+    );
+    expect(operationRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recoveryClass: ExecutionOperationRecoveryClass.EFFECT_CHECKED,
+      }),
+    );
   });
 
   it('rejects recursive delegation before creating another child', async () => {

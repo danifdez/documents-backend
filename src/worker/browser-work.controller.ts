@@ -26,7 +26,10 @@ import {
 } from '../execution/dto/execution-protocol.dto';
 import { WorkerKind } from './worker-kind.enum';
 import { WorkerService } from './worker.service';
-import { BROWSER_READ_TOOL_CAPABILITY } from '../execution/execution-tool.constants';
+import {
+  BROWSER_NAVIGATE_TOOL_CAPABILITY,
+  BROWSER_READ_TOOL_CAPABILITY,
+} from '../execution/execution-tool.constants';
 
 @Controller('browser-work')
 export class BrowserWorkController {
@@ -87,7 +90,10 @@ export class BrowserWorkController {
         workerId,
         ownerPrincipal: worker.ownerPrincipal ?? undefined,
         stepKinds: [ExecutionStepKind.TOOL],
-        capabilities: [BROWSER_READ_TOOL_CAPABILITY],
+        capabilities: [
+          BROWSER_READ_TOOL_CAPABILITY,
+          BROWSER_NAVIGATE_TOOL_CAPABILITY,
+        ],
         leaseDurationMs: body.leaseDurationMs,
         enforceRegisteredWorkerCapacity: true,
       },

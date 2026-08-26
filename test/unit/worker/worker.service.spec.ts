@@ -61,7 +61,10 @@ describe('WorkerService', () => {
     expect(registration.worker).toMatchObject({
       workerKind: WorkerKind.BROWSER,
       ownerPrincipal: '7',
-      capabilities: ['tool.browser.read_current_page/1'],
+      capabilities: [
+        'tool.browser.read_current_page/1',
+        'tool.browser.navigate/1',
+      ],
       stepKinds: [ExecutionStepKind.TOOL],
       maximumConcurrency: 1,
       status: 'online',

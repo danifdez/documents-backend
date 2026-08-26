@@ -19,6 +19,10 @@ export const BROWSER_READ_TOOL_NAME = 'browser.read_current_page';
 export const BROWSER_READ_TOOL_VERSION = 'browser.read_current_page/1';
 export const BROWSER_READ_TOOL_CAPABILITY = 'tool.browser.read_current_page/1';
 
+export const BROWSER_NAVIGATE_TOOL_NAME = 'browser.navigate';
+export const BROWSER_NAVIGATE_TOOL_VERSION = 'browser.navigate/1';
+export const BROWSER_NAVIGATE_TOOL_CAPABILITY = 'tool.browser.navigate/1';
+
 export const WORKSPACE_FILE_READ_TOOL_NAME = 'workspace_files.read';
 export const WORKSPACE_FILE_READ_TOOL_VERSION = 'workspace_files.read/1';
 export const WORKSPACE_FILE_READ_TOOL_CAPABILITY =

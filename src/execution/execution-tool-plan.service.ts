@@ -30,6 +30,9 @@ import {
   AGENT_DELEGATE_TOOL_CAPABILITY,
   AGENT_DELEGATE_TOOL_NAME,
   AGENT_DELEGATE_TOOL_VERSION,
+  BROWSER_NAVIGATE_TOOL_CAPABILITY,
+  BROWSER_NAVIGATE_TOOL_NAME,
+  BROWSER_NAVIGATE_TOOL_VERSION,
   BROWSER_READ_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_NAME,
   BROWSER_READ_TOOL_VERSION,
@@ -365,6 +368,9 @@ export class ExecutionToolPlanService {
     }
     if (invocation.name === BROWSER_READ_TOOL_NAME) {
       return this.prepareBrowserRead(invocation);
+    }
+    if (invocation.name === BROWSER_NAVIGATE_TOOL_NAME) {
+      return this.prepareBrowserNavigate(invocation);
     }
     if (invocation.name === WORKSPACE_FILE_READ_TOOL_NAME) {
       return this.prepareWorkspaceFileRead(invocation, execution);
@@ -900,6 +906,73 @@ export class ExecutionToolPlanService {
       deadline: new Date(
         preparedAt.getTime() + BROWSER_READ_TIMEOUT_MS,
       ).toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareBrowserNavigate(
+    invocation: ToolInvocationContract,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    const keys = Object.keys(invocation.arguments);
+    if (keys.some((key) => !['url', 'expectedCurrentUrl'].includes(key))) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const url =
+      typeof invocation.arguments.url === 'string'
+        ? invocation.arguments.url.trim()
+        : '';
+    const rawExpectedCurrentUrl = invocation.arguments.expectedCurrentUrl;
+    if (
+      !this.isHttpUrl(url) ||
+      (rawExpectedCurrentUrl !== undefined &&
+        (typeof rawExpectedCurrentUrl !== 'string' ||
+          !this.isHttpUrl(rawExpectedCurrentUrl.trim())))
+    ) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const expectedCurrentUrl =
+      typeof rawExpectedCurrentUrl === 'string'
+        ? rawExpectedCurrentUrl.trim()
+        : null;
+    const preparedAt = new Date();
+    const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
+    const resourceKey = 'browser:active-page';
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: BROWSER_NAVIGATE_TOOL_NAME,
+      descriptorVersion: BROWSER_NAVIGATE_TOOL_VERSION,
+      normalizedArguments: { url, expectedCurrentUrl },
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_reversible',
+          resourceKey,
+          description: `Navigate IA Browser to: ${url}`,
+          reversible: true,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_navigation_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Navigation changes the active page in the paired IA Browser.',
+        prompt: `Navigate IA Browser to "${url}"?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-navigate:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_NAVIGATE_TOOL_CAPABILITY],
+      deadline: expiresAt.toISOString(),
       preparedAt: preparedAt.toISOString(),
     };
   }

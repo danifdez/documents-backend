@@ -16,7 +16,10 @@ import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { WorkerEntity } from './worker.entity';
 import { WorkerRegistrationView } from './worker-registration.types';
 import { WorkerKind } from './worker-kind.enum';
-import { BROWSER_READ_TOOL_CAPABILITY } from '../execution/execution-tool.constants';
+import {
+  BROWSER_NAVIGATE_TOOL_CAPABILITY,
+  BROWSER_READ_TOOL_CAPABILITY,
+} from '../execution/execution-tool.constants';
 
 @Injectable()
 export class WorkerService {
@@ -75,7 +78,7 @@ export class WorkerService {
       name,
       WorkerKind.BROWSER,
       ownerPrincipal,
-      [BROWSER_READ_TOOL_CAPABILITY],
+      [BROWSER_READ_TOOL_CAPABILITY, BROWSER_NAVIGATE_TOOL_CAPABILITY],
       [ExecutionStepKind.TOOL],
       1,
       metadata,
@@ -198,7 +201,10 @@ export class WorkerService {
     const result = await this.repo.update(
       { id, workerKind: WorkerKind.BROWSER, revokedAt: IsNull() },
       {
-        capabilities: [BROWSER_READ_TOOL_CAPABILITY],
+        capabilities: [
+          BROWSER_READ_TOOL_CAPABILITY,
+          BROWSER_NAVIGATE_TOOL_CAPABILITY,
+        ],
         stepKinds: [ExecutionStepKind.TOOL],
         maximumConcurrency: 1,
         metadata: metadata as any,

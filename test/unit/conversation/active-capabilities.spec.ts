@@ -78,7 +78,7 @@ describe('active capability selection', () => {
     ]);
   });
 
-  it('selects browser read only for a live paired browser', async () => {
+  it('selects browser read and confirmed navigation for a live paired browser', async () => {
     const query = {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
@@ -104,9 +104,23 @@ describe('active capability selection', () => {
       descriptorVersion: 'browser.read_current_page/1',
       availabilityBasis: 'paired_browser',
     });
+    expect(selected.tools).toContainEqual({
+      name: 'browser.navigate',
+      descriptorVersion: 'browser.navigate/1',
+      availabilityBasis: 'paired_browser',
+    });
     expect(query.andWhere).toHaveBeenCalledWith(
       'worker.ownerPrincipal = :ownerPrincipal',
       { ownerPrincipal: 'paired-user' },
+    );
+    expect(query.andWhere).toHaveBeenCalledWith(
+      'worker.capabilities @> :capabilities::jsonb',
+      {
+        capabilities: JSON.stringify([
+          'tool.browser.read_current_page/1',
+          'tool.browser.navigate/1',
+        ]),
+      },
     );
   });
 
