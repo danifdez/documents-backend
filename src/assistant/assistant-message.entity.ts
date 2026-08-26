@@ -52,8 +52,7 @@ export class AssistantMessageEntity {
   error: string | null;
 
   /**
-   * Structured event payload for inline cards (e.g. {kind: 'memory_saved',
-   * entry: {...}}). Non-null only when role === 'event'.
+   * Structured event payload for inline cards. Non-null only for event rows.
    */
   @Column({ type: 'jsonb', nullable: true })
   event: Record<string, any> | null;

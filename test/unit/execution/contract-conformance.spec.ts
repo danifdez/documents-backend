@@ -328,6 +328,20 @@ describe('execution v1 contract', () => {
         contextual: {
           conversation: [{ role: 'user', content: 'Continue' }],
           continuityCapsule: capsule,
+          activeMemory: null,
+          activeCapabilities: {
+            schemaVersion: 'active-capability-set/1',
+            owner: { type: 'assistant', id: 1 },
+            selectionPolicy: 'backend-availability/1',
+            tools: [
+              {
+                name: 'documents.search',
+                descriptorVersion: 'documents.search/1',
+                availabilityBasis: 'core_read',
+              },
+            ],
+            skills: [],
+          },
         },
         volatile: {},
       },

@@ -1,6 +1,5 @@
 import { IngestContentProcessor } from '../../../src/execution-processor/processors/ingest-content-processor'; // eslint-disable-line max-len
 import { IndexedFileIngestProcessor } from '../../../src/execution-processor/processors/indexed-file-ingest-processor'; // eslint-disable-line max-len
-import { MemoryIngestProcessor } from '../../../src/execution-processor/processors/memory-ingest-processor'; // eslint-disable-line max-len
 import { VectorSearchProcessor } from '../../../src/execution-processor/processors/vector-search-processor'; // eslint-disable-line max-len
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
 
@@ -47,37 +46,6 @@ describe('vector domain finalizers', () => {
     });
   });
 
-  it('persists the memory embedding under Backend ownership', async () => {
-    const vectorStore = {
-      replaceMemory: jest.fn().mockResolvedValue(undefined),
-    };
-    const artifacts = {
-      readOutputJson: jest
-        .fn()
-        .mockResolvedValue([{ embedding: Array(384).fill(0) }]),
-    };
-    const processor = new MemoryIngestProcessor(
-      vectorStore as any,
-      artifacts as any,
-    );
-
-    await expect(
-      processor.process(
-        execution(
-          'memory-ingest',
-          { memoryId: 4, ownerId: 2, name: 'Editor', type: 'fact' },
-          { artifactCount: 1 },
-        ),
-      ),
-    ).resolves.toEqual({ success: true, memoryId: 4 });
-    expect(vectorStore.replaceMemory).toHaveBeenCalledWith(
-      4,
-      2,
-      expect.any(Array),
-      { memory_id: 4, name: 'Editor', type: 'fact' },
-    );
-  });
-
   it('persists indexed-file points only for the current checksum', async () => {
     const file = {
       id: 9,
@@ -119,32 +87,26 @@ describe('vector domain finalizers', () => {
   });
 
   it('requires a structured result for vector searches', async () => {
-    const memories = { find: jest.fn().mockResolvedValue([{ id: 1 }]) };
     const files = { find: jest.fn().mockResolvedValue([]) };
-    const processor = new VectorSearchProcessor(memories as any, files as any);
+    const processor = new VectorSearchProcessor(files as any);
     await expect(
       processor.process(
         execution(
-          'memory-search',
-          { ownerId: 2 },
-          { results: [{ memoryId: 1, score: 0.9 }] },
+          'indexed-file-search',
+          { ownerType: 'assistant', ownerId: 2 },
+          { results: [] },
         ),
       ),
-    ).resolves.toEqual({ success: true, resultCount: 1 });
-    expect(memories.find).toHaveBeenCalledWith({
-      where: { id: expect.anything(), assistantId: 2 },
-      select: ['id'],
-    });
+    ).resolves.toEqual({ success: true, resultCount: 0 });
     await expect(
-      processor.process(execution('memory-search', {}, {})),
+      processor.process(execution('indexed-file-search', {}, {})),
     ).rejects.toThrow('result requires results');
   });
 
   it('rejects indexed-file hits outside the execution owner scope', async () => {
-    const processor = new VectorSearchProcessor(
-      { find: jest.fn() } as any,
-      { find: jest.fn().mockResolvedValue([]) } as any,
-    );
+    const processor = new VectorSearchProcessor({
+      find: jest.fn().mockResolvedValue([]),
+    } as any);
 
     await expect(
       processor.process(

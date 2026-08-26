@@ -96,6 +96,21 @@ describe('ExecutionToolPlanService', () => {
       phase: 'backend_finalization',
       lastEventId: EVENT_ID,
       progressLedger: null,
+      payload: {
+        activeCapabilities: {
+          tools: [
+            'documents.search',
+            'user_tasks.create',
+            'agents.delegate',
+            'browser.read_current_page',
+            'workspace_files.list',
+            'workspace_files.search',
+            'workspace_files.read',
+            'workspace_files.write',
+            'workspace_files.delete',
+          ].map((name) => ({ name })),
+        },
+      },
     };
     executionRepo = {
       findOne: jest.fn().mockResolvedValue(execution),
@@ -199,6 +214,20 @@ describe('ExecutionToolPlanService', () => {
     expect(operationRepo.save).not.toHaveBeenCalled();
     expect(execution.phase).toBe('tool_planning');
     expect(confirmations.createPending).toHaveBeenCalled();
+  });
+
+  it('rejects a tool omitted from the frozen turn capability set', async () => {
+    execution.payload.activeCapabilities.tools = [{ name: 'documents.search' }];
+
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'user_tasks.create',
+          arguments: { title: 'Hidden mutation' },
+        }),
+      ),
+    ).rejects.toThrow('tool_not_available_for_turn');
+    expect(planRepo.save).not.toHaveBeenCalled();
   });
 
   it('returns the same plan for an identical repeated invocation', async () => {
@@ -336,7 +365,11 @@ describe('ExecutionToolPlanService', () => {
 
   it('prepares a working-folder read for the personal assistant', async () => {
     execution.taskType = 'assistant-chat';
-    execution.payload = { ownerId: 1, folderScope: '/workspace/project' };
+    execution.payload = {
+      ...execution.payload,
+      ownerId: 1,
+      folderScope: '/workspace/project',
+    };
 
     const prepared = await service.prepare(
       invocation({
@@ -368,7 +401,11 @@ describe('ExecutionToolPlanService', () => {
 
   it('prepares an agent working-folder write as a confirmed verified effect', async () => {
     execution.taskType = 'agent-chat';
-    execution.payload = { ownerId: 42, folderScope: '/workspace/project' };
+    execution.payload = {
+      ...execution.payload,
+      ownerId: 42,
+      folderScope: '/workspace/project',
+    };
 
     const prepared = await service.prepare(
       invocation({
@@ -410,7 +447,11 @@ describe('ExecutionToolPlanService', () => {
 
   it('prepares indexed folder search as optional scoped context', async () => {
     execution.taskType = 'assistant-chat';
-    execution.payload = { ownerId: 1, folderScope: '/workspace/project' };
+    execution.payload = {
+      ...execution.payload,
+      ownerId: 1,
+      folderScope: '/workspace/project',
+    };
 
     const prepared = await service.prepare(
       invocation({
@@ -441,7 +482,11 @@ describe('ExecutionToolPlanService', () => {
 
   it('accepts binary content and prepares deletion as a destructive effect', async () => {
     execution.taskType = 'agent-chat';
-    execution.payload = { ownerId: 42, folderScope: '/workspace/project' };
+    execution.payload = {
+      ...execution.payload,
+      ownerId: 42,
+      folderScope: '/workspace/project',
+    };
 
     const binary = await service.prepare(
       invocation({
@@ -487,7 +532,11 @@ describe('ExecutionToolPlanService', () => {
 
   it('uses the same physical resource lock when different owners share a folder', async () => {
     execution.taskType = 'assistant-chat';
-    execution.payload = { ownerId: 1, folderScope: '/workspace/shared' };
+    execution.payload = {
+      ...execution.payload,
+      ownerId: 1,
+      folderScope: '/workspace/shared',
+    };
     const assistantRead = await service.prepare(
       invocation({
         name: 'workspace_files.read',
@@ -496,7 +545,11 @@ describe('ExecutionToolPlanService', () => {
     );
 
     execution.taskType = 'agent-chat';
-    execution.payload = { ownerId: 42, folderScope: '/workspace/shared' };
+    execution.payload = {
+      ...execution.payload,
+      ownerId: 42,
+      folderScope: '/workspace/shared',
+    };
     const agentWrite = await service.prepare(
       invocation({
         toolCallId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca798',
@@ -512,7 +565,7 @@ describe('ExecutionToolPlanService', () => {
 
   it('rejects working-folder tools when the chat has no configured folder', async () => {
     execution.taskType = 'assistant-chat';
-    execution.payload = { ownerId: 1, folderScope: null };
+    execution.payload = { ...execution.payload, ownerId: 1, folderScope: null };
 
     await expect(
       service.prepare(

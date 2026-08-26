@@ -41,7 +41,7 @@ import { ArchiveModule } from './archive/archive.module';
 import { FeatureFlagModule } from './common/feature-flags.module';
 import { InferenceModule } from './common/inference.module';
 import { AssistantModule } from './assistant/assistant.module';
-import { AssistantMemoryModule } from './assistant-memory/assistant-memory.module';
+import { MemoryModule } from './memory/memory.module';
 import { IndexedFileModule } from './indexed-file/indexed-file.module';
 import { AgentModule } from './agent/agent.module';
 import { AppStateModule } from './app-state/app-state.module';
@@ -102,7 +102,7 @@ export class AppModule {
       CalendarEventModule,
       UserTaskModule,
       AssistantModule,
-      AssistantMemoryModule,
+      MemoryModule,
       IndexedFileModule,
       AgentModule,
       AuthorModule,

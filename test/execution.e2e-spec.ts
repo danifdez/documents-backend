@@ -23,6 +23,7 @@ import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
 import { CreateConversationSessions1757668140730 } from '../migrations/1757668140730-CreateConversationSessions';
+import { ReplaceAssistantMemory1757668140740 } from '../migrations/1757668140740-ReplaceAssistantMemory';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -78,6 +79,7 @@ import { AssistantMessageEntity } from '../src/assistant/assistant-message.entit
 import { AgentMessageEntity } from '../src/agent/agent-message.entity';
 import { AssistantEntity } from '../src/assistant/assistant.entity';
 import { AgentEntity } from '../src/agent/agent.entity';
+import { MemoryEntryEntity } from '../src/memory/memory-entry.entity';
 
 loadEnv({ path: '.env' });
 
@@ -124,6 +126,7 @@ describe('execution PostgreSQL integration', () => {
         AgentMessageEntity,
         AssistantEntity,
         AgentEntity,
+        MemoryEntryEntity,
       ],
     });
     await dataSource.initialize();
@@ -153,6 +156,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionToolPlans1757668140420().up(runner);
     await new CreateExecutionConfirmations1757668140720().up(runner);
     await new CreateConversationSessions1757668140730().up(runner);
+    await new ReplaceAssistantMemory1757668140740().up(runner);
     await runner.query(`
       INSERT INTO "assistants" ("id", "name", "icon", "sub")
       VALUES (1, 'Assistant', '◇', 'Personal assistant')
@@ -164,7 +168,8 @@ describe('execution PostgreSQL integration', () => {
     await runner.release();
 
     const config = {
-      get: (_key: string, fallback?: unknown) => fallback,
+      get: (key: string, fallback?: unknown) =>
+        key === 'FEATURE_BROWSER_FEDERATION' ? 'true' : fallback,
     } as any;
     budgets = new ExecutionProgressService(dataSource, config);
     service = new ExecutionService(
@@ -216,6 +221,12 @@ describe('execution PostgreSQL integration', () => {
         "agent_messages"
       RESTART IDENTITY CASCADE
     `);
+    await dataSource.query(
+      `UPDATE "assistants" SET "folder_scope" = NULL WHERE "id" = 1`,
+    );
+    await dataSource.query(
+      `UPDATE "agents" SET "folder_scope" = NULL WHERE "id" = 1`,
+    );
   });
 
   const progress = (context: any, instanceId: string) => ({
@@ -301,6 +312,18 @@ describe('execution PostgreSQL integration', () => {
         ...payload,
       })
     ).execution;
+
+  const activeCapabilities = (...names: string[]) => ({
+    schemaVersion: 'active-capability-set/1',
+    owner: { type: 'assistant', id: 1 },
+    selectionPolicy: 'backend-availability/1',
+    tools: names.map((name) => ({
+      name,
+      descriptorVersion: `${name}/1`,
+      availabilityBasis: 'core_read',
+    })),
+    skills: [],
+  });
 
   it('creates only canonical execution control columns', async () => {
     const columns = await dataSource.query(`
@@ -894,7 +917,7 @@ describe('execution PostgreSQL integration', () => {
     const created = await service.create(
       'tool-plan-test',
       ExecutionPriority.NORMAL,
-      {},
+      { activeCapabilities: activeCapabilities('documents.search') },
     );
     const stepsBefore = await dataSource
       .getRepository(ExecutionStepEntity)
@@ -950,7 +973,10 @@ describe('execution PostgreSQL integration', () => {
     const created = await service.create(
       'tool-plan-test',
       ExecutionPriority.NORMAL,
-      { ownerId: 42 },
+      {
+        ownerId: 42,
+        activeCapabilities: activeCapabilities('user_tasks.create'),
+      },
       { ownerPrincipal },
     );
     const toolCallId = randomUUID();
@@ -1049,7 +1075,7 @@ describe('execution PostgreSQL integration', () => {
     const created = await service.create(
       'tool-plan-test',
       ExecutionPriority.NORMAL,
-      {},
+      { activeCapabilities: activeCapabilities('user_tasks.create') },
       { ownerPrincipal },
     );
     const prepared = await toolPlanService.prepare({
@@ -1515,6 +1541,13 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('routes a browser tool request through IA Browser and into the next inference', async () => {
+    const browserId = randomUUID();
+    await workerService.enrollBrowser(
+      browserId,
+      'ia-browser-agent-loop-e2e',
+      'agent-loop-e2e',
+      { runtime: 'test' },
+    );
     const created = await createChat(
       'assistant_chat',
       'Find the harness plan',
@@ -1619,13 +1652,6 @@ describe('execution PostgreSQL integration', () => {
         .findOneByOrFail({ stepId: assignment!.stepId }),
     ).resolves.toMatchObject({ continuationProcessedAt: expect.any(Date) });
 
-    const browserId = randomUUID();
-    await workerService.enrollBrowser(
-      browserId,
-      'ia-browser-agent-loop-e2e',
-      'agent-loop-e2e',
-      { runtime: 'test' },
-    );
     const browserAssignment = await attemptService.claimReadyStep({
       workerId: browserId,
       ownerPrincipal: 'agent-loop-e2e',
@@ -2269,6 +2295,124 @@ describe('execution PostgreSQL integration', () => {
         ownerId: 1,
       }),
     ).resolves.toMatchObject({ activeTurnId: null });
+  });
+
+  it('freezes consented owner memory into the active turn context', async () => {
+    const memoryRepo = dataSource.getRepository(MemoryEntryEntity);
+    const values = {
+      name: 'Preferred editor',
+      type: 'fact' as const,
+      body: 'The preferred editor is Neovim',
+    };
+    const memory = await memoryRepo.save(
+      memoryRepo.create({
+        assistantId: 1,
+        agentId: null,
+        ...values,
+        contentHash: canonicalHash(values),
+        sourceKind: 'manual',
+        sourceExecutionId: null,
+        sourceTurnId: null,
+        sourceMessageId: null,
+        sourceArtifactId: null,
+        sourceArtifactRevision: null,
+        consentStatus: 'granted',
+        consentBasis: 'explicit_user_action',
+        consentedAt: new Date(),
+        dataClassification: 'workspace',
+        purpose: 'conversation_memory',
+        allowedDestinations: ['documents', 'documents-models'],
+      }),
+    );
+    const agentMemory = await memoryRepo.save(
+      memoryRepo.create({
+        assistantId: null,
+        agentId: 1,
+        ...values,
+        contentHash: canonicalHash(values),
+        sourceKind: 'manual',
+        sourceExecutionId: null,
+        sourceTurnId: null,
+        sourceMessageId: null,
+        sourceArtifactId: null,
+        sourceArtifactRevision: null,
+        consentStatus: 'granted',
+        consentBasis: 'explicit_user_action',
+        consentedAt: new Date(),
+        dataClassification: 'workspace',
+        purpose: 'conversation_memory',
+        allowedDestinations: ['documents', 'documents-models'],
+      }),
+    );
+
+    const execution = await createChat(
+      'assistant_chat',
+      'Which editor do I prefer?',
+      { ownerPrincipal: 'memory-e2e' },
+    );
+    memory.body = 'Changed after the turn started';
+    await memoryRepo.save(memory);
+
+    expect(execution.payload.activeMemory).toMatchObject({
+      schemaVersion: 'active-memory/1',
+      owner: { type: 'assistant', id: 1 },
+      activeEntries: [
+        {
+          entryId: memory.id,
+          body: 'The preferred editor is Neovim',
+          consent: { status: 'granted' },
+          provenance: { sourceKind: 'manual' },
+        },
+      ],
+    });
+
+    const agentExecution = await createChat(
+      'agent_chat',
+      'Which editor do I prefer?',
+      { ownerPrincipal: 'agent-memory-e2e' },
+    );
+    expect(agentExecution.payload.activeMemory).toMatchObject({
+      owner: { type: 'agent', id: 1 },
+      candidates: [expect.objectContaining({ entryId: agentMemory.id })],
+      activeEntries: [expect.objectContaining({ entryId: agentMemory.id })],
+    });
+    const agentCandidates = (
+      agentExecution.payload.activeMemory as {
+        candidates: Array<{ entryId: string }>;
+      }
+    ).candidates;
+    expect(agentCandidates).not.toContainEqual(
+      expect.objectContaining({ entryId: memory.id }),
+    );
+  });
+
+  it('selects folder tools from persisted owner state rather than client payload', async () => {
+    await dataSource.query(
+      `UPDATE "assistants" SET "folder_scope" = '/workspace/real' WHERE "id" = 1`,
+    );
+
+    const accepted = await service.createForChat(
+      'assistant_chat',
+      'Read the workspace files',
+      { ownerPrincipal: 'folder-capability-e2e' },
+      { ownerId: 1, folderScope: '/workspace/spoofed' },
+    );
+    const capabilityNames = (
+      accepted.execution.payload.activeCapabilities as {
+        tools: Array<{ name: string }>;
+      }
+    ).tools.map(({ name }) => name);
+
+    expect(accepted.execution.payload.folderScope).toBe('/workspace/real');
+    expect(capabilityNames).toEqual(
+      expect.arrayContaining([
+        'workspace_files.list',
+        'workspace_files.search',
+        'workspace_files.read',
+        'workspace_files.write',
+        'workspace_files.delete',
+      ]),
+    );
   });
 
   it('persists one conversation lane and promotes queued turns in order', async () => {

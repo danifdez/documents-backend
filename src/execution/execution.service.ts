@@ -71,6 +71,8 @@ import {
   buildActiveConversationContext,
   freezeActiveContextArtifact,
 } from '../conversation/conversation-context';
+import { buildActiveMemoryContext } from '../memory/active-memory';
+import { buildActiveCapabilitySet } from '../conversation/active-capabilities';
 
 export {
   canonicalHash,
@@ -469,9 +471,31 @@ export class ExecutionService {
       throw new ConflictException('queued_turn_execution_missing');
     }
     const activeContext = buildActiveConversationContext(revision);
+    const ownerConfig = await this.conversationOwnerConfig(
+      manager,
+      session.ownerType,
+      session.ownerId,
+    );
     nextExecution.payload = {
       ...(nextExecution.payload ?? {}),
+      folderScope: ownerConfig.folderScope,
+      ...(session.ownerType === 'agent'
+        ? { systemPrompt: ownerConfig.systemPrompt }
+        : {}),
       ...activeContext,
+      activeMemory: await buildActiveMemoryContext(
+        manager,
+        session.ownerType,
+        session.ownerId,
+        userMessage.content,
+      ),
+      activeCapabilities: await buildActiveCapabilitySet(manager, {
+        ownerType: session.ownerType,
+        ownerId: session.ownerId,
+        ownerPrincipal: nextExecution.ownerPrincipal,
+        folderScope: ownerConfig.folderScope,
+        browserFederationEnabled: this.browserFederationEnabled(),
+      }),
     };
     await executionRepo.save(nextExecution);
     const contextArtifact = await freezeActiveContextArtifact(manager, {
@@ -927,13 +951,19 @@ export class ExecutionService {
     }
 
     return this.dataSource.transaction(async (manager) => {
-      const ownerTable = ownerType === 'assistant' ? 'assistants' : 'agents';
-      const ownerRows = await manager.query(
-        `SELECT "id" FROM "${ownerTable}" WHERE "id" = $1 FOR UPDATE`,
-        [ownerId],
+      const ownerConfig = await this.conversationOwnerConfig(
+        manager,
+        ownerType,
+        ownerId,
+        true,
       );
-      if (!ownerRows.length)
-        throw new NotFoundException(`${ownerType}_not_found`);
+      const canonicalPayload = {
+        ...payload,
+        folderScope: ownerConfig.folderScope,
+        ...(ownerType === 'agent'
+          ? { systemPrompt: ownerConfig.systemPrompt }
+          : {}),
+      };
 
       const sessionRepo = manager.getRepository(ConversationSessionEntity);
       let session = await sessionRepo.findOne({
@@ -1031,8 +1061,24 @@ export class ExecutionService {
       await sessionRepo.save(session);
 
       const executionPayload = activeRevision
-        ? { ...payload, ...buildActiveConversationContext(activeRevision) }
-        : { ...payload };
+        ? {
+            ...canonicalPayload,
+            ...buildActiveConversationContext(activeRevision),
+            activeMemory: await buildActiveMemoryContext(
+              manager,
+              ownerType,
+              ownerId,
+              safeMessage,
+            ),
+            activeCapabilities: await buildActiveCapabilitySet(manager, {
+              ownerType,
+              ownerId,
+              ownerPrincipal: scope.ownerPrincipal,
+              folderScope: ownerConfig.folderScope,
+              browserFederationEnabled: this.browserFederationEnabled(),
+            }),
+          }
+        : canonicalPayload;
       const execution = manager.getRepository(ExecutionEntity).create({
         executionId,
         rootExecutionId,
@@ -1176,6 +1222,35 @@ export class ExecutionService {
       }
       return { execution: await manager.save(execution), userMessage };
     });
+  }
+
+  private async conversationOwnerConfig(
+    manager: EntityManager,
+    ownerType: ConversationOwnerType,
+    ownerId: number,
+    lock = false,
+  ): Promise<{ folderScope: string | null; systemPrompt: string | null }> {
+    const table = ownerType === 'assistant' ? 'assistants' : 'agents';
+    const systemPrompt =
+      ownerType === 'assistant'
+        ? 'NULL::text AS "systemPrompt"'
+        : '"system_prompt" AS "systemPrompt"';
+    const rows = await manager.query(
+      `SELECT "folder_scope" AS "folderScope", ${systemPrompt}
+       FROM "${table}" WHERE "id" = $1${lock ? ' FOR UPDATE' : ''}`,
+      [ownerId],
+    );
+    if (!rows.length) throw new NotFoundException(`${ownerType}_not_found`);
+    return {
+      folderScope:
+        typeof rows[0].folderScope === 'string' ? rows[0].folderScope : null,
+      systemPrompt:
+        typeof rows[0].systemPrompt === 'string' ? rows[0].systemPrompt : null,
+    };
+  }
+
+  private browserFederationEnabled(): boolean {
+    return this.config.get('FEATURE_BROWSER_FEDERATION') === 'true';
   }
 
   async create(

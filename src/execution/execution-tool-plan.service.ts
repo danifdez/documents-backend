@@ -269,6 +269,8 @@ export class ExecutionToolPlanService {
               payload: {
                 conversation: [{ role: 'user', content: goal }],
                 delegationMode: true,
+                activeMemory: null,
+                activeCapabilities: null,
                 ...(execution.payload?.conversationContext
                   ? {
                       conversationContext:
@@ -335,6 +337,16 @@ export class ExecutionToolPlanService {
     invocation: ToolInvocationContract,
     execution: ExecutionEntity,
   ): ToolPlanContract {
+    const selectedTools = Array.isArray(
+      execution.payload?.activeCapabilities?.tools,
+    )
+      ? (execution.payload.activeCapabilities.tools as Array<{
+          name?: unknown;
+        }>)
+      : [];
+    if (!selectedTools.some((tool) => tool.name === invocation.name)) {
+      throw new BadRequestException('tool_not_available_for_turn');
+    }
     if (invocation.name === DOCUMENT_SEARCH_TOOL_NAME) {
       return this.prepareDocumentsSearch(invocation);
     }

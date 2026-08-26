@@ -41,7 +41,6 @@ import { EntitiesBatchTranslationStrategy } from './processors/translate/entitie
 import { EntityTranslationStrategy } from './processors/translate/entity-translation.strategy';
 import { ExecutionModule } from '../execution/execution.module';
 import { VectorModule } from '../vector/vector.module';
-import { MemoryIngestProcessor } from './processors/memory-ingest-processor';
 import { VectorSearchProcessor } from './processors/vector-search-processor';
 
 @Module({})
@@ -66,7 +65,6 @@ export class ExecutionProcessorModule {
       AskProcessor,
       TranscribeProcessor,
       SearchProcessor,
-      MemoryIngestProcessor,
       VectorSearchProcessor,
       AssistantChatProcessor,
       IndexedFileExtractionProcessor,

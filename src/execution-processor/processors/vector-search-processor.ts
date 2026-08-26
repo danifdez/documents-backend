@@ -3,19 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
-import { MemoryEntryEntity } from '../../assistant-memory/memory-entry.entity';
 import { IndexedFileEntity } from '../../indexed-file/indexed-file.entity';
 
 @Injectable()
 export class VectorSearchProcessor implements ExecutionProcessor {
-  private readonly taskTypes = new Set([
-    'memory-search',
-    'indexed-file-search',
-  ]);
+  private readonly taskTypes = new Set(['indexed-file-search']);
 
   constructor(
-    @InjectRepository(MemoryEntryEntity)
-    private readonly memoryRepository: Repository<MemoryEntryEntity>,
     @InjectRepository(IndexedFileEntity)
     private readonly indexedFileRepository: Repository<IndexedFileEntity>,
   ) {}
@@ -31,30 +25,8 @@ export class VectorSearchProcessor implements ExecutionProcessor {
     if (!Array.isArray(result?.results)) {
       throw new Error(`${execution.taskType} result requires results`);
     }
-    if (execution.taskType === 'memory-search') {
-      await this.validateMemoryResults(execution, result.results);
-    } else {
-      await this.validateIndexedFileResults(execution, result.results);
-    }
+    await this.validateIndexedFileResults(execution, result.results);
     return { success: true, resultCount: result.results.length };
-  }
-
-  private async validateMemoryResults(
-    execution: ExecutionEntity,
-    results: unknown[],
-  ): Promise<void> {
-    const ownerId = this.positiveId(execution.payload['ownerId']);
-    const ids = this.resultIds(results, 'memoryId');
-    if (!ids.length) return;
-    const rows = await this.memoryRepository.find({
-      where: { id: In(ids), assistantId: ownerId },
-      select: ['id'],
-    });
-    this.assertSameIds(
-      ids,
-      rows.map((row) => row.id),
-      'memory-search',
-    );
   }
 
   private async validateIndexedFileResults(

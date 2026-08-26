@@ -55,6 +55,8 @@ export interface ActiveContextSnapshot {
     contextual: {
       conversation: unknown;
       continuityCapsule: unknown;
+      activeMemory: unknown;
+      activeCapabilities: unknown;
     };
     volatile: Record<string, unknown>;
   };
@@ -137,6 +139,8 @@ export async function freezeActiveContextArtifact(
       contextual: {
         conversation: input.effectivePayload.conversation ?? [],
         continuityCapsule: input.effectivePayload.continuityCapsule ?? null,
+        activeMemory: input.effectivePayload.activeMemory ?? null,
+        activeCapabilities: input.effectivePayload.activeCapabilities ?? null,
       },
       volatile: selectPayloadFields(input.effectivePayload, [
         'toolHistory',

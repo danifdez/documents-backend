@@ -115,42 +115,6 @@ export class VectorStoreService {
     });
   }
 
-  async replaceMemory(
-    memoryId: number,
-    assistantId: number,
-    embedding: number[],
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    if (
-      !Number.isInteger(memoryId) ||
-      memoryId <= 0 ||
-      !Number.isInteger(assistantId) ||
-      assistantId <= 0
-    ) {
-      throw new Error('Memory vector identity is invalid');
-    }
-    const point = this.validatePoint({
-      id: String(memoryId),
-      embedding,
-      payload,
-    });
-    await this.dataSource.query(
-      `INSERT INTO memory_vectors
-         (memory_id, embedding, assistant_id, payload)
-       VALUES ($1, $2::vector, $3, $4::jsonb)
-       ON CONFLICT (memory_id) DO UPDATE SET
-         embedding = EXCLUDED.embedding,
-         assistant_id = EXCLUDED.assistant_id,
-         payload = EXCLUDED.payload`,
-      [
-        memoryId,
-        this.vectorLiteral(point.embedding),
-        String(assistantId),
-        JSON.stringify(point.payload),
-      ],
-    );
-  }
-
   async deleteWorkspaceSource(sourceId: string): Promise<void> {
     await this.dataSource.query('DELETE FROM rag_chunks WHERE source_id = $1', [
       sourceId,
@@ -200,21 +164,6 @@ export class VectorStoreService {
        ORDER BY id
        LIMIT $2`,
       [ownerTag, this.safeLimit(limit)],
-    );
-    return rows.map((row) => this.rowToCandidate(row));
-  }
-
-  async memoryCandidates(
-    assistantId: number,
-    limit = MAX_CANDIDATES,
-  ): Promise<VectorCandidate[]> {
-    const rows = await this.dataSource.query(
-      `SELECT memory_id::text AS id, embedding::text AS embedding, payload
-       FROM memory_vectors
-       WHERE assistant_id = $1
-       ORDER BY memory_id
-       LIMIT $2`,
-      [String(assistantId), this.safeLimit(limit)],
     );
     return rows.map((row) => this.rowToCandidate(row));
   }
