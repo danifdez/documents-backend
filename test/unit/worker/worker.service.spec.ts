@@ -164,24 +164,39 @@ describe('WorkerService', () => {
   });
 
   it('revokes only a browser owned by the current principal', async () => {
-    const queryBuilder = repo.createQueryBuilder!() as any;
     const worker = buildWorker({
       workerKind: WorkerKind.BROWSER,
       ownerPrincipal: '7',
       credentialHash: `sha256:${'a'.repeat(64)}`,
     });
-    queryBuilder.getOne.mockResolvedValue(worker);
-    repo.save.mockImplementation((saved) => Promise.resolve(saved));
+    repo.update = jest.fn().mockResolvedValue({ affected: 1 });
 
     await service.revokeBrowser(worker.id, '7');
 
-    expect(repo.save).toHaveBeenCalledWith(
+    expect(repo.update).toHaveBeenCalledWith(
+      {
+        id: worker.id,
+        workerKind: WorkerKind.BROWSER,
+        ownerPrincipal: '7',
+      },
       expect.objectContaining({
         status: 'revoked',
         credentialHash: null,
         revokedAt: expect.any(Date),
       }),
     );
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('does not revoke a browser owned by another principal', async () => {
+    repo.update = jest.fn().mockResolvedValue({ affected: 0 });
+
+    await expect(
+      service.revokeBrowser(
+        '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+        'other-owner',
+      ),
+    ).rejects.toThrow('browser_installation_not_found');
   });
 
   it('derives active assignments and available concurrency', async () => {

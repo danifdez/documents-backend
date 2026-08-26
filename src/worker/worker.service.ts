@@ -168,21 +168,17 @@ export class WorkerService {
   }
 
   async revokeBrowser(id: string, ownerPrincipal: string): Promise<void> {
-    const worker = await this.repo
-      .createQueryBuilder('worker')
-      .addSelect('worker.credentialHash')
-      .where('worker.id = :id', { id })
-      .getOne();
-    if (!worker || worker.workerKind !== WorkerKind.BROWSER) {
+    const result = await this.repo.update(
+      { id, workerKind: WorkerKind.BROWSER, ownerPrincipal },
+      {
+        status: 'revoked',
+        revokedAt: new Date(),
+        credentialHash: null,
+      },
+    );
+    if (!result.affected) {
       throw new NotFoundException('browser_installation_not_found');
     }
-    if (worker.ownerPrincipal !== ownerPrincipal) {
-      throw new ForbiddenException('worker_identity_owner_mismatch');
-    }
-    worker.status = 'revoked';
-    worker.revokedAt = new Date();
-    worker.credentialHash = null;
-    await this.repo.save(worker);
   }
 
   async heartbeatModels(

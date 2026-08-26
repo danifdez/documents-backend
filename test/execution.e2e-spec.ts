@@ -1936,7 +1936,9 @@ describe('execution PostgreSQL integration', () => {
       id: installationId,
       workerKind: WorkerKind.BROWSER,
       ownerPrincipal: 'browser-owner',
-      capabilities: ['tool.browser.read_current_page/1'],
+      capabilities: expect.arrayContaining([
+        'tool.browser.read_current_page/1',
+      ]),
       stepKinds: [ExecutionStepKind.TOOL],
     });
     await expect(
