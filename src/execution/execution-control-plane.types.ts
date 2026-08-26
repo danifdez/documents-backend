@@ -31,6 +31,7 @@ export interface GrantExecutionStepAttemptInput {
 
 export interface ClaimExecutionStepInput {
   workerId: string;
+  ownerPrincipal?: string;
   stepKinds: ExecutionStepKind[];
   capabilities: string[];
   leaseDurationMs: number;

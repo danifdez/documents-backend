@@ -62,7 +62,7 @@ describe('WorkerService', () => {
       workerKind: WorkerKind.BROWSER,
       ownerPrincipal: '7',
       capabilities: ['browser.read'],
-      stepKinds: [ExecutionStepKind.TOOL, ExecutionStepKind.VERIFICATION],
+      stepKinds: [ExecutionStepKind.VERIFICATION],
       maximumConcurrency: 1,
       status: 'online',
       revokedAt: null,

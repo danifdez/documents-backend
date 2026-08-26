@@ -75,7 +75,7 @@ export class WorkerService {
       WorkerKind.BROWSER,
       ownerPrincipal,
       ['browser.read'],
-      [ExecutionStepKind.TOOL, ExecutionStepKind.VERIFICATION],
+      [ExecutionStepKind.VERIFICATION],
       1,
       metadata,
     );
@@ -198,7 +198,7 @@ export class WorkerService {
       { id, workerKind: WorkerKind.BROWSER, revokedAt: IsNull() },
       {
         capabilities: ['browser.read'],
-        stepKinds: [ExecutionStepKind.TOOL, ExecutionStepKind.VERIFICATION],
+        stepKinds: [ExecutionStepKind.VERIFICATION],
         maximumConcurrency: 1,
         metadata: metadata as any,
         status: 'online',

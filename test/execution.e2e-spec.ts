@@ -1565,6 +1565,90 @@ describe('execution PostgreSQL integration', () => {
       ),
     ).rejects.toThrow('invalid_worker_credential');
 
+    await service.create(
+      'browser-read-current-page',
+      ExecutionPriority.NORMAL,
+      {},
+      {
+        ownerPrincipal: 'different-owner',
+        initialStep: {
+          stepKind: ExecutionStepKind.VERIFICATION,
+          work: { taskType: 'browser-read-current-page', payload: {} },
+          requiredCapabilities: ['browser.read'],
+        },
+      },
+    );
+    const owned = await service.create(
+      'browser-read-current-page',
+      ExecutionPriority.NORMAL,
+      {},
+      {
+        ownerPrincipal: 'browser-owner',
+        initialStep: {
+          stepKind: ExecutionStepKind.VERIFICATION,
+          work: { taskType: 'browser-read-current-page', payload: {} },
+          requiredCapabilities: ['browser.read'],
+        },
+      },
+    );
+    const assignment = await attemptService.claimReadyStep({
+      workerId: installationId,
+      ownerPrincipal: 'browser-owner',
+      stepKinds: [ExecutionStepKind.VERIFICATION],
+      capabilities: ['browser.read'],
+      leaseDurationMs: 60_000,
+      enforceRegisteredWorkerCapacity: true,
+    });
+    expect(assignment).toMatchObject({ executionId: owned.executionId });
+    await expect(
+      attemptService.startAttempt(assignment!.attemptId, installationId),
+    ).resolves.toMatchObject({ status: ExecutionStepAttemptStatus.RUNNING });
+    await expect(
+      attemptService.startAttempt(assignment!.attemptId, installationId),
+    ).resolves.toMatchObject({ status: ExecutionStepAttemptStatus.RUNNING });
+
+    const result = {
+      schemaVersion: 'step-result/1',
+      executionId: assignment!.executionId,
+      stepId: assignment!.stepId,
+      operationId: assignment!.operationId,
+      attemptId: assignment!.attemptId,
+      stepKind: ExecutionStepKind.VERIFICATION,
+      status: 'succeeded',
+      runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
+      artifactRefs: [],
+      error: null,
+      output: {
+        kind: ExecutionStepKind.VERIFICATION,
+        page: {
+          url: 'https://example.test',
+          text: 'Example page',
+          truncated: false,
+        },
+      },
+    };
+    await expect(
+      attemptService.receiveResult({
+        executionId: assignment!.executionId,
+        stepId: assignment!.stepId,
+        operationId: assignment!.operationId,
+        attemptId: assignment!.attemptId,
+        workerId: installationId,
+        result,
+      }),
+    ).resolves.toMatchObject({ code: 'received' });
+    await expect(
+      attemptService.receiveResult({
+        executionId: assignment!.executionId,
+        stepId: assignment!.stepId,
+        operationId: assignment!.operationId,
+        attemptId: assignment!.attemptId,
+        workerId: installationId,
+        result,
+      }),
+    ).resolves.toMatchObject({ code: 'duplicate' });
+    await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+
     await workerService.revokeBrowser(installationId, 'browser-owner');
     await expect(
       workerService.authenticate(

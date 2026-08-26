@@ -221,12 +221,16 @@ export class ExecutionAttemptService {
               WHERE "executions"."execution_id" = "execution_steps"."execution_id"
                 AND "executions"."status" IN ('queued', 'running')
                 AND "executions"."cancellation_requested_at" IS NULL
+                AND (
+                  $3::varchar IS NULL
+                  OR "executions"."owner_principal" = $3::varchar
+                )
             )
           ORDER BY "priority" DESC, "available_at", "created_at"
           LIMIT 1
           FOR UPDATE SKIP LOCKED
         `,
-        [stepKinds, capabilities],
+        [stepKinds, capabilities, input.ownerPrincipal ?? null],
       );
       if (!rows.length) return null;
 
@@ -301,6 +305,9 @@ export class ExecutionAttemptService {
       );
       if (attempt.leaseExpiresAt <= new Date()) {
         throw new ConflictException('lease_expired');
+      }
+      if (attempt.status === ExecutionStepAttemptStatus.RUNNING) {
+        return attempt;
       }
       assertAttemptTransition(
         attempt.status,

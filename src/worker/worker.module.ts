@@ -4,13 +4,12 @@ import { WorkerEntity } from './worker.entity';
 import { WorkerService } from './worker.service';
 import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
 import { WorkerController } from './worker.controller';
-import { BrowserWorkController } from './browser-work.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([WorkerEntity, ExecutionStepAttemptEntity]),
   ],
-  controllers: [WorkerController, BrowserWorkController],
+  controllers: [WorkerController],
   providers: [WorkerService],
   exports: [WorkerService],
 })

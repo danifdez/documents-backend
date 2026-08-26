@@ -12,6 +12,7 @@ import { ExecutionProgressService } from './execution-progress.service';
 import { ExecutionArtifactService } from './execution-artifact.service';
 import { ExecutionConfirmationController } from './execution-confirmation.controller';
 import { ExecutionConfirmationService } from './execution-confirmation.service';
+import { BrowserWorkController } from '../worker/browser-work.controller';
 
 @Module({
   imports: [DatabaseModule, WorkerModule],
@@ -19,6 +20,7 @@ import { ExecutionConfirmationService } from './execution-confirmation.service';
     ExecutionController,
     ExecutionProtocolController,
     ExecutionConfirmationController,
+    BrowserWorkController,
   ],
   providers: [
     ExecutionService,
