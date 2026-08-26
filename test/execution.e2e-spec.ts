@@ -16,6 +16,7 @@ import { AddExecutionStepFailureFinalization1757668140470 } from '../migrations/
 import { AddExecutionOutputArtifacts1757668140600 } from '../migrations/1757668140600-AddExecutionOutputArtifacts';
 import { AddWorkerConcurrency1757668140700 } from '../migrations/1757668140700-AddWorkerConcurrency';
 import { RemoveExecutionWorkspaceScope1757668140710 } from '../migrations/1757668140710-RemoveExecutionWorkspaceScope';
+import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -42,6 +43,8 @@ import { ExecutionOperationStatus } from '../src/execution/execution-operation-s
 import { ExecutionToolInvocationEntity } from '../src/execution/execution-tool-invocation.entity';
 import { ExecutionToolPlanEntity } from '../src/execution/execution-tool-plan.entity';
 import { ExecutionToolPlanService } from '../src/execution/execution-tool-plan.service';
+import { ExecutionConfirmationEntity } from '../src/execution/execution-confirmation.entity';
+import { ExecutionConfirmationService } from '../src/execution/execution-confirmation.service';
 import { ExecutionToolRuntimeService } from '../src/execution-coordinator/execution-tool-runtime.service';
 import { ExecutionAgentLoopService } from '../src/execution-coordinator/execution-agent-loop.service';
 import {
@@ -68,6 +71,7 @@ describe('execution PostgreSQL integration', () => {
   let attemptService: ExecutionAttemptService;
   let workerService: WorkerService;
   let toolPlanService: ExecutionToolPlanService;
+  let confirmationService: ExecutionConfirmationService;
   let agentLoopService: ExecutionAgentLoopService;
 
   beforeAll(async () => {
@@ -93,6 +97,7 @@ describe('execution PostgreSQL integration', () => {
         ExecutionOperationEntity,
         ExecutionToolInvocationEntity,
         ExecutionToolPlanEntity,
+        ExecutionConfirmationEntity,
         WorkerEntity,
       ],
     });
@@ -127,6 +132,7 @@ describe('execution PostgreSQL integration', () => {
     await new AddExecutionOutputArtifacts1757668140600().up(runner);
     await new AddWorkerConcurrency1757668140700().up(runner);
     await new RemoveExecutionWorkspaceScope1757668140710().up(runner);
+    await new CreateExecutionConfirmations1757668140720().up(runner);
     await runner.release();
 
     const config = {
@@ -150,9 +156,14 @@ describe('execution PostgreSQL integration', () => {
       dataSource.getRepository(WorkerEntity),
       dataSource.getRepository(ExecutionStepAttemptEntity),
     );
+    confirmationService = new ExecutionConfirmationService(
+      dataSource,
+      new ExecutionContractValidator(),
+    );
     toolPlanService = new ExecutionToolPlanService(
       dataSource,
       new ExecutionContractValidator(),
+      confirmationService,
     );
     agentLoopService = new ExecutionAgentLoopService(
       dataSource,
@@ -248,7 +259,6 @@ describe('execution PostgreSQL integration', () => {
           'checkpoint',
           'origin',
           'priority',
-          'wait_reason',
           'workspace_id'
         )
     `);
@@ -625,6 +635,154 @@ describe('execution PostgreSQL integration', () => {
     });
   });
 
+  it('persists, publishes and decides a confirmation tied to the exact tool plan', async () => {
+    const ownerPrincipal = 'confirmation-e2e';
+    const created = await service.create(
+      'tool-plan-test',
+      ExecutionPriority.NORMAL,
+      { ownerId: 42 },
+      { ownerPrincipal },
+    );
+    const toolCallId = randomUUID();
+    const prepared = await toolPlanService.prepare({
+      schemaVersion: 'tool-invocation/1',
+      toolCallId,
+      name: 'user_tasks.create',
+      arguments: { title: 'Review harness evidence', description: 'E2E' },
+      requester: {
+        kind: 'deterministic',
+        component: 'documents-backend',
+      },
+      executionContext: {
+        executionId: created.executionId,
+        causedByEventId: created.lastEventId!,
+        phase: 'agent_loop',
+        dataClassification: 'workspace',
+      },
+    });
+
+    expect(prepared.plan.plan.policyDecision.decision).toBe(
+      'confirmation_required',
+    );
+    await expect(
+      toolPlanService.materialize(toolCallId, randomUUID()),
+    ).resolves.toBeNull();
+    await expect(
+      confirmationService.activatePending(created.executionId),
+    ).resolves.toBe(1);
+
+    const waiting = await dataSource
+      .getRepository(ExecutionEntity)
+      .findOneByOrFail({ executionId: created.executionId });
+    expect(waiting).toMatchObject({
+      status: ExecutionStatus.WAITING,
+      phase: 'awaiting_confirmation',
+      waitReason: 'confirmation',
+      resumePhase: 'agent_loop',
+    });
+    const pending = await confirmationService.listPending({ ownerPrincipal });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      ownerId: 42,
+      taskType: 'tool-plan-test',
+      confirmation: {
+        operationId: prepared.plan.operationId,
+        toolCallId,
+        planHash: prepared.plan.planHash,
+        status: 'pending',
+      },
+    });
+
+    const decided = await confirmationService.decide(
+      pending[0].confirmation.confirmationId,
+      'approved',
+      { ownerPrincipal },
+    );
+    expect(decided).toMatchObject({
+      planHash: prepared.plan.planHash,
+      status: 'approved',
+    });
+    const resumed = await dataSource
+      .getRepository(ExecutionEntity)
+      .findOneByOrFail({ executionId: created.executionId });
+    expect(resumed).toMatchObject({
+      status: ExecutionStatus.QUEUED,
+      phase: 'agent_loop',
+      waitReason: null,
+      waitCondition: null,
+      resumePhase: null,
+      waitExpiresAt: null,
+    });
+    const events = await dataSource.getRepository(ExecutionEventEntity).find({
+      where: { executionId: created.executionId },
+      order: { sequence: 'ASC' },
+    });
+    expect(events.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining([
+        'confirmation.requested',
+        'confirmation.decided',
+      ]),
+    );
+    const publications = await dataSource
+      .getRepository(ExecutionOutboxEntity)
+      .find({ where: { executionId: created.executionId } });
+    expect(publications.map((publication) => publication.socketEvent)).toEqual(
+      expect.arrayContaining([
+        'executionConfirmationRequested',
+        'executionConfirmationDecided',
+      ]),
+    );
+  });
+
+  it('expires a requested confirmation and resumes it as not executable', async () => {
+    const ownerPrincipal = 'confirmation-expiry-e2e';
+    const created = await service.create(
+      'tool-plan-test',
+      ExecutionPriority.NORMAL,
+      {},
+      { ownerPrincipal },
+    );
+    const prepared = await toolPlanService.prepare({
+      schemaVersion: 'tool-invocation/1',
+      toolCallId: randomUUID(),
+      name: 'user_tasks.create',
+      arguments: { title: 'Expired task' },
+      requester: {
+        kind: 'deterministic',
+        component: 'documents-backend',
+      },
+      executionContext: {
+        executionId: created.executionId,
+        causedByEventId: created.lastEventId!,
+        phase: 'agent_loop',
+        dataClassification: 'workspace',
+      },
+    });
+    await confirmationService.activatePending(created.executionId);
+    const repository = dataSource.getRepository(ExecutionConfirmationEntity);
+    const confirmation = await repository.findOneByOrFail({
+      operationId: prepared.plan.operationId,
+    });
+    confirmation.expiresAt = new Date(Date.now() - 1_000);
+    await repository.save(confirmation);
+
+    await expect(confirmationService.expirePending()).resolves.toBe(1);
+    await expect(
+      repository.findOneByOrFail({
+        confirmationId: confirmation.confirmationId,
+      }),
+    ).resolves.toMatchObject({ status: 'expired', decidedBy: null });
+    await expect(
+      dataSource
+        .getRepository(ExecutionEntity)
+        .findOneByOrFail({ executionId: created.executionId }),
+    ).resolves.toMatchObject({
+      status: ExecutionStatus.QUEUED,
+      phase: 'agent_loop',
+      waitReason: null,
+    });
+  });
+
   it('executes documents.search and accepts its canonical ToolResult', async () => {
     const created = await service.createForChat(
       'assistant_chat',
@@ -698,6 +856,12 @@ describe('execution PostgreSQL integration', () => {
             collection: 'docs',
           },
         ],
+      },
+      {
+        createFromExecution: async () => {
+          throw new Error('unexpected_user_task_creation');
+        },
+        findByExecutionOperation: async () => null,
       },
     );
 
@@ -941,6 +1105,12 @@ describe('execution PostgreSQL integration', () => {
             collection: 'docs',
           },
         ],
+      },
+      {
+        createFromExecution: async () => {
+          throw new Error('unexpected_user_task_creation');
+        },
+        findByExecutionOperation: async () => null,
       },
     );
     await expect(runtime.executeReady()).resolves.toBe(1);

@@ -22,6 +22,7 @@ describe('ExecutionCoordinatorService', () => {
   let outboxService: Record<string, jest.Mock>;
   let toolRuntime: Record<string, jest.Mock>;
   let agentLoop: Record<string, jest.Mock>;
+  let confirmations: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionService = {
@@ -49,6 +50,9 @@ describe('ExecutionCoordinatorService', () => {
       materializeAcceptedToolRequests: jest.fn().mockResolvedValue(0),
       materializeReadyToolContinuations: jest.fn().mockResolvedValue(0),
     };
+    confirmations = {
+      expirePending: jest.fn(),
+    };
     service = new ExecutionCoordinatorService(
       executionService as any,
       executionAttemptService as any,
@@ -56,6 +60,7 @@ describe('ExecutionCoordinatorService', () => {
       outboxService as any,
       toolRuntime as any,
       agentLoop as any,
+      confirmations as any,
     );
   });
 
@@ -71,6 +76,13 @@ describe('ExecutionCoordinatorService', () => {
 
     await expect(service.executeReadyTools(2)).resolves.toBe(2);
     expect(toolRuntime.executeReady).toHaveBeenCalledWith(2);
+  });
+
+  it('expires durable confirmations through the coordinator', async () => {
+    confirmations.expirePending.mockResolvedValue(2);
+
+    await expect(service.expireConfirmations(2)).resolves.toBe(2);
+    expect(confirmations.expirePending).toHaveBeenCalledWith(2);
   });
 
   it('accepts durable result receipts through the attempt service', async () => {

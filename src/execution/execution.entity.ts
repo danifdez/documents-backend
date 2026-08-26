@@ -47,6 +47,18 @@ export class ExecutionEntity {
   @Column({ type: 'varchar', length: 80, nullable: true })
   phase: string | null;
 
+  @Column({ name: 'wait_reason', type: 'varchar', length: 40, nullable: true })
+  waitReason: string | null;
+
+  @Column({ name: 'wait_condition', type: 'jsonb', nullable: true })
+  waitCondition: Record<string, unknown> | null;
+
+  @Column({ name: 'resume_phase', type: 'varchar', length: 80, nullable: true })
+  resumePhase: string | null;
+
+  @Column({ name: 'wait_expires_at', type: 'timestamptz', nullable: true })
+  waitExpiresAt: Date | null;
+
   @Column({
     name: 'completion_kind',
     type: 'varchar',

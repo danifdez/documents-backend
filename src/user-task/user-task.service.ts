@@ -9,7 +9,7 @@ export class UserTaskService {
   constructor(
     @InjectRepository(UserTaskEntity)
     private readonly repository: Repository<UserTaskEntity>,
-  ) { }
+  ) {}
 
   async findAll(): Promise<UserTaskEntity[]> {
     return await this.repository.find({
@@ -53,12 +53,43 @@ export class UserTaskService {
     return await this.repository.save(created);
   }
 
-  async update(id: number, dto: UpdateUserTaskDto): Promise<UserTaskEntity | null> {
+  async createFromExecution(
+    operationId: string,
+    title: string,
+    description: string | null,
+  ): Promise<UserTaskEntity> {
+    const existing = await this.repository.findOneBy({
+      executionOperationId: operationId,
+    });
+    if (existing) return existing;
+    return this.repository.save(
+      this.repository.create({
+        title,
+        description,
+        status: 'pending',
+        reminderAt: null,
+        project: null,
+        executionOperationId: operationId,
+      }),
+    );
+  }
+
+  findByExecutionOperation(
+    operationId: string,
+  ): Promise<UserTaskEntity | null> {
+    return this.repository.findOneBy({ executionOperationId: operationId });
+  }
+
+  async update(
+    id: number,
+    dto: UpdateUserTaskDto,
+  ): Promise<UserTaskEntity | null> {
     const data: Partial<UserTaskEntity> = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.status !== undefined) data.status = dto.status;
-    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
+    if (dto.projectId !== undefined)
+      data.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
 
     // reminderAt precedence:
     //   1) status='completed' clears it (a closed task has no live reminder).

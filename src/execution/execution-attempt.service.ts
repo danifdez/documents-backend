@@ -896,11 +896,13 @@ export class ExecutionAttemptService {
             'domain_failure_finalization',
           ].includes(execution.phase ?? '');
         const finishedAt = new Date();
-        if (acceptedStatus === 'succeeded') {
+        if (['succeeded', 'not_executed'].includes(String(acceptedStatus))) {
           assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
           step.status = ExecutionStepStatus.COMPLETED;
           step.result = result.output ?? null;
-          operation.status = ExecutionOperationStatus.SUCCEEDED;
+          operation.status = canonicalToolResult
+            ? operationStatusForToolResult(canonicalToolResult.status)
+            : ExecutionOperationStatus.SUCCEEDED;
           operation.result = canonicalToolResult ?? result.output ?? null;
           operation.error = null;
         } else if (acceptedStatus === 'cancelled') {

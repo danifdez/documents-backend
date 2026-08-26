@@ -6,6 +6,7 @@ import { ExecutionService } from '../execution/execution.service';
 import { ExecutionOutboxService } from '../execution-outbox/execution-outbox.service';
 import { ExecutionToolRuntimeService } from './execution-tool-runtime.service';
 import { ExecutionAgentLoopService } from './execution-agent-loop.service';
+import { ExecutionConfirmationService } from '../execution/execution-confirmation.service';
 
 const TERMINAL_STATUSES = new Set<ExecutionStatus>([
   ExecutionStatus.COMPLETED,
@@ -24,6 +25,7 @@ export class ExecutionCoordinatorService {
     private readonly executionOutboxService: ExecutionOutboxService,
     private readonly executionToolRuntime: ExecutionToolRuntimeService,
     private readonly agentLoop: ExecutionAgentLoopService,
+    private readonly confirmations: ExecutionConfirmationService,
   ) {}
 
   prepareAgentWork(limit = 20): Promise<number> {
@@ -128,5 +130,9 @@ export class ExecutionCoordinatorService {
     return this.executionService.recoverStaleFinalizations(
       new Date(Date.now() - staleAfterMs),
     );
+  }
+
+  expireConfirmations(limit = 20): Promise<number> {
+    return this.confirmations.expirePending(limit);
   }
 }

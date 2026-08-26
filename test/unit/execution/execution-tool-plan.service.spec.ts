@@ -40,6 +40,7 @@ describe('ExecutionToolPlanService', () => {
   let invocationRepo: Record<string, jest.Mock>;
   let planRepo: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
+  let confirmations: Record<string, jest.Mock>;
 
   const invocation = (
     overrides: Partial<ToolInvocationContract> = {},
@@ -160,6 +161,11 @@ describe('ExecutionToolPlanService', () => {
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
     };
+    confirmations = {
+      createPending: jest.fn().mockResolvedValue(null),
+      decisionForPlan: jest.fn().mockResolvedValue(null),
+      activatePending: jest.fn().mockResolvedValue(0),
+    };
     service = new ExecutionToolPlanService(
       {
         transaction: jest.fn(async (callback) => callback(manager)),
@@ -168,6 +174,7 @@ describe('ExecutionToolPlanService', () => {
         assertToolInvocation: jest.fn(),
         assertToolPlan: jest.fn(),
       } as any,
+      confirmations as any,
     );
   });
 
@@ -187,6 +194,7 @@ describe('ExecutionToolPlanService', () => {
     expect(stepRepo.save).not.toHaveBeenCalled();
     expect(operationRepo.save).not.toHaveBeenCalled();
     expect(execution.phase).toBe('tool_planning');
+    expect(confirmations.createPending).toHaveBeenCalled();
   });
 
   it('returns the same plan for an identical repeated invocation', async () => {
@@ -208,6 +216,39 @@ describe('ExecutionToolPlanService', () => {
       duplicate: true,
     });
     expect(invocationRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('prepares a task creation as a confirmable reversible effect', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'user_tasks.create',
+        arguments: { title: 'Review harness', description: 'Check evidence' },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'user_tasks.create',
+        normalizedArguments: {
+          title: 'Review harness',
+          description: 'Check evidence',
+        },
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+        }),
+        confirmationRequirement: expect.objectContaining({
+          confirmationId: expect.any(String),
+          scope: 'once',
+        }),
+        recoveryClass: 'effect_checked',
+      }),
+    );
+    expect(confirmations.createPending).toHaveBeenCalledWith(
+      manager,
+      execution,
+      prepared.plan,
+    );
+    expect(stepRepo.save).not.toHaveBeenCalled();
   });
 
   it('rejects reuse of a tool call identity with different arguments', async () => {
@@ -288,5 +329,34 @@ describe('ExecutionToolPlanService', () => {
     ).rejects.toThrow('tool_budget_not_reserved');
     expect(stepRepo.save).not.toHaveBeenCalled();
     expect(operationRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps confirmable work unmaterialized while the decision is pending', async () => {
+    const plan = {
+      ...planContract(),
+      policyDecision: {
+        decision: 'confirmation_required' as const,
+        rule: 'user_task_create_requires_confirmation',
+      },
+      confirmationRequirement: {
+        confirmationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca709',
+        reason: 'Local mutation',
+        prompt: 'Create task?',
+        scope: 'once' as const,
+      },
+    };
+    planRepo.findOne.mockResolvedValue({
+      operationId: TOOL_OPERATION_ID,
+      executionId: EXECUTION_ID,
+      toolCallId: TOOL_CALL_ID,
+      stepId: null,
+      plan,
+    });
+    confirmations.decisionForPlan.mockResolvedValue({ status: 'pending' });
+
+    await expect(
+      service.materialize(TOOL_CALL_ID, RESERVATION_ID),
+    ).resolves.toBeNull();
+    expect(stepRepo.save).not.toHaveBeenCalled();
   });
 });

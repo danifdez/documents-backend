@@ -69,6 +69,13 @@ export class TaskScheduleService {
       if (expired > 0) {
         this.logger.log(`Expired ${expired} stale step attempt(s)`);
       }
+      const expiredConfirmations =
+        await this.executionCoordinatorService.expireConfirmations();
+      if (expiredConfirmations > 0) {
+        this.logger.log(
+          `Expired ${expiredConfirmations} pending confirmation(s)`,
+        );
+      }
       const recovered =
         await this.executionCoordinatorService.recoverStaleFinalizations(
           FINALIZATION_STALE_AFTER_MS,

@@ -229,6 +229,11 @@ export class ExecutionAgentLoopService {
         eventType: 'operation.finished',
       });
     let materialized = 0;
+    const preparedBatch: Array<{
+      call: ToolRequest;
+      plan: ExecutionToolPlanEntity;
+      reservationId: string;
+    }> = [];
     for (const [index, call] of calls.entries()) {
       try {
         const prepared = await this.toolPlans.prepare({
@@ -272,12 +277,11 @@ export class ExecutionAgentLoopService {
           },
         );
         if (!decision.granted) continue;
-        const alreadyMaterialized = prepared.plan.stepId !== null;
-        await this.toolPlans.materialize(
-          call.toolCallId,
-          decision.reservation.reservationId,
-        );
-        if (!alreadyMaterialized) materialized += 1;
+        preparedBatch.push({
+          call,
+          plan: prepared.plan,
+          reservationId: decision.reservation.reservationId,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(
@@ -285,6 +289,23 @@ export class ExecutionAgentLoopService {
         );
         throw error;
       }
+    }
+    let confirmationPending = false;
+    for (const item of preparedBatch) {
+      const alreadyMaterialized = item.plan.stepId !== null;
+      const step = await this.toolPlans.materialize(
+        item.call.toolCallId,
+        item.reservationId,
+      );
+      if (!step) {
+        confirmationPending = true;
+      } else if (!alreadyMaterialized) {
+        materialized += 1;
+      }
+    }
+    if (confirmationPending) {
+      await this.toolPlans.activatePendingConfirmations(execution.executionId);
+      return materialized;
     }
     await this.dataSource.transaction(async (manager) => {
       const locked = await manager.getRepository(ExecutionStepEntity).findOne({

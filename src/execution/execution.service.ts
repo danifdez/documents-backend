@@ -628,11 +628,15 @@ export class ExecutionService {
       if (!root) throw new NotFoundException('Root execution not found');
 
       const previousStatus = execution.status;
+      if (status === ExecutionStatus.WAITING) {
+        throw new ConflictException('waiting_requires_durable_condition');
+      }
       execution.status = status;
-      if (
-        status === ExecutionStatus.QUEUED ||
-        status === ExecutionStatus.WAITING
-      ) {
+      execution.waitReason = null;
+      execution.waitCondition = null;
+      execution.resumePhase = null;
+      execution.waitExpiresAt = null;
+      if (status === ExecutionStatus.QUEUED) {
         execution.phase = null;
       }
       if (TERMINAL_STATES.has(status)) {
@@ -1443,12 +1447,6 @@ export class ExecutionService {
       ) {
         throw new BadRequestException(
           'Runtime template completion has an ambiguous tool operation',
-        );
-      }
-      const result = payload?.['result'] as Record<string, any> | undefined;
-      if (result?.['pendingConfirmation']) {
-        throw new BadRequestException(
-          'Runtime template completion has a pending confirmation',
         );
       }
     }

@@ -10,6 +10,9 @@ import {
   ExecutionToolRuntimeService,
 } from './execution-tool-runtime.service';
 import { ExecutionAgentLoopService } from './execution-agent-loop.service';
+import { UserTaskModule } from '../user-task/user-task.module';
+import { UserTaskService } from '../user-task/user-task.service';
+import { USER_TASK_CREATE_PROVIDER } from './execution-tool-runtime.service';
 
 @Module({
   imports: [
@@ -17,12 +20,14 @@ import { ExecutionAgentLoopService } from './execution-agent-loop.service';
     ExecutionProcessorModule.register(),
     ExecutionOutboxModule,
     SearchModule,
+    UserTaskModule,
   ],
   providers: [
     ExecutionCoordinatorService,
     ExecutionAgentLoopService,
     ExecutionToolRuntimeService,
     { provide: DOCUMENT_SEARCH_PROVIDER, useExisting: SearchService },
+    { provide: USER_TASK_CREATE_PROVIDER, useExisting: UserTaskService },
   ],
   exports: [ExecutionCoordinatorService],
 })

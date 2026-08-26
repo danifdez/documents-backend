@@ -1453,7 +1453,6 @@ describe('ExecutionProgressService operation budget', () => {
   it.each([
     ['failed result', 'failed', { value: 'fixture' }],
     ['unknown result', 'unknown', { value: 'fixture' }],
-    ['pending confirmation', 'succeeded', { pendingConfirmation: true }],
   ] as const)(
     'does not signal a repeat after a %s',
     async (_label, status, result) => {

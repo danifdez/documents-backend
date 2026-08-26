@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+} from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
 
 @Entity({ name: 'user_tasks' })
@@ -18,7 +25,12 @@ export class UserTaskEntity {
   @Column({ type: 'timestamptz', name: 'reminder_at', nullable: true })
   reminderAt: Date | null;
 
-  @ManyToOne(() => ProjectEntity, (project) => project.userTasks, { nullable: true })
+  @Column({ name: 'execution_operation_id', type: 'uuid', nullable: true })
+  executionOperationId: string | null;
+
+  @ManyToOne(() => ProjectEntity, (project) => project.userTasks, {
+    nullable: true,
+  })
   project: ProjectEntity | null;
 
   @CreateDateColumn({ name: 'created_at' })

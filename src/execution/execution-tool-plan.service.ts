@@ -30,9 +30,14 @@ import {
   DOCUMENT_SEARCH_TOOL_CAPABILITY,
   DOCUMENT_SEARCH_TOOL_NAME,
   DOCUMENT_SEARCH_TOOL_VERSION,
+  USER_TASK_CREATE_TOOL_CAPABILITY,
+  USER_TASK_CREATE_TOOL_NAME,
+  USER_TASK_CREATE_TOOL_VERSION,
 } from './execution-tool.constants';
+import { ExecutionConfirmationService } from './execution-confirmation.service';
 
 const PLAN_TIMEOUT_MS = 30_000;
+const CONFIRMATION_TIMEOUT_MS = 15 * 60_000;
 
 export interface PreparedToolPlan {
   invocation: ExecutionToolInvocationEntity;
@@ -45,6 +50,7 @@ export class ExecutionToolPlanService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly contractValidator: ExecutionContractValidator,
+    private readonly confirmations: ExecutionConfirmationService,
   ) {}
 
   async prepare(invocation: ToolInvocationContract): Promise<PreparedToolPlan> {
@@ -95,7 +101,7 @@ export class ExecutionToolPlanService {
       );
       await this.assertCause(manager, execution, invocation);
       await this.assertRequester(manager, execution, invocation);
-      const planContract = this.prepareDocumentsSearch(invocation);
+      const planContract = this.preparePlan(invocation);
       this.contractValidator.assertToolPlan(
         planContract as unknown as Record<string, unknown>,
       );
@@ -123,7 +129,10 @@ export class ExecutionToolPlanService {
         materializedAt: null,
       });
       await planRepo.save(storedPlan);
-      execution.phase = 'tool_planning';
+      await this.confirmations.createPending(manager, execution, storedPlan);
+      if (execution.status !== ExecutionStatus.WAITING) {
+        execution.phase = 'tool_planning';
+      }
       await manager.getRepository(ExecutionEntity).save(execution);
       return {
         invocation: storedInvocation,
@@ -136,7 +145,7 @@ export class ExecutionToolPlanService {
   async materialize(
     toolCallId: string,
     budgetReservationId: string,
-  ): Promise<ExecutionStepEntity> {
+  ): Promise<ExecutionStepEntity | null> {
     this.assertUuid(toolCallId, 'toolCallId');
     this.assertUuid(budgetReservationId, 'budgetReservationId');
     return this.dataSource.transaction(async (manager) => {
@@ -162,15 +171,29 @@ export class ExecutionToolPlanService {
       }
 
       const plan = storedPlan.plan;
-      if (
-        plan.policyDecision.decision !== 'allowed' ||
-        plan.confirmationRequirement !== null
-      ) {
+      if (plan.policyDecision.decision === 'denied') {
         throw new ConflictException('tool_plan_not_allowed');
+      }
+      const confirmation = await this.confirmations.decisionForPlan(
+        manager,
+        storedPlan,
+      );
+      if (plan.policyDecision.decision === 'confirmation_required') {
+        if (!confirmation) {
+          throw new ConflictException('tool_confirmation_missing');
+        }
+        if (confirmation.status === 'pending') return null;
+      } else if (plan.confirmationRequirement !== null || confirmation) {
+        throw new ConflictException('tool_confirmation_mismatch');
       }
       const now = new Date();
       const deadline = new Date(plan.deadline);
-      if (deadline <= now) throw new ConflictException('tool_plan_expired');
+      if (
+        deadline <= now &&
+        (!confirmation || confirmation.status === 'approved')
+      ) {
+        throw new ConflictException('tool_plan_expired');
+      }
       const execution = await this.lockActiveExecution(
         manager,
         storedPlan.executionId,
@@ -200,7 +223,20 @@ export class ExecutionToolPlanService {
         executionId: execution.executionId,
         stepKind: ExecutionStepKind.TOOL,
         dependsOnStepIds,
-        work: { taskType: plan.toolName, toolPlan: plan },
+        work: {
+          taskType: plan.toolName,
+          toolPlan: plan,
+          ...(confirmation
+            ? {
+                confirmationDecision: {
+                  confirmationId: confirmation.confirmationId,
+                  planHash: confirmation.planHash,
+                  status: confirmation.status,
+                  decidedAt: confirmation.decidedAt?.toISOString() ?? null,
+                },
+              }
+            : {}),
+        },
         requiredCapabilities: plan.requiredCapabilities,
         resourceKeys: plan.resources.map((resource) => resource.resourceKey),
         budgetReservationId,
@@ -219,12 +255,23 @@ export class ExecutionToolPlanService {
     });
   }
 
+  activatePendingConfirmations(executionId: string): Promise<number> {
+    return this.confirmations.activatePending(executionId);
+  }
+
+  private preparePlan(invocation: ToolInvocationContract): ToolPlanContract {
+    if (invocation.name === DOCUMENT_SEARCH_TOOL_NAME) {
+      return this.prepareDocumentsSearch(invocation);
+    }
+    if (invocation.name === USER_TASK_CREATE_TOOL_NAME) {
+      return this.prepareUserTaskCreate(invocation);
+    }
+    throw new BadRequestException('tool_not_available');
+  }
+
   private prepareDocumentsSearch(
     invocation: ToolInvocationContract,
   ): ToolPlanContract {
-    if (invocation.name !== DOCUMENT_SEARCH_TOOL_NAME) {
-      throw new BadRequestException('tool_not_available');
-    }
     if (invocation.executionContext.dataClassification === 'secret') {
       throw new BadRequestException('data_policy_violation');
     }
@@ -263,6 +310,74 @@ export class ExecutionToolPlanService {
       idempotencyKey: null,
       requiredCapabilities: [DOCUMENT_SEARCH_TOOL_CAPABILITY],
       deadline: new Date(preparedAt.getTime() + PLAN_TIMEOUT_MS).toISOString(),
+      preparedAt: preparedAt.toISOString(),
+    };
+  }
+
+  private prepareUserTaskCreate(
+    invocation: ToolInvocationContract,
+  ): ToolPlanContract {
+    if (invocation.executionContext.dataClassification === 'secret') {
+      throw new BadRequestException('data_policy_violation');
+    }
+    const keys = Object.keys(invocation.arguments);
+    if (keys.some((key) => !['title', 'description'].includes(key))) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const title = String(invocation.arguments.title ?? '').trim();
+    if (!title || title.length > 200) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const rawDescription = invocation.arguments.description;
+    if (rawDescription !== undefined && typeof rawDescription !== 'string') {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const description =
+      typeof rawDescription === 'string' ? rawDescription.trim() || null : null;
+    if (description && description.length > 4_000) {
+      throw new BadRequestException('invalid_arguments');
+    }
+    const preparedAt = new Date();
+    const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
+    return {
+      schemaVersion: 'tool-plan/1',
+      operationId: randomUUID(),
+      toolCallId: invocation.toolCallId,
+      toolName: USER_TASK_CREATE_TOOL_NAME,
+      descriptorVersion: USER_TASK_CREATE_TOOL_VERSION,
+      normalizedArguments: { title, description },
+      resources: [
+        {
+          resourceKey: 'user-tasks:collection',
+          mode: 'exclusive',
+          kind: 'user_task_collection',
+        },
+      ],
+      effects: [
+        {
+          effectClass: 'local_reversible',
+          resourceKey: 'user-tasks:collection',
+          description: `Create task: ${title}`,
+          reversible: true,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'user_task_create_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Creating a task changes local workspace data.',
+        prompt: `Create the task "${title}"?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `user-task:${invocation.toolCallId}`,
+      requiredCapabilities: [USER_TASK_CREATE_TOOL_CAPABILITY],
+      deadline: expiresAt.toISOString(),
       preparedAt: preparedAt.toISOString(),
     };
   }

@@ -48,6 +48,7 @@ import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.
 import { ExecutionStepDependencyEntity } from '../execution/execution-step-dependency.entity';
 import { ExecutionStepEntity } from '../execution/execution-step.entity';
 import { ExecutionOutboxEntity } from '../execution-outbox/execution-outbox.entity';
+import { ExecutionConfirmationEntity } from '../execution/execution-confirmation.entity';
 import { ExecutionOperationEntity } from '../execution/execution-operation.entity';
 import { ExecutionToolInvocationEntity } from '../execution/execution-tool-invocation.entity';
 import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity';
@@ -111,6 +112,7 @@ export const getTypeOrmConfig = async (
       ExecutionStepAttemptEntity,
       ExecutionResultReceiptEntity,
       ExecutionOutboxEntity,
+      ExecutionConfirmationEntity,
       ExecutionOperationEntity,
       ExecutionToolInvocationEntity,
       ExecutionToolPlanEntity,

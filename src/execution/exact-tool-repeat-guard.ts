@@ -65,8 +65,7 @@ function succeededToolFinish(
       event.operationId === operationId &&
       (attemptId === ANY_ATTEMPT || event.attemptId === attemptId) &&
       event.payload?.operationKind === 'tool_call' &&
-      event.payload.status === 'succeeded' &&
-      event.payload.result?.pendingConfirmation !== true
+      event.payload.status === 'succeeded'
     );
   });
 }

@@ -54,6 +54,7 @@ import { ExecutionOutboxEntity } from '../execution-outbox/execution-outbox.enti
 import { ExecutionOperationEntity } from '../execution/execution-operation.entity';
 import { ExecutionToolInvocationEntity } from '../execution/execution-tool-invocation.entity';
 import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity';
+import { ExecutionConfirmationEntity } from '../execution/execution-confirmation.entity';
 
 @Module({
   imports: [
@@ -116,6 +117,7 @@ import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity
       ExecutionOperationEntity,
       ExecutionToolInvocationEntity,
       ExecutionToolPlanEntity,
+      ExecutionConfirmationEntity,
     ]),
   ],
   providers: [...databaseProviders],
