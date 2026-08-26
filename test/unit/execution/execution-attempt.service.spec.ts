@@ -406,6 +406,79 @@ describe('ExecutionAttemptService', () => {
     );
   });
 
+  it('retries an empty claim until work becomes available', async () => {
+    jest.useFakeTimers();
+    const assignment = {
+      schemaVersion: 'step-assignment/1' as const,
+      executionId: EXECUTION_ID,
+      stepId: STEP_ID,
+      operationId: OPERATION_ID,
+      attemptId: ATTEMPT_ID,
+      stepKind: ExecutionStepKind.SERVICE,
+      dependsOnStepIds: [],
+      inputArtifactRefs: [],
+      work: { taskType: 'detect-language' },
+      limits: { maxDurationMs: 30_000 },
+      deadline: new Date(Date.now() + 30_000).toISOString(),
+    };
+    const claim = jest
+      .spyOn(service, 'claimReadyStep')
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(assignment);
+
+    try {
+      const pending = service.claimReadyStepWithWait(
+        {
+          workerId: WORKER_ID,
+          stepKinds: [ExecutionStepKind.SERVICE],
+          capabilities: ['detect-language'],
+          leaseDurationMs: 30_000,
+        },
+        1_000,
+      );
+      await jest.advanceTimersByTimeAsync(1_000);
+
+      await expect(pending).resolves.toEqual(assignment);
+      expect(claim).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('performs one immediate claim when waiting is disabled', async () => {
+    const claim = jest.spyOn(service, 'claimReadyStep').mockResolvedValue(null);
+
+    await expect(
+      service.claimReadyStepWithWait(
+        {
+          workerId: WORKER_ID,
+          stepKinds: [ExecutionStepKind.SERVICE],
+          capabilities: ['detect-language'],
+          leaseDurationMs: 30_000,
+        },
+        0,
+      ),
+    ).resolves.toBeNull();
+    expect(claim).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an excessive claim wait before querying for work', async () => {
+    const claim = jest.spyOn(service, 'claimReadyStep');
+
+    await expect(
+      service.claimReadyStepWithWait(
+        {
+          workerId: WORKER_ID,
+          stepKinds: [ExecutionStepKind.SERVICE],
+          capabilities: ['detect-language'],
+          leaseDurationMs: 30_000,
+        },
+        30_001,
+      ),
+    ).rejects.toThrow('invalid_claim_wait');
+    expect(claim).not.toHaveBeenCalled();
+  });
+
   it('does not claim beyond the registered worker concurrency', async () => {
     workerRepo.findOne.mockResolvedValue({
       id: WORKER_ID,

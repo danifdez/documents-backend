@@ -85,6 +85,11 @@ export class ClaimExecutionStepDto {
   @Min(1_000)
   @Max(900_000)
   leaseDurationMs: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(30_000)
+  waitTimeoutMs: number;
 }
 
 export class RenewExecutionStepLeaseDto {

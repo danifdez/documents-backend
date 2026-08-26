@@ -54,6 +54,8 @@ import { ExecutionOperationKind } from './execution-operation-kind.enum';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
+const MAX_CLAIM_WAIT_MS = 30_000;
+const CLAIM_RETRY_INTERVAL_MS = 1_000;
 const MAX_OUTPUT_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -254,6 +256,32 @@ export class ExecutionAttemptService {
       );
       return assignment;
     });
+  }
+
+  async claimReadyStepWithWait(
+    input: ClaimExecutionStepInput,
+    waitTimeoutMs: number,
+  ): Promise<StepAssignment | null> {
+    if (
+      !Number.isInteger(waitTimeoutMs) ||
+      waitTimeoutMs < 0 ||
+      waitTimeoutMs > MAX_CLAIM_WAIT_MS
+    ) {
+      throw new BadRequestException('invalid_claim_wait');
+    }
+
+    const deadline = Date.now() + waitTimeoutMs;
+    while (true) {
+      const assignment = await this.claimReadyStep(input);
+      if (assignment || Date.now() >= deadline) return assignment;
+
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.min(CLAIM_RETRY_INTERVAL_MS, deadline - Date.now()),
+        ),
+      );
+    }
   }
 
   async startAttempt(

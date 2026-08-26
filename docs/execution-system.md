@@ -12,9 +12,10 @@ queued → running → waiting → running → completed
 
 Backend creates root executions transactionally with their first
 `execution.created` event and step graph. Models workers request compatible
-ready steps over HTTP; Backend locks the worker and step, enforces its declared
-concurrency, creates a lease-bound attempt and fences every result with that
-identity. Reentrant work is represented by
+ready steps through bounded long-poll HTTP claims. Backend retries outside any
+transaction, then locks the worker and step only for each atomic claim,
+enforces its declared concurrency, creates a lease-bound attempt and fences
+every result with that identity. Reentrant work is represented by
 successor steps or child executions that preserve `rootExecutionId` and
 reference `parentExecutionId`.
 
@@ -56,7 +57,9 @@ declared task capabilities.
   `policySummary` records that consent together with its evaluation purpose,
   `ai-train` destination, retention class, and caller access scope.
 - Models registers, heartbeats, claims steps, downloads artifacts and submits
-  results through `/models-work`; IA Browser never writes directly to PostgreSQL.
+  results through `/models-work`; a claim may wait up to 30 seconds and returns
+  `null` when its bounded wait expires. IA Browser never writes directly to
+  PostgreSQL.
 - `GET /workers` returns authenticated operational projections with effective
   capabilities, maximum/available concurrency and active attempt IDs. Active
   assignments are derived from unexpired `leased` and `running` attempts.

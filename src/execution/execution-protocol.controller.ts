@@ -74,11 +74,15 @@ export class ExecutionProtocolController {
     @Body() body: ClaimExecutionStepDto,
   ) {
     await this.workers.authenticate(workerId, credential);
-    return this.attempts.claimReadyStep({
-      workerId,
-      ...body,
-      enforceRegisteredWorkerCapacity: true,
-    });
+    const { waitTimeoutMs, ...claim } = body;
+    return this.attempts.claimReadyStepWithWait(
+      {
+        workerId,
+        ...claim,
+        enforceRegisteredWorkerCapacity: true,
+      },
+      waitTimeoutMs,
+    );
   }
 
   @Post('attempts/:attemptId/start')
