@@ -9,7 +9,7 @@ import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { ExecutionService } from '../execution/execution.service';
 import { DatasetRecordEntity } from './dataset-record.entity';
 import { DatasetEntity, DatasetField } from './dataset.entity';
-import { isDatasetAnalysisTaskType } from './dataset-analysis.types';
+import { parseDatasetAnalysisRequest } from './dataset-analysis-request';
 
 interface DatasetAnalysisField extends DatasetField {
   linkedLabels?: Record<string, string>;
@@ -32,44 +32,113 @@ export class DatasetAnalysisService {
   ) {}
 
   async createExecution(
-    operation: string,
+    operation: unknown,
     datasetIds: number[],
-    params: Record<string, unknown>,
+    params: unknown,
   ) {
-    if (!isDatasetAnalysisTaskType(operation)) {
-      throw new BadRequestException('Unsupported dataset analysis operation');
-    }
+    const request = parseDatasetAnalysisRequest(operation, params, 'summary');
     const ids = [...new Set(datasetIds.map(Number))].filter(
       (id) => Number.isInteger(id) && id > 0,
     );
     if (!ids.length) {
       throw new BadRequestException('At least one dataset is required');
     }
+    if (request.operation !== 'query' && ids.length !== 1) {
+      throw new BadRequestException(
+        'Only dataset query supports multiple datasets',
+      );
+    }
     const snapshots = await this.buildSnapshots(ids);
-    const payload = {
-      ...(ids.length === 1 ? { datasetId: ids[0] } : { datasetIds: ids }),
-      params,
+    const options = {
+      inputArtifacts: [
+        {
+          role: 'datasets',
+          kind: 'dataset_snapshot',
+          mediaType: 'application/json',
+          body: Buffer.from(
+            JSON.stringify({
+              schemaVersion: 'dataset-analysis-input/1',
+              datasets: snapshots,
+            }),
+          ),
+        },
+      ],
     };
-    return this.executionService.createCode(
-      operation,
-      ExecutionPriority.NORMAL,
-      payload,
-      {
-        inputArtifacts: [
+    switch (request.operation) {
+      case 'distribution':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'correlation':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'correlation-matrix':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'group-by':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'time-series':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'outliers':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'pivot-table':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'summary':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+      case 'query':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
           {
-            role: 'datasets',
-            kind: 'dataset_snapshot',
-            mediaType: 'application/json',
-            body: Buffer.from(
-              JSON.stringify({
-                schemaVersion: 'dataset-analysis-input/1',
-                datasets: snapshots,
-              }),
-            ),
+            ...(ids.length === 1 ? { datasetId: ids[0] } : { datasetIds: ids }),
+            params: request.params,
           },
-        ],
-      },
-    );
+          options,
+        );
+      case 'chart':
+        return this.executionService.createCode(
+          request.operation,
+          ExecutionPriority.NORMAL,
+          { datasetId: ids[0], params: request.params },
+          options,
+        );
+    }
   }
 
   private async buildSnapshots(

@@ -43,6 +43,7 @@ import { canonicalHash } from '../execution/execution-canonical';
 import { UserTaskEntity } from '../user-task/user-task.entity';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionStatus } from '../execution/execution-status.enum';
+import type { DelegatedAgentExecutionPayload } from '../execution/execution-task-payload.types';
 import {
   IndexedFileService,
   OwnerRef,
@@ -751,7 +752,9 @@ export class ExecutionToolRuntimeService {
     if (
       !child ||
       child.parentExecutionId !== assignment.executionId ||
-      child.payload?.delegationOperationId !== plan.operationId
+      child.taskType !== 'delegated-agent' ||
+      (child.payload as DelegatedAgentExecutionPayload)
+        .delegationOperationId !== plan.operationId
     ) {
       throw new Error('delegated_execution_not_found');
     }

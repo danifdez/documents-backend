@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionOperationKind } from '../execution/execution-operation-kind.enum';
 // eslint-disable-next-line max-len
 import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
@@ -21,14 +22,13 @@ export function buildDateExtractionWorkflowSteps(
         stepId: randomUUID(),
         stepKind: ExecutionStepKind.INFERENCE,
         work: {
-          taskType: 'date-extraction-map',
-          payload: {
+          ...executionTaskWork('date-extraction-map', {
             content,
             chunkIndex,
             charOffset,
             language,
             anchorDate,
-          },
+          }),
         },
         requiredCapabilities: ['date-extraction-map'],
       };
@@ -42,8 +42,7 @@ export function buildDateExtractionWorkflowSteps(
         stepKind: ExecutionStepKind.CODE,
         dependsOnStepIds: [],
         work: {
-          taskType: 'date-extraction-reduce',
-          payload: { partials: [] },
+          ...executionTaskWork('date-extraction-reduce', { partials: [] }),
         },
         requiredCapabilities: ['date-extraction-reduce'],
         operationKind: ExecutionOperationKind.ARTIFACT_PROCESSING,
@@ -56,8 +55,7 @@ export function buildDateExtractionWorkflowSteps(
     stepKind: ExecutionStepKind.CODE,
     dependsOnStepIds: dependencyStepIds,
     work: {
-      taskType: 'date-extraction-reduce',
-      payload: {},
+      ...executionTaskWork('date-extraction-reduce', {}),
       coordination: {
         kind: 'map-reduce-reduce/1',
         mapStepIds: dependencyStepIds,

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionOperationKind } from '../execution/execution-operation-kind.enum';
 // eslint-disable-next-line max-len
 import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
@@ -30,8 +31,11 @@ export function buildRelationshipExtractionWorkflowSteps(
     stepId: randomUUID(),
     stepKind: ExecutionStepKind.INFERENCE,
     work: {
-      taskType: 'relationship-extraction-map',
-      payload: { content, chunkIndex, entities },
+      ...executionTaskWork('relationship-extraction-map', {
+        content,
+        chunkIndex,
+        entities,
+      }),
     },
     requiredCapabilities: ['relationship-extraction-map'],
   }));
@@ -39,8 +43,7 @@ export function buildRelationshipExtractionWorkflowSteps(
     stepKind: ExecutionStepKind.CODE,
     dependsOnStepIds: dependencyStepIds,
     work: {
-      taskType: 'relationship-extraction-reduce',
-      payload: {},
+      ...executionTaskWork('relationship-extraction-reduce', {}),
       coordination: {
         kind: 'map-reduce-reduce/1',
         mapStepIds: dependencyStepIds,

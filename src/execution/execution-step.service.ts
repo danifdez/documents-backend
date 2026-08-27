@@ -30,6 +30,7 @@ import {
 } from '../conversation/context-input-workflow';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { contentHash } from './execution-canonical';
+import type { ChatExecutionPayload } from './execution-task-payload.types';
 
 export async function createExecutionStep(
   manager: EntityManager,
@@ -398,11 +399,14 @@ async function materializeContextInput(
   if (!finish) throw new ConflictException('context_reduction_finish_missing');
 
   const work = (candidate.work ?? {}) as Record<string, unknown>;
+  if (work.taskType !== 'assistant-chat' && work.taskType !== 'agent-chat') {
+    throw new ConflictException('invalid_context_reduction_task');
+  }
   const payload =
     work.payload && typeof work.payload === 'object'
-      ? (work.payload as Record<string, unknown>)
+      ? (work.payload as ChatExecutionPayload)
       : {};
-  const effectivePayload = {
+  const effectivePayload: ChatExecutionPayload = {
     ...payload,
     activeInputReduction: {
       schemaVersion: ACTIVE_INPUT_REDUCTION_SCHEMA,

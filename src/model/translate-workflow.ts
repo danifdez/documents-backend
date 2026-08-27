@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionOperationKind } from '../execution/execution-operation-kind.enum';
 // eslint-disable-next-line max-len
 import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
@@ -63,13 +64,12 @@ export function buildTranslateWorkflowSteps(input: {
       stepId: randomUUID(),
       stepKind: ExecutionStepKind.INFERENCE,
       work: {
-        taskType: 'translate-map',
-        payload: {
+        ...executionTaskWork('translate-map', {
           sourceLanguage: input.sourceLanguage,
           targetLanguage,
           batchIndex,
           units: mapUnits,
-        },
+        }),
       },
       requiredCapabilities: ['translate-map'],
     })),
@@ -81,8 +81,7 @@ export function buildTranslateWorkflowSteps(input: {
       stepKind: ExecutionStepKind.CODE,
       dependsOnStepIds: dependencyStepIds,
       work: {
-        taskType: 'translate-reduce',
-        payload: {
+        ...executionTaskWork('translate-reduce', {
           final,
           level,
           groupIndex,
@@ -93,7 +92,7 @@ export function buildTranslateWorkflowSteps(input: {
                 targetLanguages: input.targetLanguages,
               }
             : {}),
-        },
+        }),
         coordination: {
           kind: 'map-reduce-reduce/1',
           mapStepIds: dependencyStepIds,

@@ -30,7 +30,10 @@ export class TranslateProcessor implements ExecutionProcessor {
       'entity-retranslate': this.entityRetranslationStrategy,
     };
 
-    if (translationType in entityStrategies) {
+    if (
+      typeof translationType === 'string' &&
+      translationType in entityStrategies
+    ) {
       const strategy = entityStrategies[translationType];
       if (!strategy) {
         throw new Error(

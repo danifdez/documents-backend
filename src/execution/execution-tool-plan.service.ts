@@ -82,6 +82,7 @@ import { ExecutionConfirmationStatus } from './execution-confirmation.types';
 import { ExecutionService } from './execution.service';
 import { IndexedFileOwnerType } from '../indexed-file/indexed-file.entity';
 import { sanitizeFilename } from '../indexed-file/path.util';
+import type { ChatExecutionPayload } from './execution-task-payload.types';
 
 const PLAN_TIMEOUT_MS = 30_000;
 const CONFIRMATION_TIMEOUT_MS = 15 * 60_000;
@@ -279,6 +280,7 @@ export class ExecutionToolPlanService {
           throw new ConflictException('delegation_depth_exceeded');
         }
         const goal = String(plan.normalizedArguments.goal ?? '');
+        const parentPayload = this.chatPayload(execution);
         const child = await this.executions.createChildInference(
           manager,
           execution,
@@ -305,10 +307,9 @@ export class ExecutionToolPlanService {
                 delegationMode: true,
                 activeMemory: null,
                 activeCapabilities: null,
-                ...(execution.payload?.conversationContext
+                ...(parentPayload.conversationContext
                   ? {
-                      conversationContext:
-                        execution.payload.conversationContext,
+                      conversationContext: parentPayload.conversationContext,
                     }
                   : {}),
               },
@@ -552,12 +553,9 @@ export class ExecutionToolPlanService {
     invocation: ToolInvocationContract,
     execution: ExecutionEntity,
   ): ToolPlanContract {
-    const selectedTools = Array.isArray(
-      execution.payload?.activeCapabilities?.tools,
-    )
-      ? (execution.payload.activeCapabilities.tools as Array<{
-          name?: unknown;
-        }>)
+    const payload = this.chatPayload(execution);
+    const selectedTools = Array.isArray(payload.activeCapabilities?.tools)
+      ? payload.activeCapabilities.tools
       : [];
     if (!selectedTools.some((tool) => tool.name === invocation.name)) {
       throw new BadRequestException('tool_not_available_for_turn');
@@ -904,18 +902,19 @@ export class ExecutionToolPlanService {
         : execution.taskType === 'agent-chat'
           ? 'agent'
           : null;
-    const ownerId = Number(execution.payload?.ownerId);
+    const payload = this.chatPayload(execution);
+    const ownerId = Number(payload.ownerId);
     if (
       !ownerType ||
       !Number.isInteger(ownerId) ||
       ownerId <= 0 ||
-      typeof execution.payload?.folderScope !== 'string' ||
-      execution.payload.folderScope.length === 0
+      typeof payload.folderScope !== 'string' ||
+      payload.folderScope.length === 0
     ) {
       throw new BadRequestException('working_folder_not_configured');
     }
     const scopeKey = createHash('sha256')
-      .update(execution.payload.folderScope)
+      .update(payload.folderScope)
       .digest('hex')
       .slice(0, 32);
     return { ownerType, ownerId, scopeKey };
@@ -981,6 +980,7 @@ export class ExecutionToolPlanService {
     invocation: ToolInvocationContract,
     execution: ExecutionEntity,
   ): ToolPlanContract {
+    const payload = this.chatPayload(execution);
     if (invocation.executionContext.dataClassification === 'secret') {
       throw new BadRequestException('data_policy_violation');
     }
@@ -1005,15 +1005,8 @@ export class ExecutionToolPlanService {
       resourceId: invocation.arguments.resourceId,
       resourceContentHash: invocation.arguments.resourceContentHash,
     };
-    const selectedSkills = Array.isArray(
-      execution.payload?.activeCapabilities?.skills,
-    )
-      ? (execution.payload.activeCapabilities.skills as Array<{
-          skillId?: unknown;
-          version?: unknown;
-          contentHash?: unknown;
-          resources?: unknown;
-        }>)
+    const selectedSkills = Array.isArray(payload.activeCapabilities?.skills)
+      ? payload.activeCapabilities.skills
       : [];
     const selected = selectedSkills.some(
       (skill) =>
@@ -1022,7 +1015,7 @@ export class ExecutionToolPlanService {
         skill.contentHash === identity.skillContentHash &&
         Array.isArray(skill.resources) &&
         skill.resources.some(
-          (resource: Record<string, unknown>) =>
+          (resource) =>
             resource.resourceId === identity.resourceId &&
             resource.contentHash === identity.resourceContentHash,
         ),
@@ -1739,6 +1732,16 @@ export class ExecutionToolPlanService {
       throw new ConflictException('tool_request_source_not_accepted');
     }
     return [source.stepId];
+  }
+
+  private chatPayload(execution: ExecutionEntity): ChatExecutionPayload {
+    if (
+      execution.taskType !== 'assistant-chat' &&
+      execution.taskType !== 'agent-chat'
+    ) {
+      throw new BadRequestException('invalid_chat_execution_type');
+    }
+    return execution.payload as ChatExecutionPayload;
   }
 
   private assertUuid(value: string, field: string): void {

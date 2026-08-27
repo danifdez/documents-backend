@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { extractTextFromHtml } from '../utils/text';
 import { buildReductionTree } from './reduction-tree';
@@ -22,13 +23,12 @@ export function buildSummarizeWorkflowSteps(
     stepId: randomUUID(),
     stepKind: ExecutionStepKind.INFERENCE,
     work: {
-      taskType: 'summarize-map',
-      payload: {
+      ...executionTaskWork('summarize-map', {
         content: chunk,
         chunkIndex,
         targetLanguage,
         sourceLanguage,
-      },
+      }),
     },
     requiredCapabilities: ['summarize-map'],
   }));
@@ -36,8 +36,10 @@ export function buildSummarizeWorkflowSteps(
     stepKind: ExecutionStepKind.INFERENCE,
     dependsOnStepIds: dependencyStepIds,
     work: {
-      taskType: 'summarize-reduce',
-      payload: { targetLanguage, sourceLanguage },
+      ...executionTaskWork('summarize-reduce', {
+        targetLanguage,
+        sourceLanguage,
+      }),
       coordination: {
         kind: 'map-reduce-reduce/1',
         mapStepIds: dependencyStepIds,

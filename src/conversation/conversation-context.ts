@@ -7,6 +7,7 @@ import {
   ConversationArtifactMessage,
   ConversationArtifactRevisionEntity,
 } from './conversation-artifact-revision.entity';
+import type { ChatExecutionPayload } from '../execution/execution-task-payload.types';
 
 export const ACTIVE_CONTEXT_ARTIFACT_ROLE = 'active_context';
 export const ACTIVE_CONTEXT_SCHEMA = 'active-context/1';
@@ -61,7 +62,7 @@ export interface ActiveContextSnapshot {
     };
     volatile: Record<string, unknown>;
   };
-  effectivePayload: Record<string, unknown>;
+  effectivePayload: ChatExecutionPayload;
 }
 
 export function buildActiveConversationContext(
@@ -115,7 +116,7 @@ export async function freezeActiveContextArtifact(
     sessionId: string | null;
     turnId: string | null;
     causedByEventId: string;
-    effectivePayload: Record<string, unknown>;
+    effectivePayload: ChatExecutionPayload;
     derivedFromArtifactIds?: string[];
   },
 ): Promise<ExecutionArtifactEntity> {
@@ -205,11 +206,11 @@ function revisionPointer(
 }
 
 function conversationPointerFromPayload(
-  payload: Record<string, unknown>,
+  payload: ChatExecutionPayload,
 ): ConversationRevisionPointer | null {
   const pointer = payload.conversationContext;
   if (!pointer || typeof pointer !== 'object') return null;
-  const value = pointer as Record<string, unknown>;
+  const value = pointer;
   if (
     typeof value.artifactId !== 'string' ||
     !Number.isInteger(value.revision) ||
@@ -217,12 +218,12 @@ function conversationPointerFromPayload(
   ) {
     throw new BadRequestException('invalid_conversation_context');
   }
-  return value as unknown as ConversationRevisionPointer;
+  return value;
 }
 
 function selectPayloadFields(
-  payload: Record<string, unknown>,
-  keys: string[],
+  payload: ChatExecutionPayload,
+  keys: Array<keyof ChatExecutionPayload>,
 ): Record<string, unknown> {
   return Object.fromEntries(
     keys

@@ -486,6 +486,7 @@ describe('ExecutionToolRuntimeService', () => {
     executions.findOne.mockResolvedValue({
       executionId: CHILD_EXECUTION_ID,
       parentExecutionId: EXECUTION_ID,
+      taskType: 'delegated-agent',
       status: 'completed',
       payload: { delegationOperationId: OPERATION_ID },
       result: { reply: 'Independent comparison' },

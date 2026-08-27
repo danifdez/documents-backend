@@ -2,6 +2,7 @@ import { ExecutionArtifactRef } from './execution-step.entity';
 import { ExecutionOperationRecoveryClass } from './execution-operation-recovery-class.enum';
 import { ExecutionOperationKind } from './execution-operation-kind.enum';
 import { ExecutionStepKind } from './execution-step-kind.enum';
+import { ExecutionStepWork } from './execution-task-payload.types';
 
 export interface CreateExecutionStepInput {
   executionId: string;
@@ -9,7 +10,7 @@ export interface CreateExecutionStepInput {
   stepKind: ExecutionStepKind;
   dependsOnStepIds?: string[];
   inputArtifactRefs?: ExecutionArtifactRef[];
-  work: Record<string, unknown>;
+  work: ExecutionStepWork;
   finalizeOnFailure?: boolean;
   requiredCapabilities?: string[];
   resourceKeys?: string[];

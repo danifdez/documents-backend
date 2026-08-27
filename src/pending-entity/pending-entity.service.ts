@@ -589,7 +589,7 @@ export class PendingEntityService {
         const translationPayload = {
           resourceId: pending.resourceId,
           targetLanguages: languagesToTranslate,
-          translationType: 'entity-retranslate',
+          translationType: 'entity-retranslate' as const,
           entityId: pending.id,
         };
 

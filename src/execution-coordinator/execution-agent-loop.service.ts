@@ -21,6 +21,10 @@ import { ToolResultContract } from '../execution/execution-tool.types';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionProgressService } from '../execution/execution-progress.service';
 import { DeterministicPartialResult } from '../execution/execution.types';
+import {
+  ChatExecutionPayload,
+  executionTaskWork,
+} from '../execution/execution-task-payload.types';
 import { COORDINATION_PENDING_PHASE } from '../execution/execution.constants';
 import {
   ACTIVE_CONTEXT_ARTIFACT_ROLE,
@@ -716,7 +720,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       const history = Array.isArray(payload.toolHistory)
         ? (payload.toolHistory as ToolRound[])
         : [];
-      let effectivePayload: Record<string, unknown> = {
+      let effectivePayload: ChatExecutionPayload = {
         ...payload,
         toolHistory: [
           ...history,
@@ -928,7 +932,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       execution: ExecutionEntity;
       source: ExecutionStepEntity;
       purpose: 'normal' | 'repair' | 'closing';
-      payload: Record<string, unknown>;
+      payload: ChatExecutionPayload;
       evidenceStepIds: string[];
       inputArtifactRefs: ExecutionStepEntity['inputArtifactRefs'];
       causedByEventId: string;
@@ -950,6 +954,10 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         : input.purpose === 'closing'
           ? 'forced_finalization'
           : 'agent_loop';
+    const taskType = input.source.work.taskType;
+    if (taskType !== 'assistant-chat' && taskType !== 'agent-chat') {
+      throw new ConflictException('invalid_agent_inference_task');
+    }
     const continuation = await createExecutionStep(manager, {
       executionId: input.execution.executionId,
       stepKind: ExecutionStepKind.INFERENCE,
@@ -962,10 +970,13 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         },
       ],
       work: {
-        taskType: input.execution.taskType,
+        ...executionTaskWork(taskType, input.payload),
         agentName:
-          input.execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
-        payload: input.payload,
+          typeof input.source.work.agentName === 'string'
+            ? input.source.work.agentName
+            : taskType === 'agent-chat'
+              ? 'agent'
+              : 'assistant',
         agentLoop: {
           schemaVersion: 'agent-inference/1',
           purpose: input.purpose,
@@ -974,7 +985,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
           evidenceStepIds: input.evidenceStepIds,
         } satisfies AgentInferenceCoordination,
       },
-      requiredCapabilities: [input.execution.taskType],
+      requiredCapabilities: [taskType],
       priority: input.source.priority,
       causedByEventId: input.causedByEventId,
     });
@@ -1000,10 +1011,17 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     throw new ConflictException('agent_loop_continuation_invalid');
   }
 
-  private stepPayload(step: ExecutionStepEntity): Record<string, unknown> {
-    return step.work.payload && typeof step.work.payload === 'object'
-      ? (step.work.payload as Record<string, unknown>)
-      : {};
+  private stepPayload(step: ExecutionStepEntity): ChatExecutionPayload {
+    if (
+      step.work.taskType !== 'assistant-chat' &&
+      step.work.taskType !== 'agent-chat'
+    ) {
+      throw new ConflictException('invalid_agent_inference_task');
+    }
+    if (!step.work.payload || typeof step.work.payload !== 'object') {
+      throw new ConflictException('invalid_agent_inference_payload');
+    }
+    return step.work.payload as ChatExecutionPayload;
   }
 
   private forcedFinalizationDirective(
@@ -1018,14 +1036,10 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
   }
 
   private payloadWithDirective(
-    payload: Record<string, unknown>,
+    payload: ChatExecutionPayload,
     directive: RuntimeDirective,
-  ): Record<string, unknown> {
-    const activeCapabilities =
-      payload.activeCapabilities &&
-      typeof payload.activeCapabilities === 'object'
-        ? (payload.activeCapabilities as Record<string, unknown>)
-        : null;
+  ): ChatExecutionPayload {
+    const activeCapabilities = payload.activeCapabilities ?? null;
     return {
       ...payload,
       runtimeDirective: directive,

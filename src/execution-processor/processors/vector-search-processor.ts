@@ -35,13 +35,14 @@ export class VectorSearchProcessor implements ExecutionProcessor {
   ): Promise<void> {
     const ownerId = this.positiveId(execution.payload['ownerId']);
     const ownerType = execution.payload['ownerType'];
-    if (!['assistant', 'agent'].includes(String(ownerType))) {
+    if (ownerType !== 'assistant' && ownerType !== 'agent') {
       throw new Error('indexed-file-search ownerType is invalid');
     }
+    const normalizedOwnerType = ownerType;
     const ids = this.resultIds(results, 'indexedFileId');
     if (!ids.length) return;
     const rows = await this.indexedFileRepository.find({
-      where: { id: In(ids), ownerId, ownerType },
+      where: { id: In(ids), ownerId, ownerType: normalizedOwnerType },
       select: ['id'],
     });
     this.assertSameIds(

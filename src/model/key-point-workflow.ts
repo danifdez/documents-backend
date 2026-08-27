@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { chunkTextParts } from './text-chunks';
 import { buildReductionTree } from './reduction-tree';
@@ -17,8 +18,11 @@ export function buildKeyPointWorkflowSteps(
     stepId: randomUUID(),
     stepKind: ExecutionStepKind.INFERENCE,
     work: {
-      taskType: 'key-point-map',
-      payload: { content, chunkIndex, targetLanguage },
+      ...executionTaskWork('key-point-map', {
+        content,
+        chunkIndex,
+        targetLanguage,
+      }),
     },
     requiredCapabilities: ['key-point-map'],
   }));
@@ -26,8 +30,7 @@ export function buildKeyPointWorkflowSteps(
     stepKind: ExecutionStepKind.INFERENCE,
     dependsOnStepIds: dependencyStepIds,
     work: {
-      taskType: 'key-point-reduce',
-      payload: { targetLanguage },
+      ...executionTaskWork('key-point-reduce', { targetLanguage }),
       coordination: {
         kind: 'map-reduce-reduce/1',
         mapStepIds: dependencyStepIds,

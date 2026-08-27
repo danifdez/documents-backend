@@ -82,4 +82,13 @@ describe('DatasetAnalysisService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(executionService.createCode).not.toHaveBeenCalled();
   });
+
+  it('allows multiple datasets only for query executions', async () => {
+    const { service, executionService } = setup();
+
+    await expect(
+      service.createExecution('summary', [1, 2], {}),
+    ).rejects.toThrow('Only dataset query supports multiple datasets');
+    expect(executionService.createCode).not.toHaveBeenCalled();
+  });
 });

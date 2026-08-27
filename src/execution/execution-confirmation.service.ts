@@ -24,6 +24,7 @@ import {
 } from './execution-event.writer';
 import { ExecutionStatus } from './execution-status.enum';
 import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
+import { executionPayloadOwnerId } from './execution-task-payload.types';
 import { ExecutionAccessScope } from './execution.types';
 
 @Injectable()
@@ -128,7 +129,7 @@ export class ExecutionConfirmationService {
           event.eventId,
           {
             confirmation: view,
-            ownerId: execution.payload?.ownerId ?? null,
+            ownerId: executionPayloadOwnerId(execution.payload) ?? null,
             taskType: execution.taskType,
           },
           'executionConfirmationRequested',
@@ -215,10 +216,7 @@ export class ExecutionConfirmationService {
         throw new ConflictException('confirmation_execution_missing');
       return {
         confirmation: this.toView(item, plan),
-        ownerId:
-          typeof execution.payload?.ownerId === 'number'
-            ? execution.payload.ownerId
-            : null,
+        ownerId: executionPayloadOwnerId(execution.payload) ?? null,
         taskType: execution.taskType,
       };
     });
@@ -377,7 +375,7 @@ export class ExecutionConfirmationService {
         decidedEvent.eventId,
         {
           confirmation: view,
-          ownerId: execution.payload?.ownerId ?? null,
+          ownerId: executionPayloadOwnerId(execution.payload) ?? null,
           taskType: execution.taskType,
         },
         'executionConfirmationDecided',

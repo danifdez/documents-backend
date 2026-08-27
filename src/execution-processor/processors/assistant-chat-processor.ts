@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { ExecutionService } from '../../execution/execution.service';
 import { ExecutionCompletion } from '../../execution/execution.types';
+import { executionPayloadOwnerId } from '../../execution/execution-task-payload.types';
 import { ExecutionProcessor } from '../execution-processor.interface';
 
 type ChatExecutionResult = {
@@ -69,7 +70,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
   private async processAssistant(
     execution: ExecutionEntity,
   ): Promise<{ success: boolean }> {
-    const assistantId = execution.payload?.ownerId as number | undefined;
+    const assistantId = executionPayloadOwnerId(execution.payload);
     if (!assistantId) {
       this.logger.error(
         `Execution ${execution.executionId} missing ownerId in payload`,
@@ -86,7 +87,7 @@ export class AssistantChatProcessor implements ExecutionProcessor {
   private async processAgent(
     execution: ExecutionEntity,
   ): Promise<{ success: boolean }> {
-    const agentId = execution.payload?.ownerId as number | undefined;
+    const agentId = executionPayloadOwnerId(execution.payload);
     if (!agentId) {
       this.logger.error(
         `Execution ${execution.executionId} missing ownerId in payload`,

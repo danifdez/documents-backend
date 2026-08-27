@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionOperationKind } from '../execution/execution-operation-kind.enum';
 // eslint-disable-next-line max-len
 import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
@@ -21,8 +22,11 @@ export function buildKeywordsWorkflowSteps(
     stepId: randomUUID(),
     stepKind: ExecutionStepKind.INFERENCE,
     work: {
-      taskType: 'keywords-map',
-      payload: { content, chunkIndex, targetLanguage },
+      ...executionTaskWork('keywords-map', {
+        content,
+        chunkIndex,
+        targetLanguage,
+      }),
     },
     requiredCapabilities: ['keywords-map'],
   }));
@@ -32,14 +36,13 @@ export function buildKeywordsWorkflowSteps(
       stepKind: ExecutionStepKind.CODE,
       dependsOnStepIds: dependencyStepIds,
       work: {
-        taskType: 'keywords-reduce',
-        payload: {
+        ...executionTaskWork('keywords-reduce', {
           final,
           inputKind: level === 1 ? 'candidates' : 'statistics',
           ...(level === 1
             ? { leafStartIndex: groupIndex * REDUCTION_TREE_FAN_IN }
             : {}),
-        },
+        }),
         coordination: {
           kind: 'map-reduce-reduce/1',
           mapStepIds: dependencyStepIds,

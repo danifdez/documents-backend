@@ -16,7 +16,10 @@ describe('ExecutionService primitives', () => {
     ) as ExecutionService;
     const create = jest.fn().mockResolvedValue({ executionId: 'execution-1' });
     service.create = create;
-    const payload = { question: 'What is this document about?' };
+    const payload = {
+      question: 'What is this document about?',
+      graphContext: [],
+    };
 
     await service.createInference('ask', ExecutionPriority.NORMAL, payload);
 

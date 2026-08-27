@@ -4,6 +4,10 @@ import { EntityManager } from 'typeorm';
 import { canonicalJson, contentHash } from '../execution/execution-canonical';
 import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import {
+  ChatExecutionPayload,
+  executionTaskWork,
+} from '../execution/execution-task-payload.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { MAX_ACTIVE_MESSAGE_CHARS } from './conversation-context';
 import { MAX_CHAT_MESSAGE_CHARS } from './conversation.constants';
@@ -54,7 +58,7 @@ export async function buildContextInputWorkflow(
     taskType: 'assistant-chat' | 'agent-chat';
     message: string;
     requestArtifact: ExecutionArtifactEntity;
-    effectivePayload: Record<string, unknown>;
+    effectivePayload: ChatExecutionPayload;
     causedByEventId: string;
   },
 ): Promise<ContextInputWorkflow | null> {
@@ -115,15 +119,14 @@ export async function buildContextInputWorkflow(
       { role: 'context_chunk_plan', artifactId: planArtifactId },
     ],
     work: {
-      taskType: CONTEXT_INPUT_MAP_TASK,
-      payload: {
+      ...executionTaskWork(CONTEXT_INPUT_MAP_TASK, {
         planArtifactId,
         chunkIndex: chunk.index,
         start: chunk.start,
         end: chunk.end,
         contentHash: chunk.contentHash,
         content: chunk.content,
-      },
+      }),
     },
     requiredCapabilities: [CONTEXT_INPUT_MAP_TASK],
     priority: HIGH_PRIORITY,
@@ -155,8 +158,11 @@ export async function buildContextInputWorkflow(
           { role: 'context_chunk_plan', artifactId: planArtifactId },
         ],
         work: {
-          taskType: CONTEXT_INPUT_REDUCE_TASK,
-          payload: { planArtifactId, level, groupIndex: nextStepIds.length },
+          ...executionTaskWork(CONTEXT_INPUT_REDUCE_TASK, {
+            planArtifactId,
+            level,
+            groupIndex: nextStepIds.length,
+          }),
           coordination: {
             kind: 'map-reduce-reduce/1',
             mapStepIds: dependencyIds,
@@ -182,8 +188,7 @@ export async function buildContextInputWorkflow(
       { role: 'context_chunk_plan', artifactId: planArtifactId },
     ],
     work: {
-      taskType: input.taskType,
-      payload: input.effectivePayload,
+      ...executionTaskWork(input.taskType, input.effectivePayload),
       agentLoop: {
         schemaVersion: 'agent-inference/1',
         purpose: 'normal',

@@ -79,6 +79,15 @@ import {
   finishSkillActivations,
 } from '../conversation/skill-activation';
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
+import {
+  ChatCreationPayloadByKind,
+  ChatExecutionPayload,
+  ExecutionTaskPayload,
+  ExecutionTaskType,
+  ExecutionTaskWork,
+  executionPayloadOwnerId,
+  executionTaskWork,
+} from './execution-task-payload.types';
 
 export {
   canonicalDomainHash,
@@ -98,6 +107,13 @@ const SECRET_VALUE_DETECTOR =
   /\b(access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|id[_-]?token|password|refresh[_-]?token|session[_-]?token|token)\s*[:=]\s*(?!\[REDACTED\])([^\s,;]+)/i;
 const MAX_ARTIFACT_BYTES = 1024 * 1024;
 const REDACTED_VALUE = '[REDACTED]';
+
+function withFinalizerIdentity<TPayload extends object>(
+  payload: TPayload,
+  idempotencyKey: string,
+): TPayload & { originFinalizerKey: string } {
+  return { ...payload, originFinalizerKey: idempotencyKey };
+}
 
 const STEP_PRIORITY: Record<ExecutionPriority, number> = {
   [ExecutionPriority.HIGH]: 100,
@@ -190,10 +206,13 @@ export interface CreateExecutionOptions {
   }>;
 }
 
-export interface CreateChildInferenceInput {
-  taskType: string;
-  payload: Record<string, unknown>;
-  work: Record<string, unknown>;
+export interface CreateChildInferenceInput<
+  TExecutionTaskType extends ExecutionTaskType,
+  TWorkTaskType extends ExecutionTaskType,
+> {
+  taskType: TExecutionTaskType;
+  payload: ExecutionTaskPayload<TExecutionTaskType>;
+  work: ExecutionTaskWork<TWorkTaskType>;
   requiredCapability: string;
   deadline?: Date;
   causedByEventId: string;
@@ -314,7 +333,7 @@ export class ExecutionService {
       if (execution.taskType === 'assistant-chat') {
         await manager.query(
           `UPDATE "assistants" SET "last_seen_at" = now(), "updated_at" = now() WHERE "id" = $1`,
-          [Number(execution.payload?.ownerId)],
+          [Number(executionPayloadOwnerId(execution.payload))],
         );
       } else {
         await manager.query(
@@ -326,7 +345,10 @@ export class ExecutionService {
                END,
                "updated_at" = now()
            WHERE "id" = $1`,
-          [Number(execution.payload?.ownerId), AGENT_DEFAULT_TTL_MS],
+          [
+            Number(executionPayloadOwnerId(execution.payload)),
+            AGENT_DEFAULT_TTL_MS,
+          ],
         );
       }
     }
@@ -358,7 +380,7 @@ export class ExecutionService {
     execution: ExecutionEntity,
     response: { reply: string; error: string | null },
   ): Promise<ChatMessageEntity> {
-    const ownerId = Number(execution.payload?.ownerId);
+    const ownerId = Number(executionPayloadOwnerId(execution.payload));
     if (!Number.isInteger(ownerId) || ownerId < 1) {
       throw new ConflictException('invalid_conversation_owner');
     }
@@ -531,7 +553,7 @@ export class ExecutionService {
     message: ChatMessageEntity | null,
   ): ExecutionPublication | undefined {
     if (!message) return undefined;
-    const ownerId = Number(execution.payload?.ownerId);
+    const ownerId = Number(executionPayloadOwnerId(execution.payload));
     const payload = {
       id: message.id,
       role: message.role,
@@ -737,7 +759,7 @@ export class ExecutionService {
             payload: {
               rootExecutionId,
               taskType: root.taskType,
-              ownerId: root.payload?.ownerId ?? null,
+              ownerId: executionPayloadOwnerId(root.payload) ?? null,
               cancellationReason,
               cancellationRequestedAt: now.toISOString(),
             },
@@ -814,10 +836,13 @@ export class ExecutionService {
     return reconciled;
   }
 
-  async createChildInference(
+  async createChildInference<
+    TExecutionTaskType extends ExecutionTaskType,
+    TWorkTaskType extends ExecutionTaskType,
+  >(
     manager: EntityManager,
     parent: ExecutionEntity,
-    input: CreateChildInferenceInput,
+    input: CreateChildInferenceInput<TExecutionTaskType, TWorkTaskType>,
   ): Promise<{ execution: ExecutionEntity; step: ExecutionStepEntity }> {
     const executionRepo = manager.getRepository(ExecutionEntity);
     const root =
@@ -928,10 +953,13 @@ export class ExecutionService {
     return { execution: child, step };
   }
 
-  async createChildInferenceOnce(
+  async createChildInferenceOnce<
+    TExecutionTaskType extends ExecutionTaskType,
+    TWorkTaskType extends ExecutionTaskType,
+  >(
     parentExecutionId: string,
     idempotencyKey: string,
-    input: CreateChildInferenceInput,
+    input: CreateChildInferenceInput<TExecutionTaskType, TWorkTaskType>,
   ): Promise<{ execution: ExecutionEntity; step: ExecutionStepEntity }> {
     if (!idempotencyKey || idempotencyKey.length > 160) {
       throw new BadRequestException('invalid_child_idempotency_key');
@@ -965,17 +993,11 @@ export class ExecutionService {
         throw new ConflictException('execution_cancellation_requested');
       }
 
-      const payload = {
-        ...input.payload,
-        [FINALIZER_IDEMPOTENCY_FIELD]: idempotencyKey,
-      };
-      const workPayload =
-        input.work.payload && typeof input.work.payload === 'object'
-          ? {
-              ...(input.work.payload as Record<string, unknown>),
-              [FINALIZER_IDEMPOTENCY_FIELD]: idempotencyKey,
-            }
-          : payload;
+      const payload = withFinalizerIdentity(input.payload, idempotencyKey);
+      const workPayload = withFinalizerIdentity(
+        input.work.payload,
+        idempotencyKey,
+      );
       const work = { ...input.work, payload: workPayload };
       const candidates = await executions.find({
         where: { parentExecutionId, taskType: input.taskType },
@@ -1010,11 +1032,11 @@ export class ExecutionService {
     });
   }
 
-  async createForChat(
-    executionKind: 'assistant_chat' | 'agent_chat',
+  async createForChat<TExecutionKind extends keyof ChatCreationPayloadByKind>(
+    executionKind: TExecutionKind,
     message: string,
     scope: ExecutionAccessScope,
-    payload: Record<string, unknown>,
+    payload: ChatCreationPayloadByKind[TExecutionKind],
   ): Promise<ChatExecutionAcceptance> {
     const executionId = randomUUID();
     const rootExecutionId = executionId;
@@ -1333,12 +1355,15 @@ export class ExecutionService {
     if (!['assistant-chat', 'agent-chat'].includes(execution.taskType)) {
       throw new ConflictException('invalid_chat_execution_type');
     }
+    const taskType =
+      execution.taskType === 'assistant-chat' ? 'assistant-chat' : 'agent-chat';
+    const effectivePayload = execution.payload as ChatExecutionPayload;
     const workflow = await buildContextInputWorkflow(manager, {
       executionId: execution.executionId,
-      taskType: execution.taskType as 'assistant-chat' | 'agent-chat',
+      taskType,
       message,
       requestArtifact,
-      effectivePayload: execution.payload ?? {},
+      effectivePayload,
       causedByEventId,
     });
     if (workflow) {
@@ -1356,7 +1381,7 @@ export class ExecutionService {
       sessionId: execution.sessionId,
       turnId: execution.turnId,
       causedByEventId,
-      effectivePayload: execution.payload ?? {},
+      effectivePayload,
       derivedFromArtifactIds: [requestArtifact.artifactId],
     });
     await createExecutionStep(manager, {
@@ -1370,8 +1395,7 @@ export class ExecutionService {
         },
       ],
       work: {
-        taskType: execution.taskType,
-        payload: execution.payload ?? {},
+        ...executionTaskWork(taskType, effectivePayload),
         agentLoop: {
           schemaVersion: 'agent-inference/1',
           purpose: 'normal',
@@ -1390,10 +1414,10 @@ export class ExecutionService {
     return this.config.get('FEATURE_BROWSER_FEDERATION') === 'true';
   }
 
-  async create(
-    taskType: string,
+  async create<TTaskType extends ExecutionTaskType>(
+    taskType: TTaskType,
     priority: ExecutionPriority,
-    payload: Record<string, unknown>,
+    payload: ExecutionTaskPayload<TTaskType>,
     options?: CreateExecutionOptions,
   ): Promise<ExecutionEntity> {
     const executionId = randomUUID();
@@ -1564,7 +1588,7 @@ export class ExecutionService {
       const steps = options?.steps ?? [
         {
           stepKind: ExecutionStepKind.SERVICE,
-          work: { taskType, payload: effectivePayload },
+          work: executionTaskWork(taskType, effectivePayload),
           requiredCapabilities: [taskType],
           priority: STEP_PRIORITY[priority],
           ...options?.initialStep,
@@ -1585,10 +1609,10 @@ export class ExecutionService {
     });
   }
 
-  async createInference(
-    taskType: string,
+  async createInference<TTaskType extends ExecutionTaskType>(
+    taskType: TTaskType,
     priority: ExecutionPriority,
-    payload: Record<string, unknown>,
+    payload: ExecutionTaskPayload<TTaskType>,
     options?: CreateSingleStepExecutionOptions,
   ): Promise<ExecutionEntity> {
     const { finalizeOnFailure = false, ...executionOptions } = options ?? {};
@@ -1596,7 +1620,7 @@ export class ExecutionService {
       ...executionOptions,
       initialStep: {
         stepKind: ExecutionStepKind.INFERENCE,
-        work: { taskType, payload },
+        work: executionTaskWork(taskType, payload),
         finalizeOnFailure,
         requiredCapabilities: [taskType],
         priority: STEP_PRIORITY[priority],
@@ -1604,10 +1628,10 @@ export class ExecutionService {
     });
   }
 
-  async createCode(
-    taskType: string,
+  async createCode<TTaskType extends ExecutionTaskType>(
+    taskType: TTaskType,
     priority: ExecutionPriority,
-    payload: Record<string, unknown>,
+    payload: ExecutionTaskPayload<TTaskType>,
     options?: CreateSingleStepExecutionOptions,
   ): Promise<ExecutionEntity> {
     const { finalizeOnFailure = false, ...executionOptions } = options ?? {};
@@ -1615,7 +1639,7 @@ export class ExecutionService {
       ...executionOptions,
       initialStep: {
         stepKind: ExecutionStepKind.CODE,
-        work: { taskType, payload },
+        work: executionTaskWork(taskType, payload),
         finalizeOnFailure,
         requiredCapabilities: [taskType],
         priority: STEP_PRIORITY[priority],

@@ -4,7 +4,10 @@ import { Repository } from 'typeorm';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { ExecutionService } from '../../execution/execution.service';
-import { IndexedFileEntity } from '../../indexed-file/indexed-file.entity';
+import {
+  IndexedFileEntity,
+  IndexedFileOwnerType,
+} from '../../indexed-file/indexed-file.entity';
 import { ExecutionEffectJournalService } from '../../execution/execution-effect-journal.service';
 import { canonicalHash } from '../../execution/execution-canonical';
 
@@ -127,7 +130,7 @@ export class IndexedFileExtractionProcessor implements ExecutionProcessor {
       const filename = observation.filename;
       const checksum = observation.checksum;
       if (
-        !['assistant', 'agent'].includes(String(ownerType)) ||
+        (ownerType !== 'assistant' && ownerType !== 'agent') ||
         !Number.isInteger(ownerId) ||
         ownerId <= 0 ||
         typeof filename !== 'string' ||
@@ -135,6 +138,8 @@ export class IndexedFileExtractionProcessor implements ExecutionProcessor {
       ) {
         throw new Error('indexed_file_extraction_observation_invalid');
       }
+      const normalizedOwnerType: IndexedFileOwnerType =
+        ownerType === 'assistant' ? 'assistant' : 'agent';
       const current = await this.repository.findOne({
         where: { id: indexedFileId },
       });
@@ -147,7 +152,7 @@ export class IndexedFileExtractionProcessor implements ExecutionProcessor {
       }
       const payload = {
         indexedFileId,
-        ownerType,
+        ownerType: normalizedOwnerType,
         ownerId,
         content: text,
         filename,

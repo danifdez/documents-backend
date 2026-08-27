@@ -11,6 +11,10 @@ import type {
   ProgressLedger,
   ProgressPolicyProjection,
 } from './execution-progress';
+import type {
+  AnyExecutionTaskPayload,
+  ExecutionTaskType,
+} from './execution-task-payload.types';
 
 @Entity({ name: 'executions' })
 @Index('IDX_executions_owner', ['ownerPrincipal'])
@@ -40,10 +44,10 @@ export class ExecutionEntity {
   schemaVersion: string;
 
   @Column({ name: 'task_type', type: 'varchar', length: 100 })
-  taskType: string;
+  taskType: ExecutionTaskType;
 
   @Column({ type: 'jsonb', nullable: true })
-  payload: any;
+  payload: AnyExecutionTaskPayload;
 
   @Column({ type: 'varchar', length: 20, default: ExecutionStatus.QUEUED })
   status: ExecutionStatus;

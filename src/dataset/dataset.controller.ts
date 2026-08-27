@@ -320,7 +320,7 @@ export class DatasetController {
   @Post(':id/stats')
   async requestStats(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { operation?: string; params?: Record<string, any> },
+    @Body() body: { operation?: unknown; params?: unknown },
   ) {
     const dataset = await this.datasetService.findOneDataset(id);
     if (!dataset) {
@@ -339,8 +339,8 @@ export class DatasetController {
     @Body()
     body: {
       datasetIds: number[];
-      operation: string;
-      params?: Record<string, any>;
+      operation?: unknown;
+      params?: unknown;
     },
   ) {
     if (!body.datasetIds || body.datasetIds.length === 0) {
