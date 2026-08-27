@@ -26,6 +26,7 @@ export async function createSkillActivations(
           skillId: activation.skillId,
           version: activation.skillVersion,
           contentHash: activation.contentHash,
+          activationSignal: String(activation.inputBindings.signal ?? ''),
         }),
       )
       .sort();
@@ -45,7 +46,10 @@ export async function createSkillActivations(
         skillVersion: skill.version,
         contentHash: skill.contentHash,
         activationReason: skill.activationReason,
-        inputBindings: { owner: capabilities.owner },
+        inputBindings: {
+          owner: capabilities.owner,
+          signal: skill.activationSignal,
+        },
         phase: 'instructions_loaded',
         checkpoint: null,
         status: 'active',
@@ -165,6 +169,10 @@ function skillIdentity(skill: {
   skillId: string;
   version: string;
   contentHash: string;
+  activationSignal: string;
 }): string {
-  return `${skill.skillId}\0${skill.version}\0${skill.contentHash}`;
+  return (
+    `${skill.skillId}\0${skill.version}\0${skill.contentHash}` +
+    `\0${skill.activationSignal}`
+  );
 }

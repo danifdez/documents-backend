@@ -184,6 +184,13 @@ export async function buildContextInputWorkflow(
     work: {
       taskType: input.taskType,
       payload: input.effectivePayload,
+      agentLoop: {
+        schemaVersion: 'agent-inference/1',
+        purpose: 'normal',
+        phase: 'agent_loop',
+        sourceStepId: finalReductionStepId,
+        evidenceStepIds: [finalReductionStepId],
+      },
       coordination: {
         kind: CONTEXT_INPUT_FINAL_COORDINATION,
         reductionStepId: finalReductionStepId,

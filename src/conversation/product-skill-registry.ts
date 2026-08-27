@@ -4,6 +4,12 @@ export const WORKSPACE_DOCUMENT_SKILL_ID = 'workspace-document-workflow';
 export const WORKSPACE_DOCUMENT_SKILL_VERSION = 'workspace-document-workflow/1';
 export const EVIDENCE_RESEARCH_SKILL_ID = 'evidence-research-workflow';
 export const EVIDENCE_RESEARCH_SKILL_VERSION = 'evidence-research-workflow/1';
+export const WORKSPACE_FOLDER_CONFIGURED_SIGNAL = 'workspace_folder_configured';
+export const DOCUMENT_SEARCH_AVAILABLE_SIGNAL = 'document_search_available';
+
+export type ProductSkillSignal =
+  | typeof WORKSPACE_FOLDER_CONFIGURED_SIGNAL
+  | typeof DOCUMENT_SEARCH_AVAILABLE_SIGNAL;
 
 export const WORKSPACE_DOCUMENT_SKILL_INSTRUCTIONS = [
   'Use the configured workspace folder as an optional source of context and ' +
@@ -71,47 +77,6 @@ export const SOURCE_EVALUATION_RESOURCE_CONTENT = [
     'source facts from conclusions inferred by the assistant.',
 ].join('\n');
 
-const WORKSPACE_OBJECTIVE_TERMS = [
-  'file',
-  'files',
-  'folder',
-  'folders',
-  'directory',
-  'directories',
-  'document',
-  'documents',
-  'archivo',
-  'archivos',
-  'carpeta',
-  'carpetas',
-  'directorio',
-  'directorios',
-  'documento',
-  'documentos',
-  'fichero',
-  'ficheros',
-];
-
-const EVIDENCE_OBJECTIVE_TERMS = [
-  'research',
-  'investigate',
-  'investigation',
-  'evidence',
-  'source',
-  'sources',
-  'compare',
-  'verify',
-  'corroborate',
-  'investigar',
-  'investigación',
-  'evidencia',
-  'fuente',
-  'fuentes',
-  'comparar',
-  'verificar',
-  'contrastar',
-];
-
 export interface ProductSkillDefinition {
   skillId: string;
   version: string;
@@ -124,7 +89,7 @@ export interface ProductSkillDefinition {
   instructions: string;
   contentHash: string;
   activationCriteria: {
-    anyObjectiveTerms: readonly string[];
+    signal: ProductSkillSignal;
   };
 }
 
@@ -144,7 +109,8 @@ export interface ActiveProductSkill {
   title: string;
   description: string;
   contentHash: string;
-  activationReason: 'objective_match';
+  activationReason: 'signal_match';
+  activationSignal: ProductSkillSignal;
   resources: ActiveProductSkillResource[];
 }
 
@@ -176,7 +142,7 @@ export const PRODUCT_SKILL_REGISTRY: readonly ProductSkillDefinition[] = [
     effectPolicy: 'explicit_user_intent',
     instructions: WORKSPACE_DOCUMENT_SKILL_INSTRUCTIONS,
     contentHash: canonicalHash(WORKSPACE_DOCUMENT_SKILL_INSTRUCTIONS),
-    activationCriteria: { anyObjectiveTerms: WORKSPACE_OBJECTIVE_TERMS },
+    activationCriteria: { signal: WORKSPACE_FOLDER_CONFIGURED_SIGNAL },
   },
   {
     skillId: EVIDENCE_RESEARCH_SKILL_ID,
@@ -200,25 +166,18 @@ export const PRODUCT_SKILL_REGISTRY: readonly ProductSkillDefinition[] = [
     effectPolicy: 'explicit_user_intent',
     instructions: EVIDENCE_RESEARCH_SKILL_INSTRUCTIONS,
     contentHash: canonicalHash(EVIDENCE_RESEARCH_SKILL_INSTRUCTIONS),
-    activationCriteria: { anyObjectiveTerms: EVIDENCE_OBJECTIVE_TERMS },
+    activationCriteria: { signal: DOCUMENT_SEARCH_AVAILABLE_SIGNAL },
   },
 ];
 
 export function selectProductSkills(
-  objective: string,
+  signals: readonly ProductSkillSignal[],
   availableCapabilities: ReadonlySet<string>,
 ): ActiveProductSkill[] {
-  const objectiveTerms = new Set(
-    objective
-      .toLocaleLowerCase('en')
-      .split(/[^\p{L}\p{N}_-]+/u)
-      .filter(Boolean),
-  );
+  const signalSet = new Set(signals);
   return PRODUCT_SKILL_REGISTRY.filter(
     (skill) =>
-      skill.activationCriteria.anyObjectiveTerms.some((term) =>
-        objectiveTerms.has(term),
-      ) &&
+      signalSet.has(skill.activationCriteria.signal) &&
       skill.requiredCapabilities.every((capability) =>
         availableCapabilities.has(capability),
       ),
@@ -230,13 +189,15 @@ export function selectProductSkills(
       description,
       contentHash,
       resourceManifest,
+      activationCriteria,
     }) => ({
       skillId,
       version,
       title,
       description,
       contentHash,
-      activationReason: 'objective_match',
+      activationReason: 'signal_match',
+      activationSignal: activationCriteria.signal,
       resources: resourceManifest.map(
         ({ resourceId, title, description, contentHash }) => ({
           resourceId,

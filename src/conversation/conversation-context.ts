@@ -148,6 +148,7 @@ export async function freezeActiveContextArtifact(
       volatile: selectPayloadFields(input.effectivePayload, [
         'toolHistory',
         'delegationMode',
+        'runtimeDirective',
       ]),
     },
     effectivePayload: input.effectivePayload,

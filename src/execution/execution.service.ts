@@ -492,7 +492,6 @@ export class ExecutionService {
       ownerPrincipal: nextExecution.ownerPrincipal,
       folderScope: ownerConfig.folderScope,
       browserFederationEnabled: this.browserFederationEnabled(),
-      objective: userMessage.content,
     });
     nextExecution.payload = {
       ...(nextExecution.payload ?? {}),
@@ -1150,7 +1149,6 @@ export class ExecutionService {
             ownerPrincipal: scope.ownerPrincipal,
             folderScope: ownerConfig.folderScope,
             browserFederationEnabled: this.browserFederationEnabled(),
-            objective: safeMessage,
           })
         : null;
       const executionPayload = activeRevision
@@ -1371,7 +1369,17 @@ export class ExecutionService {
           artifactId: contextArtifact.artifactId,
         },
       ],
-      work: { taskType: execution.taskType, payload: execution.payload ?? {} },
+      work: {
+        taskType: execution.taskType,
+        payload: execution.payload ?? {},
+        agentLoop: {
+          schemaVersion: 'agent-inference/1',
+          purpose: 'normal',
+          phase: 'agent_loop',
+          sourceStepId: null,
+          evidenceStepIds: [],
+        },
+      },
       requiredCapabilities: [execution.taskType],
       priority: STEP_PRIORITY[ExecutionPriority.HIGH],
       causedByEventId,
@@ -2350,7 +2358,7 @@ export class ExecutionService {
               error: error
                 ? {
                     code:
-                      completionReason === 'loop_detected'
+                      completionReason === 'partial_loop_guard'
                         ? 'IMMEDIATE_EXACT_TOOL_REPEAT_PERSISTED'
                         : 'CHAT_FAILED',
                     message: redactExecutionText(error),
@@ -2374,7 +2382,7 @@ export class ExecutionService {
         execution.error = error
           ? {
               code:
-                completionReason === 'loop_detected'
+                completionReason === 'partial_loop_guard'
                   ? 'IMMEDIATE_EXACT_TOOL_REPEAT_PERSISTED'
                   : 'CHAT_FAILED',
               message: redactExecutionText(error),
@@ -2472,7 +2480,7 @@ export class ExecutionService {
     if (
       error ||
       completion.kind !== 'partial' ||
-      !['budget_exhausted', 'tool_budget_exhausted', 'loop_detected'].includes(
+      !['partial_budget_exhausted', 'partial_loop_guard'].includes(
         String(completion.reason),
       )
     ) {
@@ -2747,7 +2755,7 @@ export class ExecutionService {
     error: string | null,
     completion?: ExecutionCompletion,
   ): void {
-    if (completion?.reason !== 'loop_detected') return;
+    if (completion?.reason !== 'partial_loop_guard') return;
     const hasTermination = rows.some((row) => {
       const payload = row.envelope.payload as Record<string, any> | undefined;
       const signal = payload?.loopGuardSignal as

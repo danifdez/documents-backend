@@ -340,7 +340,7 @@ describe('ExecutionProgressService operation budget', () => {
     ];
     const completion = {
       kind: 'partial' as const,
-      reason: 'budget_exhausted',
+      reason: 'partial_budget_exhausted',
       source: 'runtime_template' as const,
       partialResult: {
         version: '1' as const,
@@ -406,7 +406,7 @@ describe('ExecutionProgressService operation budget', () => {
   });
 
   it('requires durable termination evidence for a loop-detected failure', () => {
-    const completion = { reason: 'loop_detected' };
+    const completion = { reason: 'partial_loop_guard' };
     const termination = {
       executionId: EXECUTION_ID,
       eventType: 'progress.reported',

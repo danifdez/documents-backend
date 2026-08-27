@@ -1,4 +1,8 @@
 import { buildActiveCapabilitySet } from '../../../src/conversation/active-capabilities';
+import {
+  WORKSPACE_FOLDER_CONFIGURED_SIGNAL,
+  selectProductSkills,
+} from '../../../src/conversation/product-skill-registry';
 
 describe('active capability selection', () => {
   it('selects folder tools only when the owner has a configured folder', async () => {
@@ -10,7 +14,6 @@ describe('active capability selection', () => {
       ownerPrincipal: 'user',
       folderScope: null,
       browserFederationEnabled: false,
-      objective: 'Answer this question',
     });
     const withFolder = await buildActiveCapabilitySet(manager as any, {
       ownerType: 'agent',
@@ -18,7 +21,6 @@ describe('active capability selection', () => {
       ownerPrincipal: 'user',
       folderScope: '/workspace',
       browserFederationEnabled: false,
-      objective: 'Answer this question',
     });
 
     expect(withoutFolder.tools.map(({ name }) => name)).toEqual([
@@ -36,10 +38,18 @@ describe('active capability selection', () => {
         'workspace_files.delete',
       ]),
     );
-    expect(withFolder.skills).toEqual([]);
+    expect(withoutFolder.skillSignals).toEqual(['document_search_available']);
+    expect(withFolder.skillSignals).toEqual([
+      'document_search_available',
+      'workspace_folder_configured',
+    ]);
+    expect(withFolder.skills.map(({ skillId }) => skillId)).toEqual([
+      'workspace-document-workflow',
+      'evidence-research-workflow',
+    ]);
   });
 
-  it('activates a matching product skill only when its tools already exist', async () => {
+  it('activates product skills from typed signals and available tools', async () => {
     const manager = { getRepository: jest.fn() };
     const withoutFolder = await buildActiveCapabilitySet(manager as any, {
       ownerType: 'assistant',
@@ -47,7 +57,6 @@ describe('active capability selection', () => {
       ownerPrincipal: 'user',
       folderScope: null,
       browserFederationEnabled: false,
-      objective: 'Modify the spreadsheet file',
     });
     const withFolder = await buildActiveCapabilitySet(manager as any, {
       ownerType: 'agent',
@@ -55,19 +64,23 @@ describe('active capability selection', () => {
       ownerPrincipal: 'user',
       folderScope: '/workspace',
       browserFederationEnabled: false,
-      objective: 'Modifica el documento de presupuesto',
     });
 
-    expect(withoutFolder.skills).toEqual([]);
-    expect(withFolder.skills).toEqual([
-      expect.objectContaining({
-        skillId: 'workspace-document-workflow',
-        version: 'workspace-document-workflow/1',
-        activationReason: 'objective_match',
-        contentHash:
-          'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
-      }),
+    expect(withoutFolder.skills.map(({ skillId }) => skillId)).toEqual([
+      'evidence-research-workflow',
     ]);
+    expect(withFolder.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          skillId: 'workspace-document-workflow',
+          version: 'workspace-document-workflow/1',
+          activationReason: 'signal_match',
+          activationSignal: 'workspace_folder_configured',
+          contentHash:
+            'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+        }),
+      ]),
+    );
     expect(withFolder.skills[0]).not.toHaveProperty('instructions');
     expect(withFolder.skills[0].resources).toEqual([
       expect.objectContaining({
@@ -96,7 +109,6 @@ describe('active capability selection', () => {
       ownerPrincipal: 'paired-user',
       folderScope: null,
       browserFederationEnabled: true,
-      objective: 'Read the current browser page',
     });
 
     expect(selected.tools).toContainEqual({
@@ -157,7 +169,6 @@ describe('active capability selection', () => {
         ownerPrincipal: 'user',
         folderScope: null,
         browserFederationEnabled: false,
-        objective: 'Compare the available sources and verify the evidence',
       },
     );
 
@@ -165,6 +176,8 @@ describe('active capability selection', () => {
       expect.objectContaining({
         skillId: 'evidence-research-workflow',
         version: 'evidence-research-workflow/1',
+        activationReason: 'signal_match',
+        activationSignal: 'document_search_available',
         contentHash:
           'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
         resources: [
@@ -187,7 +200,6 @@ describe('active capability selection', () => {
         ownerPrincipal: 'user',
         folderScope: '/workspace',
         browserFederationEnabled: false,
-        objective: 'Compare evidence in the document files',
       },
     );
 
@@ -195,5 +207,19 @@ describe('active capability selection', () => {
       'workspace-document-workflow',
       'evidence-research-workflow',
     ]);
+  });
+
+  it('does not let a signal grant missing workspace capabilities', () => {
+    const selected = selectProductSkills(
+      [WORKSPACE_FOLDER_CONFIGURED_SIGNAL],
+      new Set([
+        'workspace_files.list',
+        'workspace_files.search',
+        'workspace_files.read',
+        'workspace_files.write',
+      ]),
+    );
+
+    expect(selected).toEqual([]);
   });
 });

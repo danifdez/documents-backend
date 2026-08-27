@@ -321,8 +321,11 @@ describe('execution v1 contract', () => {
       skillVersion: 'workspace-document-workflow/1',
       contentHash:
         'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
-      activationReason: 'objective_match',
-      inputBindings: { owner: { type: 'assistant', id: 1 } },
+      activationReason: 'signal_match',
+      inputBindings: {
+        owner: { type: 'assistant', id: 1 },
+        signal: 'workspace_folder_configured',
+      },
       phase: 'finished',
       checkpoint: null,
       status: 'completed',
@@ -340,6 +343,10 @@ describe('execution v1 contract', () => {
       skillVersion: 'evidence-research-workflow/1',
       contentHash:
         'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
+      inputBindings: {
+        owner: { type: 'assistant', id: 1 },
+        signal: 'document_search_available',
+      },
     };
     expect(validateSkillActivation(researchActivation)).toBe(true);
     expect(
@@ -384,7 +391,8 @@ describe('execution v1 contract', () => {
           activeCapabilities: {
             schemaVersion: 'active-capability-set/1',
             owner: { type: 'assistant', id: 1 },
-            selectionPolicy: 'backend-availability/1',
+            selectionPolicy: 'backend-signals/1',
+            skillSignals: [],
             tools: [
               {
                 name: 'documents.search',
@@ -572,7 +580,7 @@ describe('execution v1 contract', () => {
       from: 'running',
       to: 'completed',
       completionKind: 'partial',
-      completionReason: 'budget_exhausted',
+      completionReason: 'partial_budget_exhausted',
       completionSource: 'runtime_template',
       partialResult: {
         version: '1',
@@ -624,7 +632,7 @@ describe('execution v1 contract', () => {
     ).toBe(false);
     const loopPartial = {
       ...payload,
-      completionReason: 'loop_detected',
+      completionReason: 'partial_loop_guard',
       partialResult: {
         ...payload.partialResult,
         trigger: 'exact_tool_repeat_persisted',

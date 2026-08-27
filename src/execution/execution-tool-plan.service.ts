@@ -11,6 +11,8 @@ import { EXECUTION_UUID_PATTERN } from './execution.constants';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
 import { ExecutionOperationKind } from './execution-operation-kind.enum';
+import { ExecutionOperationEntity } from './execution-operation.entity';
+import { ExecutionOperationStatus } from './execution-operation-status.enum';
 import { ExecutionOperationRecoveryClass } from './execution-operation-recovery-class.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { ExecutionStepAttemptEntity } from './execution-step-attempt.entity';
@@ -24,6 +26,7 @@ import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
 import {
   ToolInvocationContract,
   ToolPlanContract,
+  ToolResultContract,
 } from './execution-tool.types';
 import { canonicalHash } from './execution-canonical';
 import {
@@ -75,6 +78,7 @@ import {
 } from './execution-tool.constants';
 import { resolveProductSkillResource } from '../conversation/product-skill-registry';
 import { ExecutionConfirmationService } from './execution-confirmation.service';
+import { ExecutionConfirmationStatus } from './execution-confirmation.types';
 import { ExecutionService } from './execution.service';
 import { IndexedFileOwnerType } from '../indexed-file/indexed-file.entity';
 import { sanitizeFilename } from '../indexed-file/path.util';
@@ -89,6 +93,14 @@ export interface PreparedToolPlan {
   plan: ExecutionToolPlanEntity;
   duplicate: boolean;
 }
+
+export type ToolPlanMaterializationDisposition =
+  | { kind: 'ready' }
+  | { kind: 'waiting_confirmation' }
+  | {
+      kind: 'not_executed';
+      error: { code: string; message: string };
+    };
 
 @Injectable()
 export class ExecutionToolPlanService {
@@ -217,29 +229,25 @@ export class ExecutionToolPlanService {
       }
 
       const plan = storedPlan.plan;
-      if (plan.policyDecision.decision === 'denied') {
-        throw new ConflictException('tool_plan_not_allowed');
-      }
       const confirmation = await this.confirmations.decisionForPlan(
         manager,
         storedPlan,
       );
-      if (plan.policyDecision.decision === 'confirmation_required') {
-        if (!confirmation) {
-          throw new ConflictException('tool_confirmation_missing');
-        }
-        if (confirmation.status === 'pending') return null;
-      } else if (plan.confirmationRequirement !== null || confirmation) {
-        throw new ConflictException('tool_confirmation_mismatch');
-      }
       const now = new Date();
-      const deadline = new Date(plan.deadline);
-      if (
-        deadline <= now &&
-        (!confirmation || confirmation.status === 'approved')
-      ) {
-        throw new ConflictException('tool_plan_expired');
+      const disposition = this.materializationDisposition(
+        storedPlan,
+        confirmation?.status ?? null,
+        now,
+      );
+      if (disposition.kind === 'waiting_confirmation') return null;
+      if (disposition.kind === 'not_executed') {
+        return this.materializeNotExecutedWithManager(
+          manager,
+          storedPlan,
+          disposition.error,
+        );
       }
+      const deadline = new Date(plan.deadline);
       const execution = await this.lockActiveExecution(
         manager,
         storedPlan.executionId,
@@ -285,6 +293,13 @@ export class ExecutionToolPlanService {
             work: {
               taskType: 'assistant-chat',
               agentName: 'subagent',
+              agentLoop: {
+                schemaVersion: 'agent-inference/1',
+                purpose: 'normal',
+                phase: 'agent_loop',
+                sourceStepId: null,
+                evidenceStepIds: [],
+              },
               payload: {
                 conversation: [{ role: 'user', content: goal }],
                 delegationMode: true,
@@ -348,8 +363,189 @@ export class ExecutionToolPlanService {
     });
   }
 
+  async materializeNotExecuted(
+    toolCallId: string,
+    error: { code: string; message: string },
+  ): Promise<ExecutionStepEntity> {
+    this.assertUuid(toolCallId, 'toolCallId');
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`tool-call:${toolCallId}`],
+      );
+      const planRepo = manager.getRepository(ExecutionToolPlanEntity);
+      const storedPlan = await planRepo.findOne({
+        where: { toolCallId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!storedPlan) throw new NotFoundException('tool_plan_not_found');
+      return this.materializeNotExecutedWithManager(manager, storedPlan, error);
+    });
+  }
+
+  async getMaterializationDisposition(
+    toolCallId: string,
+  ): Promise<ToolPlanMaterializationDisposition> {
+    this.assertUuid(toolCallId, 'toolCallId');
+    return this.dataSource.transaction(async (manager) => {
+      const storedPlan = await manager
+        .getRepository(ExecutionToolPlanEntity)
+        .findOneBy({ toolCallId });
+      if (!storedPlan) throw new NotFoundException('tool_plan_not_found');
+      const confirmation = await this.confirmations.decisionForPlan(
+        manager,
+        storedPlan,
+      );
+      return this.materializationDisposition(
+        storedPlan,
+        confirmation?.status ?? null,
+        new Date(),
+      );
+    });
+  }
+
   activatePendingConfirmations(executionId: string): Promise<number> {
     return this.confirmations.activatePending(executionId);
+  }
+
+  private materializationDisposition(
+    storedPlan: ExecutionToolPlanEntity,
+    confirmationStatus: ExecutionConfirmationStatus | null,
+    now: Date,
+  ): ToolPlanMaterializationDisposition {
+    const plan = storedPlan.plan;
+    if (plan.policyDecision.decision === 'denied') {
+      return {
+        kind: 'not_executed',
+        error: {
+          code: 'tool_policy_denied',
+          message: 'The tool operation was denied by policy',
+        },
+      };
+    }
+    if (plan.policyDecision.decision === 'confirmation_required') {
+      if (!confirmationStatus) {
+        throw new ConflictException('tool_confirmation_missing');
+      }
+      if (confirmationStatus === 'pending') {
+        return { kind: 'waiting_confirmation' };
+      }
+      if (confirmationStatus !== 'approved') {
+        return {
+          kind: 'not_executed',
+          error: {
+            code:
+              confirmationStatus === 'expired'
+                ? 'tool_confirmation_expired'
+                : 'tool_confirmation_denied',
+            message:
+              confirmationStatus === 'expired'
+                ? 'The tool operation was not executed because confirmation expired'
+                : 'The tool operation was not executed because confirmation was denied',
+          },
+        };
+      }
+    } else if (plan.confirmationRequirement !== null || confirmationStatus) {
+      throw new ConflictException('tool_confirmation_mismatch');
+    }
+    if (new Date(plan.deadline) <= now) {
+      return {
+        kind: 'not_executed',
+        error: {
+          code: 'tool_plan_expired',
+          message:
+            'The tool operation was not executed because its plan expired',
+        },
+      };
+    }
+    return { kind: 'ready' };
+  }
+
+  private async materializeNotExecutedWithManager(
+    manager: EntityManager,
+    storedPlan: ExecutionToolPlanEntity,
+    error: { code: string; message: string },
+  ): Promise<ExecutionStepEntity> {
+    const planRepo = manager.getRepository(ExecutionToolPlanEntity);
+    if (storedPlan.stepId) {
+      const existing = await manager
+        .getRepository(ExecutionStepEntity)
+        .findOneBy({ stepId: storedPlan.stepId });
+      const toolResult = (existing?.result as Record<string, unknown> | null)
+        ?.toolResult as ToolResultContract | undefined;
+      if (
+        !existing ||
+        existing.status !== ExecutionStepStatus.COMPLETED ||
+        toolResult?.status !== 'not_executed' ||
+        toolResult.error?.code !== error.code
+      ) {
+        throw new ConflictException('tool_result_already_materialized');
+      }
+      return existing;
+    }
+
+    const execution = await this.lockActiveExecution(
+      manager,
+      storedPlan.executionId,
+    );
+    const invocation = await manager
+      .getRepository(ExecutionToolInvocationEntity)
+      .findOneBy({ toolCallId: storedPlan.toolCallId });
+    if (!invocation) throw new ConflictException('incomplete_tool_plan');
+    const toolResult: ToolResultContract = {
+      schemaVersion: 'tool-result/1',
+      operationId: storedPlan.operationId,
+      toolCallId: storedPlan.toolCallId,
+      status: 'not_executed',
+      content: '',
+      structuredContent: null,
+      artifactRefs: [],
+      sourceRefs: [],
+      effects: [],
+      error: { ...error, retryable: false },
+    };
+    this.contractValidator.assertToolResult(
+      toolResult as unknown as Record<string, unknown>,
+    );
+    const step = await createExecutionStep(manager, {
+      executionId: execution.executionId,
+      stepKind: ExecutionStepKind.TOOL,
+      dependsOnStepIds: await this.sourceDependencies(
+        manager,
+        invocation.invocation,
+      ),
+      work: {
+        taskType: storedPlan.toolName,
+        toolPlan: storedPlan.plan,
+        coordinationDecision: {
+          kind: 'not_executed',
+          reason: error.code,
+        },
+      },
+      requiredCapabilities: [],
+      resourceKeys: [],
+      operationId: storedPlan.operationId,
+      operationKind: ExecutionOperationKind.TOOL_CALL,
+      recoveryClass: storedPlan.plan
+        .recoveryClass as ExecutionOperationRecoveryClass,
+      causedByEventId: invocation.causedByEventId,
+    });
+    step.status = ExecutionStepStatus.COMPLETED;
+    step.result = { kind: ExecutionStepKind.TOOL, toolResult };
+    step.version += 1;
+    await manager.getRepository(ExecutionStepEntity).save(step);
+    const operation = await manager
+      .getRepository(ExecutionOperationEntity)
+      .findOneByOrFail({ operationId: storedPlan.operationId });
+    operation.status = ExecutionOperationStatus.NOT_EXECUTED;
+    operation.result = toolResult;
+    operation.error = error;
+    operation.finishedAt = new Date();
+    await manager.getRepository(ExecutionOperationEntity).save(operation);
+    storedPlan.stepId = step.stepId;
+    storedPlan.materializedAt = new Date();
+    await planRepo.save(storedPlan);
+    return step;
   }
 
   private preparePlan(

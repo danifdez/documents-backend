@@ -7,6 +7,7 @@ import { ExecutionOutboxService } from '../execution-outbox/execution-outbox.ser
 import { ExecutionToolRuntimeService } from './execution-tool-runtime.service';
 import { ExecutionAgentLoopService } from './execution-agent-loop.service';
 import { ExecutionConfirmationService } from '../execution/execution-confirmation.service';
+import { ExecutionNextWorkService } from './execution-next-work.service';
 
 const TERMINAL_STATUSES = new Set<ExecutionStatus>([
   ExecutionStatus.COMPLETED,
@@ -26,6 +27,7 @@ export class ExecutionCoordinatorService {
     private readonly executionToolRuntime: ExecutionToolRuntimeService,
     private readonly agentLoop: ExecutionAgentLoopService,
     private readonly confirmations: ExecutionConfirmationService,
+    private readonly nextWork: ExecutionNextWorkService,
   ) {}
 
   prepareAgentWork(limit = 20): Promise<number> {
@@ -39,10 +41,8 @@ export class ExecutionCoordinatorService {
   async acceptResults(limit = 20): Promise<number> {
     const processed =
       await this.executionAttemptService.processReceivedResults(limit);
-    await this.agentLoop.materializeAcceptedToolRequests(limit);
-    await this.agentLoop.materializeReadyToolContinuations(limit);
+    await this.nextWork.select(limit);
     await this.executionService.finalizePendingTerminals(limit);
-    await this.agentLoop.releaseTerminalDelegations(limit);
     await this.executionService.reconcileRequestedCancellations(limit);
     return processed;
   }
@@ -125,7 +125,7 @@ export class ExecutionCoordinatorService {
       }
       finalized += 1;
     }
-    await this.agentLoop.releaseTerminalDelegations(limit);
+    await this.nextWork.select(limit);
     await this.executionService.reconcileRequestedCancellations(limit);
     return finalized;
   }

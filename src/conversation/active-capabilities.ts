@@ -42,6 +42,9 @@ import { WorkerKind } from '../worker/worker-kind.enum';
 import type { ConversationOwnerType } from './conversation-session.entity';
 import {
   ActiveProductSkill,
+  DOCUMENT_SEARCH_AVAILABLE_SIGNAL,
+  ProductSkillSignal,
+  WORKSPACE_FOLDER_CONFIGURED_SIGNAL,
   selectProductSkills,
 } from './product-skill-registry';
 
@@ -64,7 +67,8 @@ interface ActiveToolCapability {
 export interface ActiveCapabilitySet {
   schemaVersion: typeof ACTIVE_CAPABILITY_SET_SCHEMA;
   owner: { type: ConversationOwnerType; id: number };
-  selectionPolicy: 'backend-availability/1';
+  selectionPolicy: 'backend-signals/1';
+  skillSignals: ProductSkillSignal[];
   tools: ActiveToolCapability[];
   skills: ActiveProductSkill[];
 }
@@ -77,7 +81,6 @@ export async function buildActiveCapabilitySet(
     ownerPrincipal: string;
     folderScope: string | null;
     browserFederationEnabled: boolean;
-    objective: string;
   },
 ): Promise<ActiveCapabilitySet> {
   const tools: ActiveToolCapability[] = [
@@ -160,13 +163,18 @@ export async function buildActiveCapabilitySet(
       ),
     );
   }
+  const skillSignals: ProductSkillSignal[] = [DOCUMENT_SEARCH_AVAILABLE_SIGNAL];
+  if (input.folderScope) {
+    skillSignals.push(WORKSPACE_FOLDER_CONFIGURED_SIGNAL);
+  }
   return {
     schemaVersion: ACTIVE_CAPABILITY_SET_SCHEMA,
     owner: { type: input.ownerType, id: input.ownerId },
-    selectionPolicy: 'backend-availability/1',
+    selectionPolicy: 'backend-signals/1',
+    skillSignals,
     tools,
     skills: selectProductSkills(
-      input.objective,
+      skillSignals,
       new Set(tools.map(({ name }) => name)),
     ),
   };

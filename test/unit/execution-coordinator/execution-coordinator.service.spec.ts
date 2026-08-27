@@ -23,6 +23,7 @@ describe('ExecutionCoordinatorService', () => {
   let toolRuntime: Record<string, jest.Mock>;
   let agentLoop: Record<string, jest.Mock>;
   let confirmations: Record<string, jest.Mock>;
+  let nextWork: Record<string, jest.Mock>;
 
   beforeEach(() => {
     executionService = {
@@ -55,6 +56,12 @@ describe('ExecutionCoordinatorService', () => {
     confirmations = {
       expirePending: jest.fn(),
     };
+    nextWork = {
+      select: jest.fn().mockResolvedValue({
+        selectedWorkItems: 0,
+        terminalCandidates: 0,
+      }),
+    };
     service = new ExecutionCoordinatorService(
       executionService as any,
       executionAttemptService as any,
@@ -63,6 +70,7 @@ describe('ExecutionCoordinatorService', () => {
       toolRuntime as any,
       agentLoop as any,
       confirmations as any,
+      nextWork as any,
     );
   });
 
@@ -94,10 +102,8 @@ describe('ExecutionCoordinatorService', () => {
     expect(executionAttemptService.processReceivedResults).toHaveBeenCalledWith(
       3,
     );
-    expect(agentLoop.materializeAcceptedToolRequests).toHaveBeenCalledWith(3);
-    expect(agentLoop.materializeReadyToolContinuations).toHaveBeenCalledWith(3);
+    expect(nextWork.select).toHaveBeenCalledWith(3);
     expect(executionService.finalizePendingTerminals).toHaveBeenCalledWith(3);
-    expect(agentLoop.releaseTerminalDelegations).toHaveBeenCalledWith(3);
     expect(
       executionService.reconcileRequestedCancellations,
     ).toHaveBeenCalledWith(3);

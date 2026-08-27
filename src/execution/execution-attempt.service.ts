@@ -45,6 +45,7 @@ import { executionStepOutputValue } from './execution-step-result';
 import { ExecutionStepKind } from './execution-step-kind.enum';
 import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
 import { ToolResultContract } from './execution-tool.types';
+import { COORDINATION_PENDING_PHASE } from './execution.constants';
 import { ExecutionEventEntity } from './execution-event.entity';
 import {
   appendBackendExecutionEvent,
@@ -1086,7 +1087,9 @@ export class ExecutionAttemptService {
             [execution.executionId],
           );
           execution.status = ExecutionStatus.RUNNING;
-          execution.phase = remaining.length ? null : 'backend_finalization';
+          execution.phase = remaining.length
+            ? null
+            : COORDINATION_PENDING_PHASE;
           if (!remaining.length) {
             execution.result = executionStepOutputValue(
               result.output,
@@ -1434,6 +1437,12 @@ export class ExecutionAttemptService {
       operation.operationKind ?? operationKindForStep(step.stepKind);
     const output = stepResult.output as Record<string, unknown> | undefined;
     const outcome = output?.outcome as Record<string, unknown> | undefined;
+    const toolPlan = (step.work ?? {}).toolPlan as
+      Record<string, unknown> | undefined;
+    const toolSummary =
+      toolResult?.status === 'succeeded'
+        ? `${String(toolPlan?.toolName ?? 'Tool')} completed`.slice(0, 200)
+        : null;
     const eventStatus =
       operation.status === ExecutionOperationStatus.NOT_EXECUTED
         ? ExecutionOperationStatus.FAILED
@@ -1449,7 +1458,18 @@ export class ExecutionAttemptService {
           operationKind,
           status: eventStatus,
           ...(operationKind === ExecutionOperationKind.INFERENCE
-            ? { outcome: String(outcome?.kind ?? 'invalid') }
+            ? {
+                outcome: String(outcome?.kind ?? 'invalid'),
+                ...(typeof outcome?.reason === 'string'
+                  ? { reason: outcome.reason }
+                  : {}),
+              }
+            : {}),
+          ...(toolSummary
+            ? {
+                resultSummary: toolSummary,
+                resultSummaryKind: 'leaf_tool',
+              }
             : {}),
           result: toolResult ?? output ?? null,
           error,

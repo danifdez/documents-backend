@@ -87,7 +87,7 @@ describe('AssistantChatProcessor final response', () => {
       result: {
         reply: 'Completed work',
         completionKind: 'partial',
-        completionReason: 'budget_exhausted',
+        completionReason: 'partial_budget_exhausted',
         completionSource: 'runtime_template',
         partialResult,
       },
@@ -97,7 +97,7 @@ describe('AssistantChatProcessor final response', () => {
 
     const completion = {
       kind: 'partial',
-      reason: 'budget_exhausted',
+      reason: 'partial_budget_exhausted',
       source: 'runtime_template',
       partialResult,
     };

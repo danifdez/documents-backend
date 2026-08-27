@@ -165,12 +165,12 @@ export class ExecutionConfirmationService {
       execution.waitCondition = {
         reason: 'confirmation',
         reference: first.confirmationId,
-        resumePhase: 'agent_loop',
+        resumePhase: 'coordination_pending',
         ...(first.expiresAt
           ? { expiresAt: first.expiresAt.toISOString() }
           : {}),
       };
-      execution.resumePhase = 'agent_loop';
+      execution.resumePhase = 'coordination_pending';
       execution.waitExpiresAt = first.expiresAt;
       root.lastSequence = String(sequence);
       root.lastEventId = stateEvent.eventId;
@@ -339,7 +339,7 @@ export class ExecutionConfirmationService {
       );
       const previousStatus = execution.status;
       execution.status = ExecutionStatus.QUEUED;
-      execution.phase = execution.resumePhase ?? 'agent_loop';
+      execution.phase = execution.resumePhase ?? 'coordination_pending';
       execution.waitReason = null;
       execution.waitCondition = null;
       execution.resumePhase = null;

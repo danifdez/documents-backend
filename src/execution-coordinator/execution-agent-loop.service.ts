@@ -1,7 +1,15 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
-import { DataSource, In } from 'typeorm';
-import { canonicalHash } from '../execution/execution-canonical';
+import { randomUUID } from 'crypto';
+import { DataSource, EntityManager, In } from 'typeorm';
+import { canonicalHash, contentHash } from '../execution/execution-canonical';
+import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 import { ExecutionEventEntity } from '../execution/execution-event.entity';
+import {
+  appendBackendExecutionEvent,
+  nextBackendProducerSequence,
+} from '../execution/execution-event.writer';
+import { ExecutionOperationEntity } from '../execution/execution-operation.entity';
+import { ExecutionOperationStatus } from '../execution/execution-operation-status.enum';
 import { ExecutionResultReceiptEntity } from '../execution/execution-result-receipt.entity';
 import { ExecutionStepEntity } from '../execution/execution-step.entity';
 import { createExecutionStep } from '../execution/execution-step.service';
@@ -12,10 +20,18 @@ import { ExecutionToolPlanService } from '../execution/execution-tool-plan.servi
 import { ToolResultContract } from '../execution/execution-tool.types';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionProgressService } from '../execution/execution-progress.service';
+import { DeterministicPartialResult } from '../execution/execution.types';
+import { COORDINATION_PENDING_PHASE } from '../execution/execution.constants';
 import {
   ACTIVE_CONTEXT_ARTIFACT_ROLE,
   freezeActiveContextArtifact,
 } from '../conversation/conversation-context';
+import {
+  AgentInferenceCoordination,
+  AgentLoopContinuation,
+  ExecutionNextStepSelector,
+  RuntimeDirective,
+} from './execution-next-work.types';
 
 const CHAT_TASK_TYPES = ['assistant-chat', 'agent-chat', 'delegated-agent'];
 const TOOL_LOOP_TASK_TYPES = ['assistant-chat', 'agent-chat'];
@@ -45,7 +61,8 @@ type ToolRound = {
 };
 
 @Injectable()
-export class ExecutionAgentLoopService {
+export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
+  readonly selectorId = 'agent-loop';
   private readonly logger = new Logger(ExecutionAgentLoopService.name);
 
   constructor(
@@ -53,6 +70,26 @@ export class ExecutionAgentLoopService {
     private readonly progress: ExecutionProgressService,
     private readonly toolPlans: ExecutionToolPlanService,
   ) {}
+
+  async selectNextWork(limit = 20): Promise<number> {
+    let materialized = await this.materializeAcceptedToolRequests(limit);
+    if (materialized < limit) {
+      materialized += await this.materializeInvalidOutcomes(
+        limit - materialized,
+      );
+    }
+    if (materialized < limit) {
+      materialized += await this.materializeReadyToolContinuations(
+        limit - materialized,
+      );
+    }
+    if (materialized < limit) {
+      materialized += await this.releaseTerminalDelegations(
+        limit - materialized,
+      );
+    }
+    return materialized;
+  }
 
   async prepareReadyInferences(limit = 20): Promise<number> {
     let prepared = 0;
@@ -99,10 +136,11 @@ export class ExecutionAgentLoopService {
           AND execution."task_type" = ANY($2::text[])
           AND execution."status" IN ('queued', 'running')
           AND execution."cancellation_requested_at" IS NULL
+          AND execution."phase" = $3
         ORDER BY receipt."received_at"
         LIMIT $1
       `,
-      [limit, TOOL_LOOP_TASK_TYPES],
+      [limit, TOOL_LOOP_TASK_TYPES, COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
     for (const row of rows) {
@@ -126,15 +164,44 @@ export class ExecutionAgentLoopService {
           AND execution."task_type" = ANY($2::text[])
           AND execution."status" IN ('queued', 'running')
           AND execution."cancellation_requested_at" IS NULL
-          AND COALESCE(execution."phase", '') NOT LIKE 'terminal_pending_%'
+          AND execution."phase" = $3
         ORDER BY step."updated_at"
         LIMIT $1
       `,
-      [limit, TOOL_LOOP_TASK_TYPES],
+      [limit, TOOL_LOOP_TASK_TYPES, COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
     for (const row of rows) {
       if (await this.materializeToolContinuation(String(row.step_id))) {
+        materialized += 1;
+      }
+    }
+    return materialized;
+  }
+
+  async materializeInvalidOutcomes(limit = 20): Promise<number> {
+    const rows = await this.dataSource.query(
+      `
+        SELECT step."step_id"
+        FROM "execution_steps" step
+        INNER JOIN "executions" execution
+          ON execution."execution_id" = step."execution_id"
+        WHERE step."status" = 'completed'
+          AND step."step_kind" = 'inference'
+          AND step."continuation_processed_at" IS NULL
+          AND step."result" #>> '{outcome,kind}' = 'invalid'
+          AND execution."task_type" = ANY($2::text[])
+          AND execution."status" IN ('queued', 'running')
+          AND execution."cancellation_requested_at" IS NULL
+          AND execution."phase" = $3
+        ORDER BY step."updated_at"
+        LIMIT $1
+      `,
+      [limit, CHAT_TASK_TYPES, COORDINATION_PENDING_PHASE],
+    );
+    let materialized = 0;
+    for (const row of rows) {
+      if (await this.materializeInvalidOutcome(String(row.step_id))) {
         materialized += 1;
       }
     }
@@ -224,6 +291,13 @@ export class ExecutionAgentLoopService {
       refreshed.progressLedger?.operationBudget?.reservations[step.operationId];
     const round =
       existingReservation?.round ?? this.nextInferenceRound(refreshed);
+    const coordination = this.inferenceCoordination(step);
+    const bucket =
+      coordination.purpose === 'repair'
+        ? 'repair'
+        : coordination.purpose === 'closing'
+          ? 'closing'
+          : 'normal';
     const decision = await this.progress.reserveOperationBudget(
       root.executionId,
       {
@@ -232,17 +306,27 @@ export class ExecutionAgentLoopService {
         grantId: grant.grantId,
         operationId: step.operationId,
         operationKind: 'inference',
-        bucket: 'normal',
-        phase: 'agent_loop',
+        bucket,
+        phase: coordination.phase,
         round,
         name:
-          execution.taskType === 'delegated-agent'
-            ? 'delegated-agent'
-            : String(step.work.taskType ?? execution.taskType),
+          coordination.purpose === 'repair'
+            ? 'output_repair'
+            : coordination.purpose === 'closing'
+              ? 'forced_finalization'
+              : execution.taskType === 'delegated-agent'
+                ? 'delegated-agent'
+                : String(step.work.taskType ?? execution.taskType),
       },
     );
     if (!decision.granted) {
-      throw new ConflictException(decision.reservation.reason);
+      return this.handleDeniedInference(
+        step,
+        execution,
+        grant.grantId,
+        decision.eventId,
+        coordination,
+      );
     }
     return this.dataSource.transaction(async (manager) => {
       const locked = await manager.getRepository(ExecutionStepEntity).findOne({
@@ -253,10 +337,62 @@ export class ExecutionAgentLoopService {
       if (locked.status !== ExecutionStepStatus.READY) {
         throw new ConflictException('inference_step_not_ready');
       }
+      if (decision.softLimitSignal) {
+        const directive: RuntimeDirective = {
+          schemaVersion: 'runtime-directive/1',
+          kind: 'progress_warning',
+          reason: 'normal_budget_soft_limit',
+          toolsAllowed: true,
+        };
+        const payload = this.payloadWithDirective(
+          this.stepPayload(locked),
+          directive,
+        );
+        const retainedRefs = locked.inputArtifactRefs.filter(
+          (ref) => ref.role !== ACTIVE_CONTEXT_ARTIFACT_ROLE,
+        );
+        const contextArtifact = await freezeActiveContextArtifact(manager, {
+          rootExecutionId: execution.rootExecutionId,
+          sessionId: execution.sessionId,
+          turnId: execution.turnId,
+          causedByEventId: decision.eventId,
+          effectivePayload: payload,
+          derivedFromArtifactIds: retainedRefs.map((ref) => ref.artifactId),
+        });
+        locked.inputArtifactRefs = [
+          ...retainedRefs,
+          {
+            role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+            artifactId: contextArtifact.artifactId,
+          },
+        ];
+        locked.work = { ...locked.work, payload };
+      }
       locked.budgetReservationId = decision.reservation.reservationId;
       await manager.save(locked);
       return true;
     });
+  }
+
+  private inferenceCoordination(
+    step: ExecutionStepEntity,
+  ): AgentInferenceCoordination {
+    const value = step.work.agentLoop;
+    if (!value || typeof value !== 'object') {
+      throw new ConflictException('agent_inference_coordination_missing');
+    }
+    const coordination = value as AgentInferenceCoordination;
+    if (
+      coordination.schemaVersion !== 'agent-inference/1' ||
+      !['normal', 'repair', 'closing'].includes(coordination.purpose) ||
+      !['agent_loop', 'output_repair', 'forced_finalization'].includes(
+        coordination.phase,
+      ) ||
+      !Array.isArray(coordination.evidenceStepIds)
+    ) {
+      throw new ConflictException('agent_inference_coordination_invalid');
+    }
+    return coordination;
   }
 
   private nextInferenceRound(execution: ExecutionEntity): number {
@@ -305,6 +441,13 @@ export class ExecutionAgentLoopService {
       plan: ExecutionToolPlanEntity;
       reservationId: string;
     }> = [];
+    const deniedBatch: Array<{
+      plan: ExecutionToolPlanEntity;
+      error: { code: string; message: string };
+      continuation?: AgentLoopContinuation;
+    }> = [];
+    let confirmationPending = false;
+    let continuation: AgentLoopContinuation = { kind: 'normal' };
     for (const [index, call] of calls.entries()) {
       try {
         const prepared = await this.toolPlans.prepare({
@@ -325,6 +468,20 @@ export class ExecutionAgentLoopService {
             dataClassification: 'workspace',
           },
         });
+        const disposition = await this.toolPlans.getMaterializationDisposition(
+          call.toolCallId,
+        );
+        if (disposition.kind === 'waiting_confirmation') {
+          confirmationPending = true;
+          continue;
+        }
+        if (disposition.kind === 'not_executed') {
+          deniedBatch.push({
+            plan: prepared.plan,
+            error: disposition.error,
+          });
+          continue;
+        }
         const decision = await this.progress.reserveOperationBudget(
           execution.executionId,
           {
@@ -347,7 +504,57 @@ export class ExecutionAgentLoopService {
             name: call.name,
           },
         );
-        if (!decision.granted) continue;
+        if (!decision.granted) {
+          const action = decision.loopGuardSignal?.action;
+          deniedBatch.push({
+            plan: prepared.plan,
+            error: {
+              code:
+                action === 'terminate'
+                  ? 'loop_guard_terminated'
+                  : action === 'block'
+                    ? 'loop_guard_blocked'
+                    : 'tool_budget_exhausted',
+              message:
+                action === 'terminate'
+                  ? 'The repeated tool operation was not executed because the loop guard terminated the loop'
+                  : action === 'block'
+                    ? 'The repeated tool operation was not executed because the loop guard blocked it'
+                    : 'The tool operation was not executed because the tool budget was exhausted',
+            },
+            continuation:
+              action === 'terminate'
+                ? {
+                    kind: 'partial',
+                    trigger: 'exact_tool_repeat_persisted',
+                  }
+                : action === 'block'
+                  ? {
+                      kind: 'normal',
+                      directive: 'exact_tool_repeat_blocked',
+                    }
+                  : { kind: 'closing', reason: 'tool_budget_exhausted' },
+          });
+          continue;
+        }
+        if (
+          continuation.kind === 'normal' &&
+          decision.loopGuardSignal?.action === 'warn'
+        ) {
+          continuation = {
+            kind: 'normal',
+            directive: 'exact_tool_repeat_warning',
+          };
+        } else if (
+          continuation.kind === 'normal' &&
+          !continuation.directive &&
+          decision.softLimitSignal
+        ) {
+          continuation = {
+            kind: 'normal',
+            directive: 'tool_budget_soft_limit',
+          };
+        }
         preparedBatch.push({
           call,
           plan: prepared.plan,
@@ -361,7 +568,27 @@ export class ExecutionAgentLoopService {
         throw error;
       }
     }
-    let confirmationPending = false;
+    for (const item of deniedBatch) {
+      const alreadyMaterialized = item.plan.stepId !== null;
+      await this.toolPlans.materializeNotExecuted(
+        item.plan.toolCallId,
+        item.error,
+      );
+      if (!alreadyMaterialized) materialized += 1;
+      if (item.continuation?.kind === 'partial') {
+        continuation = item.continuation;
+      } else if (
+        item.continuation?.kind === 'closing' &&
+        continuation.kind !== 'partial'
+      ) {
+        continuation = item.continuation;
+      } else if (
+        item.continuation?.kind === 'normal' &&
+        continuation.kind === 'normal'
+      ) {
+        continuation = item.continuation;
+      }
+    }
     for (const item of preparedBatch) {
       const alreadyMaterialized = item.plan.stepId !== null;
       const step = await this.toolPlans.materialize(
@@ -385,6 +612,10 @@ export class ExecutionAgentLoopService {
       });
       if (!locked) throw new ConflictException('tool_request_step_missing');
       locked.continuationProcessedAt = new Date();
+      locked.work = {
+        ...locked.work,
+        agentLoopContinuation: continuation,
+      };
       await manager.save(locked);
     });
     return materialized;
@@ -472,7 +703,10 @@ export class ExecutionAgentLoopService {
         },
         order: { sequence: 'DESC' },
       });
-      if (!finish) throw new ConflictException('tool_batch_finish_missing');
+      const causedByEventId = finish?.eventId ?? execution.lastEventId;
+      if (!causedByEventId) {
+        throw new ConflictException('tool_batch_finish_missing');
+      }
 
       const work = source.work ?? {};
       const payload =
@@ -482,50 +716,508 @@ export class ExecutionAgentLoopService {
       const history = Array.isArray(payload.toolHistory)
         ? (payload.toolHistory as ToolRound[])
         : [];
-      const effectivePayload = {
+      let effectivePayload: Record<string, unknown> = {
         ...payload,
         toolHistory: [
           ...history,
           { round: sourceReservation.round, calls, results },
         ],
       };
-      const contextArtifact = await freezeActiveContextArtifact(manager, {
-        rootExecutionId: execution.rootExecutionId,
-        sessionId: execution.sessionId,
-        turnId: execution.turnId,
-        causedByEventId: finish.eventId,
-        effectivePayload,
-        derivedFromArtifactIds: continuationArtifacts.map(
-          (artifact) => artifact.artifactId,
-        ),
-      });
-      const continuation = await createExecutionStep(manager, {
-        executionId: execution.executionId,
-        stepKind: ExecutionStepKind.INFERENCE,
-        dependsOnStepIds: toolStepIds as string[],
-        inputArtifactRefs: [
-          ...continuationArtifacts,
-          {
-            role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
-            artifactId: contextArtifact.artifactId,
-          },
-        ],
-        work: {
-          taskType: execution.taskType,
-          agentName:
-            execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
-          payload: effectivePayload,
-        },
-        requiredCapabilities: [execution.taskType],
-        priority: source.priority,
-        causedByEventId: finish.eventId,
+      const requested = this.continuationDirective(source);
+      if (requested.kind === 'partial') {
+        source.work = {
+          ...source.work,
+          agentLoopTerminalPrepared: true,
+        };
+        await stepRepo.save(source);
+        await this.materializeDeterministicPartial(
+          manager,
+          execution,
+          requested.trigger,
+          causedByEventId,
+        );
+        return true;
+      }
+      const purpose = requested.kind === 'closing' ? 'closing' : 'normal';
+      const directive =
+        requested.kind === 'closing'
+          ? this.forcedFinalizationDirective(requested.reason)
+          : requested.directive
+            ? {
+                schemaVersion: 'runtime-directive/1' as const,
+                kind: 'progress_warning' as const,
+                reason: requested.directive,
+                toolsAllowed: true as const,
+              }
+            : null;
+      if (directive) {
+        effectivePayload = this.payloadWithDirective(
+          effectivePayload,
+          directive,
+        );
+      }
+      const continuation = await this.createInferenceContinuation(manager, {
+        execution,
+        source,
+        purpose,
+        payload: effectivePayload,
+        evidenceStepIds: toolStepIds as string[],
+        inputArtifactRefs: continuationArtifacts,
+        causedByEventId,
       });
       source.continuationStepId = continuation.stepId;
       await stepRepo.save(source);
-      execution.phase = null;
-      execution.result = null;
-      await manager.getRepository(ExecutionEntity).save(execution);
       return true;
     });
+  }
+
+  private async materializeInvalidOutcome(stepId: string): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      const stepRepo = manager.getRepository(ExecutionStepEntity);
+      const source = await stepRepo.findOne({
+        where: { stepId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!source || source.continuationProcessedAt) return false;
+      const outcome = (source.result as Record<string, unknown> | null)
+        ?.outcome as Record<string, unknown> | undefined;
+      if (outcome?.kind !== 'invalid') return false;
+      const execution = await manager.getRepository(ExecutionEntity).findOne({
+        where: { executionId: source.executionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!execution) throw new ConflictException('execution_not_found');
+      const finish = await manager.getRepository(ExecutionEventEntity).findOne({
+        where: {
+          rootExecutionId: execution.rootExecutionId,
+          operationId: source.operationId,
+          eventType: 'operation.finished',
+        },
+        order: { sequence: 'DESC' },
+      });
+      const causedByEventId = finish?.eventId ?? execution.lastEventId;
+      if (!causedByEventId) {
+        throw new ConflictException('invalid_outcome_finish_missing');
+      }
+      source.continuationProcessedAt = new Date();
+      const coordination = this.inferenceCoordination(source);
+      if (coordination.purpose === 'closing') {
+        source.work = {
+          ...source.work,
+          agentLoopTerminalPrepared: true,
+        };
+        await stepRepo.save(source);
+        await this.materializeDeterministicPartial(
+          manager,
+          execution,
+          'closing_output_empty',
+          causedByEventId,
+        );
+        return true;
+      }
+
+      const purpose = coordination.purpose === 'repair' ? 'closing' : 'repair';
+      const reason = String(outcome.reason ?? 'invalid_model_output');
+      const directive: RuntimeDirective =
+        purpose === 'repair'
+          ? {
+              schemaVersion: 'runtime-directive/1',
+              kind: 'output_repair',
+              reason,
+              toolsAllowed: false,
+            }
+          : this.forcedFinalizationDirective('budget_exhausted');
+      const payload = this.payloadWithDirective(
+        this.stepPayload(source),
+        directive,
+      );
+      const continuation = await this.createInferenceContinuation(manager, {
+        execution,
+        source,
+        purpose,
+        payload,
+        evidenceStepIds: [source.stepId],
+        inputArtifactRefs: source.inputArtifactRefs.filter(
+          (ref) => ref.role !== ACTIVE_CONTEXT_ARTIFACT_ROLE,
+        ),
+        causedByEventId,
+      });
+      source.continuationStepId = continuation.stepId;
+      await stepRepo.save(source);
+      return true;
+    });
+  }
+
+  private async handleDeniedInference(
+    step: ExecutionStepEntity,
+    execution: ExecutionEntity,
+    grantId: string,
+    causedByEventId: string,
+    coordination: AgentInferenceCoordination,
+  ): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      const stepRepo = manager.getRepository(ExecutionStepEntity);
+      const locked = await stepRepo.findOne({
+        where: { stepId: step.stepId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked || locked.budgetReservationId) return false;
+      if (locked.status !== ExecutionStepStatus.READY) return false;
+      locked.status = ExecutionStepStatus.CANCELLED;
+      locked.error = {
+        code: 'inference_budget_exhausted',
+        message: `No ${coordination.purpose} inference budget remained`,
+      };
+      locked.version += 1;
+      await stepRepo.save(locked);
+      const operation = await manager
+        .getRepository(ExecutionOperationEntity)
+        .findOneByOrFail({ operationId: locked.operationId });
+      operation.status = ExecutionOperationStatus.NOT_EXECUTED;
+      operation.error = locked.error;
+      operation.finishedAt = new Date();
+      await manager.getRepository(ExecutionOperationEntity).save(operation);
+      const current = await manager.getRepository(ExecutionEntity).findOne({
+        where: { executionId: execution.executionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!current) throw new ConflictException('execution_not_found');
+
+      if (coordination.purpose === 'closing') {
+        await this.materializeDeterministicPartial(
+          manager,
+          current,
+          'closing_unavailable',
+          causedByEventId,
+          grantId,
+        );
+        return true;
+      }
+
+      const continuation = await this.createInferenceContinuation(manager, {
+        execution: current,
+        source: locked,
+        purpose: 'closing',
+        payload: this.payloadWithDirective(
+          this.stepPayload(locked),
+          this.forcedFinalizationDirective('budget_exhausted'),
+        ),
+        evidenceStepIds: coordination.evidenceStepIds,
+        inputArtifactRefs: locked.inputArtifactRefs.filter(
+          (ref) => ref.role !== ACTIVE_CONTEXT_ARTIFACT_ROLE,
+        ),
+        causedByEventId,
+      });
+      if (coordination.sourceStepId) {
+        const source = await stepRepo.findOne({
+          where: { stepId: coordination.sourceStepId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (source) {
+          source.continuationStepId = continuation.stepId;
+          await stepRepo.save(source);
+        }
+      }
+      return true;
+    });
+  }
+
+  private async createInferenceContinuation(
+    manager: EntityManager,
+    input: {
+      execution: ExecutionEntity;
+      source: ExecutionStepEntity;
+      purpose: 'normal' | 'repair' | 'closing';
+      payload: Record<string, unknown>;
+      evidenceStepIds: string[];
+      inputArtifactRefs: ExecutionStepEntity['inputArtifactRefs'];
+      causedByEventId: string;
+    },
+  ): Promise<ExecutionStepEntity> {
+    const contextArtifact = await freezeActiveContextArtifact(manager, {
+      rootExecutionId: input.execution.rootExecutionId,
+      sessionId: input.execution.sessionId,
+      turnId: input.execution.turnId,
+      causedByEventId: input.causedByEventId,
+      effectivePayload: input.payload,
+      derivedFromArtifactIds: input.inputArtifactRefs.map(
+        (artifact) => artifact.artifactId,
+      ),
+    });
+    const phase =
+      input.purpose === 'repair'
+        ? 'output_repair'
+        : input.purpose === 'closing'
+          ? 'forced_finalization'
+          : 'agent_loop';
+    const continuation = await createExecutionStep(manager, {
+      executionId: input.execution.executionId,
+      stepKind: ExecutionStepKind.INFERENCE,
+      dependsOnStepIds: input.evidenceStepIds,
+      inputArtifactRefs: [
+        ...input.inputArtifactRefs,
+        {
+          role: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+          artifactId: contextArtifact.artifactId,
+        },
+      ],
+      work: {
+        taskType: input.execution.taskType,
+        agentName:
+          input.execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
+        payload: input.payload,
+        agentLoop: {
+          schemaVersion: 'agent-inference/1',
+          purpose: input.purpose,
+          phase,
+          sourceStepId: input.source.stepId,
+          evidenceStepIds: input.evidenceStepIds,
+        } satisfies AgentInferenceCoordination,
+      },
+      requiredCapabilities: [input.execution.taskType],
+      priority: input.source.priority,
+      causedByEventId: input.causedByEventId,
+    });
+    input.execution.phase = null;
+    input.execution.result = null;
+    await manager.getRepository(ExecutionEntity).save(input.execution);
+    return continuation;
+  }
+
+  private continuationDirective(
+    source: ExecutionStepEntity,
+  ): AgentLoopContinuation {
+    const value = source.work.agentLoopContinuation;
+    if (!value || typeof value !== 'object') return { kind: 'normal' };
+    const continuation = value as AgentLoopContinuation;
+    if (
+      continuation.kind === 'normal' ||
+      continuation.kind === 'closing' ||
+      continuation.kind === 'partial'
+    ) {
+      return continuation;
+    }
+    throw new ConflictException('agent_loop_continuation_invalid');
+  }
+
+  private stepPayload(step: ExecutionStepEntity): Record<string, unknown> {
+    return step.work.payload && typeof step.work.payload === 'object'
+      ? (step.work.payload as Record<string, unknown>)
+      : {};
+  }
+
+  private forcedFinalizationDirective(
+    reason: 'budget_exhausted' | 'tool_budget_exhausted',
+  ): RuntimeDirective {
+    return {
+      schemaVersion: 'runtime-directive/1',
+      kind: 'forced_finalization',
+      reason,
+      toolsAllowed: false,
+    };
+  }
+
+  private payloadWithDirective(
+    payload: Record<string, unknown>,
+    directive: RuntimeDirective,
+  ): Record<string, unknown> {
+    const activeCapabilities =
+      payload.activeCapabilities &&
+      typeof payload.activeCapabilities === 'object'
+        ? (payload.activeCapabilities as Record<string, unknown>)
+        : null;
+    return {
+      ...payload,
+      runtimeDirective: directive,
+      ...(directive.toolsAllowed || !activeCapabilities
+        ? {}
+        : {
+            activeCapabilities: {
+              ...activeCapabilities,
+              tools: [],
+            },
+          }),
+    };
+  }
+
+  private async materializeDeterministicPartial(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    trigger:
+      | 'closing_unavailable'
+      | 'closing_output_empty'
+      | 'exact_tool_repeat_persisted',
+    causedByEventId: string,
+    explicitGrantId?: string,
+  ): Promise<void> {
+    const eventRepo = manager.getRepository(ExecutionEventEntity);
+    const rows = await eventRepo.find({
+      where: { rootExecutionId: execution.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const starts = new Map(
+      rows
+        .filter(
+          (row) =>
+            row.executionId === execution.executionId &&
+            row.eventType === 'operation.started' &&
+            (row.envelope.payload as Record<string, unknown>)?.operationKind ===
+              'tool_call',
+        )
+        .map((row) => [row.operationId, row]),
+    );
+    const completedOperations = rows.flatMap((row) => {
+      const payload = row.envelope.payload as Record<string, unknown>;
+      const start = starts.get(row.operationId);
+      const startPayload = start?.envelope.payload as
+        Record<string, unknown> | undefined;
+      if (
+        row.executionId !== execution.executionId ||
+        row.eventType !== 'operation.finished' ||
+        payload?.operationKind !== 'tool_call' ||
+        payload.status !== 'succeeded' ||
+        payload.resultSummaryKind !== 'leaf_tool' ||
+        typeof payload.resultSummary !== 'string' ||
+        !start ||
+        !row.operationId ||
+        !row.envelope.toolCallId
+      ) {
+        return [];
+      }
+      return [
+        {
+          operationId: row.operationId,
+          toolCallId: String(row.envelope.toolCallId),
+          name: String(startPayload?.name ?? 'tool'),
+          summary: payload.resultSummary,
+        },
+      ];
+    });
+    const grantId =
+      explicitGrantId ??
+      Object.keys(execution.progressLedger?.operationBudget?.grants ?? {})[0];
+    if (!grantId || !completedOperations.length) {
+      execution.error = {
+        code: 'terminal_candidate_unavailable',
+        message:
+          'The execution budget ended before any confirmed result could be summarized',
+      };
+      execution.phase = 'terminal_pending_failed';
+      await manager.getRepository(ExecutionEntity).save(execution);
+      return;
+    }
+    const loopPartial = trigger === 'exact_tool_repeat_persisted';
+    const partialResult: DeterministicPartialResult = {
+      version: '1',
+      trigger,
+      loopId: execution.executionId,
+      grantId,
+      completedOperations,
+      pending: loopPartial ? ['strategy_change'] : ['final_synthesis'],
+      ...(loopPartial
+        ? {
+            continuation: {
+              kind: 'new_turn' as const,
+              reason: 'different_strategy_required' as const,
+            },
+          }
+        : {}),
+    };
+    const reply = loopPartial
+      ? [
+          'I stopped because the same tool action kept repeating.',
+          '',
+          'Completed work:',
+          ...completedOperations.map(
+            (item) => `- ${item.name}: ${item.summary}`,
+          ),
+          '',
+          'Pending:',
+          '- Continue in a new turn with a different strategy.',
+        ].join('\n')
+      : [
+          "I couldn't produce the final synthesis because this turn reached its execution limit.",
+          '',
+          'Completed work:',
+          ...completedOperations.map(
+            (item) => `- ${item.name}: ${item.summary}`,
+          ),
+          '',
+          'Pending:',
+          '- Final synthesis of the completed results.',
+        ].join('\n');
+    const root =
+      execution.executionId === execution.rootExecutionId
+        ? execution
+        : await manager.getRepository(ExecutionEntity).findOneOrFail({
+            where: {
+              executionId: execution.rootExecutionId,
+              rootExecutionId: execution.rootExecutionId,
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+    const artifactId = randomUUID();
+    const body = Buffer.from(reply, 'utf8');
+    await manager.getRepository(ExecutionArtifactEntity).save(
+      manager.getRepository(ExecutionArtifactEntity).create({
+        artifactId,
+        rootExecutionId: execution.rootExecutionId,
+        kind: 'model_response',
+        contentHash: contentHash(body),
+        size: String(body.length),
+        mediaType: 'text/plain',
+        encoding: 'identity',
+        dataClassification: 'workspace',
+        redaction: { applied: false },
+        retentionClass: 'evaluation',
+        createdByEventId: null,
+        inputSourceIds: [],
+        storageRef: `execution:${execution.rootExecutionId}:artifact:${artifactId}`,
+        body,
+      }),
+    );
+    const event = await appendBackendExecutionEvent(
+      manager,
+      root,
+      nextBackendProducerSequence(rows),
+      {
+        eventType: 'message.recorded',
+        payloadSchema: 'message.recorded/1',
+        payload: {
+          messageKind: 'final_response',
+          role: 'assistant',
+          contentPreview: reply.slice(0, 512),
+          contentArtifactId: artifactId,
+          format: 'text',
+          generationSource: 'runtime_template',
+        },
+        actor: { type: 'system' },
+        executionId: execution.executionId,
+        turnId: execution.turnId,
+        causedByEventId,
+        artifactRefs: [artifactId],
+      },
+      Number(root.lastSequence) + 1,
+    );
+    root.lastSequence = event.sequence;
+    root.lastEventId = event.eventId;
+    execution.lastSequence = event.sequence;
+    execution.lastEventId = event.eventId;
+    execution.result = {
+      reply,
+      error: null,
+      completionKind: 'partial',
+      completionReason: loopPartial
+        ? 'partial_loop_guard'
+        : 'partial_budget_exhausted',
+      completionSource: 'runtime_template',
+      partialResult,
+    };
+    execution.error = null;
+    execution.phase = COORDINATION_PENDING_PHASE;
+    await manager.getRepository(ExecutionEntity).save(root);
+    if (root.executionId !== execution.executionId) {
+      await manager.getRepository(ExecutionEntity).save(execution);
+    }
   }
 }

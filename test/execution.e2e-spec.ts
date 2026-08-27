@@ -57,6 +57,7 @@ import { ExecutionConfirmationEntity } from '../src/execution/execution-confirma
 import { ExecutionConfirmationService } from '../src/execution/execution-confirmation.service';
 import { ExecutionToolRuntimeService } from '../src/execution-coordinator/execution-tool-runtime.service';
 import { ExecutionAgentLoopService } from '../src/execution-coordinator/execution-agent-loop.service';
+import { ExecutionTerminalCandidateService } from '../src/execution-coordinator/execution-terminal-candidate.service';
 import {
   assertOperationBudgetProjection,
   governedBudgetStart,
@@ -96,6 +97,7 @@ describe('execution PostgreSQL integration', () => {
   let toolPlanService: ExecutionToolPlanService;
   let confirmationService: ExecutionConfirmationService;
   let agentLoopService: ExecutionAgentLoopService;
+  let terminalCandidateService: ExecutionTerminalCandidateService;
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -209,6 +211,9 @@ describe('execution PostgreSQL integration', () => {
       budgets,
       toolPlanService,
     );
+    terminalCandidateService = new ExecutionTerminalCandidateService(
+      dataSource,
+    );
   });
 
   afterAll(async () => {
@@ -321,7 +326,8 @@ describe('execution PostgreSQL integration', () => {
   const activeCapabilities = (...names: string[]) => ({
     schemaVersion: 'active-capability-set/1',
     owner: { type: 'assistant', id: 1 },
-    selectionPolicy: 'backend-availability/1',
+    selectionPolicy: 'backend-signals/1',
+    skillSignals: [],
     tools: names.map((name) => ({
       name,
       descriptorVersion: `${name}/1`,
@@ -796,11 +802,17 @@ describe('execution PostgreSQL integration', () => {
     expect(persistedRoot.lastSequence).toBe('4');
     expect(persistedRoot.lastEventId).toBe(treeEvents[3].eventId);
     expect(persistedChild).toMatchObject({
-      phase: 'backend_finalization',
+      phase: 'coordination_pending',
       result: { transcript: 'Hello' },
       lastSequence: '4',
       lastEventId: treeEvents[3].eventId,
     });
+    await expect(terminalCandidateService.promoteReady()).resolves.toBe(1);
+    await expect(
+      dataSource
+        .getRepository(ExecutionEntity)
+        .findOneByOrFail({ executionId: child.executionId }),
+    ).resolves.toMatchObject({ phase: 'backend_finalization' });
   });
 
   it('propagates durable cancellation through active child attempts', async () => {
@@ -1041,7 +1053,7 @@ describe('execution PostgreSQL integration', () => {
       status: ExecutionStatus.WAITING,
       phase: 'awaiting_confirmation',
       waitReason: 'confirmation',
-      resumePhase: 'agent_loop',
+      resumePhase: 'coordination_pending',
     });
     const pending = await confirmationService.listPending({ ownerPrincipal });
     expect(pending).toHaveLength(1);
@@ -1070,7 +1082,7 @@ describe('execution PostgreSQL integration', () => {
       .findOneByOrFail({ executionId: created.executionId });
     expect(resumed).toMatchObject({
       status: ExecutionStatus.QUEUED,
-      phase: 'agent_loop',
+      phase: 'coordination_pending',
       waitReason: null,
       waitCondition: null,
       resumePhase: null,
@@ -1141,7 +1153,7 @@ describe('execution PostgreSQL integration', () => {
         .findOneByOrFail({ executionId: created.executionId }),
     ).resolves.toMatchObject({
       status: ExecutionStatus.QUEUED,
-      phase: 'agent_loop',
+      phase: 'coordination_pending',
       waitReason: null,
     });
   });
@@ -1861,6 +1873,138 @@ describe('execution PostgreSQL integration', () => {
     await expect(agentLoopService.prepareReadyInferences()).resolves.toBe(1);
   });
 
+  it('repairs invalid chat output once, forces closing, then fails without confirmed value', async () => {
+    const created = await createChat(
+      'assistant_chat',
+      'Produce a valid final answer',
+      { ownerPrincipal: 'invalid-outcome-e2e' },
+      { ownerId: 1 },
+    );
+    const workerId = randomUUID();
+    const completeInvalidInference = async () => {
+      await expect(agentLoopService.prepareReadyInferences()).resolves.toBe(1);
+      const assignment = await attemptService.claimReadyStep({
+        workerId,
+        stepKinds: [ExecutionStepKind.INFERENCE],
+        capabilities: ['assistant-chat'],
+        leaseDurationMs: 30_000,
+      });
+      expect(assignment).not.toBeNull();
+      await attemptService.startAttempt(assignment!.attemptId, workerId);
+      await attemptService.receiveResult({
+        executionId: assignment!.executionId,
+        stepId: assignment!.stepId,
+        operationId: assignment!.operationId,
+        attemptId: assignment!.attemptId,
+        workerId,
+        result: {
+          schemaVersion: 'step-result/1',
+          executionId: assignment!.executionId,
+          stepId: assignment!.stepId,
+          operationId: assignment!.operationId,
+          attemptId: assignment!.attemptId,
+          stepKind: ExecutionStepKind.INFERENCE,
+          status: 'succeeded',
+          codeFingerprint: TEST_CODE_FINGERPRINT,
+          runtimeFingerprint: TEST_RUNTIME_FINGERPRINT,
+          output: {
+            kind: ExecutionStepKind.INFERENCE,
+            outcome: {
+              kind: 'invalid',
+              reason: 'empty_model_response',
+            },
+          },
+          usage: {
+            promptTokens: 10,
+            completionTokens: 0,
+            totalTokens: 10,
+          },
+          inference: {
+            effectiveModel: 'e2e-model',
+            effectiveAdapter: null,
+            effectivePromptPackages: ['e2e-prompt'],
+            finishReason: 'completed',
+            inferenceMs: 1,
+            cacheOutcome: 'miss',
+            warnings: [],
+          },
+          artifactRefs: [],
+          error: null,
+        },
+      });
+      await expect(attemptService.processReceivedResults()).resolves.toBe(1);
+      return assignment!;
+    };
+
+    const initial = await completeInvalidInference();
+    await expect(terminalCandidateService.promoteReady()).resolves.toBe(0);
+    await expect(agentLoopService.materializeInvalidOutcomes()).resolves.toBe(
+      1,
+    );
+    const initialSource = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ stepId: initial.stepId });
+    const repair = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ stepId: initialSource.continuationStepId! });
+    expect(repair.work).toMatchObject({
+      agentLoop: {
+        purpose: 'repair',
+        phase: 'output_repair',
+        sourceStepId: initial.stepId,
+      },
+      payload: {
+        runtimeDirective: {
+          kind: 'output_repair',
+          reason: 'empty_model_response',
+          toolsAllowed: false,
+        },
+        activeCapabilities: { tools: [] },
+      },
+    });
+
+    const repairAssignment = await completeInvalidInference();
+    expect(repairAssignment.stepId).toBe(repair.stepId);
+    await expect(agentLoopService.materializeInvalidOutcomes()).resolves.toBe(
+      1,
+    );
+    const repairedSource = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ stepId: repair.stepId });
+    const closing = await dataSource
+      .getRepository(ExecutionStepEntity)
+      .findOneByOrFail({ stepId: repairedSource.continuationStepId! });
+    expect(closing.work).toMatchObject({
+      agentLoop: {
+        purpose: 'closing',
+        phase: 'forced_finalization',
+        sourceStepId: repair.stepId,
+      },
+      payload: {
+        runtimeDirective: {
+          kind: 'forced_finalization',
+          toolsAllowed: false,
+        },
+        activeCapabilities: { tools: [] },
+      },
+    });
+
+    const closingAssignment = await completeInvalidInference();
+    expect(closingAssignment.stepId).toBe(closing.stepId);
+    await expect(agentLoopService.materializeInvalidOutcomes()).resolves.toBe(
+      1,
+    );
+    await expect(
+      dataSource
+        .getRepository(ExecutionEntity)
+        .findOneByOrFail({ executionId: created.executionId }),
+    ).resolves.toMatchObject({
+      status: ExecutionStatus.RUNNING,
+      phase: 'terminal_pending_failed',
+      error: { code: 'terminal_candidate_unavailable' },
+    });
+  });
+
   it('registers and authenticates an isolated Models identity', async () => {
     const workerId = randomUUID();
     const registration = await workerService.registerModels(
@@ -2110,9 +2254,10 @@ describe('execution PostgreSQL integration', () => {
       }),
     ).resolves.toMatchObject({
       status: ExecutionStatus.RUNNING,
-      phase: 'backend_finalization',
+      phase: 'coordination_pending',
       result: { language: 'en' },
     });
+    await expect(terminalCandidateService.promoteReady()).resolves.toBe(1);
   });
 
   it('runs summarize fan-out and fan-in on the canonical step graph', async () => {
@@ -2274,9 +2419,10 @@ describe('execution PostgreSQL integration', () => {
       }),
     ).resolves.toMatchObject({
       status: ExecutionStatus.RUNNING,
-      phase: 'backend_finalization',
+      phase: 'coordination_pending',
       result: { response: 'merged' },
     });
+    await expect(terminalCandidateService.promoteReady()).resolves.toBe(1);
   });
 
   it('materializes oversized chat input through a durable reduction graph', async () => {
@@ -2592,15 +2738,18 @@ describe('execution PostgreSQL integration', () => {
         'workspace_files.delete',
       ]),
     );
-    expect(accepted.execution.payload.activeCapabilities.skills).toEqual([
-      expect.objectContaining({
-        skillId: 'workspace-document-workflow',
-        version: 'workspace-document-workflow/1',
-        activationReason: 'objective_match',
-        contentHash:
-          'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
-      }),
-    ]);
+    expect(accepted.execution.payload.activeCapabilities.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          skillId: 'workspace-document-workflow',
+          version: 'workspace-document-workflow/1',
+          activationReason: 'signal_match',
+          activationSignal: 'workspace_folder_configured',
+          contentHash:
+            'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
+        }),
+      ]),
+    );
     expect(
       accepted.execution.payload.activeCapabilities.skills[0],
     ).not.toHaveProperty('instructions');
@@ -2619,13 +2768,17 @@ describe('execution PostgreSQL integration', () => {
     const repo = dataSource.getRepository(SkillActivationEntity);
     const active = await repo.findOneByOrFail({
       executionId: accepted.execution.executionId,
+      skillId: 'workspace-document-workflow',
     });
     expect(active).toMatchObject({
       schemaVersion: 'skill-activation/1',
       skillId: 'workspace-document-workflow',
       skillVersion: 'workspace-document-workflow/1',
-      activationReason: 'objective_match',
-      inputBindings: { owner: { type: 'assistant', id: 1 } },
+      activationReason: 'signal_match',
+      inputBindings: {
+        owner: { type: 'assistant', id: 1 },
+        signal: 'workspace_folder_configured',
+      },
       phase: 'instructions_loaded',
       checkpoint: null,
       status: 'active',
@@ -2940,7 +3093,15 @@ describe('execution PostgreSQL integration', () => {
       );
       expect(JSON.stringify(bundle)).not.toContain('known-secret');
       expect(bundle.embeddedArtifacts).toBeDefined();
-      expect(bundle.skillActivations).toEqual([]);
+      expect(bundle.skillActivations).toEqual([
+        expect.objectContaining({
+          skillId: 'evidence-research-workflow',
+          activationReason: 'signal_match',
+          inputBindings: expect.objectContaining({
+            signal: 'document_search_available',
+          }),
+        }),
+      ]);
       expect(bundle.bundleCompleteness).toEqual({
         status: 'reproducible',
         reproducible: true,
@@ -3876,7 +4037,7 @@ describe('execution PostgreSQL integration', () => {
     );
     const completion = {
       kind: 'partial' as const,
-      reason: 'budget_exhausted',
+      reason: 'partial_budget_exhausted',
       source: 'runtime_template' as const,
       partialResult: {
         version: '1' as const,
@@ -3913,7 +4074,7 @@ describe('execution PostgreSQL integration', () => {
     expect(completed).toMatchObject({
       status: 'completed',
       completionKind: 'partial',
-      completionReason: 'budget_exhausted',
+      completionReason: 'partial_budget_exhausted',
       error: null,
       result: { reply },
     });
@@ -3940,7 +4101,7 @@ describe('execution PostgreSQL integration', () => {
     expect(terminal.envelope.payload).toMatchObject({
       to: 'completed',
       completionKind: 'partial',
-      completionReason: 'budget_exhausted',
+      completionReason: 'partial_budget_exhausted',
       completionSource: 'runtime_template',
       partialResult: completion.partialResult,
       result: { reply },

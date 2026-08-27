@@ -180,6 +180,10 @@ describe('ExecutionToolPlanService', () => {
     };
     operationRepo = {
       create: jest.fn((value) => value),
+      findOneByOrFail: jest.fn().mockResolvedValue({
+        operationId: TOOL_OPERATION_ID,
+        status: ExecutionOperationStatus.PLANNED,
+      }),
       save: jest.fn(async (value) => value),
     };
     dependencyRepo = {
@@ -225,6 +229,7 @@ describe('ExecutionToolPlanService', () => {
       {
         assertToolInvocation: jest.fn(),
         assertToolPlan: jest.fn(),
+        assertToolResult: jest.fn(),
       } as any,
       confirmations as any,
       executions as any,
@@ -1261,5 +1266,92 @@ describe('ExecutionToolPlanService', () => {
       service.materialize(TOOL_CALL_ID, RESERVATION_ID),
     ).resolves.toBeNull();
     expect(stepRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('exposes a pending confirmation before any budget is reserved', async () => {
+    const plan = {
+      ...planContract(),
+      policyDecision: {
+        decision: 'confirmation_required' as const,
+        rule: 'user_task_create_requires_confirmation',
+      },
+      confirmationRequirement: {
+        confirmationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca709',
+        reason: 'Local mutation',
+        prompt: 'Create task?',
+        scope: 'once' as const,
+      },
+    };
+    planRepo.findOneBy.mockResolvedValue({
+      operationId: TOOL_OPERATION_ID,
+      executionId: EXECUTION_ID,
+      toolCallId: TOOL_CALL_ID,
+      stepId: null,
+      plan,
+    });
+    confirmations.decisionForPlan.mockResolvedValue({ status: 'pending' });
+
+    await expect(
+      service.getMaterializationDisposition(TOOL_CALL_ID),
+    ).resolves.toEqual({ kind: 'waiting_confirmation' });
+  });
+
+  it('materializes one not-executed result when confirmation is denied', async () => {
+    const plan = {
+      ...planContract(),
+      policyDecision: {
+        decision: 'confirmation_required' as const,
+        rule: 'user_task_create_requires_confirmation',
+      },
+      confirmationRequirement: {
+        confirmationId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca709',
+        reason: 'Local mutation',
+        prompt: 'Create task?',
+        scope: 'once' as const,
+      },
+    };
+    const storedPlan = {
+      operationId: TOOL_OPERATION_ID,
+      executionId: EXECUTION_ID,
+      toolCallId: TOOL_CALL_ID,
+      toolName: 'user_tasks.create',
+      stepId: null,
+      plan,
+      materializedAt: null,
+    };
+    planRepo.findOne.mockResolvedValue(storedPlan);
+    invocationRepo.findOneBy.mockResolvedValue({
+      toolCallId: TOOL_CALL_ID,
+      causedByEventId: EVENT_ID,
+      invocation: invocation({ name: 'user_tasks.create' }),
+    });
+    confirmations.decisionForPlan.mockResolvedValue({ status: 'denied' });
+
+    const step = await service.materialize(TOOL_CALL_ID, RESERVATION_ID);
+
+    expect(step).toEqual(
+      expect.objectContaining({
+        status: ExecutionStepStatus.COMPLETED,
+        budgetReservationId: null,
+        requiredCapabilities: [],
+        result: {
+          kind: ExecutionStepKind.TOOL,
+          toolResult: expect.objectContaining({
+            toolCallId: TOOL_CALL_ID,
+            status: 'not_executed',
+            error: expect.objectContaining({
+              code: 'tool_confirmation_denied',
+              retryable: false,
+            }),
+          }),
+        },
+      }),
+    );
+    expect(operationRepo.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: ExecutionOperationStatus.NOT_EXECUTED,
+      }),
+    );
+    expect(storedPlan.stepId).toBe(step.stepId);
   });
 });

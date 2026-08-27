@@ -1190,7 +1190,7 @@ describe('ExecutionAttemptService', () => {
     );
   });
 
-  it('offers domain finalization only after the last step completes', async () => {
+  it('offers coordination only after the last step completes', async () => {
     const step = {
       ...readyStep(),
       status: ExecutionStepStatus.RESULT_RECEIVED,
@@ -1224,7 +1224,7 @@ describe('ExecutionAttemptService', () => {
     expect(execution).toEqual(
       expect.objectContaining({
         status: ExecutionStatus.RUNNING,
-        phase: 'backend_finalization',
+        phase: 'coordination_pending',
         result: 42,
         error: null,
       }),
