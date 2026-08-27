@@ -58,4 +58,39 @@ describe('compound model workflows', () => {
       ),
     ).toBe(true);
   });
+
+  it('carries exact keyword statistics across intermediate levels', () => {
+    const text = Array.from(
+      { length: 13_501 },
+      (_, index) => `word-${index}`,
+    ).join(' ');
+    const reductions = buildKeywordsWorkflowSteps([{ text }], 'en').filter(
+      (step) => step.work.taskType === 'keywords-reduce',
+    );
+    const intermediate = reductions.find(
+      (step) => (step.work.payload as { final: boolean }).final === false,
+    )!;
+    const final = reductions.at(-1)!;
+
+    expect(intermediate.work).toEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          final: false,
+          inputKind: 'candidates',
+        }),
+        coordination: expect.objectContaining({ resultKey: 'keywords' }),
+      }),
+    );
+    expect(final.work).toEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          final: true,
+          inputKind: 'statistics',
+        }),
+        coordination: expect.objectContaining({
+          resultKey: 'keyword_statistics',
+        }),
+      }),
+    );
+  });
 });
