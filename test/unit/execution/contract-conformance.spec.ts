@@ -255,6 +255,110 @@ function validateProtocolFixture(ajv: Ajv2020, fixture: any): string | null {
   return null;
 }
 
+const browserMutationCases = [
+  {
+    name: 'browser.navigate',
+    capability: 'tool.browser.navigate/1',
+    effectClass: 'external_reversible',
+    reversible: true,
+    arguments: {
+      url: 'https://example.test/next',
+      expectedCurrentUrl: 'https://example.test/current',
+    },
+  },
+  {
+    name: 'browser.go_back',
+    capability: 'tool.browser.go_back/1',
+    effectClass: 'external_reversible',
+    reversible: true,
+    arguments: { expectedCurrentUrl: 'https://example.test/current' },
+  },
+  {
+    name: 'browser.click',
+    capability: 'tool.browser.click/1',
+    effectClass: 'external_irreversible',
+    reversible: false,
+    arguments: {
+      expectedCurrentUrl: 'https://example.test/current',
+      elementIndex: 2,
+      expectedKind: 'button',
+      expectedLabel: 'Continue',
+    },
+  },
+  {
+    name: 'browser.type_text',
+    capability: 'tool.browser.type_text/1',
+    effectClass: 'external_irreversible',
+    reversible: false,
+    arguments: {
+      expectedCurrentUrl: 'https://example.test/current',
+      elementIndex: 3,
+      expectedLabel: 'Search',
+      expectedCurrentValue: '',
+      expectedCurrentValueTruncated: false,
+      text: 'harness',
+    },
+  },
+  {
+    name: 'browser.select_option',
+    capability: 'tool.browser.select_option/1',
+    effectClass: 'external_irreversible',
+    reversible: false,
+    arguments: {
+      expectedCurrentUrl: 'https://example.test/current',
+      elementIndex: 4,
+      expectedLabel: 'Environment',
+      expectedCurrentValue: 'dev',
+      expectedCurrentValueTruncated: false,
+      optionValue: 'prod',
+      expectedOptionLabel: 'Production',
+    },
+  },
+] as const;
+
+function asBrowserMutationFixture(
+  fixture: any,
+  mutation: (typeof browserMutationCases)[number],
+): any {
+  const value = structuredClone(fixture);
+  value.scenario = `${value.scenario}-${mutation.name}`;
+  for (const record of value.records) {
+    const instance = record.instance;
+    if (record.schemaId.endsWith('/step.schema.json')) {
+      instance.work.taskType = mutation.name;
+      instance.work.toolPlan.normalizedArguments = mutation.arguments;
+      instance.requiredCapabilities = [mutation.capability];
+    }
+    if (record.schemaId.endsWith('/step-assignment.schema.json')) {
+      instance.work.taskType = mutation.name;
+      instance.work.toolPlan.normalizedArguments = mutation.arguments;
+    }
+    if (record.schemaId.endsWith('/tool-invocation.schema.json')) {
+      instance.name = mutation.name;
+      instance.arguments = mutation.arguments;
+    }
+    if (record.schemaId.endsWith('/tool-plan.schema.json')) {
+      instance.toolName = mutation.name;
+      instance.descriptorVersion = `${mutation.name}/1`;
+      instance.normalizedArguments = mutation.arguments;
+      instance.effects[0].effectClass = mutation.effectClass;
+      instance.effects[0].reversible = mutation.reversible;
+      instance.effects[0].description = `Apply ${mutation.name} in IA Browser`;
+      instance.policyDecision.rule =
+        'paired_browser_mutation_requires_confirmation';
+      instance.idempotencyKey = `${mutation.name}:${instance.toolCallId}`;
+      instance.requiredCapabilities = [mutation.capability];
+    }
+    if (record.schemaId.endsWith('/step-result.schema.json')) {
+      instance.output.toolResult.effects[0].effectClass = mutation.effectClass;
+    }
+    if (record.schemaId.endsWith('/tool-result.schema.json')) {
+      instance.effects[0].effectClass = mutation.effectClass;
+    }
+  }
+  return value;
+}
+
 describe('execution v1 contract', () => {
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   addFormats(ajv);
@@ -540,6 +644,25 @@ describe('execution v1 contract', () => {
     const fixture = readJson(join(protocolFixturesRoot, 'valid', name));
     expect(validateProtocolFixture(ajv, fixture)).toBeNull();
   });
+
+  it.each(
+    [
+      'browser-effect-cancelled-before-apply.json',
+      'browser-effect-duplicate-ack.json',
+      'browser-effect-expired-lease.json',
+    ].flatMap((fixtureName) =>
+      browserMutationCases.map((mutation) => [fixtureName, mutation] as const),
+    ),
+  )(
+    'accepts %s projected onto %s and its effect class',
+    (fixtureName, mutation) => {
+      const fixture = asBrowserMutationFixture(
+        readJson(join(protocolFixturesRoot, 'valid', fixtureName)),
+        mutation,
+      );
+      expect(validateProtocolFixture(ajv, fixture)).toBeNull();
+    },
+  );
 
   it.each(
     readdirSync(join(protocolFixturesRoot, 'invalid'))
