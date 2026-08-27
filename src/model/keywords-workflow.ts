@@ -5,6 +5,7 @@ import { ExecutionOperationKind } from '../execution/execution-operation-kind.en
 import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { chunkTextParts } from './text-chunks';
+import { buildReductionTree } from './reduction-tree';
 
 const MAP_WORD_BUDGET = 1_500;
 
@@ -24,25 +25,20 @@ export function buildKeywordsWorkflowSteps(
     },
     requiredCapabilities: ['keywords-map'],
   }));
-  const mapStepIds = mapSteps.map((step) => step.stepId);
-
-  return [
-    ...mapSteps,
-    {
-      stepKind: ExecutionStepKind.CODE,
-      dependsOnStepIds: mapStepIds,
-      work: {
-        taskType: 'keywords-reduce',
-        payload: {},
-        coordination: {
-          kind: 'map-reduce-reduce/1',
-          mapStepIds,
-          resultKey: 'keywords',
-        },
+  return buildReductionTree(mapSteps, ({ dependencyStepIds }) => ({
+    stepKind: ExecutionStepKind.CODE,
+    dependsOnStepIds: dependencyStepIds,
+    work: {
+      taskType: 'keywords-reduce',
+      payload: {},
+      coordination: {
+        kind: 'map-reduce-reduce/1',
+        mapStepIds: dependencyStepIds,
+        resultKey: 'keywords',
       },
-      requiredCapabilities: ['keywords-reduce'],
-      operationKind: ExecutionOperationKind.ARTIFACT_PROCESSING,
-      recoveryClass: ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
     },
-  ];
+    requiredCapabilities: ['keywords-reduce'],
+    operationKind: ExecutionOperationKind.ARTIFACT_PROCESSING,
+    recoveryClass: ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
+  }));
 }

@@ -622,13 +622,9 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('persists one-shot model work as an inference step', async () => {
-    const payload = {
-      sourceLanguage: 'en',
-      targetLanguage: 'es',
-      texts: ['Hello'],
-    };
+    const payload = { question: 'What is this document about?' };
     const created = await service.createInference(
-      'translate',
+      'ask',
       ExecutionPriority.NORMAL,
       payload,
     );
@@ -639,8 +635,8 @@ describe('execution PostgreSQL integration', () => {
       }),
     ).resolves.toMatchObject({
       stepKind: ExecutionStepKind.INFERENCE,
-      work: { taskType: 'translate', payload },
-      requiredCapabilities: ['translate'],
+      work: { taskType: 'ask', payload },
+      requiredCapabilities: ['ask'],
     });
   });
 

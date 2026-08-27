@@ -260,7 +260,6 @@ export class ResourceService {
           ExecutionPriority.NORMAL,
           {
             resourceId: id,
-            chunkCount: steps.length - 1,
           },
           { steps },
         );

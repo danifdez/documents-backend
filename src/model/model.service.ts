@@ -11,6 +11,7 @@ import { VectorStoreService } from '../vector/vector-store.service';
 import { AgeGraphService } from '../graph/age-graph.service';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 import { contentHash } from '../execution/execution-canonical';
+import { buildTranslateWorkflowSteps } from './translate-workflow';
 
 @Injectable()
 export class ModelService {
@@ -115,15 +116,22 @@ export class ModelService {
     const sourceLanguage = resource.language || 'en';
     const extractedTexts = extractTextFromHtml(content);
 
-    const execution = await this.executionService.createInference(
+    const steps = buildTranslateWorkflowSteps({
+      texts: extractedTexts,
+      sourceLanguage,
+      targetLanguages: [language],
+      responseMode: 'items',
+    });
+    const execution = await this.executionService.create(
       'translate',
       ExecutionPriority.NORMAL,
       {
-        resourceId: resourceId,
-        sourceLanguage: sourceLanguage,
+        resourceId,
+        sourceLanguage,
         targetLanguage: language,
-        texts: extractedTexts,
+        sourceContentHash: contentHash(content),
       },
+      { steps },
     );
     return { executionId: execution.executionId };
   }
@@ -147,7 +155,6 @@ export class ModelService {
       ExecutionPriority.NORMAL,
       {
         resourceId,
-        chunkCount: steps.length - 1,
         sourceContentHash: contentHash(content),
         sourceLanguage: resource.language || 'en',
       },
@@ -187,7 +194,6 @@ export class ModelService {
       {
         resourceId,
         targetLanguage: effectiveTargetLanguage,
-        chunkCount: steps.length - 1,
       },
       { steps },
     );
@@ -225,7 +231,6 @@ export class ModelService {
       {
         resourceId,
         targetLanguage: effectiveTargetLanguage,
-        chunkCount: steps.length - 1,
       },
       { steps },
     );

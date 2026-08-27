@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { extractTextFromHtml } from '../utils/text';
+import { buildReductionTree } from './reduction-tree';
 
 const MAP_WORD_BUDGET = 1_500;
 
@@ -31,24 +32,20 @@ export function buildSummarizeWorkflowSteps(
     },
     requiredCapabilities: ['summarize-map'],
   }));
-  const mapStepIds = mapSteps.map((step) => step.stepId);
-  return [
-    ...mapSteps,
-    {
-      stepKind: ExecutionStepKind.INFERENCE,
-      dependsOnStepIds: mapStepIds,
-      work: {
-        taskType: 'summarize-reduce',
-        payload: { targetLanguage, sourceLanguage },
-        coordination: {
-          kind: 'map-reduce-reduce/1',
-          mapStepIds,
-          resultKey: 'response',
-        },
+  return buildReductionTree(mapSteps, ({ dependencyStepIds }) => ({
+    stepKind: ExecutionStepKind.INFERENCE,
+    dependsOnStepIds: dependencyStepIds,
+    work: {
+      taskType: 'summarize-reduce',
+      payload: { targetLanguage, sourceLanguage },
+      coordination: {
+        kind: 'map-reduce-reduce/1',
+        mapStepIds: dependencyStepIds,
+        resultKey: 'response',
       },
-      requiredCapabilities: ['summarize-reduce'],
     },
-  ];
+    requiredCapabilities: ['summarize-reduce'],
+  }));
 }
 
 function chunkWords(text: string, maxWords: number): string[] {

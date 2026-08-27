@@ -158,7 +158,6 @@ export class RelationshipService {
         resourceId,
         projectId,
         entities: workflowEntities,
-        chunkCount: steps.length - 1,
       },
       { steps },
     );

@@ -144,7 +144,6 @@ export class DetectLanguageProcessor implements ExecutionProcessor {
         ExecutionPriority.NORMAL,
         {
           resourceId,
-          chunkCount: dateSteps.length - 1,
           sourceContentHash,
           detectedLanguage,
           anchorDate,

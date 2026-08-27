@@ -104,7 +104,7 @@ describe('ResourceService', () => {
       expect(executionService.create).toHaveBeenCalledWith(
         'date-extraction',
         expect.any(String),
-        { resourceId: 1, chunkCount: 1 },
+        { resourceId: 1 },
         {
           steps: [
             expect.objectContaining({

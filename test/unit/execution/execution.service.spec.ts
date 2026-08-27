@@ -16,24 +16,20 @@ describe('ExecutionService primitives', () => {
     ) as ExecutionService;
     const create = jest.fn().mockResolvedValue({ executionId: 'execution-1' });
     service.create = create;
-    const payload = { texts: ['Hello'], targetLanguage: 'es' };
+    const payload = { question: 'What is this document about?' };
 
-    await service.createInference(
-      'translate',
-      ExecutionPriority.NORMAL,
-      payload,
-    );
+    await service.createInference('ask', ExecutionPriority.NORMAL, payload);
 
     expect(create).toHaveBeenCalledWith(
-      'translate',
+      'ask',
       ExecutionPriority.NORMAL,
       payload,
       {
         initialStep: {
           stepKind: 'inference',
-          work: { taskType: 'translate', payload },
+          work: { taskType: 'ask', payload },
           finalizeOnFailure: false,
-          requiredCapabilities: ['translate'],
+          requiredCapabilities: ['ask'],
           priority: 0,
         },
       },

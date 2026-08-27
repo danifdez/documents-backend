@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { chunkTextParts } from './text-chunks';
+import { buildReductionTree } from './reduction-tree';
 
 const MAP_WORD_BUDGET = 1_500;
 
@@ -21,23 +22,18 @@ export function buildKeyPointWorkflowSteps(
     },
     requiredCapabilities: ['key-point-map'],
   }));
-  const mapStepIds = mapSteps.map((step) => step.stepId);
-
-  return [
-    ...mapSteps,
-    {
-      stepKind: ExecutionStepKind.INFERENCE,
-      dependsOnStepIds: mapStepIds,
-      work: {
-        taskType: 'key-point-reduce',
-        payload: { targetLanguage },
-        coordination: {
-          kind: 'map-reduce-reduce/1',
-          mapStepIds,
-          resultKey: 'key_points',
-        },
+  return buildReductionTree(mapSteps, ({ dependencyStepIds }) => ({
+    stepKind: ExecutionStepKind.INFERENCE,
+    dependsOnStepIds: dependencyStepIds,
+    work: {
+      taskType: 'key-point-reduce',
+      payload: { targetLanguage },
+      coordination: {
+        kind: 'map-reduce-reduce/1',
+        mapStepIds: dependencyStepIds,
+        resultKey: 'key_points',
       },
-      requiredCapabilities: ['key-point-reduce'],
     },
-  ];
+    requiredCapabilities: ['key-point-reduce'],
+  }));
 }

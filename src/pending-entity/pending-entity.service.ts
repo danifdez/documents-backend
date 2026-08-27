@@ -16,6 +16,7 @@ import { readFeaturesFromEnv } from '../common/feature-flags';
 import { extractTextFromHtml } from '../utils/text';
 // eslint-disable-next-line max-len
 import { buildRelationshipExtractionWorkflowSteps } from '../model/relationship-extraction-workflow';
+import { buildTranslateWorkflowSteps } from '../model/translate-workflow';
 
 export interface CreatePendingEntityDto {
   resourceId: number;
@@ -301,7 +302,6 @@ export class PendingEntityService {
               resourceId,
               projectId,
               entities: workflowEntities,
-              chunkCount: steps.length - 1,
             },
             { steps },
           );
@@ -588,17 +588,22 @@ export class PendingEntityService {
       if (languagesToTranslate.length > 0) {
         const translationPayload = {
           resourceId: pending.resourceId,
-          texts: [{ text: pending.name }],
-          sourceLanguage: 'en',
           targetLanguages: languagesToTranslate,
           translationType: 'entity-retranslate',
           entityId: pending.id,
         };
 
-        await this.executionService.createInference(
+        const steps = buildTranslateWorkflowSteps({
+          texts: [{ text: pending.name }],
+          sourceLanguage: 'en',
+          targetLanguages: languagesToTranslate,
+          responseMode: 'targets',
+        });
+        await this.executionService.create(
           'translate',
           ExecutionPriority.NORMAL,
           translationPayload,
+          { steps },
         );
       }
 

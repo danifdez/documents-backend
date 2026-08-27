@@ -70,7 +70,7 @@ describe('ModelService execution identities', () => {
     expect(executionService.create).toHaveBeenCalledWith(
       'key-point',
       expect.any(String),
-      { resourceId: 7, targetLanguage: 'en', chunkCount: 1 },
+      { resourceId: 7, targetLanguage: 'en' },
       {
         steps: [
           expect.objectContaining({
@@ -127,7 +127,7 @@ describe('ModelService execution identities', () => {
     expect(executionService.create).toHaveBeenCalledWith(
       'keywords',
       expect.any(String),
-      { resourceId: 7, targetLanguage: 'en', chunkCount: 1 },
+      { resourceId: 7, targetLanguage: 'en' },
       {
         steps: [
           expect.objectContaining({
@@ -154,7 +154,6 @@ describe('ModelService execution identities', () => {
       expect.any(String),
       {
         resourceId: 7,
-        chunkCount: 1,
         sourceContentHash: contentHash('<p>Hola mundo</p>'),
         sourceLanguage: 'es',
       },
@@ -175,18 +174,30 @@ describe('ModelService execution identities', () => {
     );
   });
 
-  it('creates translate as an inference assignment', async () => {
+  it('creates translate as a durable map-reduce step graph', async () => {
     await expect(service.translate(7, 'en')).resolves.toEqual({
       executionId: executionIds.translate,
     });
-    expect(executionService.createInference).toHaveBeenCalledWith(
+    expect(executionService.create).toHaveBeenCalledWith(
       'translate',
       expect.any(String),
       expect.objectContaining({
         sourceLanguage: 'es',
         targetLanguage: 'en',
-        texts: expect.any(Array),
+        sourceContentHash: contentHash('<p>Hola mundo</p>'),
       }),
+      {
+        steps: [
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['translate-map'],
+          }),
+          expect.objectContaining({
+            stepKind: 'code',
+            requiredCapabilities: ['translate-reduce'],
+          }),
+        ],
+      },
     );
   });
 
