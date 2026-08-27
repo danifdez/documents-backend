@@ -81,6 +81,22 @@ reject(
   backendRuntime,
   'Backend contains a second or legacy harness path',
 );
+reject(
+  /\b(?:LLAMA_SERVER_URL|InferenceModule|InferenceService)\b/,
+  [...backendRuntime, join(backend, '.env.example')],
+  'Backend contains IA Browser inference-engine handoff',
+);
+
+const browserProductRuntime = [
+  ...browserRuntime,
+  ...sourceFiles(join(browser, 'resources'), ['.js', '.html', '.css']),
+  join(browser, 'CMakeLists.txt'),
+];
+reject(
+  /\b(?:SyncSharedEngine|DropSharedEngine|UseShared|ReleaseShared|shared_inference_|awaiting_shared_|shared_model_)\b|shared_engine\.(?:cc|h)/,
+  browserProductRuntime,
+  'IA Browser contains Backend-owned inference-engine handoff',
+);
 
 for (const required of [
   join(aiTrain, 'harness', 'offline_evaluation.py'),

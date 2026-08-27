@@ -39,7 +39,6 @@ import { AuthModule } from './auth/auth.module';
 import { OfflineModule } from './offline/offline.module';
 import { ArchiveModule } from './archive/archive.module';
 import { FeatureFlagModule } from './common/feature-flags.module';
-import { InferenceModule } from './common/inference.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { MemoryModule } from './memory/memory.module';
 import { IndexedFileModule } from './indexed-file/indexed-file.module';
@@ -73,7 +72,6 @@ export class AppModule {
       ]),
       ScheduleModule.forRoot(),
       FeatureFlagModule,
-      InferenceModule,
       AppStateModule,
 
       // Core modules (always loaded)

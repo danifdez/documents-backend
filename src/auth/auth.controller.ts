@@ -1,4 +1,14 @@
-import { Controller, Post, Get, Patch, Delete, Body, UnauthorizedException, UseInterceptors, UploadedFile } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Patch,
+  Delete,
+  Body,
+  UnauthorizedException,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -8,7 +18,6 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { FeatureFlagService } from '../common/feature-flags.service';
-import { InferenceService } from '../common/inference.service';
 
 @Controller('auth')
 export class AuthController {
@@ -16,7 +25,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly featureFlagService: FeatureFlagService,
     private readonly avatarService: AvatarService,
-    private readonly inferenceService: InferenceService,
   ) {}
 
   @Public()
@@ -26,10 +34,6 @@ export class AuthController {
       authEnabled: this.authService.isAuthEnabled(),
       offlineEnabled: this.authService.isOfflineEnabled(),
       features: this.featureFlagService.getEnabledFeatures(),
-      // Clients that bring their own engine — the embedded browser does —
-      // shut it down and use this one, so the machine loads a single model.
-      // Null when this installation doesn't share one.
-      inference: this.inferenceService.getSharedEngine(),
     };
   }
 
@@ -37,7 +41,10 @@ export class AuthController {
   @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post('login')
   async login(@Body() dto: LoginDto) {
-    const user = await this.authService.validateUser(dto.username, dto.password);
+    const user = await this.authService.validateUser(
+      dto.username,
+      dto.password,
+    );
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -65,8 +72,13 @@ export class AuthController {
   }
 
   @Post('me/avatar')
-  @UseInterceptors(FileInterceptor('avatar', { limits: { fileSize: 5 * 1024 * 1024 } }))
-  async uploadAvatar(@CurrentUser() user: any, @UploadedFile() file: Express.Multer.File) {
+  @UseInterceptors(
+    FileInterceptor('avatar', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  async uploadAvatar(
+    @CurrentUser() user: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
     const result = await this.avatarService.uploadAvatar(user.userId, file);
     const updated = await this.authService.findUserById(user.userId);
     return { ...updated, avatarPath: result.avatarPath };

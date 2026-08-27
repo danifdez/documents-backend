@@ -102,6 +102,20 @@ const assertBrowserRuntimeHashWiring = (root) => {
   }
 };
 
+const assertBrowserScenarioHashWiring = (root) => {
+  const scenarioTargetPath = join(
+    root,
+    'harness/browser_driver/ScenarioTarget.cmake',
+  );
+  if (!existsSync(scenarioTargetPath)) return;
+  const scenarioTarget = readFileSync(scenarioTargetPath, 'utf8');
+  if (!scenarioTarget.includes('IA_BROWSER_CONTRACT_SET_HASH')) {
+    throw new Error(
+      `IA Browser scenario target is not wired to the canonical schema manifest: ${root}`,
+    );
+  }
+};
+
 const schemaFiles = walk(join(contractRoot, 'schemas'), (path) =>
   path.endsWith('.json'),
 );
@@ -208,6 +222,7 @@ for (const target of targets) {
     `ai-train (${target.root})`,
   );
   assertBrowserRuntimeHashWiring(target.root);
+  assertBrowserScenarioHashWiring(target.root);
 }
 
 console.log(
