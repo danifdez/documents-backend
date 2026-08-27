@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { link, open, readFile } from 'fs/promises';
+import { chmod, link, mkdir, open, readFile } from 'fs/promises';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { EntityManager } from 'typeorm';
@@ -155,10 +155,12 @@ export class ExecutionArtifactStorageService {
     }
     const relativePath = this.externalRelativePath(artifactId);
     const fullPath = this.resolveExternalPath(relativePath);
-    await fs.ensureDir(path.dirname(fullPath));
+    const artifactDirectory = path.dirname(fullPath);
+    await mkdir(artifactDirectory, { recursive: true, mode: 0o700 });
+    await chmod(artifactDirectory, 0o700);
     const temporaryPath = `${fullPath}.${randomUUID()}.tmp`;
     try {
-      const handle = await open(temporaryPath, 'wx');
+      const handle = await open(temporaryPath, 'wx', 0o600);
       try {
         await handle.writeFile(body);
         await handle.sync();
@@ -174,6 +176,7 @@ export class ExecutionArtifactStorageService {
           throw new Error('artifact_storage_conflict');
         }
       }
+      await chmod(fullPath, 0o600);
     } finally {
       await fs.remove(temporaryPath);
     }

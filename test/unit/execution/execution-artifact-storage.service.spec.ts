@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { contentHash } from '../../../src/execution/execution-canonical';
@@ -89,6 +89,9 @@ describe('ExecutionArtifactStorageService', () => {
     await expect(readFile(join(directory, relativePath))).resolves.toEqual(
       body,
     );
+    const fullPath = join(directory, relativePath);
+    expect((await stat(fullPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(join(fullPath, '..'))).mode & 0o777).toBe(0o700);
   });
 
   it('reuses an immutable external body on an idempotent write', async () => {

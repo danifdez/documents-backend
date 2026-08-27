@@ -51,6 +51,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConditionalAuthGuard } from './auth/guards/conditional-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { ExecutionModule } from './execution/execution.module';
+import { ExecutionOperationsModule } from './execution-operations/execution-operations.module';
 
 @Module({})
 export class AppModule {
@@ -83,6 +84,7 @@ export class AppModule {
       ResourceTypeModule,
       FileStorageModule,
       ExecutionModule,
+      ExecutionOperationsModule,
       TaskScheduleModule,
       NotificationModule,
       VoiceModule,

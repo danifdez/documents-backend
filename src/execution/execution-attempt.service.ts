@@ -67,6 +67,10 @@ import {
   earliestArtifactExpiry,
   mostRestrictedClassification,
 } from './execution-artifact-policy';
+import {
+  EXECUTION_AGE_PRIORITY_INTERVAL_SECONDS,
+  EXECUTION_DEADLINE_URGENCY_SECONDS,
+} from './execution-scheduling-policy';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -262,11 +266,35 @@ export class ExecutionAttemptService {
                   OR "executions"."owner_principal" = $3::varchar
                 )
             )
-          ORDER BY "priority" DESC, "available_at", "created_at"
+          ORDER BY (
+            "priority"
+            + floor(
+                extract(epoch FROM (now() - "available_at")) / $4::numeric
+              )
+            + CASE
+                WHEN "deadline" IS NULL THEN 0
+                ELSE greatest(
+                  0,
+                  floor(
+                    $5::numeric
+                    - extract(epoch FROM ("deadline" - now()))
+                  )
+                )
+              END
+          ) DESC,
+          "deadline" ASC NULLS LAST,
+          "available_at",
+          "created_at"
           LIMIT 1
           FOR UPDATE SKIP LOCKED
         `,
-        [stepKinds, capabilities, input.ownerPrincipal ?? null],
+        [
+          stepKinds,
+          capabilities,
+          input.ownerPrincipal ?? null,
+          EXECUTION_AGE_PRIORITY_INTERVAL_SECONDS,
+          EXECUTION_DEADLINE_URGENCY_SECONDS,
+        ],
       );
       if (!rows.length) return null;
 
@@ -965,7 +993,7 @@ export class ExecutionAttemptService {
     });
   }
 
-  async expireStaleAttempts(now = new Date()): Promise<number> {
+  async expireStaleAttempts(now = new Date(), limit = 100): Promise<number> {
     const attempts = await this.dataSource
       .getRepository(ExecutionStepAttemptEntity)
       .find({
@@ -977,7 +1005,7 @@ export class ExecutionAttemptService {
           leaseExpiresAt: LessThanOrEqual(now),
         },
         order: { leaseExpiresAt: 'ASC' },
-        take: 100,
+        take: limit,
       });
     let expired = 0;
     for (const attempt of attempts) {

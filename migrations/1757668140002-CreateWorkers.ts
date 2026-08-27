@@ -13,9 +13,19 @@ export class CreateWorkers1757668140002 implements MigrationInterface {
     await queryRunner.query(
       `CREATE INDEX "IDX_workers_browser_owner" ON "workers" ("owner_principal") WHERE "worker_kind" = 'browser' AND "revoked_at" IS NULL`,
     );
+    await queryRunner.query(
+      `CREATE TABLE "worker_credential_events" ("event_id" UUID NOT NULL DEFAULT gen_random_uuid(), "worker_id" UUID NOT NULL, "worker_kind" VARCHAR(20) NOT NULL, "action" VARCHAR(20) NOT NULL, "actor_type" VARCHAR(20) NOT NULL, "actor_principal" VARCHAR(255), "metadata" JSONB NOT NULL DEFAULT '{}', "occurred_at" TIMESTAMPTZ NOT NULL DEFAULT now(), CONSTRAINT "PK_worker_credential_events" PRIMARY KEY ("event_id"), CONSTRAINT "CHK_worker_credential_events_action" CHECK ("action" IN ('issued', 'rotated', 'revoked')), CONSTRAINT "CHK_worker_credential_events_actor_type" CHECK ("actor_type" IN ('service', 'user')), CONSTRAINT "FK_worker_credential_events_worker" FOREIGN KEY ("worker_id") REFERENCES "workers"("id") ON DELETE RESTRICT)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_worker_credential_events_worker_occurred" ON "worker_credential_events" ("worker_id", "occurred_at")`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `DROP INDEX "IDX_worker_credential_events_worker_occurred"`,
+    );
+    await queryRunner.query(`DROP TABLE "worker_credential_events"`);
     await queryRunner.query(`DROP INDEX "IDX_workers_browser_owner"`);
     await queryRunner.query(`DROP INDEX "IDX_workers_status"`);
     await queryRunner.query(`DROP TABLE "workers"`);

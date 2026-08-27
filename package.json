@@ -23,6 +23,7 @@
     "contracts:check:all": "node scripts/sync-execution-contracts.mjs ../models ../../ia-browser ai-train:../../ai-train",
     "contracts:sync:models": "node scripts/sync-execution-contracts.mjs --write ../models",
     "contracts:sync:all": "node scripts/sync-execution-contracts.mjs --write ../models ../../ia-browser ai-train:../../ai-train",
+    "harness:hardening:audit": "node scripts/audit-harness-boundaries.mjs",
     "typeorm": "typeorm-ts-node-commonjs -d ./typeorm.config.ts",
     "migration:generate": "npm run typeorm migration:generate ./migrations/Init",
     "migration:run": "npm run typeorm migration:run",

@@ -8,15 +8,35 @@ import { buildWorker } from '../../factories';
 import { ExecutionContractValidator } from '../../../src/execution/execution-contract-validator';
 import { WorkerKind } from '../../../src/worker/worker-kind.enum';
 import { ExecutionStepKind } from '../../../src/execution/execution-step-kind.enum';
+import { WorkerCredentialEventEntity } from '../../../src/worker/worker-credential-event.entity';
+import { DataSource } from 'typeorm';
+import { WorkerController } from '../../../src/worker/worker.controller';
+import { PERMISSIONS_KEY } from '../../../src/auth/decorators/permissions.decorator';
+import { Permission } from '../../../src/auth/permission.enum';
 
 describe('WorkerService', () => {
   let service: WorkerService;
   let repo: MockRepository<WorkerEntity>;
   let attemptRepo: MockRepository<ExecutionStepAttemptEntity>;
+  let credentialEventRepo: MockRepository<WorkerCredentialEventEntity>;
 
   beforeEach(async () => {
     repo = createMockRepository();
     attemptRepo = createMockRepository();
+    credentialEventRepo = createMockRepository();
+    credentialEventRepo.create!.mockImplementation((event) => event);
+    credentialEventRepo.save!.mockImplementation((event) =>
+      Promise.resolve(event),
+    );
+    const dataSource = {
+      transaction: jest.fn((work) =>
+        work({
+          query: jest.fn().mockResolvedValue([]),
+          getRepository: (entity: unknown) =>
+            entity === WorkerEntity ? repo : credentialEventRepo,
+        }),
+      ),
+    };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkerService,
@@ -25,24 +45,14 @@ describe('WorkerService', () => {
           provide: getRepositoryToken(ExecutionStepAttemptEntity),
           useValue: attemptRepo,
         },
+        {
+          provide: getRepositoryToken(WorkerCredentialEventEntity),
+          useValue: credentialEventRepo,
+        },
+        { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
     service = module.get(WorkerService);
-  });
-
-  it('should find all workers', async () => {
-    repo.find.mockResolvedValue([buildWorker()]);
-    expect(await service.findAll()).toHaveLength(1);
-  });
-
-  it('should find online workers', async () => {
-    repo.find.mockResolvedValue([buildWorker()]);
-    expect(await service.findOnline()).toHaveLength(1);
-  });
-
-  it('should find by id', async () => {
-    repo.findOneBy.mockResolvedValue(buildWorker());
-    expect(await service.findById('test-uuid')).toBeDefined();
   });
 
   it('enrolls a browser with server-owned capabilities', async () => {
@@ -76,6 +86,15 @@ describe('WorkerService', () => {
     });
     expect(registration.worker.credentialHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(registration.credential).not.toContain('sha256:');
+    expect(credentialEventRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerId: registration.worker.id,
+        workerKind: WorkerKind.BROWSER,
+        action: 'issued',
+        actorType: 'user',
+        actorPrincipal: '7',
+      }),
+    );
   });
 
   it('does not register Models as a tool worker', async () => {
@@ -90,6 +109,7 @@ describe('WorkerService', () => {
       ),
     ).rejects.toThrow('models_tool_steps_not_allowed');
     expect(repo.save).not.toHaveBeenCalled();
+    expect(credentialEventRepo.save).not.toHaveBeenCalled();
   });
 
   it('does not reactivate a revoked browser identity during enrollment', async () => {
@@ -113,6 +133,7 @@ describe('WorkerService', () => {
       ),
     ).rejects.toThrow('worker_identity_revoked');
     expect(repo.save).not.toHaveBeenCalled();
+    expect(credentialEventRepo.save).not.toHaveBeenCalled();
   });
 
   it('does not let a Models heartbeat escalate into tool work', async () => {
@@ -184,6 +205,7 @@ describe('WorkerService', () => {
       { status: 'offline' },
     );
     expect(repo.save).not.toHaveBeenCalled();
+    expect(credentialEventRepo.save).not.toHaveBeenCalled();
   });
 
   it('revokes only a browser owned by the current principal', async () => {
@@ -209,6 +231,13 @@ describe('WorkerService', () => {
       }),
     );
     expect(repo.save).not.toHaveBeenCalled();
+    expect(credentialEventRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerId: worker.id,
+        action: 'revoked',
+        actorPrincipal: '7',
+      }),
+    );
   });
 
   it('does not revoke a browser owned by another principal', async () => {
@@ -220,6 +249,58 @@ describe('WorkerService', () => {
         'other-owner',
       ),
     ).rejects.toThrow('browser_installation_not_found');
+    expect(credentialEventRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('revokes any live worker credential through an audited admin action', async () => {
+    const worker = buildWorker({
+      workerKind: WorkerKind.MODELS,
+      credentialHash: `sha256:${'a'.repeat(64)}`,
+    });
+    repo.findOne!.mockResolvedValue(worker);
+    repo.save!.mockResolvedValue(worker);
+
+    await service.revokeCredential(worker.id, 'admin-user');
+
+    expect(repo.findOne).toHaveBeenCalledWith({
+      where: { id: worker.id, revokedAt: expect.anything() },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'revoked',
+        revokedAt: expect.any(Date),
+        credentialHash: null,
+      }),
+    );
+    expect(credentialEventRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerId: worker.id,
+        workerKind: WorkerKind.MODELS,
+        action: 'revoked',
+        actorType: 'user',
+        actorPrincipal: 'admin-user',
+      }),
+    );
+  });
+
+  it('returns a bounded credential history without credential material', async () => {
+    const event = {
+      eventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
+      workerId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
+      action: 'rotated',
+      occurredAt: new Date(),
+    } as WorkerCredentialEventEntity;
+    credentialEventRepo.find!.mockResolvedValue([event]);
+
+    await expect(service.credentialHistory(event.workerId)).resolves.toEqual([
+      event,
+    ]);
+    expect(credentialEventRepo.find).toHaveBeenCalledWith({
+      where: { workerId: event.workerId },
+      order: { occurredAt: 'DESC' },
+      take: 100,
+    });
   });
 
   it('derives active assignments and available concurrency', async () => {
@@ -248,4 +329,18 @@ describe('WorkerService', () => {
       ),
     ).not.toThrow();
   });
+});
+
+describe('WorkerController credential operations', () => {
+  it.each(['credentialHistory', 'revokeCredential'] as const)(
+    'protects %s with administrative permission',
+    (method) => {
+      expect(
+        Reflect.getMetadata(
+          PERMISSIONS_KEY,
+          WorkerController.prototype[method],
+        ),
+      ).toEqual([Permission.USER_MANAGEMENT]);
+    },
+  );
 });

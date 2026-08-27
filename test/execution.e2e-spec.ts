@@ -52,6 +52,7 @@ import {
 import { WorkerEntity } from '../src/worker/worker.entity';
 import { WorkerService } from '../src/worker/worker.service';
 import { WorkerKind } from '../src/worker/worker-kind.enum';
+import { WorkerCredentialEventEntity } from '../src/worker/worker-credential-event.entity';
 import { ExecutionOutboxEntity } from '../src/execution-outbox/execution-outbox.entity';
 import { ExecutionOperationEntity } from '../src/execution/execution-operation.entity';
 import { ExecutionOperationStatus } from '../src/execution/execution-operation-status.enum';
@@ -139,6 +140,7 @@ describe('execution PostgreSQL integration', () => {
         ExecutionToolPlanEntity,
         ExecutionConfirmationEntity,
         WorkerEntity,
+        WorkerCredentialEventEntity,
         ConversationSessionEntity,
         ConversationTurnEntity,
         ConversationArtifactRevisionEntity,
@@ -221,6 +223,8 @@ describe('execution PostgreSQL integration', () => {
     workerService = new WorkerService(
       dataSource.getRepository(WorkerEntity),
       dataSource.getRepository(ExecutionStepAttemptEntity),
+      dataSource.getRepository(WorkerCredentialEventEntity),
+      dataSource,
     );
     confirmationService = new ExecutionConfirmationService(
       dataSource,
@@ -2508,6 +2512,23 @@ describe('execution PostgreSQL integration', () => {
         WorkerKind.MODELS,
       ),
     ).resolves.toMatchObject({ id: workerId });
+    await workerService.revokeCredential(workerId, 'admin-e2e');
+    await expect(
+      workerService.authenticate(
+        workerId,
+        rotation.credential,
+        WorkerKind.MODELS,
+      ),
+    ).rejects.toThrow('invalid_worker_credential');
+    await expect(workerService.credentialHistory(workerId)).resolves.toEqual([
+      expect.objectContaining({
+        action: 'revoked',
+        actorType: 'user',
+        actorPrincipal: 'admin-e2e',
+      }),
+      expect.objectContaining({ action: 'rotated', actorType: 'service' }),
+      expect.objectContaining({ action: 'issued', actorType: 'service' }),
+    ]);
   });
 
   it('enrolls and revokes a browser identity without Models access', async () => {
@@ -2565,12 +2586,28 @@ describe('execution PostgreSQL integration', () => {
         enforceRegisteredWorkerCapacity: true,
       }),
     ).rejects.toThrow('worker_not_available');
-    await expect(workerService.findById(installationId)).resolves.toMatchObject(
-      {
-        status: 'revoked',
-        revokedAt: expect.any(Date),
-      },
-    );
+    await expect(
+      dataSource.getRepository(WorkerEntity).findOneByOrFail({
+        id: installationId,
+      }),
+    ).resolves.toMatchObject({
+      status: 'revoked',
+      revokedAt: expect.any(Date),
+    });
+    await expect(
+      workerService.credentialHistory(installationId),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        action: 'revoked',
+        actorType: 'user',
+        actorPrincipal: 'browser-owner',
+      }),
+      expect.objectContaining({
+        action: 'issued',
+        actorType: 'user',
+        actorPrincipal: 'browser-owner',
+      }),
+    ]);
   });
 
   it('serializes concurrent claims at the registered worker limit', async () => {

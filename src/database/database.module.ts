@@ -60,6 +60,7 @@ import { ConversationTurnEntity } from '../conversation/conversation-turn.entity
 import { ConversationArtifactRevisionEntity } from '../conversation/conversation-artifact-revision.entity';
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
 import { ExecutionEffectJournalEntity } from '../execution/execution-effect-journal.entity';
+import { WorkerCredentialEventEntity } from '../worker/worker-credential-event.entity';
 
 @Module({
   imports: [
@@ -101,6 +102,7 @@ import { ExecutionEffectJournalEntity } from '../execution/execution-effect-jour
       BibliographyEntryEntity,
       UserTaskEntity,
       WorkerEntity,
+      WorkerCredentialEventEntity,
       UserEntity,
       PermissionGroupEntity,
       DataSourceEntity,

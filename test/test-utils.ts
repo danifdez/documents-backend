@@ -4,7 +4,9 @@ export type MockRepository<T extends ObjectLiteral = any> = Partial<
   Record<keyof Repository<T>, jest.Mock>
 >;
 
-export function createMockRepository<T extends ObjectLiteral = any>(): MockRepository<T> {
+export function createMockRepository<
+  T extends ObjectLiteral = any,
+>(): MockRepository<T> {
   const qb = createMockQueryBuilder<T>();
   return {
     find: jest.fn(),
@@ -22,16 +24,37 @@ export function createMockRepository<T extends ObjectLiteral = any>(): MockRepos
   };
 }
 
-export function createMockQueryBuilder<T extends ObjectLiteral = any>(): Partial<
-  Record<keyof SelectQueryBuilder<T>, jest.Mock>
-> {
+export function createMockQueryBuilder<
+  T extends ObjectLiteral = any,
+>(): Partial<Record<keyof SelectQueryBuilder<T>, jest.Mock>> {
   const qb: any = {};
   const chainMethods = [
-    'select', 'addSelect', 'where', 'andWhere', 'orWhere',
-    'leftJoin', 'leftJoinAndSelect', 'innerJoin', 'innerJoinAndSelect',
-    'orderBy', 'addOrderBy', 'limit', 'offset', 'skip', 'take',
-    'groupBy', 'having', 'setParameter', 'insert', 'into', 'values',
-    'update', 'set', 'delete', 'from',
+    'select',
+    'addSelect',
+    'where',
+    'andWhere',
+    'orWhere',
+    'leftJoin',
+    'leftJoinAndSelect',
+    'innerJoin',
+    'innerJoinAndSelect',
+    'orderBy',
+    'addOrderBy',
+    'limit',
+    'offset',
+    'skip',
+    'take',
+    'groupBy',
+    'having',
+    'setParameter',
+    'setLock',
+    'insert',
+    'into',
+    'values',
+    'update',
+    'set',
+    'delete',
+    'from',
   ];
   for (const method of chainMethods) {
     qb[method] = jest.fn().mockReturnValue(qb);
@@ -45,7 +68,9 @@ export function createMockQueryBuilder<T extends ObjectLiteral = any>(): Partial
   return qb;
 }
 
-export function createMockService<T>(methods: string[]): Record<string, jest.Mock> {
+export function createMockService(
+  methods: string[],
+): Record<string, jest.Mock> {
   const mock: Record<string, jest.Mock> = {};
   for (const method of methods) {
     mock[method] = jest.fn();
