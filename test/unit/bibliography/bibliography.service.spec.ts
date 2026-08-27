@@ -182,7 +182,7 @@ describe('BibliographyService', () => {
       repo.create.mockImplementation((data) => data as any);
       repo.save.mockImplementation(async (e) => e);
 
-      const result = await service.importFromResource(1);
+      await service.importFromResource(1);
       expect(repo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           creators: expect.arrayContaining([
@@ -205,7 +205,7 @@ describe('BibliographyService', () => {
       repo.create.mockImplementation((data) => data as any);
       repo.save.mockResolvedValue(entries);
 
-      const result = await service.importBibTeX(bibtex, 1);
+      await service.importBibTeX(bibtex, 1);
       expect(repo.create).toHaveBeenCalled();
       expect(repo.save).toHaveBeenCalled();
     });

@@ -97,5 +97,3 @@ export function folderScopeReasonToMessage(
       return 'That folder is not allowed (system paths are blocked).';
   }
 }
-
-export const _internals = { POSIX_FORBIDDEN_ROOTS, WINDOWS_FORBIDDEN_ROOTS };

@@ -541,7 +541,7 @@ export class DatasetService {
         await this.linkRepository.delete({ id: linkId });
     }
 
-    async getLinkedRecords(datasetId: number, recordId: number): Promise<any[]> {
+    async getLinkedRecords(recordId: number): Promise<any[]> {
         const links = await this.linkRepository.createQueryBuilder('link')
             .leftJoinAndSelect('link.relation', 'relation')
             .leftJoinAndSelect('relation.sourceDataset', 'sourceDataset')

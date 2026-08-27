@@ -291,10 +291,10 @@ export class DatasetController {
 
   @Get(':id/records/:recordId/links')
   async getLinkedRecords(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseIntPipe) _id: number,
     @Param('recordId', ParseIntPipe) recordId: number,
   ) {
-    return await this.datasetService.getLinkedRecords(id, recordId);
+    return await this.datasetService.getLinkedRecords(recordId);
   }
 
   @Get(':id/aggregate')
@@ -359,7 +359,7 @@ export class DatasetController {
 
   @Get(':id/stats/:executionId')
   async getStatsResult(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseIntPipe) _id: number,
     @Param('executionId', ParseUUIDPipe) executionId: string,
   ) {
     const execution = await this.executionService.findOne(executionId);
@@ -378,7 +378,7 @@ export class DatasetController {
     FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
   )
   async importPreview(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseIntPipe) _id: number,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) {

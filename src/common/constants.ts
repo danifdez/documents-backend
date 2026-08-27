@@ -2,5 +2,3 @@ export const RESOURCE_TYPE_WEBPAGE = 51;
 
 export const DEFAULT_PAGE_SIZE = 50;
 export const DEFAULT_SEARCH_LIMIT = 20;
-
-export const DEFAULT_FILE_SIZE_LIMIT = 10485760; // 10MB

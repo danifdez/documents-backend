@@ -3,8 +3,6 @@ import { ProjectEntity } from '../src/project/project.entity';
 import { EntityEntity } from '../src/entity/entity.entity';
 import { AuthorEntity } from '../src/author/author.entity';
 import { UserEntity } from '../src/auth/user.entity';
-import { ExecutionEntity } from '../src/execution/execution.entity';
-import { ExecutionStatus } from '../src/execution/execution-status.enum';
 import { ExecutionStepKind } from '../src/execution/execution-step-kind.enum';
 import { DocEntity } from '../src/doc/doc.entity';
 import { CommentEntity } from '../src/comment/comment.entity';
@@ -12,7 +10,6 @@ import { NoteEntity } from '../src/note/note.entity';
 import { MarkEntity } from '../src/mark/mark.entity';
 import { CanvasEntity } from '../src/canvas/canvas.entity';
 import { DatasetEntity } from '../src/dataset/dataset.entity';
-import { DatasetRecordEntity } from '../src/dataset/dataset-record.entity';
 import { BibliographyEntryEntity } from '../src/bibliography/bibliography-entry.entity';
 import { CalendarEventEntity } from '../src/calendar-event/calendar-event.entity';
 import { TimelineEntity } from '../src/timeline/timeline.entity';
@@ -21,7 +18,6 @@ import { KnowledgeEntryEntity } from '../src/knowledge-base/knowledge-entry.enti
 import { WorkerEntity } from '../src/worker/worker.entity';
 import { WorkerKind } from '../src/worker/worker-kind.enum';
 import { ThreadEntity } from '../src/thread/thread.entity';
-import { PendingEntityEntity } from '../src/pending-entity/pending-entity.entity';
 import { EntityTypeEntity } from '../src/entity-type/entity-type.entity';
 import { ResourceTypeEntity } from '../src/resource-type/resource-type.entity';
 
@@ -144,36 +140,6 @@ export function buildUser(overrides: Partial<UserEntity> = {}): UserEntity {
   } as UserEntity;
 }
 
-export function buildExecution(
-  overrides: Partial<ExecutionEntity> = {},
-): ExecutionEntity {
-  return {
-    executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
-    rootExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
-    parentExecutionId: null,
-    sessionId: null,
-    turnId: null,
-    ownerPrincipal: 'test-user',
-    schemaVersion: 'execution-event/1',
-    taskType: 'document-extraction',
-    payload: {},
-    status: ExecutionStatus.QUEUED,
-    phase: null,
-    completionKind: null,
-    completionReason: null,
-    result: null,
-    error: null,
-    completedAt: null,
-    lastSequence: '0',
-    lastEventId: null,
-    completenessStatus: 'reproducible',
-    missingEvidence: [],
-    createdAt: now,
-    updatedAt: now,
-    ...overrides,
-  } as ExecutionEntity;
-}
-
 export function buildThread(
   overrides: Partial<ThreadEntity> = {},
 ): ThreadEntity {
@@ -275,19 +241,6 @@ export function buildDataset(
     updatedAt: now,
     ...overrides,
   } as DatasetEntity;
-}
-
-export function buildDatasetRecord(
-  overrides: Partial<DatasetRecordEntity> = {},
-): DatasetRecordEntity {
-  return {
-    id: 1,
-    dataset: buildDataset(),
-    data: {},
-    createdAt: now,
-    updatedAt: now,
-    ...overrides,
-  } as DatasetRecordEntity;
 }
 
 export function buildBibliographyEntry(
@@ -437,29 +390,6 @@ export function buildWorker(
   } as WorkerEntity;
 }
 
-export function buildPendingEntity(
-  overrides: Partial<PendingEntityEntity> = {},
-): PendingEntityEntity {
-  return {
-    id: 1,
-    resourceId: 1,
-    resource: buildResource(),
-    name: 'Pending Entity',
-    description: null,
-    language: null,
-    translations: null,
-    aliases: null,
-    scope: 'document',
-    status: 'pending',
-    mergedTargetType: null,
-    mergedTargetId: null,
-    mergedAt: null,
-    entityType: buildEntityType(),
-    createdAt: now,
-    updatedAt: now,
-    ...overrides,
-  } as PendingEntityEntity;
-}
 
 export function buildResourceType(
   overrides: Partial<ResourceTypeEntity> = {},

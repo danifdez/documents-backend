@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
 import { ResourceEntity } from '../../resource/resource.entity';
@@ -22,7 +22,6 @@ class IngestContentResourceNotFoundError extends Error {}
 
 @Injectable()
 export class IngestContentProcessor implements ExecutionProcessor {
-  private readonly logger = new Logger(IngestContentProcessor.name);
   private readonly TASK_TYPE = 'ingest-content';
 
   constructor(

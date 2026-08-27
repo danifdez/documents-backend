@@ -3079,7 +3079,6 @@ export class ExecutionService {
       execution,
       events,
       artifacts,
-      environment,
       { ...inferenceIdentities, ...toolIdentities },
     );
     const completenessStatus = missingEvidence.length
@@ -3469,7 +3468,6 @@ export class ExecutionService {
     execution: ExecutionEntity,
     events: Record<string, unknown>[],
     artifacts: ExecutionArtifactEntity[],
-    environment: Record<string, unknown>,
     inferenceIdentities: {
       modelIdentityKnown: boolean;
       adapterIdentityKnown: boolean;

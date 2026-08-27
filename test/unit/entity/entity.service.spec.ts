@@ -6,7 +6,7 @@ import { EntityEntity } from '../../../src/entity/entity.entity';
 import { EntityTypeService } from '../../../src/entity-type/entity-type.service';
 import { ResourceService } from '../../../src/resource/resource.service';
 import { createMockRepository, MockRepository } from '../../test-utils';
-import { buildEntity, buildEntityType, buildResource } from '../../factories';
+import { buildEntity, buildEntityType } from '../../factories';
 
 describe('EntityService', () => {
   let service: EntityService;

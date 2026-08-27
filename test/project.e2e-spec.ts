@@ -4,7 +4,6 @@ import * as request from 'supertest';
 import { ProjectController } from '../src/project/project.controller';
 import { ProjectService } from '../src/project/project.service';
 import { buildProject } from './factories';
-import { APP_GUARD } from '@nestjs/core';
 
 /**
  * E2E tests for /projects endpoints.

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionPriority } from '../../execution/execution-priority.enum';
 import { ResourceEntity } from '../../resource/resource.entity';
@@ -36,7 +36,6 @@ const MEDIA_EXTENSIONS = new Set([
 
 @Injectable()
 export class DocumentExtractionProcessor implements ExecutionProcessor {
-  private readonly logger = new Logger(DocumentExtractionProcessor.name);
   private readonly TASK_TYPE = 'document-extraction';
 
   constructor(

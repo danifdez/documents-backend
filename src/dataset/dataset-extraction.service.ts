@@ -3,7 +3,6 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,8 +19,6 @@ const DEFAULT_PROMPT_VERSION = 'v1-2026-05';
 
 @Injectable()
 export class DatasetExtractionService {
-  private readonly logger = new Logger(DatasetExtractionService.name);
-
   constructor(
     @InjectRepository(DatasetEntity)
     private readonly datasetRepository: Repository<DatasetEntity>,

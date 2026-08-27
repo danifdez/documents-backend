@@ -33,7 +33,7 @@ export class AgentService {
     @InjectRepository(AgentEntity)
     private readonly agentRepo: Repository<AgentEntity>,
     @InjectRepository(AgentMessageEntity)
-    private readonly messageRepo: Repository<AgentMessageEntity>,
+    messageRepo: Repository<AgentMessageEntity>,
     @Inject(forwardRef(() => IndexedFileService))
     private readonly indexedFileService: IndexedFileService,
     private readonly executionService: ExecutionService,

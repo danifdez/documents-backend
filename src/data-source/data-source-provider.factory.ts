@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, Inject, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import { DataSourceProvider } from './data-source-provider.interface';
 
 export const DATA_SOURCE_PROVIDERS = 'DATA_SOURCE_PROVIDERS';

@@ -11,17 +11,12 @@ import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionAccessScope } from '../execution/execution.types';
-import {
-  ChatMessageStore,
-  DEFAULT_CHAT_MESSAGE_PAGE_SIZE,
-} from '../common/chat-message.store';
+import { ChatMessageStore } from '../common/chat-message.store';
 import { IndexedFileService } from '../indexed-file/indexed-file.service';
 import {
   folderScopeReasonToMessage,
   validateFolderScope,
 } from './folder-scope.validator';
-
-export const MESSAGE_PAGE_SIZE = DEFAULT_CHAT_MESSAGE_PAGE_SIZE;
 
 @Injectable()
 export class AssistantService implements OnApplicationBootstrap {
@@ -32,7 +27,7 @@ export class AssistantService implements OnApplicationBootstrap {
     @InjectRepository(AssistantEntity)
     private readonly assistantRepo: Repository<AssistantEntity>,
     @InjectRepository(AssistantMessageEntity)
-    private readonly messageRepo: Repository<AssistantMessageEntity>,
+    messageRepo: Repository<AssistantMessageEntity>,
     private readonly indexedFileService: IndexedFileService,
     private readonly executionService: ExecutionService,
   ) {

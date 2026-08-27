@@ -82,7 +82,7 @@ export class DatasetQueryService {
         if (params.search) {
             const textFields = dataset.schema.filter(f => f.type === 'text' || f.type === 'select');
             if (textFields.length > 0) {
-                const conditions = textFields.map((f, i) =>
+                const conditions = textFields.map((_, i) =>
                     `record.data ->> :search_field_${i} ILIKE :search_term`
                 );
                 const searchParams: Record<string, any> = { search_term: `%${params.search}%` };

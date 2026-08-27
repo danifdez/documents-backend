@@ -1,4 +1,4 @@
-import { Entity, Column, CreateDateColumn, ManyToOne, JoinColumn, PrimaryColumn } from 'typeorm';
+import { Entity, CreateDateColumn, ManyToOne, JoinColumn, PrimaryColumn } from 'typeorm';
 import { ResourceEntity } from '../resource/resource.entity';
 import { AuthorEntity } from '../author/author.entity';
 

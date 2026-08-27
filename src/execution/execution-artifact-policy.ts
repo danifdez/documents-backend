@@ -7,8 +7,6 @@ export const EXECUTION_ARTIFACT_RETENTION_CLASSES = [
 export type ExecutionArtifactRetentionClass =
   (typeof EXECUTION_ARTIFACT_RETENTION_CLASSES)[number];
 
-export type ExecutionArtifactContentState = 'active' | 'expired' | 'withdrawn';
-
 export interface ExecutionArtifactDataPolicy {
   classification: string;
   allowedPurposes: ['execution'];

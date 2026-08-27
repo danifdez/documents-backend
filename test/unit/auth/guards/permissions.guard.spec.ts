@@ -1,5 +1,4 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
 import { PermissionsGuard } from '../../../../src/auth/guards/permissions.guard';
 
 describe('PermissionsGuard', () => {

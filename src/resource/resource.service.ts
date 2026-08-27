@@ -2,7 +2,6 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,8 +21,6 @@ import { AgeGraphService } from '../graph/age-graph.service';
 
 @Injectable()
 export class ResourceService {
-  private readonly logger = new Logger(ResourceService.name);
-
   constructor(
     @InjectRepository(ResourceEntity)
     private readonly repo: Repository<ResourceEntity>,

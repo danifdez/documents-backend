@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsIn, IsObject, IsDateString } from 'class-validator';
+import { IsNumber, IsIn, IsObject, IsDateString } from 'class-validator';
 
 export class SyncChangeDto {
   @IsIn(['doc', 'comment', 'mark', 'note', 'resource'])

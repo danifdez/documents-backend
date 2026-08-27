@@ -135,27 +135,6 @@ export class LinkRecordsDto {
     targetRecordId: number;
 }
 
-export class CsvImportMappingDto {
-    @IsArray()
-    @ValidateNested({ each: true })
-    @Type(() => CsvColumnMappingDto)
-    mappings: CsvColumnMappingDto[];
-
-    @IsBoolean()
-    @IsOptional()
-    skipFirstRow?: boolean;
-}
-
-export class CsvColumnMappingDto {
-    @IsString()
-    @IsNotEmpty()
-    csvColumn: string;
-
-    @IsString()
-    @IsNotEmpty()
-    fieldKey: string;
-}
-
 export class BulkDeleteRecordsDto {
     @IsArray()
     @IsNumber({}, { each: true })

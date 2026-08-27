@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ResourceService } from '../../resource/resource.service';
 import { ResourceEntity } from '../../resource/resource.entity';
@@ -15,7 +15,6 @@ class DetectLanguageResourceChangedError extends Error {}
 
 @Injectable()
 export class DetectLanguageProcessor implements ExecutionProcessor {
-  private readonly logger = new Logger(DetectLanguageProcessor.name);
   private readonly TASK_TYPE = 'detect-language';
 
   constructor(
