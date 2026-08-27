@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -11,6 +12,7 @@ import {
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ExecutionService } from './execution.service';
 import { CancelExecutionDto } from './dto/cancel-execution.dto';
+import { WithdrawExecutionEvidenceDto } from './dto/withdraw-execution-evidence.dto';
 
 @Controller('executions')
 export class ExecutionController {
@@ -58,6 +60,36 @@ export class ExecutionController {
       rootExecutionId,
       scope,
       evaluationConsent === 'granted',
+    );
+  }
+
+  @Delete(':rootExecutionId/artifacts/:artifactId')
+  async withdrawArtifact(
+    @Param('rootExecutionId') rootExecutionId: string,
+    @Param('artifactId') artifactId: string,
+    @Body() input: WithdrawExecutionEvidenceDto,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.service.withdrawArtifact(
+      rootExecutionId,
+      artifactId,
+      this.service.resolveAccessScope(user),
+      input.reason,
+    );
+  }
+
+  @Delete(':rootExecutionId/sources/:sourceId')
+  async withdrawSource(
+    @Param('rootExecutionId') rootExecutionId: string,
+    @Param('sourceId') sourceId: string,
+    @Body() input: WithdrawExecutionEvidenceDto,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.service.withdrawSource(
+      rootExecutionId,
+      sourceId,
+      this.service.resolveAccessScope(user),
+      input.reason,
     );
   }
 

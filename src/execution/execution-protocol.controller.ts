@@ -171,7 +171,7 @@ export class ExecutionProtocolController {
       encoding: 'identity',
       dataClassification: 'workspace',
       redaction: { applied: false },
-      retentionClass: 'execution',
+      retentionClass: 'operational',
       inputSourceIds: [],
     });
   }

@@ -165,7 +165,7 @@ export class BrowserWorkController {
       encoding: 'identity',
       dataClassification: 'workspace',
       redaction: { applied: false },
-      retentionClass: 'execution',
+      retentionClass: 'operational',
       inputSourceIds: [],
     });
   }

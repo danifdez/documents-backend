@@ -15,6 +15,7 @@ import { ExecutionConfirmationService } from './execution-confirmation.service';
 import { BrowserWorkController } from '../worker/browser-work.controller';
 import { ExecutionEffectJournalService } from './execution-effect-journal.service';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
+import { ExecutionRetentionService } from './execution-retention.service';
 
 @Module({
   imports: [DatabaseModule, WorkerModule],
@@ -35,6 +36,7 @@ import { ExecutionArtifactStorageService } from './execution-artifact-storage.se
     ExecutionArtifactStorageService,
     ExecutionConfirmationService,
     ExecutionEffectJournalService,
+    ExecutionRetentionService,
   ],
   exports: [
     ExecutionService,

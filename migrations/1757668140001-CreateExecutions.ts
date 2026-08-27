@@ -131,13 +131,27 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         "data_classification" varchar(30) NOT NULL,
         "redaction" jsonb NOT NULL DEFAULT '{"applied":false}'::jsonb,
         "retention_class" varchar(30) NOT NULL,
+        "expires_at" timestamptz,
+        "content_state" varchar(20) NOT NULL DEFAULT 'active',
+        "withdrawal_reason" varchar(240),
+        "content_deleted_at" timestamptz,
         "created_by_event_id" uuid,
         "produced_by_attempt_id" uuid,
         "input_source_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "derived_from_artifact_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
         "storage_ref" varchar(500) NOT NULL,
         "body" bytea,
         "created_at" timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT "PK_execution_artifacts" PRIMARY KEY ("artifact_id"),
+        CONSTRAINT "CHK_execution_artifacts_retention_class"
+          CHECK ("retention_class" IN ('operational', 'diagnostic', 'evaluation')),
+        CONSTRAINT "CHK_execution_artifacts_content_state"
+          CHECK ("content_state" IN ('active', 'expired', 'withdrawn')),
+        CONSTRAINT "CHK_execution_artifacts_content_lifecycle" CHECK (
+          ("content_state" = 'active' AND "content_deleted_at" IS NULL AND "withdrawal_reason" IS NULL)
+          OR
+          ("content_state" IN ('expired', 'withdrawn') AND "content_deleted_at" IS NOT NULL AND "withdrawal_reason" IS NOT NULL)
+        ),
         CONSTRAINT "FK_execution_artifacts_root" FOREIGN KEY ("root_execution_id")
           REFERENCES "executions"("execution_id") ON DELETE CASCADE
       )
@@ -147,6 +161,9 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
     );
     await queryRunner.query(
       `CREATE INDEX "IDX_execution_artifacts_attempt" ON "execution_artifacts" ("produced_by_attempt_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_execution_artifacts_retention" ON "execution_artifacts" ("content_state", "expires_at")`,
     );
     await queryRunner.query(`
       CREATE FUNCTION reject_execution_event_mutation()

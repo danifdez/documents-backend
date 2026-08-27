@@ -7,7 +7,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { DataSource, EntityManager, In, MoreThan, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  In,
+  LessThanOrEqual,
+  MoreThan,
+  Repository,
+} from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
@@ -80,6 +87,12 @@ import {
 } from '../conversation/skill-activation';
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
+import {
+  defaultArtifactExpiry,
+  derivedArtifactPolicy,
+  earliestArtifactExpiry,
+  ExecutionArtifactRetentionClass,
+} from './execution-artifact-policy';
 import {
   ChatCreationPayloadByKind,
   ChatExecutionPayload,
@@ -203,7 +216,10 @@ export interface CreateExecutionOptions {
     mediaType: string;
     body: Buffer;
     dataClassification?: string;
-    retentionClass?: string;
+    retentionClass?: ExecutionArtifactRetentionClass;
+    expiresAt?: Date | null;
+    inputSourceIds?: string[];
+    derivedFromArtifactIds?: string[];
   }>;
 }
 
@@ -1550,9 +1566,11 @@ export class ExecutionService {
             encoding: 'identity',
             dataClassification: input.dataClassification ?? 'workspace',
             redaction: { applied: false },
-            retentionClass: input.retentionClass ?? 'execution',
+            retentionClass: input.retentionClass ?? 'operational',
+            expiresAt: input.expiresAt,
             createdByEventId: null,
-            inputSourceIds: [],
+            inputSourceIds: input.inputSourceIds ?? [],
+            derivedFromArtifactIds: input.derivedFromArtifactIds ?? [],
             body: input.body,
           });
           return { role: input.role, artifactId };
@@ -2016,8 +2034,15 @@ export class ExecutionService {
           dataClassification: input.dataClassification,
           redaction: input.redaction ?? { applied: false },
           retentionClass: input.retentionClass ?? 'evaluation',
+          expiresAt:
+            input.expiresAt === undefined
+              ? undefined
+              : input.expiresAt === null
+                ? null
+                : new Date(input.expiresAt),
           createdByEventId: input.createdByEventId ?? null,
           inputSourceIds: input.inputSourceIds ?? [],
+          derivedFromArtifactIds: input.derivedFromArtifactIds ?? [],
           body,
         });
         if (!body)
@@ -2268,6 +2293,16 @@ export class ExecutionService {
           ?.sourceId;
         return typeof sourceId === 'string' ? [sourceId] : [];
       });
+      const dependencyArtifactIds = [
+        ...new Set(rows.flatMap((row) => row.envelope.artifactRefs ?? [])),
+      ];
+      const dependencyArtifacts = dependencyArtifactIds.length
+        ? await manager.getRepository(ExecutionArtifactEntity).findBy({
+            rootExecutionId: execution.rootExecutionId,
+            artifactId: In(dependencyArtifactIds),
+          })
+        : [];
+      const finalArtifactPolicy = derivedArtifactPolicy(dependencyArtifacts);
 
       if (!hasFinalMessage && reply && !TERMINAL_STATES.has(execution.status)) {
         const artifactId = randomUUID();
@@ -2281,11 +2316,18 @@ export class ExecutionService {
           size: String(body.length),
           mediaType: 'text/plain',
           encoding: 'identity',
-          dataClassification: 'workspace',
+          dataClassification: finalArtifactPolicy.dataClassification,
           redaction: { applied: safeReply !== reply },
-          retentionClass: 'evaluation',
+          retentionClass: finalArtifactPolicy.retentionClass,
+          expiresAt: finalArtifactPolicy.expiresAt,
           createdByEventId: null,
-          inputSourceIds: observedSourceIds,
+          inputSourceIds: [
+            ...new Set([
+              ...observedSourceIds,
+              ...finalArtifactPolicy.inputSourceIds,
+            ]),
+          ],
+          derivedFromArtifactIds: finalArtifactPolicy.derivedFromArtifactIds,
           body,
         });
         sequence += 1;
@@ -2925,6 +2967,10 @@ export class ExecutionService {
         'Explicit consent is required to export evaluation evidence',
       );
     }
+    const exportedAt = new Date();
+    while ((await this.purgeExpiredArtifacts(1_000, exportedAt)) > 0) {
+      continue;
+    }
     const execution = await this.findOwned(rootExecutionId, scope);
     const events = (
       await this.eventRepo.find({
@@ -2959,7 +3005,7 @@ export class ExecutionService {
       { encoding: 'base64'; data: string }
     > = {};
     const artifactManifest = artifacts.map((artifact) => {
-      if (artifact.body) {
+      if (artifact.contentState === 'active' && artifact.body) {
         embeddedArtifacts[artifact.artifactId] = {
           encoding: 'base64',
           data: artifact.body.toString('base64'),
@@ -2972,13 +3018,26 @@ export class ExecutionService {
         size: Number(artifact.size),
         mediaType: artifact.mediaType,
         encoding: artifact.encoding,
-        storageRef: artifact.storageRef,
+        storageRef:
+          artifact.contentState === 'active' ? artifact.storageRef : undefined,
         createdByEventId: artifact.createdByEventId ?? undefined,
         inputSourceIds: artifact.inputSourceIds,
+        derivedFromArtifactIds: artifact.derivedFromArtifactIds,
         dataClassification: artifact.dataClassification,
         redaction: artifact.redaction,
-        retentionClass: artifact.retentionClass,
-        omissionReason: artifact.body ? undefined : 'not_captured',
+        retentionClass: 'evaluation',
+        expiresAt: artifact.expiresAt?.toISOString(),
+        contentState: artifact.contentState,
+        contentDeletedAt: artifact.contentDeletedAt?.toISOString(),
+        withdrawalReason: artifact.withdrawalReason ?? undefined,
+        omissionReason:
+          artifact.contentState === 'expired'
+            ? 'expired'
+            : artifact.contentState === 'withdrawn'
+              ? 'withdrawn'
+              : artifact.body
+                ? undefined
+                : 'not_captured',
       };
     });
     const firstSequence = events.length ? Number(events[0].sequence) : 0;
@@ -3004,6 +3063,12 @@ export class ExecutionService {
     const completenessStatus = missingEvidence.length
       ? 'evaluable_partial'
       : execution.completenessStatus;
+    const policyExpiresAt = earliestArtifactExpiry([
+      defaultArtifactExpiry('evaluation', exportedAt),
+      ...artifacts
+        .filter((artifact) => artifact.contentState === 'active')
+        .map((artifact) => artifact.expiresAt),
+    ])!;
     const bundle: Record<string, unknown> = {
       bundleSchema: EXECUTION_BUNDLE_SCHEMA,
       bundleId: randomUUID(),
@@ -3049,13 +3114,333 @@ export class ExecutionService {
         },
         allowedDestinations: ['ai-train'],
         retentionClass: 'evaluation',
+        expiresAt: policyExpiresAt.toISOString(),
         accessScope: scope,
       },
-      exportedAt: new Date().toISOString(),
+      exportedAt: exportedAt.toISOString(),
     };
     bundle.manifestHash = canonicalHash(bundle);
     this.contractValidator.assertBundle(bundle);
     return bundle;
+  }
+
+  async withdrawArtifact(
+    rootExecutionId: string,
+    artifactId: string,
+    scope: ExecutionAccessScope,
+    reason: string,
+  ): Promise<{ artifactIds: string[]; state: 'withdrawn' }> {
+    await this.findOwned(rootExecutionId, scope);
+    const artifactIds = await this.dataSource.transaction(async (manager) => {
+      const root = await this.lockOwnedRoot(manager, rootExecutionId, scope);
+      const artifact = await manager
+        .getRepository(ExecutionArtifactEntity)
+        .findOneBy({ artifactId, rootExecutionId });
+      if (!artifact) throw new NotFoundException('artifact_not_found');
+      if (artifact.contentState === 'withdrawn') {
+        return this.derivedArtifactClosure(manager, rootExecutionId, [
+          artifactId,
+        ]);
+      }
+      const affected = await this.retireArtifactGraph(
+        manager,
+        rootExecutionId,
+        [artifactId],
+        'withdrawn',
+        reason.trim(),
+        new Date(),
+      );
+      await this.appendEvidenceLifecycleEvent(manager, root, {
+        eventType: 'artifact.withdrawn',
+        payloadSchema: 'artifact.withdrawn/1',
+        payload: {
+          artifactId,
+          reason: reason.trim(),
+          propagatedArtifactIds: affected.filter((id) => id !== artifactId),
+        },
+        artifactId,
+        artifactRefs: affected,
+      });
+      return affected;
+    });
+    await this.cancelActiveExecutionAfterEvidenceLoss(rootExecutionId, scope);
+    return { artifactIds, state: 'withdrawn' };
+  }
+
+  async withdrawSource(
+    rootExecutionId: string,
+    sourceId: string,
+    scope: ExecutionAccessScope,
+    reason: string,
+  ): Promise<{ sourceId: string; artifactIds: string[]; state: 'withdrawn' }> {
+    await this.findOwned(rootExecutionId, scope);
+    const artifactIds = await this.dataSource.transaction(async (manager) => {
+      const root = await this.lockOwnedRoot(manager, rootExecutionId, scope);
+      const events = await manager.getRepository(ExecutionEventEntity).find({
+        where: { rootExecutionId },
+        order: { sequence: 'ASC' },
+      });
+      const observed = events.find(
+        (event) =>
+          event.eventType === 'source.observed' &&
+          (event.envelope.payload as Record<string, unknown>)?.sourceId ===
+            sourceId,
+      );
+      if (!observed) throw new NotFoundException('source_not_found');
+      const existing = events.find(
+        (event) =>
+          event.eventType === 'source.withdrawn' &&
+          (event.envelope.payload as Record<string, unknown>)?.sourceId ===
+            sourceId,
+      );
+      if (existing) {
+        return this.derivedArtifactClosure(
+          manager,
+          rootExecutionId,
+          await this.artifactsForSource(manager, rootExecutionId, sourceId),
+        );
+      }
+      const direct = await this.artifactsForSource(
+        manager,
+        rootExecutionId,
+        sourceId,
+      );
+      const affected = await this.retireArtifactGraph(
+        manager,
+        rootExecutionId,
+        direct,
+        'withdrawn',
+        reason.trim(),
+        new Date(),
+      );
+      await this.appendEvidenceLifecycleEvent(manager, root, {
+        eventType: 'source.withdrawn',
+        payloadSchema: 'source.withdrawn/1',
+        payload: {
+          sourceId,
+          reason: reason.trim(),
+          affectedArtifactIds: affected,
+        },
+        sourceId,
+        causedByEventId: observed.eventId,
+        artifactRefs: affected,
+      });
+      return affected;
+    });
+    await this.cancelActiveExecutionAfterEvidenceLoss(rootExecutionId, scope);
+    return { sourceId, artifactIds, state: 'withdrawn' };
+  }
+
+  async purgeExpiredArtifacts(limit = 100, now = new Date()): Promise<number> {
+    const expired = await this.artifactRepo.find({
+      where: {
+        contentState: 'active',
+        expiresAt: LessThanOrEqual(now),
+      },
+      order: { expiresAt: 'ASC' },
+      take: limit,
+    });
+    const byRoot = new Map<string, string[]>();
+    for (const artifact of expired) {
+      const ids = byRoot.get(artifact.rootExecutionId) ?? [];
+      ids.push(artifact.artifactId);
+      byRoot.set(artifact.rootExecutionId, ids);
+    }
+    let purged = 0;
+    for (const [rootExecutionId, artifactIds] of byRoot) {
+      const result = await this.dataSource.transaction(async (manager) => {
+        const root = await manager.getRepository(ExecutionEntity).findOne({
+          where: { executionId: rootExecutionId, rootExecutionId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!root) return { count: 0, ownerPrincipal: null };
+        const affected = await this.retireArtifactGraph(
+          manager,
+          rootExecutionId,
+          artifactIds,
+          'expired',
+          'retention_expired',
+          now,
+        );
+        if (!affected.length) {
+          return { count: 0, ownerPrincipal: root.ownerPrincipal };
+        }
+        await this.appendEvidenceLifecycleEvent(manager, root, {
+          eventType: 'artifact.expired',
+          payloadSchema: 'artifact.expired/1',
+          payload: {
+            artifactIds,
+            propagatedArtifactIds: affected.filter(
+              (id) => !artifactIds.includes(id),
+            ),
+          },
+          artifactRefs: affected,
+        });
+        return {
+          count: affected.length,
+          ownerPrincipal: root.ownerPrincipal,
+        };
+      });
+      purged += result.count;
+      if (result.count && result.ownerPrincipal) {
+        await this.cancelActiveExecutionAfterEvidenceLoss(rootExecutionId, {
+          ownerPrincipal: result.ownerPrincipal,
+        });
+      }
+    }
+    return purged;
+  }
+
+  private async lockOwnedRoot(
+    manager: EntityManager,
+    rootExecutionId: string,
+    scope: ExecutionAccessScope,
+  ): Promise<ExecutionEntity> {
+    const root = await manager.getRepository(ExecutionEntity).findOne({
+      where: {
+        executionId: rootExecutionId,
+        rootExecutionId,
+        ownerPrincipal: scope.ownerPrincipal,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!root) throw new NotFoundException('Execution not found');
+    return root;
+  }
+
+  private async artifactsForSource(
+    manager: EntityManager,
+    rootExecutionId: string,
+    sourceId: string,
+  ): Promise<string[]> {
+    const rows = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .where('artifact.root_execution_id = :rootExecutionId', {
+        rootExecutionId,
+      })
+      .andWhere('artifact.input_source_ids @> :sourceRef::jsonb', {
+        sourceRef: JSON.stringify([sourceId]),
+      })
+      .getMany();
+    return rows.map((artifact) => artifact.artifactId);
+  }
+
+  private async derivedArtifactClosure(
+    manager: EntityManager,
+    rootExecutionId: string,
+    seedArtifactIds: string[],
+  ): Promise<string[]> {
+    const artifacts = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .findBy({ rootExecutionId });
+    const affected = new Set(seedArtifactIds);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const artifact of artifacts) {
+        if (
+          affected.has(artifact.artifactId) ||
+          !artifact.derivedFromArtifactIds.some((id) => affected.has(id))
+        ) {
+          continue;
+        }
+        affected.add(artifact.artifactId);
+        changed = true;
+      }
+    }
+    return [...affected].sort();
+  }
+
+  private async retireArtifactGraph(
+    manager: EntityManager,
+    rootExecutionId: string,
+    seedArtifactIds: string[],
+    state: 'expired' | 'withdrawn',
+    reason: string,
+    deletedAt: Date,
+  ): Promise<string[]> {
+    const closure = await this.derivedArtifactClosure(
+      manager,
+      rootExecutionId,
+      seedArtifactIds,
+    );
+    if (!closure.length) return [];
+    const repository = manager.getRepository(ExecutionArtifactEntity);
+    const artifacts = await repository
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.root_execution_id = :rootExecutionId', {
+        rootExecutionId,
+      })
+      .andWhere('artifact.artifact_id IN (:...artifactIds)', {
+        artifactIds: closure,
+      })
+      .getMany();
+    const active = artifacts.filter(
+      (artifact) => artifact.contentState === 'active',
+    );
+    for (const artifact of active) {
+      await this.artifactStorage.deleteBody(artifact);
+      artifact.body = null;
+      artifact.storageRef = `${state}:v1:${artifact.artifactId}`;
+      artifact.contentState = state;
+      artifact.withdrawalReason = reason;
+      artifact.contentDeletedAt = deletedAt;
+    }
+    if (active.length) await repository.save(active);
+    return active.map((artifact) => artifact.artifactId).sort();
+  }
+
+  private async appendEvidenceLifecycleEvent(
+    manager: EntityManager,
+    root: ExecutionEntity,
+    input: {
+      eventType: string;
+      payloadSchema: string;
+      payload: Record<string, unknown>;
+      artifactId?: string;
+      sourceId?: string;
+      causedByEventId?: string;
+      artifactRefs: string[];
+    },
+  ): Promise<void> {
+    const events = await manager.getRepository(ExecutionEventEntity).find({
+      where: { rootExecutionId: root.rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    const event = await this.appendBackendEvent(
+      manager,
+      root,
+      nextBackendProducerSequence(events),
+      {
+        ...input,
+        actor: { type: 'system' },
+        executionId: root.executionId,
+        causedByEventId: input.causedByEventId ?? root.lastEventId,
+      },
+      Number(root.lastSequence) + 1,
+    );
+    root.lastSequence = event.sequence;
+    root.lastEventId = event.eventId;
+    await manager.save(root);
+  }
+
+  private async cancelActiveExecutionAfterEvidenceLoss(
+    rootExecutionId: string,
+    scope: ExecutionAccessScope,
+  ): Promise<void> {
+    const root = await this.executionRepo.findOneBy({
+      executionId: rootExecutionId,
+      rootExecutionId,
+    });
+    if (root && !TERMINAL_STATES.has(root.status)) {
+      await this.requestCancellation(
+        rootExecutionId,
+        scope,
+        'Required evidence became unavailable',
+      );
+    }
   }
 
   private deriveBundleMissingEvidence(
@@ -3132,7 +3517,13 @@ export class ExecutionService {
     }
     for (const artifact of artifacts) {
       if (artifact.body === null) {
-        missing.add(`artifact.${artifact.artifactId}.body`);
+        const reason =
+          artifact.contentState === 'expired'
+            ? 'expired'
+            : artifact.contentState === 'withdrawn'
+              ? 'withdrawn'
+              : 'body';
+        missing.add(`artifact.${artifact.artifactId}.${reason}`);
       }
     }
     return [...missing].sort();
@@ -3454,6 +3845,27 @@ export class ExecutionService {
     }
     if (artifact.dataClassification === 'secret') {
       throw new BadRequestException('Secret artifacts cannot be persisted');
+    }
+    if (
+      artifact.expiresAt !== undefined &&
+      artifact.expiresAt !== null &&
+      (Number.isNaN(new Date(artifact.expiresAt).getTime()) ||
+        new Date(artifact.expiresAt) <= new Date())
+    ) {
+      throw new BadRequestException('artifact_expiry_invalid');
+    }
+    for (const ids of [
+      artifact.inputSourceIds ?? [],
+      artifact.derivedFromArtifactIds ?? [],
+    ]) {
+      if (
+        !Array.isArray(ids) ||
+        ids.some(
+          (id) => typeof id !== 'string' || !EXECUTION_UUID_PATTERN.test(id),
+        )
+      ) {
+        throw new BadRequestException('artifact_provenance_invalid');
+      }
     }
     this.contractValidator.assertArtifact({
       ...artifact,

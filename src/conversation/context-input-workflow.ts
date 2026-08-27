@@ -10,6 +10,7 @@ import {
 } from '../execution/execution-task-payload.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { ExecutionArtifactStorageService } from '../execution/execution-artifact-storage.service';
+import { derivedArtifactPolicy } from '../execution/execution-artifact-policy';
 import { MAX_ACTIVE_MESSAGE_CHARS } from './conversation-context';
 import { MAX_CHAT_MESSAGE_CHARS } from './conversation.constants';
 
@@ -90,6 +91,7 @@ export async function buildContextInputWorkflow(
     })),
   };
   const planBody = Buffer.from(canonicalJson(plan), 'utf8');
+  const planPolicy = derivedArtifactPolicy([input.requestArtifact]);
   const planArtifact = await artifactStorage.save(manager, {
     artifactId: planArtifactId,
     rootExecutionId: input.requestArtifact.rootExecutionId,
@@ -98,12 +100,14 @@ export async function buildContextInputWorkflow(
     size: String(planBody.length),
     mediaType: 'application/vnd.documents.context-chunk-plan+json',
     encoding: 'identity',
-    dataClassification: 'workspace',
+    dataClassification: planPolicy.dataClassification,
     redaction: { applied: false },
-    retentionClass: 'evaluation',
+    retentionClass: planPolicy.retentionClass,
+    expiresAt: planPolicy.expiresAt,
     createdByEventId: input.causedByEventId,
     producedByAttemptId: null,
-    inputSourceIds: input.requestArtifact.inputSourceIds,
+    inputSourceIds: planPolicy.inputSourceIds,
+    derivedFromArtifactIds: planPolicy.derivedFromArtifactIds,
     body: planBody,
   });
 

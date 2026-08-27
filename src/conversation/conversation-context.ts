@@ -9,6 +9,7 @@ import {
 } from './conversation-artifact-revision.entity';
 import type { ChatExecutionPayload } from '../execution/execution-task-payload.types';
 import { ExecutionArtifactStorageService } from '../execution/execution-artifact-storage.service';
+import { derivedArtifactPolicy } from '../execution/execution-artifact-policy';
 
 export const ACTIVE_CONTEXT_ARTIFACT_ROLE = 'active_context';
 export const ACTIVE_CONTEXT_SCHEMA = 'active-context/1';
@@ -171,11 +172,7 @@ export async function freezeActiveContextArtifact(
         },
       })
     : [];
-  const inputSourceIds = [
-    ...new Set(
-      derivedArtifacts.flatMap((artifact) => artifact.inputSourceIds ?? []),
-    ),
-  ];
+  const policy = derivedArtifactPolicy(derivedArtifacts);
   return artifactStorage.save(manager, {
     artifactId,
     rootExecutionId: input.rootExecutionId,
@@ -184,12 +181,14 @@ export async function freezeActiveContextArtifact(
     size: String(body.length),
     mediaType: 'application/vnd.documents.active-context+json',
     encoding: 'identity',
-    dataClassification: 'workspace',
+    dataClassification: policy.dataClassification,
     redaction: { applied: false },
-    retentionClass: 'evaluation',
+    retentionClass: policy.retentionClass,
+    expiresAt: policy.expiresAt,
     createdByEventId: input.causedByEventId,
     producedByAttemptId: null,
-    inputSourceIds,
+    inputSourceIds: policy.inputSourceIds,
+    derivedFromArtifactIds: derivedIds,
     body,
   });
 }

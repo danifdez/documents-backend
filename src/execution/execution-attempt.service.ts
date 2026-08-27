@@ -62,6 +62,11 @@ import {
 } from './execution-tool.constants';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 import { ExecutionEffectJournalEntity } from './execution-effect-journal.entity';
+import {
+  defaultArtifactExpiry,
+  earliestArtifactExpiry,
+  mostRestrictedClassification,
+} from './execution-artifact-policy';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -273,6 +278,13 @@ export class ExecutionAttemptService {
       const dependencies = await manager
         .getRepository(ExecutionStepDependencyEntity)
         .findBy({ stepId: step.stepId });
+      const inputArtifactRefs = await this.assignmentArtifactRefs(
+        manager,
+        step,
+        step.stepKind === ExecutionStepKind.TOOL
+          ? 'ia-browser'
+          : 'documents-models',
+      );
       const assignment: StepAssignment = {
         schemaVersion: 'step-assignment/1',
         executionId: step.executionId,
@@ -283,7 +295,7 @@ export class ExecutionAttemptService {
         dependsOnStepIds: dependencies.map(
           (dependency) => dependency.dependsOnStepId,
         ),
-        inputArtifactRefs: step.inputArtifactRefs,
+        inputArtifactRefs,
         work: step.work,
         limits: { maxDurationMs: input.leaseDurationMs },
         deadline: (step.deadline && step.deadline < attempt.leaseExpiresAt
@@ -419,6 +431,24 @@ export class ExecutionAttemptService {
         return ack('stale_attempt');
       }
 
+      const inputArtifactIds = (step.inputArtifactRefs ?? []).map(
+        (ref) => ref.artifactId,
+      );
+      const inputArtifacts = inputArtifactIds.length
+        ? await artifactRepo.findBy({
+            artifactId: In(inputArtifactIds),
+            rootExecutionId: execution.rootExecutionId,
+          })
+        : [];
+      if (inputArtifacts.length !== new Set(inputArtifactIds).size) {
+        throw new ConflictException('artifact_unavailable');
+      }
+      const inputSourceIds = [
+        ...new Set(
+          inputArtifacts.flatMap((input) => input.inputSourceIds ?? []),
+        ),
+      ];
+
       await this.artifactStorage.save(manager, {
         artifactId: artifact.artifactId,
         rootExecutionId: execution.rootExecutionId,
@@ -427,12 +457,20 @@ export class ExecutionAttemptService {
         size: String(artifact.size),
         mediaType: artifact.mediaType,
         encoding: 'identity',
-        dataClassification: 'workspace',
+        dataClassification: mostRestrictedClassification([
+          'workspace',
+          ...inputArtifacts.map((input) => input.dataClassification),
+        ]),
         redaction: { applied: false },
-        retentionClass: 'execution',
+        retentionClass: 'operational',
+        expiresAt: earliestArtifactExpiry([
+          defaultArtifactExpiry('operational', acknowledgedAt),
+          ...inputArtifacts.map((input) => input.expiresAt),
+        ]),
         createdByEventId: null,
         producedByAttemptId: attemptId,
-        inputSourceIds: [],
+        inputSourceIds,
+        derivedFromArtifactIds: inputArtifactIds,
         body,
       });
       return ack('received');
@@ -491,6 +529,51 @@ export class ExecutionAttemptService {
     return artifact;
   }
 
+  private async assignmentArtifactRefs(
+    manager: EntityManager,
+    step: ExecutionStepEntity,
+    destination: 'documents-models' | 'ia-browser',
+  ): Promise<StepAssignment['inputArtifactRefs']> {
+    if (!step.inputArtifactRefs.length) return [];
+    const execution = await manager
+      .getRepository(ExecutionEntity)
+      .findOneBy({ executionId: step.executionId });
+    if (!execution) throw new ConflictException('artifact_unavailable');
+    const ids = step.inputArtifactRefs.map((ref) => ref.artifactId);
+    const artifacts = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .findBy({
+        artifactId: In(ids),
+        rootExecutionId: execution.rootExecutionId,
+      });
+    const byId = new Map(
+      artifacts.map((artifact) => [artifact.artifactId, artifact]),
+    );
+    const now = new Date();
+    return step.inputArtifactRefs.map((ref) => {
+      const artifact = byId.get(ref.artifactId);
+      if (
+        !artifact ||
+        artifact.contentState !== 'active' ||
+        (artifact.expiresAt !== null && artifact.expiresAt <= now)
+      ) {
+        throw new ConflictException('artifact_unavailable');
+      }
+      return {
+        ...ref,
+        dataPolicy: {
+          classification: artifact.dataClassification,
+          allowedPurposes: ['execution'],
+          allowedDestinations: [destination],
+          retentionClass: artifact.retentionClass as
+            'operational' | 'diagnostic' | 'evaluation',
+          expiresAt: artifact.expiresAt?.toISOString() ?? null,
+          sourceRefs: artifact.inputSourceIds,
+        },
+      };
+    });
+  }
+
   async renewAttemptLease(
     attemptId: string,
     workerId: string,
@@ -523,7 +606,8 @@ export class ExecutionAttemptService {
       const cancelled =
         execution?.status === ExecutionStatus.CANCELLED ||
         Boolean(execution?.cancellationRequestedAt) ||
-        step.status === ExecutionStepStatus.CANCELLED;
+        step.status === ExecutionStepStatus.CANCELLED ||
+        (await this.hasUnavailableInputArtifacts(manager, step, now));
       if (cancelled) {
         return {
           leaseExpiresAt: attempt.leaseExpiresAt,
@@ -580,10 +664,42 @@ export class ExecutionAttemptService {
       cancelled:
         execution.status === ExecutionStatus.CANCELLED ||
         Boolean(execution.cancellationRequestedAt) ||
-        step.status === ExecutionStepStatus.CANCELLED,
+        step.status === ExecutionStepStatus.CANCELLED ||
+        (await this.hasUnavailableInputArtifacts(
+          this.dataSource.manager,
+          step,
+          new Date(),
+        )),
       leaseExpiresAt: attempt.leaseExpiresAt,
       deadline: step.deadline,
     };
+  }
+
+  private async hasUnavailableInputArtifacts(
+    manager: EntityManager,
+    step: ExecutionStepEntity,
+    now: Date,
+  ): Promise<boolean> {
+    if (!(step.inputArtifactRefs ?? []).length) return false;
+    const execution = await manager
+      .getRepository(ExecutionEntity)
+      .findOneBy({ executionId: step.executionId });
+    if (!execution) return true;
+    const ids = step.inputArtifactRefs.map((ref) => ref.artifactId);
+    const artifacts = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .findBy({
+        artifactId: In(ids),
+        rootExecutionId: execution.rootExecutionId,
+      });
+    return (
+      artifacts.length !== ids.length ||
+      artifacts.some(
+        (artifact) =>
+          artifact.contentState !== 'active' ||
+          (artifact.expiresAt !== null && artifact.expiresAt <= now),
+      )
+    );
   }
 
   async findRecoverableLocalEffects(
@@ -646,7 +762,11 @@ export class ExecutionAttemptService {
           dependsOnStepIds: dependencies.map(
             (dependency) => dependency.dependsOnStepId,
           ),
-          inputArtifactRefs: step.inputArtifactRefs,
+          inputArtifactRefs: await this.assignmentArtifactRefs(
+            this.dataSource.manager,
+            step,
+            'documents-models',
+          ),
           work: step.work,
           limits: {
             maxDurationMs: Math.max(

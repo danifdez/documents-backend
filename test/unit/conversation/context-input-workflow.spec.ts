@@ -12,6 +12,9 @@ describe('context input workflow', () => {
     rootExecutionId: '10000000-0000-4000-8000-000000000002',
     contentHash: `sha256:${'a'.repeat(64)}`,
     size: '20000',
+    dataClassification: 'personal',
+    retentionClass: 'operational',
+    expiresAt: new Date('2026-09-01T00:00:00Z'),
     inputSourceIds: ['10000000-0000-4000-8000-000000000003'],
   } as ExecutionArtifactEntity;
   const repository = {
@@ -66,6 +69,13 @@ describe('context input workflow', () => {
     expect(plan.chunks.length).toBeGreaterThan(1);
     expect(plan.chunks[0].start).toBe(0);
     expect(plan.chunks.at(-1).end).toBe(message.length);
+    expect(workflow!.planArtifact).toMatchObject({
+      dataClassification: 'personal',
+      retentionClass: 'operational',
+      expiresAt: new Date('2026-09-01T00:00:00Z'),
+      inputSourceIds: requestArtifact.inputSourceIds,
+      derivedFromArtifactIds: [requestArtifact.artifactId],
+    });
     const mapSteps = workflow!.steps.filter(
       (step) => step.work.taskType === 'context-input-map',
     );

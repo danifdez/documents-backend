@@ -18,6 +18,7 @@ export interface BackendExecutionEventData {
   toolCallId?: string | null;
   attemptId?: string | null;
   sourceId?: string | null;
+  artifactId?: string | null;
   causedByEventId?: string | null;
   artifactRefs?: string[];
   redactionApplied?: boolean;
@@ -44,6 +45,7 @@ export async function appendBackendExecutionEvent(
     toolCallId: data.toolCallId,
     attemptId: data.attemptId,
     sourceId: data.sourceId,
+    artifactId: data.artifactId,
     sequence,
     producerSequence,
     eventType: data.eventType,

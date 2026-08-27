@@ -1,4 +1,5 @@
 import { ExecutionArtifactRef } from './execution-step.entity';
+import { ExecutionArtifactDataPolicy } from './execution-artifact-policy';
 import { ExecutionOperationRecoveryClass } from './execution-operation-recovery-class.enum';
 import { ExecutionOperationKind } from './execution-operation-kind.enum';
 import { ExecutionStepKind } from './execution-step-kind.enum';
@@ -47,7 +48,9 @@ export interface StepAssignment {
   attemptId: string;
   stepKind: ExecutionStepKind;
   dependsOnStepIds: string[];
-  inputArtifactRefs: ExecutionArtifactRef[];
+  inputArtifactRefs: Array<
+    ExecutionArtifactRef & { dataPolicy: ExecutionArtifactDataPolicy }
+  >;
   work: Record<string, unknown>;
   limits: { maxDurationMs: number };
   deadline: string;

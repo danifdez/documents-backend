@@ -26,6 +26,8 @@ import {
 } from '../execution/execution-task-payload.types';
 import { COORDINATION_PENDING_PHASE } from '../execution/execution.constants';
 import { ExecutionArtifactStorageService } from '../execution/execution-artifact-storage.service';
+import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
+import { derivedArtifactPolicy } from '../execution/execution-artifact-policy';
 import {
   ACTIVE_CONTEXT_ARTIFACT_ROLE,
   freezeActiveContextArtifact,
@@ -1181,6 +1183,16 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
           });
     const artifactId = randomUUID();
     const body = Buffer.from(reply, 'utf8');
+    const dependencyArtifactIds = [
+      ...new Set(rows.flatMap((row) => row.envelope.artifactRefs ?? [])),
+    ];
+    const dependencyArtifacts = dependencyArtifactIds.length
+      ? await manager.getRepository(ExecutionArtifactEntity).findBy({
+          rootExecutionId: execution.rootExecutionId,
+          artifactId: In(dependencyArtifactIds),
+        })
+      : [];
+    const artifactPolicy = derivedArtifactPolicy(dependencyArtifacts);
     await this.artifactStorage.save(manager, {
       artifactId,
       rootExecutionId: execution.rootExecutionId,
@@ -1189,11 +1201,13 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       size: String(body.length),
       mediaType: 'text/plain',
       encoding: 'identity',
-      dataClassification: 'workspace',
+      dataClassification: artifactPolicy.dataClassification,
       redaction: { applied: false },
-      retentionClass: 'evaluation',
+      retentionClass: artifactPolicy.retentionClass,
+      expiresAt: artifactPolicy.expiresAt,
       createdByEventId: null,
-      inputSourceIds: [],
+      inputSourceIds: artifactPolicy.inputSourceIds,
+      derivedFromArtifactIds: artifactPolicy.derivedFromArtifactIds,
       body,
     });
     const event = await appendBackendExecutionEvent(

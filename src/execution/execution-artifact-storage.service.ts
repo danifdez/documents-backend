@@ -7,6 +7,11 @@ import * as path from 'path';
 import { EntityManager } from 'typeorm';
 import { contentHash } from './execution-canonical';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
+import {
+  assertArtifactRetentionClass,
+  defaultArtifactExpiry,
+  ExecutionArtifactRetentionClass,
+} from './execution-artifact-policy';
 
 const DEFAULT_INLINE_MAX_BYTES = 64 * 1024;
 const UUID_PATH_PATTERN =
@@ -26,10 +31,12 @@ export interface StoredExecutionArtifactInput {
   encoding: string;
   dataClassification: string;
   redaction: Record<string, unknown>;
-  retentionClass: string;
+  retentionClass: ExecutionArtifactRetentionClass;
+  expiresAt?: Date | null;
   createdByEventId: string | null;
   producedByAttemptId?: string | null;
   inputSourceIds: string[];
+  derivedFromArtifactIds?: string[];
   body: Buffer | null;
 }
 
@@ -56,6 +63,14 @@ export class ExecutionArtifactStorageService {
     input: StoredExecutionArtifactInput,
   ): Promise<ExecutionArtifactEntity> {
     this.assertBodyIntegrity(input);
+    assertArtifactRetentionClass(input.retentionClass);
+    const expiresAt =
+      input.expiresAt === undefined
+        ? defaultArtifactExpiry(input.retentionClass)
+        : input.expiresAt;
+    if (expiresAt !== null && expiresAt <= new Date()) {
+      throw new Error('artifact_expiry_invalid');
+    }
     const physical =
       input.body !== null
         ? await this.storeBody(input.artifactId, input.body)
@@ -67,7 +82,12 @@ export class ExecutionArtifactStorageService {
     return repository.save(
       repository.create({
         ...input,
+        expiresAt,
+        contentState: 'active',
+        withdrawalReason: null,
+        contentDeletedAt: null,
         producedByAttemptId: input.producedByAttemptId ?? null,
+        derivedFromArtifactIds: input.derivedFromArtifactIds ?? [],
         storageRef: physical.storageRef,
         body: physical.body,
       }),
@@ -75,6 +95,12 @@ export class ExecutionArtifactStorageService {
   }
 
   async readBody(artifact: ExecutionArtifactEntity): Promise<Buffer | null> {
+    if (
+      artifact.contentState !== 'active' ||
+      (artifact.expiresAt !== null && artifact.expiresAt <= new Date())
+    ) {
+      return null;
+    }
     if (Buffer.isBuffer(artifact.body)) {
       this.assertStoredBodyIntegrity(artifact, artifact.body);
       return Buffer.from(artifact.body);
@@ -108,6 +134,13 @@ export class ExecutionArtifactStorageService {
     artifacts: ExecutionArtifactEntity[],
   ): Promise<ExecutionArtifactEntity[]> {
     return Promise.all(artifacts.map((artifact) => this.hydrate(artifact)));
+  }
+
+  async deleteBody(artifact: ExecutionArtifactEntity): Promise<void> {
+    const match = FILE_STORAGE_REF_PATTERN.exec(artifact.storageRef);
+    if (!match) return;
+    const relativePath = match[0].slice('file:'.length);
+    await fs.remove(this.resolveExternalPath(relativePath));
   }
 
   private async storeBody(

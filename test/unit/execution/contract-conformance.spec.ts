@@ -164,7 +164,16 @@ function assertInvariants(
       ['completed', 'failed', 'cancelled'].includes(event.payload.to),
   );
   expect(terminal).toHaveLength(1);
-  expect(terminal[0]).toBe(events.at(-1));
+  const terminalIndex = events.indexOf(terminal[0]);
+  expect(
+    events
+      .slice(terminalIndex + 1)
+      .every((event: any) =>
+        ['source.withdrawn', 'artifact.withdrawn', 'artifact.expired'].includes(
+          event.eventType,
+        ),
+      ),
+  ).toBe(true);
 
   for (const artifact of bundle.artifacts) {
     if (!artifact.bundlePath) continue;

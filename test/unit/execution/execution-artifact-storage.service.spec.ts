@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { contentHash } from '../../../src/execution/execution-canonical';
 import { ExecutionArtifactStorageService } from '../../../src/execution/execution-artifact-storage.service';
+import type { StoredExecutionArtifactInput } from '../../../src/execution/execution-artifact-storage.service';
 
 const ARTIFACT_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const ROOT_EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -42,7 +43,7 @@ describe('ExecutionArtifactStorageService', () => {
     };
   }
 
-  function input(body: Buffer) {
+  function input(body: Buffer): StoredExecutionArtifactInput {
     return {
       artifactId: ARTIFACT_ID,
       rootExecutionId: ROOT_EXECUTION_ID,
@@ -53,7 +54,7 @@ describe('ExecutionArtifactStorageService', () => {
       encoding: 'identity',
       dataClassification: 'workspace',
       redaction: { applied: false },
-      retentionClass: 'execution',
+      retentionClass: 'operational',
       createdByEventId: null,
       inputSourceIds: [],
       body,
@@ -68,6 +69,10 @@ describe('ExecutionArtifactStorageService', () => {
 
     expect(artifact.storageRef).toBe(`postgres:v1:${ARTIFACT_ID}`);
     expect(artifact.body).toEqual(body);
+    expect(artifact.contentState).toBe('active');
+    expect(artifact.expiresAt).toBeInstanceOf(Date);
+    expect(artifact.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect(artifact.derivedFromArtifactIds).toEqual([]);
     await expect(service.readBody(artifact as any)).resolves.toEqual(body);
   });
 
@@ -122,6 +127,33 @@ describe('ExecutionArtifactStorageService', () => {
     );
   });
 
+  it.each(['expired', 'withdrawn'] as const)(
+    'never exposes a %s body',
+    async (contentState) => {
+      const { service, manager } = setup(0);
+      const artifact = await service.save(
+        manager as any,
+        input(Buffer.from('protected')),
+      );
+      artifact.contentState = contentState;
+
+      await expect(service.readBody(artifact as any)).resolves.toBeNull();
+    },
+  );
+
+  it('deletes externally stored content', async () => {
+    const { service, manager } = setup(0);
+    const artifact = await service.save(
+      manager as any,
+      input(Buffer.from('delete me')),
+    );
+    const path = join(directory, artifact.storageRef.slice('file:'.length));
+
+    await service.deleteBody(artifact as any);
+
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('represents an intentionally absent body without physical storage', async () => {
     const { service, manager } = setup(0);
     const artifact = await service.save(manager as any, {
@@ -152,6 +184,8 @@ describe('ExecutionArtifactStorageService', () => {
       service.readBody({
         ...input(Buffer.from('body')),
         body: null,
+        contentState: 'active',
+        expiresAt: new Date('2999-01-01T00:00:00Z'),
         storageRef: 'file:../../secret',
       } as any),
     ).rejects.toThrow('artifact_storage_ref_invalid');

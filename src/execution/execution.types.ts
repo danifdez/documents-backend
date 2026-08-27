@@ -19,9 +19,11 @@ export interface IncomingExecutionArtifact {
   encoding?: 'identity';
   dataClassification: string;
   redaction?: Record<string, unknown>;
-  retentionClass?: string;
+  retentionClass?: 'operational' | 'diagnostic' | 'evaluation';
+  expiresAt?: string | null;
   createdByEventId?: string | null;
   inputSourceIds?: string[];
+  derivedFromArtifactIds?: string[];
   bodyBase64?: string;
 }
 
