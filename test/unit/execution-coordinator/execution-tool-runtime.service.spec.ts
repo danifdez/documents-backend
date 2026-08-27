@@ -1,6 +1,9 @@
 import { ExecutionToolRuntimeService } from '../../../src/execution-coordinator/execution-tool-runtime.service';
 import { ExecutionStepKind } from '../../../src/execution/execution-step-kind.enum';
-import { canonicalHash } from '../../../src/execution/execution-canonical';
+import {
+  canonicalHash,
+  contentHash,
+} from '../../../src/execution/execution-canonical';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -17,6 +20,7 @@ describe('ExecutionToolRuntimeService', () => {
   let userTasks: Record<string, jest.Mock>;
   let indexedFiles: Record<string, jest.Mock>;
   let executions: Record<string, jest.Mock>;
+  let effectJournal: Record<string, jest.Mock>;
   let service: ExecutionToolRuntimeService;
 
   const assignment = () => ({
@@ -281,6 +285,16 @@ describe('ExecutionToolRuntimeService', () => {
         .mockResolvedValueOnce(null),
       startAttempt: jest.fn().mockResolvedValue({}),
       receiveResult: jest.fn().mockResolvedValue({ code: 'received' }),
+      receiveRecoveredEffectResult: jest
+        .fn()
+        .mockResolvedValue({ code: 'received' }),
+      readAttemptControl: jest.fn().mockResolvedValue({
+        cancelled: false,
+        leaseExpiresAt: new Date('2099-08-25T00:30:00.000Z'),
+        deadline: null,
+      }),
+      findRecoverableLocalEffects: jest.fn().mockResolvedValue([]),
+      requeueVerifiedNotAppliedEffect: jest.fn().mockResolvedValue(true),
     };
     contracts = {
       assertToolPlan: jest.fn(),
@@ -309,6 +323,33 @@ describe('ExecutionToolRuntimeService', () => {
       getByFilename: jest.fn(),
       deleteByFilename: jest.fn(),
     };
+    let durableState: Record<string, unknown> | null = null;
+    effectJournal = {
+      readExternal: jest.fn(async () => durableState),
+      prepareExternal: jest.fn(async (_input, preparationObservation) => {
+        durableState = {
+          status: 'prepared',
+          intent: _input.intent,
+          preparationObservation,
+          observation: null,
+          lastObservation: null,
+          lastObservedAt: null,
+        };
+        return durableState;
+      }),
+      recordExternalObservation: jest.fn(
+        async (_input, observation, disposition) => {
+          durableState = {
+            ...(durableState ?? {}),
+            status: disposition === 'continue' ? 'prepared' : disposition,
+            observation: disposition === 'continue' ? null : observation,
+            lastObservation: observation,
+            lastObservedAt: new Date(),
+          };
+          return durableState;
+        },
+      ),
+    };
     service = new ExecutionToolRuntimeService(
       attempts as any,
       contracts as any,
@@ -316,6 +357,7 @@ describe('ExecutionToolRuntimeService', () => {
       userTasks as any,
       indexedFiles as any,
       executions as any,
+      effectJournal as any,
     );
   });
 
@@ -562,6 +604,16 @@ describe('ExecutionToolRuntimeService', () => {
       size: 9,
       checksum: 'checksum',
     });
+    indexedFiles.scanFolder.mockResolvedValue({
+      status: 'done',
+      added: 0,
+      updated: 0,
+      removed: 0,
+    });
+    indexedFiles.getByFilename
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 8, filename: 'notes.md' });
     indexedFiles.readContent.mockResolvedValue({
       content: Buffer.from('# Updated'),
     });
@@ -573,6 +625,18 @@ describe('ExecutionToolRuntimeService', () => {
       'notes.md',
       Buffer.from('# Updated'),
       { overwrite: true },
+    );
+    expect(effectJournal.prepareExternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectKey: `workspace-file:${OPERATION_ID}`,
+        effectType: 'workspace_file_write',
+      }),
+      expect.objectContaining({ exists: false, filename: 'notes.md' }),
+    );
+    expect(effectJournal.recordExternalObservation).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ effectStatus: 'applied' }),
+      'verified',
     );
     expect(attempts.receiveResult).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -656,7 +720,11 @@ describe('ExecutionToolRuntimeService', () => {
       .mockResolvedValueOnce(null);
     indexedFiles.getByFilename
       .mockResolvedValueOnce({ id: 12, filename: 'report.pdf' })
+      .mockResolvedValueOnce({ id: 12, filename: 'report.pdf' })
       .mockResolvedValueOnce(null);
+    indexedFiles.readContent.mockResolvedValue({
+      content: Buffer.from('report'),
+    });
     indexedFiles.scanFolder.mockResolvedValue({
       status: 'done',
       added: 0,
@@ -683,5 +751,239 @@ describe('ExecutionToolRuntimeService', () => {
         }),
       }),
     );
+  });
+
+  it('reconciles a write applied before a crash without writing it again', async () => {
+    const request = workspaceWriteAssignment();
+    attempts.findRecoverableLocalEffects.mockResolvedValue([
+      { assignment: request, cancellationRequested: false },
+    ]);
+    effectJournal.readExternal.mockResolvedValue({
+      status: 'prepared',
+      intent: {},
+      preparationObservation: {
+        schemaVersion: 'workspace-file-snapshot/1',
+        filename: 'notes.md',
+        exists: false,
+        indexedFileId: null,
+        contentHash: null,
+        size: null,
+      },
+      observation: null,
+      lastObservation: null,
+      lastObservedAt: null,
+    });
+    indexedFiles.scanFolder.mockResolvedValue({ status: 'done' });
+    indexedFiles.getByFilename.mockResolvedValue({ id: 8 });
+    indexedFiles.readContent.mockResolvedValue({
+      content: Buffer.from('# Updated'),
+    });
+
+    await expect(service.recoverStaleEffects()).resolves.toBe(1);
+
+    expect(indexedFiles.writeFile).not.toHaveBeenCalled();
+    expect(effectJournal.recordExternalObservation).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        effectStatus: 'applied',
+        reason: 'workspace_file_content_verified',
+      }),
+      'verified',
+    );
+    expect(attempts.receiveRecoveredEffectResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ status: 'succeeded' }),
+      }),
+    );
+  });
+
+  it('requeues a write proven not applied before the crash', async () => {
+    const request = workspaceWriteAssignment();
+    attempts.findRecoverableLocalEffects.mockResolvedValue([
+      { assignment: request, cancellationRequested: false },
+    ]);
+    effectJournal.readExternal.mockResolvedValue({
+      status: 'prepared',
+      intent: {},
+      preparationObservation: {
+        schemaVersion: 'workspace-file-snapshot/1',
+        filename: 'notes.md',
+        exists: false,
+        indexedFileId: null,
+        contentHash: null,
+        size: null,
+      },
+      observation: null,
+      lastObservation: null,
+      lastObservedAt: null,
+    });
+    indexedFiles.scanFolder.mockResolvedValue({ status: 'done' });
+    indexedFiles.getByFilename.mockResolvedValue(null);
+
+    await expect(service.recoverStaleEffects()).resolves.toBe(1);
+
+    expect(indexedFiles.writeFile).not.toHaveBeenCalled();
+    expect(attempts.requeueVerifiedNotAppliedEffect).toHaveBeenCalledWith(
+      ATTEMPT_ID,
+    );
+    expect(attempts.receiveRecoveredEffectResult).not.toHaveBeenCalled();
+  });
+
+  it('finalizes a cancelled stale write only after proving it was not applied', async () => {
+    const request = workspaceWriteAssignment();
+    attempts.findRecoverableLocalEffects.mockResolvedValue([
+      { assignment: request, cancellationRequested: true },
+    ]);
+    effectJournal.readExternal.mockResolvedValue({
+      status: 'prepared',
+      intent: {},
+      preparationObservation: {
+        schemaVersion: 'workspace-file-snapshot/1',
+        filename: 'notes.md',
+        exists: false,
+        indexedFileId: null,
+        contentHash: null,
+        size: null,
+      },
+      observation: null,
+      lastObservation: null,
+      lastObservedAt: null,
+    });
+    indexedFiles.scanFolder.mockResolvedValue({ status: 'done' });
+    indexedFiles.getByFilename.mockResolvedValue(null);
+
+    await expect(service.recoverStaleEffects()).resolves.toBe(1);
+
+    expect(attempts.requeueVerifiedNotAppliedEffect).not.toHaveBeenCalled();
+    expect(effectJournal.recordExternalObservation).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ effectStatus: 'not_applied' }),
+      'verified',
+    );
+    expect(attempts.receiveRecoveredEffectResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ status: 'cancelled' }),
+      }),
+    );
+  });
+
+  it('never replays a stale write when the observed state is inconclusive', async () => {
+    const request = workspaceWriteAssignment();
+    attempts.findRecoverableLocalEffects.mockResolvedValue([
+      { assignment: request, cancellationRequested: false },
+    ]);
+    effectJournal.readExternal.mockResolvedValue({
+      status: 'prepared',
+      intent: {},
+      preparationObservation: {
+        schemaVersion: 'workspace-file-snapshot/1',
+        filename: 'notes.md',
+        exists: true,
+        indexedFileId: 3,
+        contentHash: contentHash(Buffer.from('original')),
+        size: 8,
+      },
+      observation: null,
+      lastObservation: null,
+      lastObservedAt: null,
+    });
+    indexedFiles.scanFolder.mockResolvedValue({ status: 'done' });
+    indexedFiles.getByFilename.mockResolvedValue({ id: 8 });
+    indexedFiles.readContent.mockResolvedValue({
+      content: Buffer.from('changed elsewhere'),
+    });
+
+    await expect(service.recoverStaleEffects()).resolves.toBe(1);
+
+    expect(indexedFiles.writeFile).not.toHaveBeenCalled();
+    expect(attempts.requeueVerifiedNotAppliedEffect).not.toHaveBeenCalled();
+    expect(effectJournal.recordExternalObservation).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ effectStatus: 'inconclusive' }),
+      'inconclusive',
+    );
+    expect(attempts.receiveRecoveredEffectResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ status: 'failed' }),
+      }),
+    );
+  });
+
+  it('reuses a terminal journal after a lost ACK without touching the file', async () => {
+    const request = workspaceWriteAssignment();
+    attempts.findRecoverableLocalEffects.mockResolvedValue([
+      { assignment: request, cancellationRequested: false },
+    ]);
+    effectJournal.readExternal.mockResolvedValue({
+      status: 'verified',
+      intent: {},
+      preparationObservation: { exists: false },
+      observation: {
+        schemaVersion: 'workspace-file-effect-observation/1',
+        operation: 'write',
+        effectStatus: 'applied',
+        reason: 'workspace_file_content_verified',
+        file: { exists: true },
+      },
+      lastObservation: null,
+      lastObservedAt: new Date(),
+    });
+    attempts.receiveRecoveredEffectResult.mockResolvedValue({
+      code: 'duplicate',
+    });
+
+    await expect(service.recoverStaleEffects()).resolves.toBe(1);
+
+    expect(indexedFiles.scanFolder).not.toHaveBeenCalled();
+    expect(indexedFiles.writeFile).not.toHaveBeenCalled();
+    expect(effectJournal.recordExternalObservation).not.toHaveBeenCalled();
+    expect(attempts.receiveRecoveredEffectResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a delete applied before a crash without deleting twice', async () => {
+    const request: any = workspaceWriteAssignment();
+    const plan = request.work.toolPlan;
+    request.work.taskType = 'workspace_files.delete';
+    plan.toolName = 'workspace_files.delete';
+    plan.descriptorVersion = 'workspace_files.delete/1';
+    plan.normalizedArguments = {
+      ownerType: 'agent',
+      ownerId: 42,
+      scopeKey: SCOPE_KEY,
+      filename: 'report.pdf',
+    };
+    plan.effects[0].resourceKey = 'working-folder:agent:42:report.pdf';
+    plan.requiredCapabilities = ['tool.workspace_files.delete/1'];
+    request.work.confirmationDecision.planHash = canonicalHash(plan);
+    attempts.findRecoverableLocalEffects.mockResolvedValue([
+      { assignment: request, cancellationRequested: false },
+    ]);
+    effectJournal.readExternal.mockResolvedValue({
+      status: 'prepared',
+      intent: {},
+      preparationObservation: {
+        schemaVersion: 'workspace-file-snapshot/1',
+        filename: 'report.pdf',
+        exists: true,
+        indexedFileId: 12,
+        contentHash: contentHash(Buffer.from('report')),
+        size: 6,
+      },
+      observation: null,
+      lastObservation: null,
+      lastObservedAt: null,
+    });
+    indexedFiles.scanFolder.mockResolvedValue({ status: 'done' });
+    indexedFiles.getByFilename.mockResolvedValue(null);
+
+    await expect(service.recoverStaleEffects()).resolves.toBe(1);
+
+    expect(indexedFiles.deleteByFilename).not.toHaveBeenCalled();
+    expect(effectJournal.recordExternalObservation).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ effectStatus: 'applied' }),
+      'verified',
+    );
+    expect(attempts.receiveRecoveredEffectResult).toHaveBeenCalledTimes(1);
   });
 });

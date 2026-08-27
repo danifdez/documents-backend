@@ -46,6 +46,7 @@ describe('ExecutionCoordinatorService', () => {
     };
     toolRuntime = {
       executeReady: jest.fn(),
+      recoverStaleEffects: jest.fn(),
     };
     agentLoop = {
       prepareReadyInferences: jest.fn(),
@@ -86,6 +87,13 @@ describe('ExecutionCoordinatorService', () => {
 
     await expect(service.executeReadyTools(2)).resolves.toBe(2);
     expect(toolRuntime.executeReady).toHaveBeenCalledWith(2);
+  });
+
+  it('recovers stale local effects before generic attempt expiry', async () => {
+    toolRuntime.recoverStaleEffects.mockResolvedValue(2);
+
+    await expect(service.recoverStaleToolEffects(2)).resolves.toBe(2);
+    expect(toolRuntime.recoverStaleEffects).toHaveBeenCalledWith(2);
   });
 
   it('expires durable confirmations through the coordinator', async () => {

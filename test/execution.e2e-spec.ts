@@ -28,6 +28,7 @@ import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668
 import { CreateConversationSessions1757668140730 } from '../migrations/1757668140730-CreateConversationSessions';
 import { ReplaceAssistantMemory1757668140740 } from '../migrations/1757668140740-ReplaceAssistantMemory';
 import { CreateSkillActivations1757668140750 } from '../migrations/1757668140750-CreateSkillActivations';
+import { CreateExecutionEffectJournal1757668140760 } from '../migrations/1757668140760-CreateExecutionEffectJournal';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
@@ -59,6 +60,8 @@ import { ExecutionToolPlanService } from '../src/execution/execution-tool-plan.s
 import { ExecutionConfirmationEntity } from '../src/execution/execution-confirmation.entity';
 import { ExecutionConfirmationService } from '../src/execution/execution-confirmation.service';
 import { ExecutionToolRuntimeService } from '../src/execution-coordinator/execution-tool-runtime.service';
+import { ExecutionEffectJournalEntity } from '../src/execution/execution-effect-journal.entity';
+import { ExecutionEffectJournalService } from '../src/execution/execution-effect-journal.service';
 import { ExecutionAgentLoopService } from '../src/execution-coordinator/execution-agent-loop.service';
 import { ExecutionTerminalCandidateService } from '../src/execution-coordinator/execution-terminal-candidate.service';
 import { ExecutionArtifactStorageService } from '../src/execution/execution-artifact-storage.service';
@@ -104,6 +107,7 @@ describe('execution PostgreSQL integration', () => {
   let confirmationService: ExecutionConfirmationService;
   let agentLoopService: ExecutionAgentLoopService;
   let terminalCandidateService: ExecutionTerminalCandidateService;
+  let effectJournalService: ExecutionEffectJournalService;
   let artifactDirectory: string;
 
   beforeAll(async () => {
@@ -143,6 +147,7 @@ describe('execution PostgreSQL integration', () => {
         AgentEntity,
         MemoryEntryEntity,
         SkillActivationEntity,
+        ExecutionEffectJournalEntity,
       ],
     });
     await dataSource.initialize();
@@ -174,6 +179,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateConversationSessions1757668140730().up(runner);
     await new ReplaceAssistantMemory1757668140740().up(runner);
     await new CreateSkillActivations1757668140750().up(runner);
+    await new CreateExecutionEffectJournal1757668140760().up(runner);
     await runner.query(`
       INSERT INTO "assistants" ("id", "name", "icon", "sub")
       VALUES (1, 'Assistant', '◇', 'Personal assistant')
@@ -234,6 +240,7 @@ describe('execution PostgreSQL integration', () => {
     terminalCandidateService = new ExecutionTerminalCandidateService(
       dataSource,
     );
+    effectJournalService = new ExecutionEffectJournalService(dataSource);
   });
 
   afterAll(async () => {
@@ -386,6 +393,46 @@ describe('execution PostgreSQL integration', () => {
         )
     `);
     expect(columns).toEqual([]);
+  });
+
+  it('creates the durable external effect journal in the base schema', async () => {
+    const columns = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'execution_effect_journal'
+        AND column_name IN (
+          'intent',
+          'preparation_observation',
+          'last_observation',
+          'last_observed_at',
+          'observation',
+          'applied_at',
+          'verified_at'
+        )
+      ORDER BY column_name
+    `);
+    const constraints = await dataSource.query(`
+      SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = 'execution_effect_journal'::regclass
+        AND conname = 'CHK_execution_effect_journal_status'
+    `);
+
+    expect(columns.map((row) => row.column_name)).toEqual([
+      'applied_at',
+      'intent',
+      'last_observation',
+      'last_observed_at',
+      'observation',
+      'preparation_observation',
+      'verified_at',
+    ]);
+    expect(constraints).toEqual([
+      expect.objectContaining({
+        definition: expect.stringContaining("'inconclusive'"),
+      }),
+    ]);
   });
 
   it('creates consolidated base columns and indexes directly', async () => {
@@ -1399,6 +1446,7 @@ describe('execution PostgreSQL integration', () => {
       },
       {} as any,
       service,
+      effectJournalService,
     );
     await expect(runtime.executeReady(1)).resolves.toBe(1);
     await expect(attemptService.processReceivedResults(1)).resolves.toBe(1);
@@ -1504,6 +1552,7 @@ describe('execution PostgreSQL integration', () => {
       },
       {} as any,
       service,
+      effectJournalService,
     );
 
     await expect(runtime.executeReady()).resolves.toBe(1);

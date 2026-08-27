@@ -115,4 +115,129 @@ describe('ExecutionEffectJournalService', () => {
       ),
     ).resolves.toEqual({ documentId: 7 });
   });
+
+  it('commits an external effect intent and baseline before the mutation', async () => {
+    const context = setup();
+    const baseline = {
+      schemaVersion: 'workspace-file-snapshot/1',
+      filename: 'notes.md',
+      exists: false,
+    };
+
+    await expect(
+      context.service.prepareExternal(input, baseline),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: 'prepared',
+        intent: input.intent,
+        preparationObservation: baseline,
+        observation: null,
+      }),
+    );
+
+    expect(context.saved).toHaveLength(1);
+    expect(context.saved[0]).toEqual(
+      expect.objectContaining({
+        status: 'prepared',
+        intent: input.intent,
+        preparationObservation: baseline,
+        observation: null,
+        lastObservation: null,
+      }),
+    );
+  });
+
+  it('keeps a verified not-applied observation durable while allowing replay', async () => {
+    const first = setup();
+    await first.service.prepareExternal(input, { exists: false });
+    const restarted = setup(first.saved[0]);
+    const observation = {
+      effectStatus: 'not_applied',
+      reason: 'workspace_baseline_unchanged',
+    };
+
+    await expect(
+      restarted.service.recordExternalObservation(
+        input,
+        observation,
+        'continue',
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: 'prepared',
+        observation: null,
+        lastObservation: observation,
+        lastObservedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it.each([
+    ['verified', 'applied'],
+    ['inconclusive', 'inconclusive'],
+  ] as const)(
+    'makes a %s external observation terminal and idempotent',
+    async (disposition, effectStatus) => {
+      const first = setup();
+      await first.service.prepareExternal(input, { exists: false });
+      const restarted = setup(first.saved[0]);
+      const observation = { effectStatus, reason: 'reconciled' };
+      const terminal = await restarted.service.recordExternalObservation(
+        input,
+        observation,
+        disposition,
+      );
+      const duplicate = setup(restarted.saved[0]);
+
+      await expect(
+        duplicate.service.recordExternalObservation(
+          input,
+          observation,
+          disposition,
+        ),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          status: disposition,
+          observation,
+        }),
+      );
+      expect(terminal).toEqual(
+        expect.objectContaining({ status: disposition, observation }),
+      );
+      expect(duplicate.saved).toHaveLength(0);
+    },
+  );
+
+  it('rejects a restarted external effect whose intent changed', async () => {
+    const first = setup();
+    await first.service.prepareExternal(input, { exists: false });
+    const restarted = setup(first.saved[0]);
+
+    await expect(
+      restarted.service.prepareExternal(
+        { ...input, intent: { ...input.intent, summary: 'Changed' } },
+        { exists: false },
+      ),
+    ).rejects.toThrow('execution_effect_journal_conflict');
+  });
+
+  it('rejects conflicting evidence after an external effect is terminal', async () => {
+    const first = setup();
+    await first.service.prepareExternal(input, { exists: false });
+    const reconciled = setup(first.saved[0]);
+    await reconciled.service.recordExternalObservation(
+      input,
+      { effectStatus: 'applied', reason: 'content_verified' },
+      'verified',
+    );
+    const restarted = setup(reconciled.saved[0]);
+
+    await expect(
+      restarted.service.recordExternalObservation(
+        input,
+        { effectStatus: 'not_applied', reason: 'baseline_unchanged' },
+        'verified',
+      ),
+    ).rejects.toThrow('execution_effect_journal_conflict');
+  });
 });

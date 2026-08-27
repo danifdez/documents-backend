@@ -54,8 +54,14 @@ import {
 import { ProgressEvent, projectExecutionProgress } from './execution-progress';
 import { ExecutionOperationKind } from './execution-operation-kind.enum';
 import { recordLoadedSkillResource } from '../conversation/skill-activation';
-import { SKILL_RESOURCE_LOAD_TOOL_NAME } from './execution-tool.constants';
+import {
+  LOCAL_TOOL_RUNTIME_WORKER_ID,
+  SKILL_RESOURCE_LOAD_TOOL_NAME,
+  WORKSPACE_FILE_DELETE_TOOL_NAME,
+  WORKSPACE_FILE_WRITE_TOOL_NAME,
+} from './execution-tool.constants';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
+import { ExecutionEffectJournalEntity } from './execution-effect-journal.entity';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -64,6 +70,15 @@ const CLAIM_RETRY_INTERVAL_MS = 1_000;
 const MAX_OUTPUT_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RECOVERABLE_LOCAL_EFFECT_TASKS = new Set<string>([
+  WORKSPACE_FILE_WRITE_TOOL_NAME,
+  WORKSPACE_FILE_DELETE_TOOL_NAME,
+]);
+
+export interface RecoverableLocalEffectAssignment {
+  assignment: StepAssignment;
+  cancellationRequested: boolean;
+}
 
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalValue);
@@ -571,6 +586,173 @@ export class ExecutionAttemptService {
     };
   }
 
+  async findRecoverableLocalEffects(
+    limit = 20,
+    now = new Date(),
+  ): Promise<RecoverableLocalEffectAssignment[]> {
+    const rows = await this.dataSource.query(
+      `
+        SELECT attempt."attempt_id"
+        FROM "execution_step_attempts" attempt
+        JOIN "execution_steps" step
+          ON step."step_id" = attempt."step_id"
+        JOIN "execution_operations" operation
+          ON operation."operation_id" = attempt."operation_id"
+        JOIN "executions" execution
+          ON execution."execution_id" = attempt."execution_id"
+        WHERE attempt."claimed_by" = $1
+          AND attempt."status" IN ('leased', 'running')
+          AND attempt."lease_expires_at" <= $2
+          AND step."status" = 'running'
+          AND step."current_attempt_id" = attempt."attempt_id"
+          AND operation."status" = 'dispatched'
+          AND operation."current_attempt_id" = attempt."attempt_id"
+          AND operation."recovery_class" = 'effect_checked'
+          AND step."work" ->> 'taskType' = ANY($3::text[])
+        ORDER BY attempt."lease_expires_at", attempt."attempt_id"
+        LIMIT $4
+      `,
+      [
+        LOCAL_TOOL_RUNTIME_WORKER_ID,
+        now,
+        [...RECOVERABLE_LOCAL_EFFECT_TASKS],
+        limit,
+      ],
+    );
+    const recovered: RecoverableLocalEffectAssignment[] = [];
+    for (const row of rows) {
+      const attempt = await this.dataSource
+        .getRepository(ExecutionStepAttemptEntity)
+        .findOneBy({ attemptId: String(row.attempt_id) });
+      if (!attempt) continue;
+      const step = await this.dataSource
+        .getRepository(ExecutionStepEntity)
+        .findOneBy({ stepId: attempt.stepId });
+      const execution = await this.dataSource
+        .getRepository(ExecutionEntity)
+        .findOneBy({ executionId: attempt.executionId });
+      if (!step || !execution) continue;
+      const dependencies = await this.dataSource
+        .getRepository(ExecutionStepDependencyEntity)
+        .findBy({ stepId: step.stepId });
+      recovered.push({
+        assignment: {
+          schemaVersion: 'step-assignment/1',
+          executionId: step.executionId,
+          stepId: step.stepId,
+          operationId: step.operationId,
+          attemptId: attempt.attemptId,
+          stepKind: step.stepKind,
+          dependsOnStepIds: dependencies.map(
+            (dependency) => dependency.dependsOnStepId,
+          ),
+          inputArtifactRefs: step.inputArtifactRefs,
+          work: step.work,
+          limits: {
+            maxDurationMs: Math.max(
+              0,
+              attempt.leaseExpiresAt.getTime() -
+                attempt.leaseGrantedAt.getTime(),
+            ),
+          },
+          deadline: (step.deadline ?? attempt.leaseExpiresAt).toISOString(),
+        },
+        cancellationRequested:
+          execution.status === ExecutionStatus.CANCELLED ||
+          Boolean(execution.cancellationRequestedAt),
+      });
+    }
+    return recovered;
+  }
+
+  async requeueVerifiedNotAppliedEffect(
+    attemptId: string,
+    now = new Date(),
+  ): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      const attempt = await manager
+        .getRepository(ExecutionStepAttemptEntity)
+        .findOne({
+          where: { attemptId },
+          lock: { mode: 'pessimistic_write' },
+        });
+      if (
+        !attempt ||
+        attempt.claimedBy !== LOCAL_TOOL_RUNTIME_WORKER_ID ||
+        attempt.leaseExpiresAt > now ||
+        ![
+          ExecutionStepAttemptStatus.LEASED,
+          ExecutionStepAttemptStatus.RUNNING,
+        ].includes(attempt.status)
+      ) {
+        return false;
+      }
+      const step = await manager.getRepository(ExecutionStepEntity).findOne({
+        where: { stepId: attempt.stepId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const operation = await manager
+        .getRepository(ExecutionOperationEntity)
+        .findOne({
+          where: { operationId: attempt.operationId },
+          lock: { mode: 'pessimistic_write' },
+        });
+      const execution = await manager.getRepository(ExecutionEntity).findOne({
+        where: { executionId: attempt.executionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const taskType = String(step?.work?.taskType ?? '');
+      const journal = await manager
+        .getRepository(ExecutionEffectJournalEntity)
+        .findOne({
+          where: {
+            executionId: attempt.executionId,
+            effectKey: `workspace-file:${attempt.operationId}`,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+      if (
+        !step ||
+        !operation ||
+        !execution ||
+        step.currentAttemptId !== attemptId ||
+        operation.currentAttemptId !== attemptId ||
+        operation.status !== ExecutionOperationStatus.DISPATCHED ||
+        operation.recoveryClass !==
+          ExecutionOperationRecoveryClass.EFFECT_CHECKED ||
+        !RECOVERABLE_LOCAL_EFFECT_TASKS.has(taskType) ||
+        ![ExecutionStatus.QUEUED, ExecutionStatus.RUNNING].includes(
+          execution.status,
+        ) ||
+        execution.cancellationRequestedAt ||
+        journal?.status !== 'prepared' ||
+        journal.lastObservation?.effectStatus !== 'not_applied' ||
+        !journal.lastObservedAt ||
+        journal.lastObservedAt < attempt.leaseExpiresAt
+      ) {
+        return false;
+      }
+
+      assertAttemptTransition(
+        attempt.status,
+        ExecutionStepAttemptStatus.EXPIRED,
+      );
+      assertStepTransition(step.status, ExecutionStepStatus.READY);
+      attempt.status = ExecutionStepAttemptStatus.EXPIRED;
+      attempt.finishedAt = now;
+      attempt.finishReason = 'effect_verified_not_applied';
+      step.status = ExecutionStepStatus.READY;
+      step.currentAttemptId = null;
+      step.version += 1;
+      operation.status = ExecutionOperationStatus.PREPARED;
+      operation.currentAttemptId = null;
+      await manager.getRepository(ExecutionStepAttemptEntity).save(attempt);
+      await manager.getRepository(ExecutionStepEntity).save(step);
+      await manager.getRepository(ExecutionOperationEntity).save(operation);
+      return true;
+    });
+  }
+
   async expireAttempt(attemptId: string, now = new Date()): Promise<boolean> {
     return this.dataSource.transaction(async (manager) => {
       const attemptRepo = manager.getRepository(ExecutionStepAttemptEntity);
@@ -687,6 +869,19 @@ export class ExecutionAttemptService {
   async receiveResult(
     input: ReceiveExecutionStepResultInput,
   ): Promise<StepResultReceiptAck> {
+    return this.receiveResultWithPolicy(input, false);
+  }
+
+  async receiveRecoveredEffectResult(
+    input: ReceiveExecutionStepResultInput,
+  ): Promise<StepResultReceiptAck> {
+    return this.receiveResultWithPolicy(input, true);
+  }
+
+  private async receiveResultWithPolicy(
+    input: ReceiveExecutionStepResultInput,
+    allowExpiredLocalEffect: boolean,
+  ): Promise<StepResultReceiptAck> {
     this.contractValidator?.assertStepResult(input.result);
     const canonicalToolResult = toolResultFromStepResult(input.result);
     if (input.result.stepKind === ExecutionStepKind.TOOL) {
@@ -768,11 +963,22 @@ export class ExecutionAttemptService {
         operation.stepId === input.stepId &&
         toolIdentityMatches;
       if (!identityMatches || !step || !operation) return ack('rejected');
+      const recoveredLocalEffect =
+        allowExpiredLocalEffect &&
+        canonicalToolResult &&
+        (await this.isAuthorizedRecoveredLocalEffect(
+          manager,
+          attempt,
+          step,
+          operation,
+          canonicalToolResult,
+          acknowledgedAt,
+        ));
       if (
         step.currentAttemptId !== attempt.attemptId ||
         operation.currentAttemptId !== attempt.attemptId ||
         operation.status !== ExecutionOperationStatus.DISPATCHED ||
-        attempt.leaseExpiresAt <= acknowledgedAt ||
+        (attempt.leaseExpiresAt <= acknowledgedAt && !recoveredLocalEffect) ||
         ![
           ExecutionStepAttemptStatus.LEASED,
           ExecutionStepAttemptStatus.RUNNING,
@@ -813,6 +1019,47 @@ export class ExecutionAttemptService {
       await stepRepo.save(step);
       return ack('received', receipt.receiptId);
     });
+  }
+
+  private async isAuthorizedRecoveredLocalEffect(
+    manager: EntityManager,
+    attempt: ExecutionStepAttemptEntity,
+    step: ExecutionStepEntity,
+    operation: ExecutionOperationEntity,
+    result: ToolResultContract,
+    now: Date,
+  ): Promise<boolean> {
+    const taskType = String(step.work?.taskType ?? '');
+    if (
+      attempt.claimedBy !== LOCAL_TOOL_RUNTIME_WORKER_ID ||
+      attempt.leaseExpiresAt > now ||
+      operation.recoveryClass !==
+        ExecutionOperationRecoveryClass.EFFECT_CHECKED ||
+      !RECOVERABLE_LOCAL_EFFECT_TASKS.has(taskType) ||
+      result.effects.length !== 1
+    ) {
+      return false;
+    }
+    const journal = await manager
+      .getRepository(ExecutionEffectJournalEntity)
+      .findOneBy({
+        executionId: attempt.executionId,
+        effectKey: `workspace-file:${attempt.operationId}`,
+      });
+    if (
+      !journal ||
+      !['verified', 'inconclusive'].includes(journal.status) ||
+      !journal.observation ||
+      journal.effectType !==
+        `workspace_file_${taskType === WORKSPACE_FILE_WRITE_TOOL_NAME ? 'write' : 'delete'}` ||
+      journal.resourceKey !== result.effects[0].resourceKey ||
+      journal.intent?.schemaVersion !== 'workspace-file-effect-intent/1' ||
+      journal.intent?.operation !==
+        (taskType === WORKSPACE_FILE_WRITE_TOOL_NAME ? 'write' : 'delete')
+    ) {
+      return false;
+    }
+    return journal.observation.effectStatus === result.effects[0].status;
   }
 
   private validateOutputArtifact(artifact: IncomingExecutionArtifact): Buffer {

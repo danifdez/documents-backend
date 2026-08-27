@@ -2,6 +2,9 @@ export const DOCUMENT_SEARCH_TOOL_NAME = 'documents.search';
 export const DOCUMENT_SEARCH_TOOL_VERSION = 'documents.search/1';
 export const DOCUMENT_SEARCH_TOOL_CAPABILITY = 'tool.documents.search/1';
 
+export const LOCAL_TOOL_RUNTIME_WORKER_ID =
+  '00000000-0000-4000-8000-000000000001';
+
 export const SKILL_RESOURCE_LOAD_TOOL_NAME = 'skills.load_resource';
 export const SKILL_RESOURCE_LOAD_TOOL_VERSION = 'skills.load_resource/1';
 export const SKILL_RESOURCE_LOAD_TOOL_CAPABILITY =

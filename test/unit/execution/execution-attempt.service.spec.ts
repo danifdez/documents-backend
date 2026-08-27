@@ -19,6 +19,8 @@ import { ExecutionOperationKind } from '../../../src/execution/execution-operati
 import { ExecutionArtifactEntity } from '../../../src/execution/execution-artifact.entity';
 import { WorkerEntity } from '../../../src/worker/worker.entity';
 import { WorkerKind } from '../../../src/worker/worker-kind.enum';
+import { ExecutionEffectJournalEntity } from '../../../src/execution/execution-effect-journal.entity';
+import { LOCAL_TOOL_RUNTIME_WORKER_ID } from '../../../src/execution/execution-tool.constants';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -40,6 +42,7 @@ describe('ExecutionAttemptService', () => {
   let eventRepo: Record<string, jest.Mock>;
   let artifactRepo: Record<string, jest.Mock>;
   let workerRepo: Record<string, jest.Mock>;
+  let effectJournalRepo: Record<string, jest.Mock>;
   let artifactStorage: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
@@ -181,6 +184,10 @@ describe('ExecutionAttemptService', () => {
     workerRepo = {
       findOne: jest.fn(),
     };
+    effectJournalRepo = {
+      findOne: jest.fn(),
+      findOneBy: jest.fn(),
+    };
     manager = {
       getRepository: jest.fn((entity) => {
         if (entity === ExecutionStepEntity) return stepRepo;
@@ -193,6 +200,7 @@ describe('ExecutionAttemptService', () => {
         if (entity === ExecutionEventEntity) return eventRepo;
         if (entity === ExecutionArtifactEntity) return artifactRepo;
         if (entity === WorkerEntity) return workerRepo;
+        if (entity === ExecutionEffectJournalEntity) return effectJournalRepo;
         throw new Error(`Unexpected repository ${entity.name}`);
       }),
       query: jest.fn().mockResolvedValue([]),
@@ -202,6 +210,7 @@ describe('ExecutionAttemptService', () => {
       {
         transaction: jest.fn(async (callback) => callback(manager)),
         getRepository: manager.getRepository,
+        query: manager.query,
       } as any,
       undefined as any,
       artifactStorage as any,
@@ -808,6 +817,157 @@ describe('ExecutionAttemptService', () => {
     expect(attemptRepo.save).not.toHaveBeenCalled();
   });
 
+  it('discovers only expired local workspace effects for reconciliation', async () => {
+    const leaseGrantedAt = new Date('2026-08-27T10:00:00.000Z');
+    const leaseExpiresAt = new Date('2026-08-27T10:00:30.000Z');
+    const attempt = {
+      ...runningAttempt(),
+      claimedBy: LOCAL_TOOL_RUNTIME_WORKER_ID,
+      leaseGrantedAt,
+      leaseExpiresAt,
+    };
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      inputArtifactRefs: [],
+      work: {
+        taskType: 'workspace_files.write',
+        toolPlan: { operationId: OPERATION_ID },
+      },
+      deadline: null,
+    };
+    manager.query.mockResolvedValue([{ attempt_id: ATTEMPT_ID }]);
+    attemptRepo.findOneBy.mockResolvedValue(attempt);
+    stepRepo.findOneBy.mockResolvedValue(step);
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: new Date('2026-08-27T10:00:20.000Z'),
+    });
+
+    await expect(
+      service.findRecoverableLocalEffects(
+        5,
+        new Date('2026-08-27T10:01:00.000Z'),
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        assignment: expect.objectContaining({
+          attemptId: ATTEMPT_ID,
+          work: step.work,
+          limits: { maxDurationMs: 30_000 },
+        }),
+        cancellationRequested: true,
+      }),
+    ]);
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining(`operation."recovery_class" = 'effect_checked'`),
+      [
+        LOCAL_TOOL_RUNTIME_WORKER_ID,
+        new Date('2026-08-27T10:01:00.000Z'),
+        ['workspace_files.write', 'workspace_files.delete'],
+        5,
+      ],
+    );
+  });
+
+  it('requeues an expired workspace effect only after durable not-applied proof', async () => {
+    const leaseExpiresAt = new Date('2026-08-27T10:00:30.000Z');
+    const now = new Date('2026-08-27T10:01:00.000Z');
+    const attempt = {
+      ...runningAttempt(),
+      claimedBy: LOCAL_TOOL_RUNTIME_WORKER_ID,
+      leaseExpiresAt,
+    };
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      work: { taskType: 'workspace_files.write' },
+    };
+    const operation = {
+      ...dispatchedOperation(),
+      operationKind: ExecutionOperationKind.TOOL_CALL,
+      recoveryClass: ExecutionOperationRecoveryClass.EFFECT_CHECKED,
+    };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(operation);
+    executionRepo.findOne.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: null,
+    });
+    effectJournalRepo.findOne.mockResolvedValue({
+      status: 'prepared',
+      lastObservation: { effectStatus: 'not_applied' },
+      lastObservedAt: new Date('2026-08-27T10:00:45.000Z'),
+    });
+
+    await expect(
+      service.requeueVerifiedNotAppliedEffect(ATTEMPT_ID, now),
+    ).resolves.toBe(true);
+
+    expect(attempt).toEqual(
+      expect.objectContaining({
+        status: ExecutionStepAttemptStatus.EXPIRED,
+        finishReason: 'effect_verified_not_applied',
+      }),
+    );
+    expect(step).toEqual(
+      expect.objectContaining({
+        status: ExecutionStepStatus.READY,
+        currentAttemptId: null,
+      }),
+    );
+    expect(operation).toEqual(
+      expect.objectContaining({
+        status: ExecutionOperationStatus.PREPARED,
+        currentAttemptId: null,
+      }),
+    );
+  });
+
+  it('refuses to requeue an expired workspace effect without post-lease proof', async () => {
+    const leaseExpiresAt = new Date('2026-08-27T10:00:30.000Z');
+    attemptRepo.findOne.mockResolvedValue({
+      ...runningAttempt(),
+      claimedBy: LOCAL_TOOL_RUNTIME_WORKER_ID,
+      leaseExpiresAt,
+    });
+    stepRepo.findOne.mockResolvedValue({
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      work: { taskType: 'workspace_files.write' },
+    });
+    operationRepo.findOne.mockResolvedValue({
+      ...dispatchedOperation(),
+      recoveryClass: ExecutionOperationRecoveryClass.EFFECT_CHECKED,
+    });
+    executionRepo.findOne.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      cancellationRequestedAt: null,
+    });
+    effectJournalRepo.findOne.mockResolvedValue({
+      status: 'prepared',
+      lastObservation: { effectStatus: 'not_applied' },
+      lastObservedAt: new Date('2026-08-27T10:00:20.000Z'),
+    });
+
+    await expect(
+      service.requeueVerifiedNotAppliedEffect(
+        ATTEMPT_ID,
+        new Date('2026-08-27T10:01:00.000Z'),
+      ),
+    ).resolves.toBe(false);
+    expect(attemptRepo.save).not.toHaveBeenCalled();
+  });
+
   it('fences an expired attempt and returns the step to ready', async () => {
     const attempt = {
       ...runningAttempt(),
@@ -943,6 +1103,153 @@ describe('ExecutionAttemptService', () => {
     expect(toolPlanRepo.findOneBy).toHaveBeenCalledWith({
       operationId: OPERATION_ID,
     });
+  });
+
+  it('accepts an expired local effect result only through durable recovery', async () => {
+    const attempt = {
+      ...runningAttempt(),
+      claimedBy: LOCAL_TOOL_RUNTIME_WORKER_ID,
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+    };
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      work: { taskType: 'workspace_files.write' },
+    };
+    const operation = {
+      ...dispatchedOperation(),
+      operationKind: ExecutionOperationKind.TOOL_CALL,
+      recoveryClass: ExecutionOperationRecoveryClass.EFFECT_CHECKED,
+    };
+    const toolResult = {
+      schemaVersion: 'tool-result/1',
+      operationId: OPERATION_ID,
+      toolCallId: TOOL_CALL_ID,
+      status: 'succeeded',
+      content: 'Updated file: notes.md',
+      structuredContent: { effectStatus: 'applied' },
+      artifactRefs: [],
+      sourceRefs: [],
+      effects: [
+        {
+          effectClass: 'local_destructive',
+          resourceKey: 'working-folder:agent:42:notes.md',
+          status: 'applied',
+        },
+      ],
+      error: null,
+    };
+    const input = {
+      executionId: EXECUTION_ID,
+      stepId: STEP_ID,
+      operationId: OPERATION_ID,
+      attemptId: ATTEMPT_ID,
+      workerId: LOCAL_TOOL_RUNTIME_WORKER_ID,
+      result: {
+        stepKind: ExecutionStepKind.TOOL,
+        status: 'succeeded',
+        output: { kind: ExecutionStepKind.TOOL, toolResult },
+        artifactRefs: [],
+        error: null,
+      },
+    };
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    operationRepo.findOne.mockResolvedValue(operation);
+    effectJournalRepo.findOneBy.mockResolvedValue({
+      status: 'verified',
+      effectType: 'workspace_file_write',
+      resourceKey: 'working-folder:agent:42:notes.md',
+      intent: {
+        schemaVersion: 'workspace-file-effect-intent/1',
+        operation: 'write',
+      },
+      observation: { effectStatus: 'applied' },
+    });
+
+    await expect(service.receiveResult(input as any)).resolves.toEqual(
+      expect.objectContaining({ code: 'stale_attempt' }),
+    );
+    await expect(
+      service.receiveRecoveredEffectResult(input as any),
+    ).resolves.toEqual(expect.objectContaining({ code: 'received' }));
+
+    expect(effectJournalRepo.findOneBy).toHaveBeenCalledWith({
+      executionId: EXECUTION_ID,
+      effectKey: `workspace-file:${OPERATION_ID}`,
+    });
+    expect(attempt.status).toBe(ExecutionStepAttemptStatus.RESULT_RECEIVED);
+    expect(step.status).toBe(ExecutionStepStatus.RESULT_RECEIVED);
+  });
+
+  it('rejects recovered effect evidence that disagrees with the result', async () => {
+    const attempt = {
+      ...runningAttempt(),
+      claimedBy: LOCAL_TOOL_RUNTIME_WORKER_ID,
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+    };
+    const step = {
+      ...readyStep(),
+      stepKind: ExecutionStepKind.TOOL,
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      work: { taskType: 'workspace_files.delete' },
+    };
+    operationRepo.findOne.mockResolvedValue({
+      ...dispatchedOperation(),
+      operationKind: ExecutionOperationKind.TOOL_CALL,
+      recoveryClass: ExecutionOperationRecoveryClass.EFFECT_CHECKED,
+    });
+    attemptRepo.findOne.mockResolvedValue(attempt);
+    stepRepo.findOne.mockResolvedValue(step);
+    effectJournalRepo.findOneBy.mockResolvedValue({
+      status: 'verified',
+      effectType: 'workspace_file_delete',
+      resourceKey: 'working-folder:agent:42:report.pdf',
+      intent: {
+        schemaVersion: 'workspace-file-effect-intent/1',
+        operation: 'delete',
+      },
+      observation: { effectStatus: 'not_applied' },
+    });
+
+    const ack = await service.receiveRecoveredEffectResult({
+      executionId: EXECUTION_ID,
+      stepId: STEP_ID,
+      operationId: OPERATION_ID,
+      attemptId: ATTEMPT_ID,
+      workerId: LOCAL_TOOL_RUNTIME_WORKER_ID,
+      result: {
+        stepKind: ExecutionStepKind.TOOL,
+        status: 'succeeded',
+        output: {
+          kind: ExecutionStepKind.TOOL,
+          toolResult: {
+            schemaVersion: 'tool-result/1',
+            operationId: OPERATION_ID,
+            toolCallId: TOOL_CALL_ID,
+            status: 'succeeded',
+            content: 'Deleted file',
+            structuredContent: null,
+            artifactRefs: [],
+            sourceRefs: [],
+            effects: [
+              {
+                effectClass: 'local_destructive',
+                resourceKey: 'working-folder:agent:42:report.pdf',
+                status: 'applied',
+              },
+            ],
+            error: null,
+          },
+        },
+      },
+    } as any);
+
+    expect(ack.code).toBe('stale_attempt');
+    expect(receiptRepo.save).not.toHaveBeenCalled();
   });
 
   it('accepts a cancelled browser result before its lease expires', async () => {

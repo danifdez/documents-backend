@@ -31,6 +31,7 @@ import {
   WORKSPACE_FILE_DELETE_TOOL_CAPABILITY,
   WORKSPACE_FILE_DELETE_TOOL_NAME,
   WORKSPACE_FILE_DELETE_TOOL_VERSION,
+  LOCAL_TOOL_RUNTIME_WORKER_ID,
 } from '../execution/execution-tool.constants';
 import { resolveProductSkillResource } from '../conversation/product-skill-registry';
 import {
@@ -39,7 +40,7 @@ import {
 } from '../execution/execution-tool.types';
 import { SearchResultDto } from '../search/dto/search-result.dto';
 import { BACKEND_RUNTIME_FINGERPRINT } from '../execution/execution-runtime';
-import { canonicalHash } from '../execution/execution-canonical';
+import { canonicalHash, contentHash } from '../execution/execution-canonical';
 import { UserTaskEntity } from '../user-task/user-task.entity';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionStatus } from '../execution/execution-status.enum';
@@ -48,8 +49,12 @@ import {
   IndexedFileService,
   OwnerRef,
 } from '../indexed-file/indexed-file.service';
+import {
+  DurableExternalEffectState,
+  ExecutionEffectJournalService,
+  VerifiedExecutionEffectInput,
+} from '../execution/execution-effect-journal.service';
 
-const TOOL_RUNTIME_WORKER_ID = '00000000-0000-4000-8000-000000000001';
 const TOOL_LEASE_MS = 30_000;
 export const DOCUMENT_SEARCH_PROVIDER = Symbol('DOCUMENT_SEARCH_PROVIDER');
 export const USER_TASK_CREATE_PROVIDER = Symbol('USER_TASK_CREATE_PROVIDER');
@@ -67,6 +72,23 @@ export interface UserTaskCreateProvider {
   findByExecutionOperation(operationId: string): Promise<UserTaskEntity | null>;
 }
 
+interface WorkspaceFileSnapshot extends Record<string, unknown> {
+  schemaVersion: 'workspace-file-snapshot/1';
+  filename: string;
+  exists: boolean | null;
+  indexedFileId: number | null;
+  contentHash: string | null;
+  size: number | null;
+}
+
+interface WorkspaceFileEffectObservation extends Record<string, unknown> {
+  schemaVersion: 'workspace-file-effect-observation/1';
+  operation: 'write' | 'delete';
+  effectStatus: 'applied' | 'not_applied' | 'inconclusive';
+  reason: string;
+  file: WorkspaceFileSnapshot;
+}
+
 @Injectable()
 export class ExecutionToolRuntimeService {
   private readonly logger = new Logger(ExecutionToolRuntimeService.name);
@@ -80,13 +102,14 @@ export class ExecutionToolRuntimeService {
     private readonly userTasks: UserTaskCreateProvider,
     private readonly indexedFiles: IndexedFileService,
     private readonly executions: ExecutionService,
+    private readonly effectJournal: ExecutionEffectJournalService,
   ) {}
 
   async executeReady(limit = 20): Promise<number> {
     let executed = 0;
     while (executed < limit) {
       const assignment = await this.attempts.claimReadyStep({
-        workerId: TOOL_RUNTIME_WORKER_ID,
+        workerId: LOCAL_TOOL_RUNTIME_WORKER_ID,
         stepKinds: [ExecutionStepKind.TOOL],
         capabilities: [
           DOCUMENT_SEARCH_TOOL_CAPABILITY,
@@ -108,11 +131,77 @@ export class ExecutionToolRuntimeService {
     return executed;
   }
 
+  async recoverStaleEffects(limit = 20): Promise<number> {
+    const candidates = await this.attempts.findRecoverableLocalEffects(limit);
+    let recovered = 0;
+    for (const candidate of candidates) {
+      try {
+        const { plan } = this.readPlan(candidate.assignment);
+        const observation = await this.runWorkspaceFileEffect(
+          candidate.assignment,
+          plan,
+          true,
+        );
+        if (
+          observation.effectStatus === 'not_applied' &&
+          !candidate.cancellationRequested &&
+          [
+            'workspace_baseline_unchanged',
+            'workspace_effect_not_prepared',
+            'lease_expired_before_effect',
+          ].includes(observation.reason)
+        ) {
+          if (
+            await this.attempts.requeueVerifiedNotAppliedEffect(
+              candidate.assignment.attemptId,
+            )
+          ) {
+            recovered += 1;
+          }
+          continue;
+        }
+        if (
+          observation.effectStatus === 'not_applied' &&
+          candidate.cancellationRequested
+        ) {
+          const operation =
+            plan.toolName === WORKSPACE_FILE_WRITE_TOOL_NAME
+              ? 'write'
+              : 'delete';
+          await this.effectJournal.recordExternalObservation(
+            this.workspaceEffectInput(
+              candidate.assignment,
+              plan,
+              operation,
+              this.workspaceWriteBody(plan),
+            ),
+            observation,
+            'verified',
+          );
+        }
+        const result = await this.workspaceObservationResult(
+          candidate.assignment,
+          plan,
+          observation,
+          candidate.cancellationRequested,
+        );
+        const ack = await this.submitResult(candidate.assignment, result, true);
+        if (['received', 'duplicate'].includes(ack)) recovered += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Workspace effect recovery ${candidate.assignment.operationId} failed: ${message}`,
+        );
+      }
+    }
+    return recovered;
+  }
+
   private async executeAssignment(assignment: StepAssignment): Promise<void> {
     const { plan, confirmationStatus } = this.readPlan(assignment);
     await this.attempts.startAttempt(
       assignment.attemptId,
-      TOOL_RUNTIME_WORKER_ID,
+      LOCAL_TOOL_RUNTIME_WORKER_ID,
     );
 
     let result: ToolResultContract;
@@ -132,9 +221,9 @@ export class ExecutionToolRuntimeService {
       } else if (plan.toolName === WORKSPACE_FILE_SEARCH_TOOL_NAME) {
         result = await this.executeWorkspaceFileSearch(plan);
       } else if (plan.toolName === WORKSPACE_FILE_WRITE_TOOL_NAME) {
-        result = await this.executeWorkspaceFileWrite(plan);
+        result = await this.executeWorkspaceFileWrite(assignment, plan);
       } else if (plan.toolName === WORKSPACE_FILE_DELETE_TOOL_NAME) {
-        result = await this.executeWorkspaceFileDelete(plan);
+        result = await this.executeWorkspaceFileDelete(assignment, plan);
       } else {
         result = await this.executeUserTaskCreate(plan);
       }
@@ -160,6 +249,14 @@ export class ExecutionToolRuntimeService {
         },
       };
     }
+    await this.submitResult(assignment, result, false);
+  }
+
+  private async submitResult(
+    assignment: StepAssignment,
+    result: ToolResultContract,
+    recovered: boolean,
+  ): Promise<string> {
     this.contracts.assertToolResult(
       result as unknown as Record<string, unknown>,
     );
@@ -168,12 +265,15 @@ export class ExecutionToolRuntimeService {
       : result.status === 'cancelled'
         ? 'cancelled'
         : 'failed';
-    const ack = await this.attempts.receiveResult({
+    const receive = recovered
+      ? this.attempts.receiveRecoveredEffectResult.bind(this.attempts)
+      : this.attempts.receiveResult.bind(this.attempts);
+    const ack = await receive({
       executionId: assignment.executionId,
       stepId: assignment.stepId,
       operationId: assignment.operationId,
       attemptId: assignment.attemptId,
-      workerId: TOOL_RUNTIME_WORKER_ID,
+      workerId: LOCAL_TOOL_RUNTIME_WORKER_ID,
       result: {
         schemaVersion: 'step-result/1',
         executionId: assignment.executionId,
@@ -190,9 +290,10 @@ export class ExecutionToolRuntimeService {
     });
     if (!['received', 'duplicate'].includes(ack.code)) {
       this.logger.warn(
-        `Tool result ${plan.toolCallId} was not accepted: ${ack.code}`,
+        `Tool result ${result.toolCallId} was not accepted: ${ack.code}`,
       );
     }
+    return ack.code;
   }
 
   private readPlan(assignment: StepAssignment): {
@@ -519,72 +620,22 @@ export class ExecutionToolRuntimeService {
   }
 
   private async executeWorkspaceFileWrite(
+    assignment: StepAssignment,
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
-    const filename = String(plan.normalizedArguments.filename ?? '');
-    const content = plan.normalizedArguments.content;
-    const contentBase64 = plan.normalizedArguments.contentBase64;
-    const body =
-      typeof content === 'string'
-        ? Buffer.from(content, 'utf8')
-        : Buffer.from(String(contentBase64 ?? ''), 'base64');
-    const overwrite = plan.normalizedArguments.overwrite === true;
     try {
-      const owner = await this.workspaceOwner(plan);
-      const file = await this.indexedFiles.writeFile(owner, filename, body, {
-        overwrite,
-      });
-      const observed = await this.indexedFiles.readContent(file.id, owner);
-      if (!observed.content.equals(body)) {
-        return this.unknownWorkspaceMutation(plan, 'File verification failed');
-      }
-      return {
-        schemaVersion: 'tool-result/1',
-        operationId: plan.operationId,
-        toolCallId: plan.toolCallId,
-        status: 'succeeded',
-        content: `${overwrite ? 'Updated' : 'Created'} file: ${file.filename}`,
-        structuredContent: {
-          indexedFileId: file.id,
-          filename: file.filename,
-          size: Number(file.size),
-          checksum: file.checksum,
-        },
-        artifactRefs: [],
-        sourceRefs: [],
-        effects: plan.effects.map((effect) => ({
-          effectClass: effect.effectClass,
-          resourceKey: effect.resourceKey,
-          status: 'applied' as const,
-        })),
-        error: null,
-      };
+      const observation = await this.runWorkspaceFileEffect(
+        assignment,
+        plan,
+        false,
+      );
+      return this.workspaceObservationResult(
+        assignment,
+        plan,
+        observation,
+        observation.reason === 'execution_cancelled_before_effect',
+      );
     } catch (error) {
-      if (
-        error instanceof ConflictException &&
-        error.message === 'file_exists'
-      ) {
-        return {
-          schemaVersion: 'tool-result/1',
-          operationId: plan.operationId,
-          toolCallId: plan.toolCallId,
-          status: 'failed',
-          content: '',
-          structuredContent: { filename, overwrite },
-          artifactRefs: [],
-          sourceRefs: [],
-          effects: plan.effects.map((effect) => ({
-            effectClass: effect.effectClass,
-            resourceKey: effect.resourceKey,
-            status: 'not_applied' as const,
-          })),
-          error: {
-            code: 'workspace_file_exists',
-            message: 'The file already exists and overwrite was not authorized',
-            retryable: false,
-          },
-        };
-      }
       return this.unknownWorkspaceMutation(
         plan,
         error instanceof Error ? error.message : String(error),
@@ -593,67 +644,445 @@ export class ExecutionToolRuntimeService {
   }
 
   private async executeWorkspaceFileDelete(
+    assignment: StepAssignment,
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
-    const filename = String(plan.normalizedArguments.filename ?? '');
     try {
-      const owner = await this.workspaceOwner(plan);
-      const existing = await this.indexedFiles.getByFilename(owner, filename);
-      if (!existing) {
-        return {
-          schemaVersion: 'tool-result/1',
-          operationId: plan.operationId,
-          toolCallId: plan.toolCallId,
-          status: 'succeeded',
-          content: `File already absent: ${filename}`,
-          structuredContent: { filename, alreadyAbsent: true },
-          artifactRefs: [],
-          sourceRefs: [],
-          effects: plan.effects.map((effect) => ({
-            effectClass: effect.effectClass,
-            resourceKey: effect.resourceKey,
-            status: 'not_applied' as const,
-          })),
-          error: null,
-        };
-      }
-      await this.indexedFiles.deleteByFilename(owner, filename);
-      const reconciliation = await this.indexedFiles.scanFolder(owner);
-      if (reconciliation.status !== 'done') {
-        return this.unknownWorkspaceMutation(
-          plan,
-          'File deletion could not be reconciled with the working folder',
-        );
-      }
-      const observed = await this.indexedFiles.getByFilename(owner, filename);
-      if (observed) {
-        return this.unknownWorkspaceMutation(
-          plan,
-          'File deletion verification failed',
-        );
-      }
-      return {
-        schemaVersion: 'tool-result/1',
-        operationId: plan.operationId,
-        toolCallId: plan.toolCallId,
-        status: 'succeeded',
-        content: `Deleted file: ${filename}`,
-        structuredContent: { filename, alreadyAbsent: false },
-        artifactRefs: [],
-        sourceRefs: [],
-        effects: plan.effects.map((effect) => ({
-          effectClass: effect.effectClass,
-          resourceKey: effect.resourceKey,
-          status: 'applied' as const,
-        })),
-        error: null,
-      };
+      const observation = await this.runWorkspaceFileEffect(
+        assignment,
+        plan,
+        false,
+      );
+      return this.workspaceObservationResult(
+        assignment,
+        plan,
+        observation,
+        observation.reason === 'execution_cancelled_before_effect',
+      );
     } catch (error) {
       return this.unknownWorkspaceMutation(
         plan,
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  private async runWorkspaceFileEffect(
+    assignment: StepAssignment,
+    plan: ToolPlanContract,
+    recoveryOnly: boolean,
+  ): Promise<WorkspaceFileEffectObservation> {
+    const operation =
+      plan.toolName === WORKSPACE_FILE_WRITE_TOOL_NAME ? 'write' : 'delete';
+    const owner = await this.workspaceOwner(plan);
+    const filename = String(plan.normalizedArguments.filename ?? '');
+    const body = this.workspaceWriteBody(plan);
+    const intent = this.workspaceEffectInput(assignment, plan, operation, body);
+    let state = await this.effectJournal.readExternal(intent);
+    const effectWasPrepared = state !== null;
+    if (!state) {
+      let preparation: WorkspaceFileSnapshot;
+      try {
+        preparation = await this.observeWorkspaceFile(owner, filename);
+      } catch (error) {
+        if (!recoveryOnly) throw error;
+        preparation = this.unavailableWorkspaceSnapshot(filename);
+      }
+      state = await this.effectJournal.prepareExternal(intent, preparation);
+    }
+    if (state.status !== 'prepared') {
+      return state.observation as unknown as WorkspaceFileEffectObservation;
+    }
+
+    if (recoveryOnly && !effectWasPrepared) {
+      const observation = this.workspaceObservation(
+        operation,
+        'not_applied',
+        'workspace_effect_not_prepared',
+        state.preparationObservation as unknown as WorkspaceFileSnapshot,
+      );
+      await this.effectJournal.recordExternalObservation(
+        intent,
+        observation,
+        'continue',
+      );
+      return observation;
+    }
+
+    let current: WorkspaceFileSnapshot;
+    try {
+      current = await this.observeWorkspaceFile(owner, filename);
+    } catch (error) {
+      if (!recoveryOnly) throw error;
+      current = this.unavailableWorkspaceSnapshot(filename);
+    }
+    let observation = this.classifyWorkspaceEffect(
+      operation,
+      plan,
+      state,
+      current,
+      body,
+    );
+    const terminalWithoutApply =
+      observation.effectStatus === 'applied' ||
+      observation.effectStatus === 'inconclusive' ||
+      observation.reason === 'workspace_file_exists' ||
+      observation.reason === 'workspace_file_already_absent';
+    if (terminalWithoutApply) {
+      await this.effectJournal.recordExternalObservation(
+        intent,
+        observation,
+        observation.effectStatus === 'inconclusive'
+          ? 'inconclusive'
+          : 'verified',
+      );
+      return observation;
+    }
+    if (recoveryOnly) {
+      await this.effectJournal.recordExternalObservation(
+        intent,
+        observation,
+        'continue',
+      );
+      return observation;
+    }
+
+    const control = await this.attempts.readAttemptControl(
+      assignment.attemptId,
+      LOCAL_TOOL_RUNTIME_WORKER_ID,
+    );
+    if (control.cancelled) {
+      observation = {
+        ...observation,
+        effectStatus: 'not_applied',
+        reason: 'execution_cancelled_before_effect',
+      };
+      await this.effectJournal.recordExternalObservation(
+        intent,
+        observation,
+        'verified',
+      );
+      return observation;
+    }
+    if (control.leaseExpiresAt <= new Date()) {
+      observation = {
+        ...observation,
+        effectStatus: 'not_applied',
+        reason: 'lease_expired_before_effect',
+      };
+      await this.effectJournal.recordExternalObservation(
+        intent,
+        observation,
+        'continue',
+      );
+      return observation;
+    }
+
+    if (operation === 'write') {
+      await this.indexedFiles.writeFile(owner, filename, body!, {
+        overwrite: plan.normalizedArguments.overwrite === true,
+      });
+    } else {
+      await this.indexedFiles.deleteByFilename(owner, filename);
+    }
+    const after = await this.observeWorkspaceFile(owner, filename);
+    observation = this.classifyWorkspaceEffect(
+      operation,
+      plan,
+      state,
+      after,
+      body,
+    );
+    await this.effectJournal.recordExternalObservation(
+      intent,
+      observation,
+      observation.effectStatus === 'inconclusive' ? 'inconclusive' : 'verified',
+    );
+    return observation;
+  }
+
+  private workspaceEffectInput(
+    assignment: StepAssignment,
+    plan: ToolPlanContract,
+    operation: 'write' | 'delete',
+    body: Buffer | null,
+  ): VerifiedExecutionEffectInput {
+    const effect = plan.effects[0];
+    if (!effect || plan.effects.length !== 1) {
+      throw new Error('workspace_effect_contract_invalid');
+    }
+    return {
+      executionId: assignment.executionId,
+      effectKey: `workspace-file:${assignment.operationId}`,
+      effectType: `workspace_file_${operation}`,
+      resourceKey: effect.resourceKey,
+      intent: {
+        schemaVersion: 'workspace-file-effect-intent/1',
+        operation,
+        ownerType: plan.normalizedArguments.ownerType,
+        ownerId: plan.normalizedArguments.ownerId,
+        scopeKey: plan.normalizedArguments.scopeKey,
+        filename: plan.normalizedArguments.filename,
+        overwrite:
+          operation === 'write'
+            ? plan.normalizedArguments.overwrite === true
+            : false,
+        contentHash: body ? contentHash(body) : null,
+        size: body?.length ?? null,
+      },
+    };
+  }
+
+  private workspaceWriteBody(plan: ToolPlanContract): Buffer | null {
+    if (plan.toolName !== WORKSPACE_FILE_WRITE_TOOL_NAME) return null;
+    const content = plan.normalizedArguments.content;
+    return typeof content === 'string'
+      ? Buffer.from(content, 'utf8')
+      : Buffer.from(
+          String(plan.normalizedArguments.contentBase64 ?? ''),
+          'base64',
+        );
+  }
+
+  private async observeWorkspaceFile(
+    owner: OwnerRef,
+    filename: string,
+  ): Promise<WorkspaceFileSnapshot> {
+    const reconciliation = await this.indexedFiles.scanFolder(owner);
+    if (reconciliation.status !== 'done') {
+      throw new Error(`workspace_${reconciliation.status}`);
+    }
+    const file = await this.indexedFiles.getByFilename(owner, filename);
+    if (!file) {
+      return {
+        schemaVersion: 'workspace-file-snapshot/1',
+        filename,
+        exists: false,
+        indexedFileId: null,
+        contentHash: null,
+        size: null,
+      };
+    }
+    const observed = await this.indexedFiles.readContent(file.id, owner);
+    return {
+      schemaVersion: 'workspace-file-snapshot/1',
+      filename,
+      exists: true,
+      indexedFileId: file.id,
+      contentHash: contentHash(observed.content),
+      size: observed.content.length,
+    };
+  }
+
+  private unavailableWorkspaceSnapshot(
+    filename: string,
+  ): WorkspaceFileSnapshot {
+    return {
+      schemaVersion: 'workspace-file-snapshot/1',
+      filename,
+      exists: null,
+      indexedFileId: null,
+      contentHash: null,
+      size: null,
+    };
+  }
+
+  private classifyWorkspaceEffect(
+    operation: 'write' | 'delete',
+    plan: ToolPlanContract,
+    state: DurableExternalEffectState,
+    current: WorkspaceFileSnapshot,
+    body: Buffer | null,
+  ): WorkspaceFileEffectObservation {
+    const before =
+      state.preparationObservation as unknown as WorkspaceFileSnapshot;
+    if (current.exists === null || before.exists === null) {
+      return this.workspaceObservation(
+        operation,
+        'inconclusive',
+        'workspace_state_unavailable',
+        current,
+      );
+    }
+    if (operation === 'delete') {
+      if (before.exists === false && current.exists === false) {
+        return this.workspaceObservation(
+          operation,
+          'not_applied',
+          'workspace_file_already_absent',
+          current,
+        );
+      }
+      if (before.exists === true && current.exists === false) {
+        return this.workspaceObservation(
+          operation,
+          'applied',
+          'workspace_file_absence_verified',
+          current,
+        );
+      }
+      if (this.sameWorkspaceSnapshot(before, current)) {
+        return this.workspaceObservation(
+          operation,
+          'not_applied',
+          'workspace_baseline_unchanged',
+          current,
+        );
+      }
+      return this.workspaceObservation(
+        operation,
+        'inconclusive',
+        'workspace_file_changed_during_delete',
+        current,
+      );
+    }
+
+    const desiredHash = contentHash(body!);
+    const overwrite = plan.normalizedArguments.overwrite === true;
+    if (current.exists && current.contentHash === desiredHash) {
+      if (!overwrite && before.exists) {
+        return this.workspaceObservation(
+          operation,
+          'not_applied',
+          'workspace_file_exists',
+          current,
+        );
+      }
+      return this.workspaceObservation(
+        operation,
+        'applied',
+        'workspace_file_content_verified',
+        current,
+      );
+    }
+    if (!overwrite && before.exists) {
+      return this.workspaceObservation(
+        operation,
+        'not_applied',
+        'workspace_file_exists',
+        current,
+      );
+    }
+    if (this.sameWorkspaceSnapshot(before, current)) {
+      return this.workspaceObservation(
+        operation,
+        'not_applied',
+        'workspace_baseline_unchanged',
+        current,
+      );
+    }
+    return this.workspaceObservation(
+      operation,
+      'inconclusive',
+      'workspace_file_changed_during_write',
+      current,
+    );
+  }
+
+  private sameWorkspaceSnapshot(
+    left: WorkspaceFileSnapshot,
+    right: WorkspaceFileSnapshot,
+  ): boolean {
+    return (
+      left.exists === right.exists &&
+      left.contentHash === right.contentHash &&
+      left.size === right.size
+    );
+  }
+
+  private workspaceObservation(
+    operation: 'write' | 'delete',
+    effectStatus: WorkspaceFileEffectObservation['effectStatus'],
+    reason: string,
+    file: WorkspaceFileSnapshot,
+  ): WorkspaceFileEffectObservation {
+    return {
+      schemaVersion: 'workspace-file-effect-observation/1',
+      operation,
+      effectStatus,
+      reason,
+      file,
+    };
+  }
+
+  private async workspaceObservationResult(
+    assignment: StepAssignment,
+    plan: ToolPlanContract,
+    observation: WorkspaceFileEffectObservation,
+    cancellationRequested: boolean,
+  ): Promise<ToolResultContract> {
+    const effectStatus = observation.effectStatus;
+    if (effectStatus === 'inconclusive') {
+      return this.unknownWorkspaceMutation(plan, observation.reason);
+    }
+    if (cancellationRequested && effectStatus === 'not_applied') {
+      return {
+        schemaVersion: 'tool-result/1',
+        operationId: assignment.operationId,
+        toolCallId: plan.toolCallId,
+        status: 'cancelled',
+        content: '',
+        structuredContent: observation,
+        artifactRefs: [],
+        sourceRefs: [],
+        effects: plan.effects.map((effect) => ({
+          effectClass: effect.effectClass,
+          resourceKey: effect.resourceKey,
+          status: 'not_applied' as const,
+        })),
+        error: {
+          code: 'execution_cancelled',
+          message: 'The execution was cancelled before the file effect',
+          retryable: false,
+        },
+      };
+    }
+    if (observation.reason === 'workspace_file_exists') {
+      return {
+        schemaVersion: 'tool-result/1',
+        operationId: assignment.operationId,
+        toolCallId: plan.toolCallId,
+        status: 'failed',
+        content: '',
+        structuredContent: observation,
+        artifactRefs: [],
+        sourceRefs: [],
+        effects: plan.effects.map((effect) => ({
+          effectClass: effect.effectClass,
+          resourceKey: effect.resourceKey,
+          status: 'not_applied' as const,
+        })),
+        error: {
+          code: 'workspace_file_exists',
+          message: 'The file already exists and overwrite was not authorized',
+          retryable: false,
+        },
+      };
+    }
+    const filename = String(plan.normalizedArguments.filename ?? '');
+    const writeAction =
+      plan.normalizedArguments.overwrite === true ? 'Updated' : 'Created';
+    return {
+      schemaVersion: 'tool-result/1',
+      operationId: assignment.operationId,
+      toolCallId: plan.toolCallId,
+      status: 'succeeded',
+      content:
+        observation.operation === 'delete'
+          ? effectStatus === 'applied'
+            ? `Deleted file: ${filename}`
+            : `File already absent: ${filename}`
+          : `${writeAction} file: ${filename}`,
+      structuredContent: observation,
+      artifactRefs: [],
+      sourceRefs: [],
+      effects: plan.effects.map((effect) => ({
+        effectClass: effect.effectClass,
+        resourceKey: effect.resourceKey,
+        status: effectStatus,
+      })),
+      error: null,
+    };
   }
 
   private unknownWorkspaceMutation(

@@ -12,8 +12,12 @@ export class CreateExecutionEffectJournal1757668140760 implements MigrationInter
         "effect_type" varchar(80) NOT NULL,
         "resource_key" varchar(255) NOT NULL,
         "intent_hash" varchar(71) NOT NULL,
+        "intent" jsonb NOT NULL,
+        "preparation_observation" jsonb,
         "status" varchar(20) NOT NULL,
         "observation" jsonb,
+        "last_observation" jsonb,
+        "last_observed_at" timestamptz,
         "applied_at" timestamptz,
         "verified_at" timestamptz,
         "created_at" timestamptz NOT NULL DEFAULT now(),
@@ -25,7 +29,21 @@ export class CreateExecutionEffectJournal1757668140760 implements MigrationInter
         CONSTRAINT "CHK_execution_effect_journal_hash"
           CHECK ("intent_hash" ~ '^sha256:[0-9a-f]{64}$'),
         CONSTRAINT "CHK_execution_effect_journal_status"
-          CHECK ("status" IN ('prepared', 'verified')),
+          CHECK ("status" IN ('prepared', 'verified', 'inconclusive')),
+        CONSTRAINT "CHK_execution_effect_journal_intent"
+          CHECK (jsonb_typeof("intent") = 'object'),
+        CONSTRAINT "CHK_execution_effect_journal_preparation"
+          CHECK (
+            "preparation_observation" IS NULL
+            OR jsonb_typeof("preparation_observation") = 'object'
+          ),
+        CONSTRAINT "CHK_execution_effect_journal_last_observation"
+          CHECK (
+            ("last_observation" IS NULL AND "last_observed_at" IS NULL)
+            OR
+            (jsonb_typeof("last_observation") = 'object'
+              AND "last_observed_at" IS NOT NULL)
+          ),
         CONSTRAINT "CHK_execution_effect_journal_observation"
           CHECK (
             ("status" = 'prepared' AND "observation" IS NULL
@@ -33,7 +51,11 @@ export class CreateExecutionEffectJournal1757668140760 implements MigrationInter
             OR
             ("status" = 'verified' AND "observation" IS NOT NULL
               AND jsonb_typeof("observation") = 'object'
-              AND "applied_at" IS NOT NULL AND "verified_at" IS NOT NULL)
+              AND "verified_at" IS NOT NULL)
+            OR
+            ("status" = 'inconclusive' AND "observation" IS NOT NULL
+              AND jsonb_typeof("observation") = 'object'
+              AND "applied_at" IS NULL AND "verified_at" IS NOT NULL)
           )
       )
     `);

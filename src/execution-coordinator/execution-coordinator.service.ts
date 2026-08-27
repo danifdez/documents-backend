@@ -38,6 +38,10 @@ export class ExecutionCoordinatorService {
     return this.executionToolRuntime.executeReady(limit);
   }
 
+  recoverStaleToolEffects(limit = 20): Promise<number> {
+    return this.executionToolRuntime.recoverStaleEffects(limit);
+  }
+
   async acceptResults(limit = 20): Promise<number> {
     const processed =
       await this.executionAttemptService.processReceivedResults(limit);

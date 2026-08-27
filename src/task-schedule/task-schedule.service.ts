@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import * as os from 'os';
 import * as process from 'process';
-import { ExecutionCoordinatorService } from 'src/execution-coordinator/execution-coordinator.service';
-import { WorkerService } from 'src/worker/worker.service';
-import { ExecutionAttemptService } from 'src/execution/execution-attempt.service';
+// eslint-disable-next-line max-len
+import { ExecutionCoordinatorService } from '../execution-coordinator/execution-coordinator.service';
+import { WorkerService } from '../worker/worker.service';
+import { ExecutionAttemptService } from '../execution/execution-attempt.service';
 
 const FINALIZATION_STALE_AFTER_MS = 5 * 60 * 1000;
 
@@ -49,7 +50,8 @@ export class TaskScheduleService {
 
     if (cpuUsagePercent > 80 || memoryUsagePercent > 80) {
       this.logger.warn(
-        `Skipping execution processing ${cpuUsagePercent.toFixed(2)}% CPU ${memoryUsagePercent.toFixed(2)}% Memory.`,
+        `Skipping execution processing: ${cpuUsagePercent.toFixed(2)}% CPU, ` +
+          `${memoryUsagePercent.toFixed(2)}% memory.`,
       );
       return;
     }
@@ -66,6 +68,13 @@ export class TaskScheduleService {
   })
   async handleStaleRecovery() {
     try {
+      const recoveredEffects =
+        await this.executionCoordinatorService.recoverStaleToolEffects();
+      if (recoveredEffects > 0) {
+        this.logger.log(
+          `Recovered ${recoveredEffects} stale local tool effect(s)`,
+        );
+      }
       const expired = await this.executionAttemptService.expireStaleAttempts();
       if (expired > 0) {
         this.logger.log(`Expired ${expired} stale step attempt(s)`);

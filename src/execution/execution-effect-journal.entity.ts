@@ -7,7 +7,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type ExecutionEffectJournalStatus = 'prepared' | 'verified';
+export type ExecutionEffectJournalStatus =
+  'prepared' | 'verified' | 'inconclusive';
 
 @Entity({ name: 'execution_effect_journal' })
 @Index('UQ_execution_effect_journal_identity', ['executionId', 'effectKey'], {
@@ -32,6 +33,18 @@ export class ExecutionEffectJournalEntity {
 
   @Column({ name: 'intent_hash', type: 'varchar', length: 71 })
   intentHash: string;
+
+  @Column({ type: 'jsonb' })
+  intent: Record<string, unknown>;
+
+  @Column({ name: 'preparation_observation', type: 'jsonb', nullable: true })
+  preparationObservation: Record<string, unknown> | null;
+
+  @Column({ name: 'last_observation', type: 'jsonb', nullable: true })
+  lastObservation: Record<string, unknown> | null;
+
+  @Column({ name: 'last_observed_at', type: 'timestamptz', nullable: true })
+  lastObservedAt: Date | null;
 
   @Column({ type: 'varchar', length: 20 })
   status: ExecutionEffectJournalStatus;
