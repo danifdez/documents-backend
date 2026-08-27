@@ -64,6 +64,44 @@ const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const writeJson = (path, value) =>
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 
+const syncRuntimeHash = (path, pattern, replacement, label) => {
+  if (!existsSync(path)) return;
+  const current = readFileSync(path, 'utf8');
+  if (!pattern.test(current)) {
+    throw new Error(`Canonical contract hash consumer is missing: ${label}`);
+  }
+  const updated = current.replace(pattern, replacement);
+  if (write) {
+    if (updated !== current) writeFileSync(path, updated, 'utf8');
+    return;
+  }
+  if (updated !== current) {
+    throw new Error(`Canonical contract hash differs: ${label}`);
+  }
+};
+
+const assertBrowserRuntimeHashWiring = (root) => {
+  const sourcePath = join(root, 'src/ai/execution_bundle.cc');
+  if (!existsSync(sourcePath)) return;
+  const source = readFileSync(sourcePath, 'utf8');
+  const cmakePath = join(root, 'CMakeLists.txt');
+  const testCmakePath = join(root, 'tests/CMakeLists.txt');
+  const cmake = existsSync(cmakePath) ? readFileSync(cmakePath, 'utf8') : '';
+  const testCmake = existsSync(testCmakePath)
+    ? readFileSync(testCmakePath, 'utf8')
+    : '';
+  if (
+    !source.includes('IA_BROWSER_CONTRACT_SET_HASH') ||
+    !cmake.includes('contracts/execution/v1/schema-manifest.json') ||
+    !cmake.includes('IA_BROWSER_CONTRACT_SET_HASH') ||
+    !testCmake.includes('IA_BROWSER_CONTRACT_SET_HASH')
+  ) {
+    throw new Error(
+      `IA Browser runtime is not wired to its canonical schema manifest: ${root}`,
+    );
+  }
+};
+
 const schemaFiles = walk(join(contractRoot, 'schemas'), (path) =>
   path.endsWith('.json'),
 );
@@ -82,6 +120,13 @@ const manifest = {
 };
 const manifestPath = join(contractRoot, 'schema-manifest.json');
 const validatorPath = join(contractRoot, 'validate.py');
+
+syncRuntimeHash(
+  join(backendRoot, 'src/execution/execution.constants.ts'),
+  /(EXECUTION_CONTRACT_SET_HASH\s*=\s*\n?\s*')[^']+(')/,
+  `$1${manifest.contractSetHash}$2`,
+  'Documents Backend',
+);
 
 const updateBundle = (path) => {
   const bundle = readJson(path);
@@ -156,6 +201,13 @@ for (const target of targets) {
       assertSame(source, destination);
     }
   }
+  syncRuntimeHash(
+    join(target.root, 'harness/execution_bundle.py'),
+    /(CONTRACT_SET_HASH\s*=\s*")[^"]+(")/,
+    `$1${manifest.contractSetHash}$2`,
+    `ai-train (${target.root})`,
+  );
+  assertBrowserRuntimeHashWiring(target.root);
 }
 
 console.log(
