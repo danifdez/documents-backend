@@ -5,6 +5,7 @@ import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionStepEntity } from './execution-step.entity';
 import { ExecutionStepStatus } from './execution-step-status.enum';
+import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 
 @Injectable()
 export class ExecutionArtifactService {
@@ -13,6 +14,7 @@ export class ExecutionArtifactService {
     private readonly steps: Repository<ExecutionStepEntity>,
     @InjectRepository(ExecutionArtifactEntity)
     private readonly artifacts: Repository<ExecutionArtifactEntity>,
+    private readonly storage: ExecutionArtifactStorageService,
   ) {}
 
   async readOutputJson(
@@ -55,24 +57,28 @@ export class ExecutionArtifactService {
       },
     });
     const byId = new Map(rows.map((row) => [row.artifactId, row]));
-    return refs.map((ref) => {
-      const artifact = byId.get(ref.artifactId);
-      if (
-        !artifact?.body ||
-        artifact.kind !== kind ||
-        !artifact.producedByAttemptId
-      ) {
-        throw new Error(`${role} output artifact is unavailable`);
-      }
-      try {
-        const parsed = JSON.parse(artifact.body.toString('utf8'));
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('not an object');
+    return Promise.all(
+      refs.map(async (ref) => {
+        const artifact = byId.get(ref.artifactId);
+        if (
+          !artifact ||
+          artifact.kind !== kind ||
+          !artifact.producedByAttemptId
+        ) {
+          throw new Error(`${role} output artifact is unavailable`);
         }
-        return parsed as Record<string, unknown>;
-      } catch {
-        throw new Error(`${role} output artifact is invalid`);
-      }
-    });
+        const body = await this.storage.readBody(artifact);
+        if (!body) throw new Error(`${role} output artifact is unavailable`);
+        try {
+          const parsed = JSON.parse(body.toString('utf8'));
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('not an object');
+          }
+          return parsed as Record<string, unknown>;
+        } catch {
+          throw new Error(`${role} output artifact is invalid`);
+        }
+      }),
+    );
   }
 }

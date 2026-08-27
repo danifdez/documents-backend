@@ -1,4 +1,5 @@
 import { ExecutionStepKind } from '../../../src/execution/execution-step-kind.enum';
+import { executionTaskWork } from '../../../src/execution/execution-task-payload.types';
 import {
   REDUCTION_TREE_FAN_IN,
   buildReductionTree,
@@ -9,13 +10,19 @@ describe('reduction tree', () => {
     const leaves = Array.from({ length: 65 }, (_, index) => ({
       stepId: `leaf-${index}`,
       stepKind: ExecutionStepKind.INFERENCE,
-      work: { taskType: 'map' },
+      work: executionTaskWork('summarize-map', {
+        content: `chunk-${index}`,
+        chunkIndex: index,
+        targetLanguage: 'en',
+      }),
     }));
 
     const steps = buildReductionTree(leaves, ({ dependencyStepIds }) => ({
       stepKind: ExecutionStepKind.CODE,
       dependsOnStepIds: dependencyStepIds,
-      work: { taskType: 'reduce' },
+      work: executionTaskWork('summarize-reduce', {
+        targetLanguage: 'en',
+      }),
     }));
     const reductions = steps.slice(leaves.length);
 

@@ -55,6 +55,7 @@ import { ProgressEvent, projectExecutionProgress } from './execution-progress';
 import { ExecutionOperationKind } from './execution-operation-kind.enum';
 import { recordLoadedSkillResource } from '../conversation/skill-activation';
 import { SKILL_RESOURCE_LOAD_TOOL_NAME } from './execution-tool.constants';
+import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 15 * 60 * 1_000;
@@ -138,7 +139,8 @@ function operationKindForStep(
 export class ExecutionAttemptService {
   constructor(
     private readonly dataSource: DataSource,
-    private readonly contractValidator?: ExecutionContractValidator,
+    private readonly contractValidator: ExecutionContractValidator,
+    private readonly artifactStorage: ExecutionArtifactStorageService,
   ) {}
 
   async grantAttempt(
@@ -402,27 +404,22 @@ export class ExecutionAttemptService {
         return ack('stale_attempt');
       }
 
-      await artifactRepo.save(
-        artifactRepo.create({
-          artifactId: artifact.artifactId,
-          rootExecutionId: execution.rootExecutionId,
-          kind: artifact.kind,
-          contentHash: artifact.contentHash,
-          size: String(artifact.size),
-          mediaType: artifact.mediaType,
-          encoding: 'identity',
-          dataClassification: 'workspace',
-          redaction: { applied: false },
-          retentionClass: 'execution',
-          createdByEventId: null,
-          producedByAttemptId: attemptId,
-          inputSourceIds: [],
-          storageRef:
-            `execution:${execution.rootExecutionId}:artifact:` +
-            artifact.artifactId,
-          body,
-        }),
-      );
+      await this.artifactStorage.save(manager, {
+        artifactId: artifact.artifactId,
+        rootExecutionId: execution.rootExecutionId,
+        kind: artifact.kind,
+        contentHash: artifact.contentHash,
+        size: String(artifact.size),
+        mediaType: artifact.mediaType,
+        encoding: 'identity',
+        dataClassification: 'workspace',
+        redaction: { applied: false },
+        retentionClass: 'execution',
+        createdByEventId: null,
+        producedByAttemptId: attemptId,
+        inputSourceIds: [],
+        body,
+      });
       return ack('received');
     });
   }
@@ -471,7 +468,11 @@ export class ExecutionAttemptService {
         rootExecutionId: execution.rootExecutionId,
       })
       .getOne();
-    if (!artifact?.body) throw new NotFoundException('artifact_unavailable');
+    if (!artifact) throw new NotFoundException('artifact_unavailable');
+    await this.artifactStorage.hydrate(artifact);
+    if (artifact.body === null) {
+      throw new NotFoundException('artifact_unavailable');
+    }
     return artifact;
   }
 
@@ -1075,7 +1076,11 @@ export class ExecutionAttemptService {
           acceptedError ?? null,
         );
         if (acceptedStatus === 'succeeded' && !executionHasTerminalIntent) {
-          await releaseExecutionStepDependents(manager, step.stepId);
+          await releaseExecutionStepDependents(
+            manager,
+            step.stepId,
+            this.artifactStorage,
+          );
           const remaining = await manager.query(
             `
               SELECT 1

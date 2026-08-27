@@ -4,9 +4,9 @@ The person who operates a Documents installation chooses how it connects to its 
 
 ## Data and file storage
 
-Documents requires its application database and a directory for uploaded files. The database stores projects, metadata, content, relationships, user accounts, and processing history. Original uploads are kept in file storage and are not duplicated when the exact same file already exists.
+Documents requires its application database and directories for uploaded files and large background-action artifacts. The database stores projects, metadata, content, relationships, user accounts, processing history, and small artifacts. Original uploads are kept in file storage and are not duplicated when the exact same file already exists. Large artifact bodies are kept outside PostgreSQL while their identity, integrity hash, retention information, and provenance remain in the database.
 
-The storage location and database connection are installation-wide choices. Changing them requires administrator access to the server.
+The storage locations, inline artifact threshold, and database connection are installation-wide choices. Changing them requires administrator access to the server. Backups must include every configured filesystem store and PostgreSQL.
 
 ## Application access
 

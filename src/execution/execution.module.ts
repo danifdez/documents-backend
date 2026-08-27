@@ -14,6 +14,7 @@ import { ExecutionConfirmationController } from './execution-confirmation.contro
 import { ExecutionConfirmationService } from './execution-confirmation.service';
 import { BrowserWorkController } from '../worker/browser-work.controller';
 import { ExecutionEffectJournalService } from './execution-effect-journal.service';
+import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 
 @Module({
   imports: [DatabaseModule, WorkerModule],
@@ -31,6 +32,7 @@ import { ExecutionEffectJournalService } from './execution-effect-journal.servic
     ExecutionToolPlanService,
     ExecutionProgressService,
     ExecutionArtifactService,
+    ExecutionArtifactStorageService,
     ExecutionConfirmationService,
     ExecutionEffectJournalService,
   ],
@@ -42,6 +44,7 @@ import { ExecutionEffectJournalService } from './execution-effect-journal.servic
     ExecutionToolPlanService,
     ExecutionProgressService,
     ExecutionArtifactService,
+    ExecutionArtifactStorageService,
     ExecutionConfirmationService,
     ExecutionEffectJournalService,
   ],

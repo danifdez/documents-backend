@@ -31,6 +31,7 @@ import {
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { contentHash } from './execution-canonical';
 import type { ChatExecutionPayload } from './execution-task-payload.types';
+import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 
 export async function createExecutionStep(
   manager: EntityManager,
@@ -157,6 +158,7 @@ export async function createExecutionStep(
 export async function releaseExecutionStepDependents(
   manager: EntityManager,
   completedStepId: string,
+  artifactStorage: ExecutionArtifactStorageService,
 ): Promise<number> {
   const rows = await manager.query(
     `
@@ -197,7 +199,12 @@ export async function releaseExecutionStepDependents(
   for (const row of rows) {
     const candidate = await stepRepo.findOneBy({ stepId: row.step_id });
     if (!candidate) continue;
-    await materializeCoordinatedInput(manager, stepRepo, candidate);
+    await materializeCoordinatedInput(
+      manager,
+      stepRepo,
+      candidate,
+      artifactStorage,
+    );
     candidate.status = ExecutionStepStatus.READY;
     candidate.version += 1;
     await stepRepo.save(candidate);
@@ -240,11 +247,18 @@ async function materializeCoordinatedInput(
   manager: EntityManager,
   stepRepo: Repository<ExecutionStepEntity>,
   candidate: ExecutionStepEntity,
+  artifactStorage: ExecutionArtifactStorageService,
 ): Promise<void> {
   const work = (candidate.work ?? {}) as Record<string, unknown>;
   const coordination = work.coordination as Record<string, unknown> | undefined;
   if (coordination?.kind === CONTEXT_INPUT_FINAL_COORDINATION) {
-    await materializeContextInput(manager, stepRepo, candidate, coordination);
+    await materializeContextInput(
+      manager,
+      stepRepo,
+      candidate,
+      coordination,
+      artifactStorage,
+    );
     return;
   }
   if (coordination?.kind !== 'map-reduce-reduce/1') return;
@@ -292,6 +306,7 @@ async function materializeContextInput(
   stepRepo: Repository<ExecutionStepEntity>,
   candidate: ExecutionStepEntity,
   coordination: Record<string, unknown>,
+  artifactStorage: ExecutionArtifactStorageService,
 ): Promise<void> {
   const reductionStepId = coordination.reductionStepId;
   const resultKey = coordination.resultKey;
@@ -333,15 +348,14 @@ async function materializeContextInput(
       rootExecutionId: execution.rootExecutionId,
     })
     .getOne();
-  if (!planArtifact?.body) {
+  if (!planArtifact) {
     throw new ConflictException('context_chunk_plan_not_found');
   }
-  if (contentHash(planArtifact.body) !== planArtifact.contentHash) {
-    throw new ConflictException('context_chunk_plan_integrity_mismatch');
-  }
+  const planBody = await artifactStorage.readBody(planArtifact);
+  if (!planBody) throw new ConflictException('context_chunk_plan_not_found');
   let plan: ContextChunkPlan;
   try {
-    plan = JSON.parse(planArtifact.body.toString('utf8')) as ContextChunkPlan;
+    plan = JSON.parse(planBody.toString('utf8')) as ContextChunkPlan;
   } catch {
     throw new ConflictException('invalid_context_chunk_plan');
   }
@@ -355,7 +369,9 @@ async function materializeContextInput(
       rootExecutionId: execution.rootExecutionId,
     })
     .getOne();
-  const sourceBody = sourceArtifact?.body;
+  const sourceBody = sourceArtifact
+    ? await artifactStorage.readBody(sourceArtifact)
+    : null;
   const sourceText = sourceBody?.toString('utf8');
   if (
     plan.schemaVersion !== CONTEXT_CHUNK_PLAN_SCHEMA ||
@@ -420,14 +436,18 @@ async function materializeContextInput(
       digest: digest.trim(),
     },
   };
-  const contextArtifact = await freezeActiveContextArtifact(manager, {
-    rootExecutionId: execution.rootExecutionId,
-    sessionId: execution.sessionId,
-    turnId: execution.turnId,
-    causedByEventId: finish.eventId,
-    effectivePayload,
-    derivedFromArtifactIds: [sourceArtifactId, planArtifactId],
-  });
+  const contextArtifact = await freezeActiveContextArtifact(
+    manager,
+    artifactStorage,
+    {
+      rootExecutionId: execution.rootExecutionId,
+      sessionId: execution.sessionId,
+      turnId: execution.turnId,
+      causedByEventId: finish.eventId,
+      effectivePayload,
+      derivedFromArtifactIds: [sourceArtifactId, planArtifactId],
+    },
+  );
   candidate.inputArtifactRefs = [
     ...candidate.inputArtifactRefs.filter(
       (ref) => ref.role !== ACTIVE_CONTEXT_ARTIFACT_ROLE,
@@ -442,7 +462,10 @@ async function materializeContextInput(
 
 @Injectable()
 export class ExecutionStepService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly artifactStorage: ExecutionArtifactStorageService,
+  ) {}
 
   async createStep(
     input: CreateExecutionStepInput,
@@ -527,7 +550,11 @@ export class ExecutionStepService {
 
   async releaseDependents(completedStepId: string): Promise<number> {
     return this.dataSource.transaction((manager) =>
-      releaseExecutionStepDependents(manager, completedStepId),
+      releaseExecutionStepDependents(
+        manager,
+        completedStepId,
+        this.artifactStorage,
+      ),
     );
   }
 }

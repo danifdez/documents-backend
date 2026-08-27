@@ -19,19 +19,28 @@ describe('ExecutionArtifactService', () => {
           artifactId: 'first',
           kind: 'vector_points',
           producedByAttemptId: 'attempt',
-          body: Buffer.from('{"points":[1]}'),
+          body: null,
         },
         {
           artifactId: 'second',
           kind: 'vector_points',
           producedByAttemptId: 'attempt',
-          body: Buffer.from('{"points":[2]}'),
+          body: null,
         },
       ]),
     };
     const service = new ExecutionArtifactService(
       steps as any,
       artifacts as any,
+      {
+        readBody: jest.fn(async (artifact) =>
+          Buffer.from(
+            artifact.artifactId === 'first'
+              ? '{"points":[1]}'
+              : '{"points":[2]}',
+          ),
+        ),
+      } as any,
     );
 
     await expect(

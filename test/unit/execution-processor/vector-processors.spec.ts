@@ -7,7 +7,7 @@ const execution = (
   taskType: string,
   payload: Record<string, unknown>,
   result: Record<string, unknown>,
-) => ({ taskType, payload, result }) as ExecutionEntity;
+) => ({ taskType, payload, result }) as unknown as ExecutionEntity;
 
 describe('vector domain finalizers', () => {
   it('persists workspace points before marking a resource ready', async () => {

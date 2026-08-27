@@ -40,6 +40,7 @@ describe('ExecutionAttemptService', () => {
   let eventRepo: Record<string, jest.Mock>;
   let artifactRepo: Record<string, jest.Mock>;
   let workerRepo: Record<string, jest.Mock>;
+  let artifactStorage: Record<string, jest.Mock>;
   let manager: Record<string, jest.Mock>;
 
   const readyStep = () => ({
@@ -162,8 +163,20 @@ describe('ExecutionAttemptService', () => {
     artifactRepo = {
       findOneBy: jest.fn().mockResolvedValue(null),
       findBy: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: jest.fn(),
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
+    };
+    artifactStorage = {
+      save: jest.fn(async (_manager, input) =>
+        artifactRepo.save(
+          artifactRepo.create({
+            ...input,
+            storageRef: `postgres:v1:${input.artifactId}`,
+          }),
+        ),
+      ),
+      hydrate: jest.fn(async (artifact) => artifact),
     };
     workerRepo = {
       findOne: jest.fn(),
@@ -185,10 +198,14 @@ describe('ExecutionAttemptService', () => {
       query: jest.fn().mockResolvedValue([]),
       save: jest.fn(async (value) => value),
     };
-    service = new ExecutionAttemptService({
-      transaction: jest.fn(async (callback) => callback(manager)),
-      getRepository: manager.getRepository,
-    } as any);
+    service = new ExecutionAttemptService(
+      {
+        transaction: jest.fn(async (callback) => callback(manager)),
+        getRepository: manager.getRepository,
+      } as any,
+      undefined as any,
+      artifactStorage as any,
+    );
   });
 
   it('reports cancellation without extending the lease before an effect', async () => {
@@ -288,6 +305,44 @@ describe('ExecutionAttemptService', () => {
     ).rejects.toThrow('artifact_not_authorized');
   });
 
+  it('resolves an externally stored input artifact through the storage abstraction', async () => {
+    attemptRepo.findOneBy.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      status: ExecutionStepStatus.RUNNING,
+      currentAttemptId: ATTEMPT_ID,
+      inputArtifactRefs: [{ role: 'source', artifactId: ARTIFACT_ID }],
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      rootExecutionId: EXECUTION_ID,
+      status: ExecutionStatus.RUNNING,
+      cancellationRequestedAt: null,
+    });
+    const artifact = {
+      artifactId: ARTIFACT_ID,
+      rootExecutionId: EXECUTION_ID,
+      storageRef: `file:v1/aa/bb/${ARTIFACT_ID}.blob`,
+      body: null,
+    };
+    const builder = {
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(artifact),
+    };
+    artifactRepo.createQueryBuilder.mockReturnValue(builder);
+    artifactStorage.hydrate.mockImplementation(async (value) => {
+      value.body = Buffer.from('external input');
+      return value;
+    });
+
+    await expect(
+      service.getInputArtifact(ATTEMPT_ID, WORKER_ID, ARTIFACT_ID),
+    ).resolves.toMatchObject({ body: Buffer.from('external input') });
+    expect(artifactStorage.hydrate).toHaveBeenCalledWith(artifact);
+  });
+
   it('stores an output artifact under the active fenced attempt', async () => {
     const body = Buffer.from('{"points":[]}');
     attemptRepo.findOne.mockResolvedValue(runningAttempt());
@@ -311,6 +366,14 @@ describe('ExecutionAttemptService', () => {
     });
 
     expect(ack.code).toBe('received');
+    expect(artifactStorage.save).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        artifactId: ARTIFACT_ID,
+        producedByAttemptId: ATTEMPT_ID,
+        body,
+      }),
+    );
     expect(artifactRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         artifactId: ARTIFACT_ID,

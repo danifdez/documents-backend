@@ -28,6 +28,8 @@ Work can have high, normal, or background priority. Documents also considers whe
 
 Documents keeps a durable history of each action. If a processor stops responding, unfinished work can be made available for another attempt. Late results from an expired attempt are ignored, and repeated delivery of the same accepted result does not apply the result twice.
 
+Artifact metadata is durable in PostgreSQL. Small bodies may remain inline, while larger bodies are stored in the installation's artifact directory. Downloads, finalization, and evaluation exports resolve either location through the same authorization and integrity checks.
+
 Cancellation is checked before and after processing. Work already being calculated may need to finish locally, but its output is discarded if the cancellation was observed.
 
 ## Progress and notifications

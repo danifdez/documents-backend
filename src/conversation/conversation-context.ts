@@ -8,6 +8,7 @@ import {
   ConversationArtifactRevisionEntity,
 } from './conversation-artifact-revision.entity';
 import type { ChatExecutionPayload } from '../execution/execution-task-payload.types';
+import { ExecutionArtifactStorageService } from '../execution/execution-artifact-storage.service';
 
 export const ACTIVE_CONTEXT_ARTIFACT_ROLE = 'active_context';
 export const ACTIVE_CONTEXT_SCHEMA = 'active-context/1';
@@ -111,6 +112,7 @@ export function buildActiveConversationContext(
 
 export async function freezeActiveContextArtifact(
   manager: EntityManager,
+  artifactStorage: ExecutionArtifactStorageService,
   input: {
     rootExecutionId: string;
     sessionId: string | null;
@@ -174,25 +176,22 @@ export async function freezeActiveContextArtifact(
       derivedArtifacts.flatMap((artifact) => artifact.inputSourceIds ?? []),
     ),
   ];
-  return artifactRepo.save(
-    artifactRepo.create({
-      artifactId,
-      rootExecutionId: input.rootExecutionId,
-      kind: ACTIVE_CONTEXT_ARTIFACT_ROLE,
-      contentHash: contentHash(body),
-      size: String(body.length),
-      mediaType: 'application/vnd.documents.active-context+json',
-      encoding: 'identity',
-      dataClassification: 'workspace',
-      redaction: { applied: false },
-      retentionClass: 'evaluation',
-      createdByEventId: input.causedByEventId,
-      producedByAttemptId: null,
-      inputSourceIds,
-      storageRef: `execution:${input.rootExecutionId}:artifact:${artifactId}`,
-      body,
-    }),
-  );
+  return artifactStorage.save(manager, {
+    artifactId,
+    rootExecutionId: input.rootExecutionId,
+    kind: ACTIVE_CONTEXT_ARTIFACT_ROLE,
+    contentHash: contentHash(body),
+    size: String(body.length),
+    mediaType: 'application/vnd.documents.active-context+json',
+    encoding: 'identity',
+    dataClassification: 'workspace',
+    redaction: { applied: false },
+    retentionClass: 'evaluation',
+    createdByEventId: input.causedByEventId,
+    producedByAttemptId: null,
+    inputSourceIds,
+    body,
+  });
 }
 
 function revisionPointer(

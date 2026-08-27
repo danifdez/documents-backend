@@ -21,12 +21,19 @@ describe('context input workflow', () => {
   const manager = {
     getRepository: jest.fn(() => repository),
   } as unknown as EntityManager;
+  const artifactStorage = {
+    save: jest.fn(async (_manager, input) =>
+      repository.save(
+        repository.create({ ...input, storageRef: 'postgres:v1:test' }),
+      ),
+    ),
+  };
 
   beforeEach(() => jest.clearAllMocks());
 
   it('keeps a bounded current message on the direct chat path', async () => {
     await expect(
-      buildContextInputWorkflow(manager, {
+      buildContextInputWorkflow(manager, artifactStorage as any, {
         executionId: requestArtifact.rootExecutionId,
         taskType: 'assistant-chat',
         message: 'short request',
@@ -40,14 +47,18 @@ describe('context input workflow', () => {
 
   it('creates an immutable chunk plan, reduction tree and blocked chat step', async () => {
     const message = `${'alpha '.repeat(2000)}\n${'omega '.repeat(1200)}`;
-    const workflow = await buildContextInputWorkflow(manager, {
-      executionId: requestArtifact.rootExecutionId,
-      taskType: 'agent-chat',
-      message,
-      requestArtifact,
-      effectivePayload: { ownerId: 7 },
-      causedByEventId: '10000000-0000-4000-8000-000000000004',
-    });
+    const workflow = await buildContextInputWorkflow(
+      manager,
+      artifactStorage as any,
+      {
+        executionId: requestArtifact.rootExecutionId,
+        taskType: 'agent-chat',
+        message,
+        requestArtifact,
+        effectivePayload: { ownerId: 7 },
+        causedByEventId: '10000000-0000-4000-8000-000000000004',
+      },
+    );
 
     expect(workflow).not.toBeNull();
     const plan = JSON.parse(workflow!.planArtifact.body!.toString('utf8'));
@@ -74,7 +85,7 @@ describe('context input workflow', () => {
 
   it('rejects chat messages beyond the bounded durable plan', async () => {
     await expect(
-      buildContextInputWorkflow(manager, {
+      buildContextInputWorkflow(manager, artifactStorage as any, {
         executionId: requestArtifact.rootExecutionId,
         taskType: 'assistant-chat',
         message: 'x'.repeat(250_001),
@@ -86,14 +97,18 @@ describe('context input workflow', () => {
   });
 
   it('builds bounded reduction levels for the largest supported plan', async () => {
-    const workflow = await buildContextInputWorkflow(manager, {
-      executionId: requestArtifact.rootExecutionId,
-      taskType: 'assistant-chat',
-      message: 'source '.repeat(30_000),
-      requestArtifact,
-      effectivePayload: { ownerId: 1 },
-      causedByEventId: '10000000-0000-4000-8000-000000000004',
-    });
+    const workflow = await buildContextInputWorkflow(
+      manager,
+      artifactStorage as any,
+      {
+        executionId: requestArtifact.rootExecutionId,
+        taskType: 'assistant-chat',
+        message: 'source '.repeat(30_000),
+        requestArtifact,
+        effectivePayload: { ownerId: 1 },
+        causedByEventId: '10000000-0000-4000-8000-000000000004',
+      },
+    );
 
     const reductions = workflow!.steps.filter(
       (step) => step.work.taskType === 'context-input-reduce',

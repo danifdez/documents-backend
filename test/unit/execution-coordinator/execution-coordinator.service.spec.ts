@@ -131,7 +131,9 @@ describe('ExecutionCoordinatorService', () => {
 
   it('fails explicitly when the task type has no finalizer', async () => {
     executionService.claimReadyForFinalization
-      .mockResolvedValueOnce(execution({ taskType: 'unknown' }))
+      .mockResolvedValueOnce(
+        execution({ taskType: 'unknown' as ExecutionEntity['taskType'] }),
+      )
       .mockResolvedValueOnce(null);
     processorFactory.getProcessor.mockReturnValue(undefined);
 

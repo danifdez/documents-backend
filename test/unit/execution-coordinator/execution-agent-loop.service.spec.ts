@@ -14,6 +14,7 @@ describe('ExecutionAgentLoopService', () => {
       } as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     await expect(service.releaseTerminalDelegations(4)).resolves.toBe(1);
@@ -37,6 +38,7 @@ describe('ExecutionAgentLoopService', () => {
       {
         transaction: jest.fn(async (callback) => callback({ query })),
       } as any,
+      {} as any,
       {} as any,
       {} as any,
     );

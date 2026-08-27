@@ -79,6 +79,7 @@ import {
   finishSkillActivations,
 } from '../conversation/skill-activation';
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
+import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 import {
   ChatCreationPayloadByKind,
   ChatExecutionPayload,
@@ -254,6 +255,7 @@ export class ExecutionService {
     private readonly config: ConfigService,
     private readonly contractValidator: ExecutionContractValidator,
     private readonly progress: ExecutionProgressService,
+    private readonly artifactStorage: ExecutionArtifactStorageService,
   ) {}
 
   resolveAccessScope(user: unknown): ExecutionAccessScope {
@@ -929,13 +931,17 @@ export class ExecutionService {
       input.work.payload && typeof input.work.payload === 'object'
         ? (input.work.payload as Record<string, unknown>)
         : {};
-    const contextArtifact = await freezeActiveContextArtifact(manager, {
-      rootExecutionId: child.rootExecutionId,
-      sessionId: child.sessionId,
-      turnId: child.turnId,
-      causedByEventId: event.eventId,
-      effectivePayload: childPayload,
-    });
+    const contextArtifact = await freezeActiveContextArtifact(
+      manager,
+      this.artifactStorage,
+      {
+        rootExecutionId: child.rootExecutionId,
+        sessionId: child.sessionId,
+        turnId: child.turnId,
+        causedByEventId: event.eventId,
+        effectivePayload: childPayload,
+      },
+    );
     const step = await createExecutionStep(manager, {
       executionId,
       stepKind: ExecutionStepKind.INFERENCE,
@@ -1214,24 +1220,21 @@ export class ExecutionService {
         missingEvidence: [],
       });
       await manager.save(execution);
-      const requestArtifact = await manager.save(
-        manager.getRepository(ExecutionArtifactEntity).create({
-          artifactId,
-          rootExecutionId,
-          kind: 'user_message',
-          contentHash: contentHash(body),
-          size: String(body.length),
-          mediaType: 'text/plain',
-          encoding: 'identity',
-          dataClassification: 'workspace',
-          redaction: { applied: safeMessage !== message },
-          retentionClass: 'evaluation',
-          createdByEventId: null,
-          inputSourceIds: [sourceId],
-          storageRef: `execution:${rootExecutionId}:artifact:${artifactId}`,
-          body,
-        }),
-      );
+      const requestArtifact = await this.artifactStorage.save(manager, {
+        artifactId,
+        rootExecutionId,
+        kind: 'user_message',
+        contentHash: contentHash(body),
+        size: String(body.length),
+        mediaType: 'text/plain',
+        encoding: 'identity',
+        dataClassification: 'workspace',
+        redaction: { applied: safeMessage !== message },
+        retentionClass: 'evaluation',
+        createdByEventId: null,
+        inputSourceIds: [sourceId],
+        body,
+      });
       const createdEvent = await this.appendBackendEvent(
         manager,
         execution,
@@ -1358,14 +1361,18 @@ export class ExecutionService {
     const taskType =
       execution.taskType === 'assistant-chat' ? 'assistant-chat' : 'agent-chat';
     const effectivePayload = execution.payload as ChatExecutionPayload;
-    const workflow = await buildContextInputWorkflow(manager, {
-      executionId: execution.executionId,
-      taskType,
-      message,
-      requestArtifact,
-      effectivePayload,
-      causedByEventId,
-    });
+    const workflow = await buildContextInputWorkflow(
+      manager,
+      this.artifactStorage,
+      {
+        executionId: execution.executionId,
+        taskType,
+        message,
+        requestArtifact,
+        effectivePayload,
+        causedByEventId,
+      },
+    );
     if (workflow) {
       for (const step of workflow.steps) {
         await createExecutionStep(manager, {
@@ -1376,14 +1383,18 @@ export class ExecutionService {
       return;
     }
 
-    const contextArtifact = await freezeActiveContextArtifact(manager, {
-      rootExecutionId: execution.rootExecutionId,
-      sessionId: execution.sessionId,
-      turnId: execution.turnId,
-      causedByEventId,
-      effectivePayload,
-      derivedFromArtifactIds: [requestArtifact.artifactId],
-    });
+    const contextArtifact = await freezeActiveContextArtifact(
+      manager,
+      this.artifactStorage,
+      {
+        rootExecutionId: execution.rootExecutionId,
+        sessionId: execution.sessionId,
+        turnId: execution.turnId,
+        causedByEventId,
+        effectivePayload,
+        derivedFromArtifactIds: [requestArtifact.artifactId],
+      },
+    );
     await createExecutionStep(manager, {
       executionId: execution.executionId,
       stepKind: ExecutionStepKind.INFERENCE,
@@ -1529,24 +1540,21 @@ export class ExecutionService {
       const inputArtifactRefs = await Promise.all(
         (options?.inputArtifacts ?? []).map(async (input) => {
           const artifactId = randomUUID();
-          await manager.save(
-            manager.getRepository(ExecutionArtifactEntity).create({
-              artifactId,
-              rootExecutionId,
-              kind: input.kind,
-              contentHash: contentHash(input.body),
-              size: String(input.body.length),
-              mediaType: input.mediaType,
-              encoding: 'identity',
-              dataClassification: input.dataClassification ?? 'workspace',
-              redaction: { applied: false },
-              retentionClass: input.retentionClass ?? 'execution',
-              createdByEventId: null,
-              inputSourceIds: [],
-              storageRef: `execution:${rootExecutionId}:artifact:${artifactId}`,
-              body: input.body,
-            }),
-          );
+          await this.artifactStorage.save(manager, {
+            artifactId,
+            rootExecutionId,
+            kind: input.kind,
+            contentHash: contentHash(input.body),
+            size: String(input.body.length),
+            mediaType: input.mediaType,
+            encoding: 'identity',
+            dataClassification: input.dataClassification ?? 'workspace',
+            redaction: { applied: false },
+            retentionClass: input.retentionClass ?? 'execution',
+            createdByEventId: null,
+            inputSourceIds: [],
+            body: input.body,
+          });
           return { role: input.role, artifactId };
         }),
       );
@@ -1997,24 +2005,21 @@ export class ExecutionService {
           );
         }
         if (body !== null) this.rejectSensitiveArtifactBody(input, body);
-        await repo.save(
-          repo.create({
-            artifactId: input.artifactId,
-            rootExecutionId,
-            kind: input.kind,
-            contentHash: input.contentHash,
-            size: String(input.size),
-            mediaType: input.mediaType,
-            encoding: input.encoding ?? 'identity',
-            dataClassification: input.dataClassification,
-            redaction: input.redaction ?? { applied: false },
-            retentionClass: input.retentionClass ?? 'evaluation',
-            createdByEventId: input.createdByEventId ?? null,
-            inputSourceIds: input.inputSourceIds ?? [],
-            storageRef: `execution:${rootExecutionId}:artifact:${input.artifactId}`,
-            body,
-          }),
-        );
+        await this.artifactStorage.save(manager, {
+          artifactId: input.artifactId,
+          rootExecutionId,
+          kind: input.kind,
+          contentHash: input.contentHash,
+          size: String(input.size),
+          mediaType: input.mediaType,
+          encoding: input.encoding ?? 'identity',
+          dataClassification: input.dataClassification,
+          redaction: input.redaction ?? { applied: false },
+          retentionClass: input.retentionClass ?? 'evaluation',
+          createdByEventId: input.createdByEventId ?? null,
+          inputSourceIds: input.inputSourceIds ?? [],
+          body,
+        });
         if (!body)
           this.addMissing(execution, `artifact_body:${input.artifactId}`);
         accepted += 1;
@@ -2268,24 +2273,21 @@ export class ExecutionService {
         const artifactId = randomUUID();
         const safeReply = redactExecutionText(reply);
         const body = Buffer.from(safeReply, 'utf8');
-        await manager.save(
-          manager.getRepository(ExecutionArtifactEntity).create({
-            artifactId,
-            rootExecutionId: execution.rootExecutionId,
-            kind: 'model_response',
-            contentHash: contentHash(body),
-            size: String(body.length),
-            mediaType: 'text/plain',
-            encoding: 'identity',
-            dataClassification: 'workspace',
-            redaction: { applied: safeReply !== reply },
-            retentionClass: 'evaluation',
-            createdByEventId: null,
-            inputSourceIds: observedSourceIds,
-            storageRef: `execution:${execution.rootExecutionId}:artifact:${artifactId}`,
-            body,
-          }),
-        );
+        await this.artifactStorage.save(manager, {
+          artifactId,
+          rootExecutionId: execution.rootExecutionId,
+          kind: 'model_response',
+          contentHash: contentHash(body),
+          size: String(body.length),
+          mediaType: 'text/plain',
+          encoding: 'identity',
+          dataClassification: 'workspace',
+          redaction: { applied: safeReply !== reply },
+          retentionClass: 'evaluation',
+          createdByEventId: null,
+          inputSourceIds: observedSourceIds,
+          body,
+        });
         sequence += 1;
         const messageEvent = await this.appendBackendEvent(
           manager,
@@ -2472,17 +2474,18 @@ export class ExecutionService {
     );
   }
 
-  private loadArtifactsWithBody(
+  private async loadArtifactsWithBody(
     repository: Repository<ExecutionArtifactEntity>,
     rootExecutionId: string,
   ): Promise<ExecutionArtifactEntity[]> {
-    return repository
+    const artifacts = await repository
       .createQueryBuilder('artifact')
       .addSelect('artifact.body')
       .where('artifact.root_execution_id = :rootExecutionId', {
         rootExecutionId,
       })
       .getMany();
+    return this.artifactStorage.hydrateAll(artifacts);
   }
 
   private assertDeterministicPartial(
@@ -2929,7 +2932,7 @@ export class ExecutionService {
         order: { sequence: 'ASC' },
       })
     ).map((row) => row.envelope);
-    const artifacts = await this.artifactRepo
+    const storedArtifacts = await this.artifactRepo
       .createQueryBuilder('artifact')
       .addSelect('artifact.body')
       .where('artifact.root_execution_id = :rootExecutionId', {
@@ -2937,6 +2940,7 @@ export class ExecutionService {
       })
       .orderBy('artifact.created_at', 'ASC')
       .getMany();
+    const artifacts = await this.artifactStorage.hydrateAll(storedArtifacts);
     const skillActivations = await this.dataSource
       .getRepository(SkillActivationEntity)
       .createQueryBuilder('activation')

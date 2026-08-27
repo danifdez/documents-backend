@@ -92,6 +92,7 @@ describe('ExecutionToolPlanService', () => {
     execution = {
       executionId: EXECUTION_ID,
       rootExecutionId: EXECUTION_ID,
+      taskType: 'assistant-chat',
       status: ExecutionStatus.RUNNING,
       phase: 'backend_finalization',
       lastEventId: EVENT_ID,

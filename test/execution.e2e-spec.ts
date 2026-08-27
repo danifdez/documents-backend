@@ -1,5 +1,8 @@
 import { randomUUID } from 'crypto';
 import { config as loadEnv } from 'dotenv';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { DataSource, In } from 'typeorm';
 import { CreateProjects1757668140000 } from '../migrations/1757668140000-CreateProjects';
 import { CreateExecutions1757668140001 } from '../migrations/1757668140001-CreateExecutions';
@@ -58,6 +61,8 @@ import { ExecutionConfirmationService } from '../src/execution/execution-confirm
 import { ExecutionToolRuntimeService } from '../src/execution-coordinator/execution-tool-runtime.service';
 import { ExecutionAgentLoopService } from '../src/execution-coordinator/execution-agent-loop.service';
 import { ExecutionTerminalCandidateService } from '../src/execution-coordinator/execution-terminal-candidate.service';
+import { ExecutionArtifactStorageService } from '../src/execution/execution-artifact-storage.service';
+import { ChatExecutionPayload } from '../src/execution/execution-task-payload.types';
 import {
   assertOperationBudgetProjection,
   governedBudgetStart,
@@ -84,6 +89,7 @@ import { AgentEntity } from '../src/agent/agent.entity';
 import { MemoryEntryEntity } from '../src/memory/memory-entry.entity';
 import { SkillActivationEntity } from '../src/conversation/skill-activation.entity';
 import { advanceSkillActivation } from '../src/conversation/skill-activation';
+import { ActiveCapabilitySet } from '../src/conversation/active-capabilities';
 
 loadEnv({ path: '.env' });
 
@@ -98,8 +104,12 @@ describe('execution PostgreSQL integration', () => {
   let confirmationService: ExecutionConfirmationService;
   let agentLoopService: ExecutionAgentLoopService;
   let terminalCandidateService: ExecutionTerminalCandidateService;
+  let artifactDirectory: string;
 
   beforeAll(async () => {
+    artifactDirectory = await mkdtemp(
+      join(tmpdir(), 'documents-e2e-artifacts-'),
+    );
     dataSource = new DataSource({
       type: 'postgres',
       host: process.env.POSTGRES_HOST,
@@ -176,8 +186,15 @@ describe('execution PostgreSQL integration', () => {
 
     const config = {
       get: (key: string, fallback?: unknown) =>
-        key === 'FEATURE_BROWSER_FEDERATION' ? 'true' : fallback,
+        key === 'FEATURE_BROWSER_FEDERATION'
+          ? 'true'
+          : key === 'EXECUTION_ARTIFACT_STORAGE_DIR'
+            ? artifactDirectory
+            : key === 'EXECUTION_ARTIFACT_INLINE_MAX_BYTES'
+              ? String(8 * 1024 * 1024)
+              : fallback,
     } as any;
+    const artifactStorage = new ExecutionArtifactStorageService(config);
     budgets = new ExecutionProgressService(dataSource, config);
     service = new ExecutionService(
       dataSource,
@@ -187,10 +204,12 @@ describe('execution PostgreSQL integration', () => {
       config,
       new ExecutionContractValidator(),
       budgets,
+      artifactStorage,
     );
     attemptService = new ExecutionAttemptService(
       dataSource,
       new ExecutionContractValidator(),
+      artifactStorage,
     );
     workerService = new WorkerService(
       dataSource.getRepository(WorkerEntity),
@@ -210,6 +229,7 @@ describe('execution PostgreSQL integration', () => {
       dataSource,
       budgets,
       toolPlanService,
+      artifactStorage,
     );
     terminalCandidateService = new ExecutionTerminalCandidateService(
       dataSource,
@@ -217,9 +237,16 @@ describe('execution PostgreSQL integration', () => {
   });
 
   afterAll(async () => {
-    if (!dataSource?.isInitialized) return;
-    await dataSource.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await dataSource.destroy();
+    try {
+      if (dataSource?.isInitialized) {
+        await dataSource.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        await dataSource.destroy();
+      }
+    } finally {
+      if (artifactDirectory) {
+        await rm(artifactDirectory, { recursive: true, force: true });
+      }
+    }
   });
 
   beforeEach(async () => {
@@ -318,12 +345,14 @@ describe('execution PostgreSQL integration', () => {
   ): Promise<ExecutionEntity> =>
     (
       await service.createForChat(kind, message, scope, {
-        ownerId: 1,
         ...payload,
+        ownerId: 1,
+        folderScope: null,
+        systemPrompt: null,
       })
     ).execution;
 
-  const activeCapabilities = (...names: string[]) => ({
+  const activeCapabilities = (...names: string[]): ActiveCapabilitySet => ({
     schemaVersion: 'active-capability-set/1',
     owner: { type: 'assistant', id: 1 },
     selectionPolicy: 'backend-signals/1',
@@ -527,11 +556,12 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('commits an execution and its initial step atomically', async () => {
-    const inputBody = Buffer.from('Hello artifact', 'utf8');
+    const inputBody = Buffer.alloc(8 * 1024 * 1024 + 1, 'a');
+    const payload = { resourceId: 7, samples: ['Hello'] };
     const created = await service.create(
       'detect-language',
       ExecutionPriority.NORMAL,
-      { content: 'Hello' },
+      payload,
       {
         inputArtifacts: [
           {
@@ -543,7 +573,7 @@ describe('execution PostgreSQL integration', () => {
         ],
         initialStep: {
           stepKind: ExecutionStepKind.CODE,
-          work: { taskType: 'detect-language', content: 'Hello' },
+          work: { taskType: 'detect-language', payload },
           requiredCapabilities: ['detect-language'],
           resourceKeys: ['resource:language-detection'],
         },
@@ -561,8 +591,18 @@ describe('execution PostgreSQL integration', () => {
       schemaVersion: 'step/1',
       stepKind: ExecutionStepKind.CODE,
       status: 'ready',
-      work: { taskType: 'detect-language', content: 'Hello' },
+      work: { taskType: 'detect-language', payload },
     });
+    const storedInput = await dataSource
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.artifact_id = :artifactId', {
+        artifactId: initialStep.inputArtifactRefs[0].artifactId,
+      })
+      .getOneOrFail();
+    expect(storedInput.body).toBeNull();
+    expect(storedInput.storageRef).toMatch(/^file:v1\//);
     await expect(
       dataSource.getRepository(ExecutionOperationEntity).findOneByOrFail({
         operationId: initialStep.operationId,
@@ -580,19 +620,14 @@ describe('execution PostgreSQL integration', () => {
       .getRepository(ExecutionEntity)
       .count();
     await expect(
-      service.create(
-        'invalid-step',
-        ExecutionPriority.NORMAL,
-        {},
-        {
-          initialStep: {
-            stepKind: ExecutionStepKind.CODE,
-            work: {},
-            availableAt: new Date('2026-08-19T10:00:00Z'),
-            deadline: new Date('2026-08-19T09:00:00Z'),
-          },
+      service.create('detect-language', ExecutionPriority.NORMAL, payload, {
+        initialStep: {
+          stepKind: ExecutionStepKind.CODE,
+          work: { taskType: 'detect-language', payload },
+          availableAt: new Date('2026-08-19T10:00:00Z'),
+          deadline: new Date('2026-08-19T09:00:00Z'),
         },
-      ),
+      }),
     ).rejects.toThrow('invalid_step_deadline');
     await expect(
       dataSource.getRepository(ExecutionEntity).count(),
@@ -609,16 +644,16 @@ describe('execution PostgreSQL integration', () => {
       schemaVersion: 'step-assignment/1',
       executionId: created.executionId,
       stepKind: ExecutionStepKind.CODE,
-      work: { taskType: 'detect-language', content: 'Hello' },
+      work: { taskType: 'detect-language', payload },
     });
     expect(assignment!.inputArtifactRefs).toHaveLength(1);
-    await expect(
-      attemptService.getInputArtifact(
-        assignment!.attemptId,
-        workerId,
-        assignment!.inputArtifactRefs[0].artifactId,
-      ),
-    ).resolves.toMatchObject({ body: inputBody, mediaType: 'text/plain' });
+    const hydratedInput = await attemptService.getInputArtifact(
+      assignment!.attemptId,
+      workerId,
+      assignment!.inputArtifactRefs[0].artifactId,
+    );
+    expect(hydratedInput.mediaType).toBe('text/plain');
+    expect(hydratedInput.body?.equals(inputBody)).toBe(true);
     await expect(
       attemptService.renewAttemptLease(assignment!.attemptId, workerId, 60_000),
     ).resolves.toMatchObject({ cancelled: false });
@@ -628,7 +663,10 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('persists one-shot model work as an inference step', async () => {
-    const payload = { question: 'What is this document about?' };
+    const payload = {
+      question: 'What is this document about?',
+      graphContext: [],
+    };
     const created = await service.createInference(
       'ask',
       ExecutionPriority.NORMAL,
@@ -647,7 +685,18 @@ describe('execution PostgreSQL integration', () => {
   });
 
   it('persists domain reconciliation policy for failed steps', async () => {
-    const payload = { datasetId: 3, recordId: 5 };
+    const payload = {
+      datasetId: 3,
+      recordId: 5,
+      resourceId: 7,
+      projectId: null,
+      schema: [],
+      columnsToExtract: [],
+      documentText: 'Dataset row source',
+      sourceTitle: 'Source',
+      isAudio: false,
+      model: 'e2e-model',
+    };
     const created = await service.createInference(
       'dataset.extract-row',
       ExecutionPriority.NORMAL,
@@ -669,13 +718,13 @@ describe('execution PostgreSQL integration', () => {
     const parent = await service.create(
       'document-extraction',
       ExecutionPriority.NORMAL,
-      { resourceId: 7 },
+      { resourceId: 7, hash: 'source-hash', extension: '.wav' },
     );
     const media = Buffer.from('media-body');
     const child = await service.createInference(
       'transcribe',
       ExecutionPriority.BACKGROUND,
-      { resourceId: 7, extension: '.wav' },
+      { resourceId: 7, hash: 'source-hash', extension: '.wav' },
       {
         rootExecutionId: parent.rootExecutionId,
         parentExecutionId: parent.executionId,
@@ -820,13 +869,13 @@ describe('execution PostgreSQL integration', () => {
     const parent = await service.create(
       'document-extraction',
       ExecutionPriority.NORMAL,
-      { resourceId: 9 },
+      { resourceId: 9, hash: 'source-hash', extension: '.wav' },
       { ownerPrincipal },
     );
     const child = await service.createInference(
       'transcribe',
       ExecutionPriority.NORMAL,
-      { resourceId: 9 },
+      { resourceId: 9, hash: 'source-hash', extension: '.wav' },
       {
         rootExecutionId: parent.executionId,
         parentExecutionId: parent.executionId,
@@ -927,6 +976,8 @@ describe('execution PostgreSQL integration', () => {
   it('commits terminal state, event and publication in one transaction', async () => {
     const created = await service.create('ask', ExecutionPriority.NORMAL, {
       requestId: 'request-1',
+      question: 'Request one',
+      graphContext: [],
     });
 
     await service.markAsCompleted(created.executionId, {
@@ -954,9 +1005,12 @@ describe('execution PostgreSQL integration', () => {
 
   it('prepares a durable tool plan without creating executable work', async () => {
     const created = await service.create(
-      'tool-plan-test',
+      'assistant-chat',
       ExecutionPriority.NORMAL,
-      { activeCapabilities: activeCapabilities('documents.search') },
+      {
+        ownerId: 1,
+        activeCapabilities: activeCapabilities('documents.search'),
+      },
     );
     const stepsBefore = await dataSource
       .getRepository(ExecutionStepEntity)
@@ -1010,7 +1064,7 @@ describe('execution PostgreSQL integration', () => {
   it('persists, publishes and decides a confirmation tied to the exact tool plan', async () => {
     const ownerPrincipal = 'confirmation-e2e';
     const created = await service.create(
-      'tool-plan-test',
+      'assistant-chat',
       ExecutionPriority.NORMAL,
       {
         ownerId: 42,
@@ -1059,7 +1113,7 @@ describe('execution PostgreSQL integration', () => {
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({
       ownerId: 42,
-      taskType: 'tool-plan-test',
+      taskType: 'assistant-chat',
       confirmation: {
         operationId: prepared.plan.operationId,
         toolCallId,
@@ -1112,7 +1166,7 @@ describe('execution PostgreSQL integration', () => {
   it('expires a requested confirmation and resumes it as not executable', async () => {
     const ownerPrincipal = 'confirmation-expiry-e2e';
     const created = await service.create(
-      'tool-plan-test',
+      'assistant-chat',
       ExecutionPriority.NORMAL,
       { activeCapabilities: activeCapabilities('user_tasks.create') },
       { ownerPrincipal },
@@ -2116,15 +2170,18 @@ describe('execution PostgreSQL integration', () => {
       { runtime: 'test' },
     );
     await Promise.all(
-      ['worker-limit-first', 'worker-limit-second'].map((name) =>
+      ['worker-limit-first', 'worker-limit-second'].map(() =>
         service.create(
-          name,
+          'detect-language',
           ExecutionPriority.NORMAL,
-          {},
+          { resourceId: 7, samples: ['Hello'] },
           {
             initialStep: {
               stepKind: ExecutionStepKind.SERVICE,
-              work: { taskType: 'detect-language' },
+              work: {
+                taskType: 'detect-language',
+                payload: { resourceId: 7, samples: ['Hello'] },
+              },
               requiredCapabilities: ['detect-language'],
             },
           },
@@ -2166,15 +2223,18 @@ describe('execution PostgreSQL integration', () => {
   it('serializes resource claims and acknowledges result retries', async () => {
     const resourceKey = `resource:${randomUUID()}`;
     const executions = await Promise.all(
-      ['first', 'second'].map((name) =>
+      ['first', 'second'].map(() =>
         service.create(
-          name,
+          'detect-language',
           ExecutionPriority.NORMAL,
-          {},
+          { resourceId: 7, samples: ['Hello'] },
           {
             initialStep: {
               stepKind: ExecutionStepKind.SERVICE,
-              work: { taskType: name },
+              work: {
+                taskType: 'detect-language',
+                payload: { resourceId: 7, samples: ['Hello'] },
+              },
               resourceKeys: [resourceKey],
             },
           },
@@ -2266,7 +2326,7 @@ describe('execution PostgreSQL integration', () => {
     const created = await service.create(
       'summarize',
       ExecutionPriority.NORMAL,
-      { targetLanguage: 'en' },
+      { targetLanguage: 'en', type: 'summary' },
       {
         steps: [
           {
@@ -2274,7 +2334,11 @@ describe('execution PostgreSQL integration', () => {
             stepKind: ExecutionStepKind.INFERENCE,
             work: {
               taskType: 'summarize-map',
-              payload: { content: 'first', chunkIndex: 0 },
+              payload: {
+                content: 'first',
+                chunkIndex: 0,
+                targetLanguage: 'en',
+              },
             },
             requiredCapabilities: ['summarize-map'],
           },
@@ -2283,7 +2347,11 @@ describe('execution PostgreSQL integration', () => {
             stepKind: ExecutionStepKind.INFERENCE,
             work: {
               taskType: 'summarize-map',
-              payload: { content: 'second', chunkIndex: 1 },
+              payload: {
+                content: 'second',
+                chunkIndex: 1,
+                targetLanguage: 'en',
+              },
             },
             requiredCapabilities: ['summarize-map'],
           },
@@ -2678,7 +2746,8 @@ describe('execution PostgreSQL integration', () => {
     memory.body = 'Changed after the turn started';
     await memoryRepo.save(memory);
 
-    expect(execution.payload.activeMemory).toMatchObject({
+    const assistantPayload = execution.payload as ChatExecutionPayload;
+    expect(assistantPayload.activeMemory).toMatchObject({
       schemaVersion: 'active-memory/1',
       owner: { type: 'assistant', id: 1 },
       activeEntries: [
@@ -2696,13 +2765,14 @@ describe('execution PostgreSQL integration', () => {
       'Which editor do I prefer?',
       { ownerPrincipal: 'agent-memory-e2e' },
     );
-    expect(agentExecution.payload.activeMemory).toMatchObject({
+    const agentPayload = agentExecution.payload as ChatExecutionPayload;
+    expect(agentPayload.activeMemory).toMatchObject({
       owner: { type: 'agent', id: 1 },
       candidates: [expect.objectContaining({ entryId: agentMemory.id })],
       activeEntries: [expect.objectContaining({ entryId: agentMemory.id })],
     });
     const agentCandidates = (
-      agentExecution.payload.activeMemory as {
+      agentPayload.activeMemory as {
         candidates: Array<{ entryId: string }>;
       }
     ).candidates;
@@ -2722,13 +2792,14 @@ describe('execution PostgreSQL integration', () => {
       { ownerPrincipal: 'folder-capability-e2e' },
       { ownerId: 1, folderScope: '/workspace/spoofed' },
     );
+    const acceptedPayload = accepted.execution.payload as ChatExecutionPayload;
     const capabilityNames = (
-      accepted.execution.payload.activeCapabilities as {
+      acceptedPayload.activeCapabilities as {
         tools: Array<{ name: string }>;
       }
     ).tools.map(({ name }) => name);
 
-    expect(accepted.execution.payload.folderScope).toBe('/workspace/real');
+    expect(acceptedPayload.folderScope).toBe('/workspace/real');
     expect(capabilityNames).toEqual(
       expect.arrayContaining([
         'workspace_files.list',
@@ -2738,7 +2809,7 @@ describe('execution PostgreSQL integration', () => {
         'workspace_files.delete',
       ]),
     );
-    expect(accepted.execution.payload.activeCapabilities.skills).toEqual(
+    expect(acceptedPayload.activeCapabilities!.skills).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           skillId: 'workspace-document-workflow',
@@ -2750,9 +2821,9 @@ describe('execution PostgreSQL integration', () => {
         }),
       ]),
     );
-    expect(
-      accepted.execution.payload.activeCapabilities.skills[0],
-    ).not.toHaveProperty('instructions');
+    expect(acceptedPayload.activeCapabilities!.skills[0]).not.toHaveProperty(
+      'instructions',
+    );
   });
 
   it('persists and closes a skill activation with its execution', async () => {
@@ -2763,7 +2834,7 @@ describe('execution PostgreSQL integration', () => {
       'assistant_chat',
       'Modify the budget document',
       { ownerPrincipal: 'skill-activation-e2e' },
-      { ownerId: 1 },
+      { ownerId: 1, folderScope: null },
     );
     const repo = dataSource.getRepository(SkillActivationEntity);
     const active = await repo.findOneByOrFail({
@@ -2837,7 +2908,7 @@ describe('execution PostgreSQL integration', () => {
       'assistant_chat',
       'Compare evidence in the document files',
       { ownerPrincipal: 'multiple-skills-e2e' },
-      { ownerId: 1 },
+      { ownerId: 1, folderScope: null },
     );
     const repo = dataSource.getRepository(SkillActivationEntity);
     const active = await repo.find({

@@ -9,6 +9,7 @@ import {
   executionTaskWork,
 } from '../execution/execution-task-payload.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
+import { ExecutionArtifactStorageService } from '../execution/execution-artifact-storage.service';
 import { MAX_ACTIVE_MESSAGE_CHARS } from './conversation-context';
 import { MAX_CHAT_MESSAGE_CHARS } from './conversation.constants';
 
@@ -53,6 +54,7 @@ export interface ContextInputWorkflow {
 
 export async function buildContextInputWorkflow(
   manager: EntityManager,
+  artifactStorage: ExecutionArtifactStorageService,
   input: {
     executionId: string;
     taskType: 'assistant-chat' | 'agent-chat';
@@ -88,29 +90,22 @@ export async function buildContextInputWorkflow(
     })),
   };
   const planBody = Buffer.from(canonicalJson(plan), 'utf8');
-  const planArtifact = await manager
-    .getRepository(ExecutionArtifactEntity)
-    .save(
-      manager.getRepository(ExecutionArtifactEntity).create({
-        artifactId: planArtifactId,
-        rootExecutionId: input.requestArtifact.rootExecutionId,
-        kind: 'context_chunk_plan',
-        contentHash: contentHash(planBody),
-        size: String(planBody.length),
-        mediaType: 'application/vnd.documents.context-chunk-plan+json',
-        encoding: 'identity',
-        dataClassification: 'workspace',
-        redaction: { applied: false },
-        retentionClass: 'evaluation',
-        createdByEventId: input.causedByEventId,
-        producedByAttemptId: null,
-        inputSourceIds: input.requestArtifact.inputSourceIds,
-        storageRef:
-          `execution:${input.requestArtifact.rootExecutionId}:artifact:` +
-          planArtifactId,
-        body: planBody,
-      }),
-    );
+  const planArtifact = await artifactStorage.save(manager, {
+    artifactId: planArtifactId,
+    rootExecutionId: input.requestArtifact.rootExecutionId,
+    kind: 'context_chunk_plan',
+    contentHash: contentHash(planBody),
+    size: String(planBody.length),
+    mediaType: 'application/vnd.documents.context-chunk-plan+json',
+    encoding: 'identity',
+    dataClassification: 'workspace',
+    redaction: { applied: false },
+    retentionClass: 'evaluation',
+    createdByEventId: input.causedByEventId,
+    producedByAttemptId: null,
+    inputSourceIds: input.requestArtifact.inputSourceIds,
+    body: planBody,
+  });
 
   const mapSteps = chunks.map((chunk) => ({
     stepId: randomUUID(),

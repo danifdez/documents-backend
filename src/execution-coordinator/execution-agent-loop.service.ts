@@ -2,7 +2,6 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { canonicalHash, contentHash } from '../execution/execution-canonical';
-import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 import { ExecutionEventEntity } from '../execution/execution-event.entity';
 import {
   appendBackendExecutionEvent,
@@ -26,6 +25,7 @@ import {
   executionTaskWork,
 } from '../execution/execution-task-payload.types';
 import { COORDINATION_PENDING_PHASE } from '../execution/execution.constants';
+import { ExecutionArtifactStorageService } from '../execution/execution-artifact-storage.service';
 import {
   ACTIVE_CONTEXT_ARTIFACT_ROLE,
   freezeActiveContextArtifact,
@@ -73,6 +73,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     private readonly dataSource: DataSource,
     private readonly progress: ExecutionProgressService,
     private readonly toolPlans: ExecutionToolPlanService,
+    private readonly artifactStorage: ExecutionArtifactStorageService,
   ) {}
 
   async selectNextWork(limit = 20): Promise<number> {
@@ -355,14 +356,18 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         const retainedRefs = locked.inputArtifactRefs.filter(
           (ref) => ref.role !== ACTIVE_CONTEXT_ARTIFACT_ROLE,
         );
-        const contextArtifact = await freezeActiveContextArtifact(manager, {
-          rootExecutionId: execution.rootExecutionId,
-          sessionId: execution.sessionId,
-          turnId: execution.turnId,
-          causedByEventId: decision.eventId,
-          effectivePayload: payload,
-          derivedFromArtifactIds: retainedRefs.map((ref) => ref.artifactId),
-        });
+        const contextArtifact = await freezeActiveContextArtifact(
+          manager,
+          this.artifactStorage,
+          {
+            rootExecutionId: execution.rootExecutionId,
+            sessionId: execution.sessionId,
+            turnId: execution.turnId,
+            causedByEventId: decision.eventId,
+            effectivePayload: payload,
+            derivedFromArtifactIds: retainedRefs.map((ref) => ref.artifactId),
+          },
+        );
         locked.inputArtifactRefs = [
           ...retainedRefs,
           {
@@ -938,16 +943,20 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       causedByEventId: string;
     },
   ): Promise<ExecutionStepEntity> {
-    const contextArtifact = await freezeActiveContextArtifact(manager, {
-      rootExecutionId: input.execution.rootExecutionId,
-      sessionId: input.execution.sessionId,
-      turnId: input.execution.turnId,
-      causedByEventId: input.causedByEventId,
-      effectivePayload: input.payload,
-      derivedFromArtifactIds: input.inputArtifactRefs.map(
-        (artifact) => artifact.artifactId,
-      ),
-    });
+    const contextArtifact = await freezeActiveContextArtifact(
+      manager,
+      this.artifactStorage,
+      {
+        rootExecutionId: input.execution.rootExecutionId,
+        sessionId: input.execution.sessionId,
+        turnId: input.execution.turnId,
+        causedByEventId: input.causedByEventId,
+        effectivePayload: input.payload,
+        derivedFromArtifactIds: input.inputArtifactRefs.map(
+          (artifact) => artifact.artifactId,
+        ),
+      },
+    );
     const phase =
       input.purpose === 'repair'
         ? 'output_repair'
@@ -1172,24 +1181,21 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
           });
     const artifactId = randomUUID();
     const body = Buffer.from(reply, 'utf8');
-    await manager.getRepository(ExecutionArtifactEntity).save(
-      manager.getRepository(ExecutionArtifactEntity).create({
-        artifactId,
-        rootExecutionId: execution.rootExecutionId,
-        kind: 'model_response',
-        contentHash: contentHash(body),
-        size: String(body.length),
-        mediaType: 'text/plain',
-        encoding: 'identity',
-        dataClassification: 'workspace',
-        redaction: { applied: false },
-        retentionClass: 'evaluation',
-        createdByEventId: null,
-        inputSourceIds: [],
-        storageRef: `execution:${execution.rootExecutionId}:artifact:${artifactId}`,
-        body,
-      }),
-    );
+    await this.artifactStorage.save(manager, {
+      artifactId,
+      rootExecutionId: execution.rootExecutionId,
+      kind: 'model_response',
+      contentHash: contentHash(body),
+      size: String(body.length),
+      mediaType: 'text/plain',
+      encoding: 'identity',
+      dataClassification: 'workspace',
+      redaction: { applied: false },
+      retentionClass: 'evaluation',
+      createdByEventId: null,
+      inputSourceIds: [],
+      body,
+    });
     const event = await appendBackendExecutionEvent(
       manager,
       root,

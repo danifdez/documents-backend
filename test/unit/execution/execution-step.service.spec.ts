@@ -72,9 +72,12 @@ describe('ExecutionStepService', () => {
       }),
       query: jest.fn().mockResolvedValue([]),
     };
-    service = new ExecutionStepService({
-      transaction: jest.fn(async (callback) => callback(manager)),
-    } as any);
+    service = new ExecutionStepService(
+      {
+        transaction: jest.fn(async (callback) => callback(manager)),
+      } as any,
+      {} as any,
+    );
   });
 
   it('creates a ready step atomically when it has no dependencies', async () => {
@@ -82,7 +85,10 @@ describe('ExecutionStepService', () => {
       executionId: EXECUTION_ID,
       stepId: STEP_ID,
       stepKind: ExecutionStepKind.SERVICE,
-      work: { taskType: 'detect-language' },
+      work: {
+        taskType: 'detect-language',
+        payload: { resourceId: 1, samples: [] },
+      },
       requiredCapabilities: [],
     });
 
@@ -120,7 +126,10 @@ describe('ExecutionStepService', () => {
       stepId: STEP_ID,
       stepKind: ExecutionStepKind.SERVICE,
       dependsOnStepIds: [DEPENDENCY_ID],
-      work: { taskType: 'detect-language' },
+      work: {
+        taskType: 'detect-language',
+        payload: { resourceId: 1, samples: [] },
+      },
     });
 
     expect(step.status).toBe(ExecutionStepStatus.BLOCKED);
@@ -153,7 +162,7 @@ describe('ExecutionStepService', () => {
         stepId: STEP_ID,
         stepKind: ExecutionStepKind.TOOL,
         dependsOnStepIds: [DEPENDENCY_ID],
-        work: { taskType: 'agents.delegate' },
+        work: { taskType: 'agents.delegate' } as any,
       }),
     ).resolves.toMatchObject({ status: ExecutionStepStatus.READY });
   });
@@ -179,7 +188,10 @@ describe('ExecutionStepService', () => {
         stepId: STEP_ID,
         stepKind: ExecutionStepKind.SERVICE,
         dependsOnStepIds: [DEPENDENCY_ID],
-        work: { taskType: 'detect-language' },
+        work: {
+          taskType: 'detect-language',
+          payload: { resourceId: 1, samples: [] },
+        },
       }),
     ).rejects.toThrow('invalid_step_dependency');
     expect(stepRepo.save).not.toHaveBeenCalled();
