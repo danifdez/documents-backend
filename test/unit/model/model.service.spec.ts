@@ -14,6 +14,7 @@ describe('ModelService execution identities', () => {
     keywords: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
     ask: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
     search: '018f1d8a-54d7-7d63-a1ee-5e9a6adca707',
+    'browser-inference': '018f1d8a-54d7-7d63-a1ee-5e9a6adca708',
   };
   let executionService: { create: jest.Mock; createInference: jest.Mock };
   let resourceService: {
@@ -60,6 +61,22 @@ describe('ModelService execution identities', () => {
       resourceService as any,
       vectorStore as any,
       graphService as any,
+    );
+  });
+
+  it('routes connected browser inference through a scoped durable step', async () => {
+    const requestJson = '{"messages":[{"role":"user","content":"Hi"}]}';
+    await expect(
+      service.browserInference(
+        { requestJson, label: 'chat', detail: 'page' },
+        { ownerPrincipal: 'user-7' },
+      ),
+    ).resolves.toEqual({ executionId: executionIds['browser-inference'] });
+    expect(executionService.createInference).toHaveBeenCalledWith(
+      'browser-inference',
+      expect.any(String),
+      { requestJson, label: 'chat', detail: 'page' },
+      { ownerPrincipal: 'user-7', finalizeOnFailure: true },
     );
   });
 

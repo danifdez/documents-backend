@@ -1681,6 +1681,28 @@ export class ExecutionService {
     return this.executionRepo.findOneBy({ executionId });
   }
 
+  async readOwnedResult(
+    rootExecutionId: string,
+    scope: ExecutionAccessScope,
+  ): Promise<{
+    executionId: string;
+    status: ExecutionStatus;
+    result: unknown | null;
+    error: unknown | null;
+  }> {
+    const execution = await this.findOwned(rootExecutionId, scope);
+    return {
+      executionId: execution.executionId,
+      status: execution.status,
+      result:
+        execution.status === ExecutionStatus.COMPLETED
+          ? execution.result
+          : null,
+      error:
+        execution.status === ExecutionStatus.FAILED ? execution.error : null,
+    };
+  }
+
   async claimReadyForFinalization(): Promise<ExecutionEntity | null> {
     return this.dataSource.transaction(async (manager) => {
       const rows = await manager.query(`

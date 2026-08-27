@@ -12,6 +12,8 @@ import { AgeGraphService } from '../graph/age-graph.service';
 import { readFeaturesFromEnv } from '../common/feature-flags';
 import { contentHash } from '../execution/execution-canonical';
 import { buildTranslateWorkflowSteps } from './translate-workflow';
+import { ExecutionAccessScope } from '../execution/execution.types';
+import { BrowserInferenceDto } from './dto/browser-inference.dto';
 
 @Injectable()
 export class ModelService {
@@ -21,6 +23,23 @@ export class ModelService {
     private readonly vectorStore: VectorStoreService,
     private readonly graphService: AgeGraphService,
   ) {}
+
+  async browserInference(
+    request: BrowserInferenceDto,
+    scope: ExecutionAccessScope,
+  ): Promise<{ executionId: string }> {
+    const execution = await this.executionService.createInference(
+      'browser-inference',
+      ExecutionPriority.HIGH,
+      {
+        requestJson: request.requestJson,
+        label: request.label,
+        detail: request.detail,
+      },
+      { ownerPrincipal: scope.ownerPrincipal, finalizeOnFailure: true },
+    );
+    return { executionId: execution.executionId };
+  }
 
   async ask(
     question: string,

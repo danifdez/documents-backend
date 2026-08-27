@@ -48,27 +48,9 @@ export class CreateVectorTables1757668140320 implements MigrationInterface {
     await queryRunner.query(
       `CREATE INDEX "IDX_indexed_file_chunks_embedding" ON "indexed_file_chunks" USING hnsw ("embedding" vector_cosine_ops)`,
     );
-
-    // Assistant personal memory: 1-to-1 with the memory entry → FK + CASCADE.
-    await queryRunner.query(`
-            CREATE TABLE "memory_vectors" (
-                "memory_id" integer PRIMARY KEY,
-                "embedding" vector(384) NOT NULL,
-                "assistant_id" text NOT NULL,
-                "payload" jsonb NOT NULL DEFAULT '{}'::jsonb,
-                CONSTRAINT "FK_memory_vectors_entry" FOREIGN KEY ("memory_id") REFERENCES "assistant_memory_entries"("id") ON DELETE CASCADE ON UPDATE NO ACTION
-            )
-        `);
-    await queryRunner.query(
-      `CREATE INDEX "IDX_memory_vectors_assistant_id" ON "memory_vectors" ("assistant_id")`,
-    );
-    await queryRunner.query(
-      `CREATE INDEX "IDX_memory_vectors_embedding" ON "memory_vectors" USING hnsw ("embedding" vector_cosine_ops)`,
-    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE "memory_vectors"`);
     await queryRunner.query(`DROP TABLE "indexed_file_chunks"`);
     await queryRunner.query(`DROP TABLE "rag_chunks"`);
   }

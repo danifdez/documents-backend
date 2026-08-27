@@ -4,11 +4,6 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
   name = 'CreateConversationSessions1757668140730';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`TRUNCATE TABLE "executions" CASCADE`);
-    await queryRunner.query(
-      `TRUNCATE TABLE "assistant_messages", "agent_messages" RESTART IDENTITY CASCADE`,
-    );
-
     await queryRunner.query(`
       CREATE TABLE "conversation_sessions" (
         "session_id" uuid NOT NULL,
@@ -115,12 +110,6 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
       ON "conversation_turns" ("session_id") WHERE "status" = 'active'
     `);
 
-    await queryRunner.query(`ALTER TABLE "executions" ADD "session_id" uuid`);
-    await queryRunner.query(`
-      ALTER TABLE "executions"
-      ADD CONSTRAINT "CHK_executions_conversation_identity"
-      CHECK (("session_id" IS NULL) = ("turn_id" IS NULL))
-    `);
     await queryRunner.query(`
       ALTER TABLE "executions"
       ADD CONSTRAINT "FK_executions_session"
@@ -151,47 +140,22 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
       FOREIGN KEY ("active_turn_id") REFERENCES "conversation_turns"("turn_id")
       ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
     `);
-    await queryRunner.query(
-      `CREATE INDEX "IDX_executions_session" ON "executions" ("session_id")`,
-    );
-
     for (const table of ['assistant_messages', 'agent_messages']) {
-      await queryRunner.query(`ALTER TABLE "${table}" ADD "turn_id" uuid`);
       await queryRunner.query(`
         ALTER TABLE "${table}"
         ADD CONSTRAINT "FK_${table}_turn"
         FOREIGN KEY ("turn_id") REFERENCES "conversation_turns"("turn_id")
         ON DELETE CASCADE
       `);
-      await queryRunner.query(`
-        ALTER TABLE "${table}"
-        ADD CONSTRAINT "CHK_${table}_turn"
-        CHECK ("role" IN ('system', 'event') OR "turn_id" IS NOT NULL)
-      `);
-      await queryRunner.query(
-        `CREATE INDEX "IDX_${table}_turn_id" ON "${table}" ("turn_id")`,
-      );
-      await queryRunner.query(`
-        CREATE UNIQUE INDEX "UQ_${table}_turn_role"
-        ON "${table}" ("turn_id", "role")
-        WHERE "role" IN ('user', 'assistant')
-      `);
     }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     for (const table of ['agent_messages', 'assistant_messages']) {
-      await queryRunner.query(`DROP INDEX "UQ_${table}_turn_role"`);
-      await queryRunner.query(`DROP INDEX "IDX_${table}_turn_id"`);
-      await queryRunner.query(
-        `ALTER TABLE "${table}" DROP CONSTRAINT "CHK_${table}_turn"`,
-      );
       await queryRunner.query(
         `ALTER TABLE "${table}" DROP CONSTRAINT "FK_${table}_turn"`,
       );
-      await queryRunner.query(`ALTER TABLE "${table}" DROP COLUMN "turn_id"`);
     }
-    await queryRunner.query(`DROP INDEX "IDX_executions_session"`);
     await queryRunner.query(
       `ALTER TABLE "conversation_sessions" DROP CONSTRAINT "FK_conversation_sessions_active_turn"`,
     );
@@ -206,12 +170,6 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
     );
     await queryRunner.query(
       `ALTER TABLE "executions" DROP CONSTRAINT "FK_executions_session"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "executions" DROP CONSTRAINT "CHK_executions_conversation_identity"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "executions" DROP COLUMN "session_id"`,
     );
     await queryRunner.query(`DROP TABLE "conversation_turns"`);
     await queryRunner.query(`DROP TABLE "conversation_artifact_revisions"`);

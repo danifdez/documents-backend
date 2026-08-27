@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { config as loadEnv } from 'dotenv';
+import { readFileSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -14,7 +15,6 @@ import { CreateResources1757668140011 } from '../migrations/1757668140011-Create
 import { CreateDocs1757668140012 } from '../migrations/1757668140012-CreateDocs';
 import { CreateResourceDates1757668140030 } from '../migrations/1757668140030-CreateResourceDates';
 import { CreateAssistantTables1757668140070 } from '../migrations/1757668140070-CreateAssistantTables';
-import { CreateAssistantMemoryEntries1757668140080 } from '../migrations/1757668140080-CreateAssistantMemoryEntries';
 import { CreateIndexedFiles1757668140100 } from '../migrations/1757668140100-CreateIndexedFiles';
 import { CreateAgents1757668140110 } from '../migrations/1757668140110-CreateAgents';
 import { CreateAgentMessages1757668140111 } from '../migrations/1757668140111-CreateAgentMessages';
@@ -26,7 +26,7 @@ import { CreateExecutionOperations1757668140410 } from '../migrations/1757668140
 import { CreateExecutionToolPlans1757668140420 } from '../migrations/1757668140420-CreateExecutionToolPlans';
 import { CreateExecutionConfirmations1757668140720 } from '../migrations/1757668140720-CreateExecutionConfirmations';
 import { CreateConversationSessions1757668140730 } from '../migrations/1757668140730-CreateConversationSessions';
-import { ReplaceAssistantMemory1757668140740 } from '../migrations/1757668140740-ReplaceAssistantMemory';
+import { CreateMemoryEntries1757668140740 } from '../migrations/1757668140740-CreateMemoryEntries';
 import { CreateSkillActivations1757668140750 } from '../migrations/1757668140750-CreateSkillActivations';
 import { CreateExecutionEffectJournal1757668140760 } from '../migrations/1757668140760-CreateExecutionEffectJournal';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
@@ -95,6 +95,25 @@ import { MemoryEntryEntity } from '../src/memory/memory-entry.entity';
 import { SkillActivationEntity } from '../src/conversation/skill-activation.entity';
 import { advanceSkillActivation } from '../src/conversation/skill-activation';
 import { ActiveCapabilitySet } from '../src/conversation/active-capabilities';
+
+interface BrowserMutationMatrixCase {
+  toolName: string;
+  descriptorVersion: string;
+  capability: string;
+  effectClass: 'external_reversible' | 'external_irreversible';
+  target: string;
+  arguments: Record<string, unknown>;
+}
+
+const BROWSER_MUTATION_MATRIX = JSON.parse(
+  readFileSync(
+    join(
+      process.cwd(),
+      'contracts/execution/v1/schemas/browser-mutation-matrix.schema.json',
+    ),
+    'utf8',
+  ),
+).properties.cases.const as BrowserMutationMatrixCase[];
 
 loadEnv({ path: '.env' });
 
@@ -167,7 +186,6 @@ describe('execution PostgreSQL integration', () => {
     await new CreateDocs1757668140012().up(runner);
     await new CreateResourceDates1757668140030().up(runner);
     await new CreateAssistantTables1757668140070().up(runner);
-    await new CreateAssistantMemoryEntries1757668140080().up(runner);
     await new CreateIndexedFiles1757668140100().up(runner);
     await new CreateAgents1757668140110().up(runner);
     await new CreateAgentMessages1757668140111().up(runner);
@@ -180,7 +198,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateExecutionToolPlans1757668140420().up(runner);
     await new CreateExecutionConfirmations1757668140720().up(runner);
     await new CreateConversationSessions1757668140730().up(runner);
-    await new ReplaceAssistantMemory1757668140740().up(runner);
+    await new CreateMemoryEntries1757668140740().up(runner);
     await new CreateSkillActivations1757668140750().up(runner);
     await new CreateExecutionEffectJournal1757668140760().up(runner);
     await runner.query(`
@@ -1992,63 +2010,8 @@ describe('execution PostgreSQL integration', () => {
   it('runs every confirmed browser mutation through duplicate ACK and continuation', async () => {
     const ownerPrincipal = 'browser-mutation-matrix-e2e';
     const browserId = randomUUID();
-    const cases = [
-      {
-        name: 'browser.navigate',
-        capability: 'tool.browser.navigate/1',
-        effectClass: 'external_reversible',
-        arguments: {
-          url: 'https://example.test/next',
-          expectedCurrentUrl: 'https://example.test/current',
-        },
-      },
-      {
-        name: 'browser.go_back',
-        capability: 'tool.browser.go_back/1',
-        effectClass: 'external_reversible',
-        arguments: {
-          expectedCurrentUrl: 'https://example.test/current',
-        },
-      },
-      {
-        name: 'browser.click',
-        capability: 'tool.browser.click/1',
-        effectClass: 'external_irreversible',
-        arguments: {
-          expectedCurrentUrl: 'https://example.test/current',
-          elementIndex: 2,
-          expectedKind: 'button',
-          expectedLabel: 'Continue',
-        },
-      },
-      {
-        name: 'browser.type_text',
-        capability: 'tool.browser.type_text/1',
-        effectClass: 'external_irreversible',
-        arguments: {
-          expectedCurrentUrl: 'https://example.test/current',
-          elementIndex: 3,
-          expectedLabel: 'Search',
-          expectedCurrentValue: '',
-          expectedCurrentValueTruncated: false,
-          text: 'harness',
-        },
-      },
-      {
-        name: 'browser.select_option',
-        capability: 'tool.browser.select_option/1',
-        effectClass: 'external_irreversible',
-        arguments: {
-          expectedCurrentUrl: 'https://example.test/current',
-          elementIndex: 4,
-          expectedLabel: 'Environment',
-          expectedCurrentValue: 'dev',
-          expectedCurrentValueTruncated: false,
-          optionValue: 'prod',
-          expectedOptionLabel: 'Production',
-        },
-      },
-    ] as const;
+    const cases = BROWSER_MUTATION_MATRIX;
+    expect(cases).toHaveLength(5);
     const registration = await workerService.enrollBrowser(
       browserId,
       'ia-browser-mutation-matrix-e2e',
@@ -2071,7 +2034,7 @@ describe('execution PostgreSQL integration', () => {
           (
             await service.createForChat(
               'agent_chat',
-              `Execute ${item.name}`,
+              `Execute ${item.toolName}`,
               { ownerPrincipal },
               {
                 ownerId: index + 1,
@@ -2128,7 +2091,7 @@ describe('execution PostgreSQL integration', () => {
               calls: [
                 {
                   toolCallId: matrixCase.toolCallId,
-                  name: matrixCase.item.name,
+                  name: matrixCase.item.toolName,
                   arguments: matrixCase.item.arguments,
                 },
               ],
@@ -2188,11 +2151,12 @@ describe('execution PostgreSQL integration', () => {
       expect(assignment).toMatchObject({
         stepKind: ExecutionStepKind.TOOL,
         work: {
-          taskType: matrixCase.item.name,
+          taskType: matrixCase.item.toolName,
           confirmationDecision: { status: 'approved' },
           toolPlan: {
             toolCallId: matrixCase.toolCallId,
-            toolName: matrixCase.item.name,
+            toolName: matrixCase.item.toolName,
+            descriptorVersion: matrixCase.item.descriptorVersion,
             normalizedArguments: matrixCase.item.arguments,
             recoveryClass: 'effect_checked',
             requiredCapabilities: [matrixCase.item.capability],
@@ -2226,7 +2190,7 @@ describe('execution PostgreSQL integration', () => {
             content: '',
             structuredContent: {
               url: 'https://example.test/after',
-              title: matrixCase.item.name,
+              title: matrixCase.item.toolName,
             },
             artifactRefs: [],
             sourceRefs: [],
@@ -2306,7 +2270,7 @@ describe('execution PostgreSQL integration', () => {
                 calls: [
                   {
                     toolCallId: matrixCase.toolCallId,
-                    name: matrixCase.item.name,
+                    name: matrixCase.item.toolName,
                   },
                 ],
                 results: [

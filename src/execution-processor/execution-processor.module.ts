@@ -37,6 +37,7 @@ import { EntityRetranslationStrategy } from './processors/translate/entity-retra
 import { ExecutionModule } from '../execution/execution.module';
 import { VectorModule } from '../vector/vector.module';
 import { VectorSearchProcessor } from './processors/vector-search-processor';
+import { BrowserInferenceProcessor } from './processors/browser-inference-processor';
 
 @Module({})
 export class ExecutionProcessorModule {
@@ -61,6 +62,7 @@ export class ExecutionProcessorModule {
       TranscribeProcessor,
       SearchProcessor,
       VectorSearchProcessor,
+      BrowserInferenceProcessor,
       AssistantChatProcessor,
       IndexedFileExtractionProcessor,
       IndexedFileIngestProcessor,

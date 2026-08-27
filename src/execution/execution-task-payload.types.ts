@@ -32,6 +32,12 @@ export interface AskExecutionPayload extends FinalizerIdentity {
   graphContext: GraphRelationship[];
 }
 
+export interface BrowserInferenceExecutionPayload extends FinalizerIdentity {
+  requestJson: string;
+  label?: string;
+  detail?: string;
+}
+
 export interface SummarizeExecutionPayload extends FinalizerIdentity {
   sourceLanguage?: string;
   targetLanguage: string;
@@ -354,6 +360,7 @@ export interface ContextInputReducePayload extends FinalizerIdentity {
 
 interface StaticExecutionPayloadByTaskType {
   ask: AskExecutionPayload;
+  'browser-inference': BrowserInferenceExecutionPayload;
   summarize: SummarizeExecutionPayload;
   'summarize-map': SummarizeMapPayload;
   'summarize-reduce': SummarizeReducePayload;

@@ -9,6 +9,7 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         "execution_id" uuid NOT NULL,
         "root_execution_id" uuid NOT NULL,
         "parent_execution_id" uuid,
+        "session_id" uuid,
         "turn_id" uuid,
         "owner_principal" varchar(200) NOT NULL,
         "schema_version" varchar(50) NOT NULL,
@@ -38,6 +39,8 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
         CONSTRAINT "PK_executions" PRIMARY KEY ("execution_id"),
         CONSTRAINT "FK_executions_parent" FOREIGN KEY ("parent_execution_id")
           REFERENCES "executions"("execution_id") ON DELETE SET NULL,
+        CONSTRAINT "CHK_executions_conversation_identity"
+          CHECK (("session_id" IS NULL) = ("turn_id" IS NULL)),
         CONSTRAINT "CHK_executions_wait_state" CHECK (
           (
             "status" = 'waiting'
@@ -62,6 +65,9 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
     );
     await queryRunner.query(
       `CREATE INDEX "IDX_executions_parent" ON "executions" ("parent_execution_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_executions_session" ON "executions" ("session_id")`,
     );
     await queryRunner.query(`
       CREATE INDEX "IDX_executions_cancellation_pending"
@@ -187,6 +193,7 @@ export class CreateExecutions1757668140001 implements MigrationInterface {
     await queryRunner.query(`DROP FUNCTION reject_execution_event_mutation()`);
     await queryRunner.query(`DROP TABLE "execution_artifacts"`);
     await queryRunner.query(`DROP TABLE "execution_events"`);
+    await queryRunner.query(`DROP INDEX "IDX_executions_session"`);
     await queryRunner.query(`DROP TABLE "executions"`);
   }
 }

@@ -1,11 +1,9 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class ReplaceAssistantMemory1757668140740 implements MigrationInterface {
-  name = 'ReplaceAssistantMemory1757668140740';
+export class CreateMemoryEntries1757668140740 implements MigrationInterface {
+  name = 'CreateMemoryEntries1757668140740';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE "memory_vectors"`);
-    await queryRunner.query(`DROP TABLE "assistant_memory_entries"`);
     await queryRunner.query(`
       CREATE TABLE "memory_entries" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),

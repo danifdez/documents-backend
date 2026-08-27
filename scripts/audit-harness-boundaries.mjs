@@ -36,6 +36,12 @@ function reject(pattern, files, message) {
   }
 }
 
+function requireMatch(pattern, file, message) {
+  if (!existsSync(file) || !pattern.test(readFileSync(file, 'utf8'))) {
+    failures.push(`${message}: ${file}`);
+  }
+}
+
 const modelRuntime = [
   join(models, 'executions.py'),
   ...['common', 'lib', 'worker', 'utils', 'tasks', 'services', 'rag'].flatMap(
@@ -82,9 +88,26 @@ reject(
   'Backend contains a second or legacy harness path',
 );
 reject(
+  /\b(?:evaluate|runEvaluation|scoreEvaluation|EvaluationService|EvaluationRunner)\b/,
+  backendRuntime,
+  'Backend runtime contains evaluation ownership',
+);
+reject(
   /\b(?:LLAMA_SERVER_URL|InferenceModule|InferenceService)\b/,
   [...backendRuntime, join(backend, '.env.example')],
   'Backend contains IA Browser inference-engine handoff',
+);
+
+const backendMigrations = sourceFiles(join(backend, 'migrations'), ['.ts']);
+reject(
+  /\bTRUNCATE\s+TABLE\b/i,
+  backendMigrations,
+  'Alpha baseline contains a data-transition migration',
+);
+reject(
+  /\b(?:assistant_memory_entries|memory_vectors|ReplaceAssistantMemory)\b/,
+  backendMigrations,
+  'Alpha baseline contains replaced memory schema',
 );
 
 const browserProductRuntime = [
@@ -96,6 +119,26 @@ reject(
   /\b(?:SyncSharedEngine|DropSharedEngine|UseShared|ReleaseShared|shared_inference_|awaiting_shared_|shared_model_)\b|shared_engine\.(?:cc|h)/,
   browserProductRuntime,
   'IA Browser contains Backend-owned inference-engine handoff',
+);
+requireMatch(
+  /@Controller\('browser-inference'\)/,
+  join(backend, 'src', 'model', 'browser-inference.controller.ts'),
+  'Backend-owned browser inference route is missing',
+);
+requireMatch(
+  /@execution_handler\("browser-inference"\)/,
+  join(models, 'tasks', 'browser_inference', 'browser_inference.py'),
+  'Models browser inference handler is missing',
+);
+requireMatch(
+  /g_backend_connected[\s\S]*StartDocuments/,
+  join(browser, 'src', 'ai', 'llama_client.cc'),
+  'Connected IA Browser does not route inference through Backend',
+);
+requireMatch(
+  /ConfigureBackendInferenceTransport\(/,
+  join(browser, 'src', 'docs_client.cc'),
+  'IA Browser does not bind inference transport to Documents',
 );
 
 for (const required of [
