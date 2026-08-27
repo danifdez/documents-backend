@@ -324,7 +324,10 @@ describe('execution v1 contract', () => {
       activationReason: 'signal_match',
       inputBindings: {
         owner: { type: 'assistant', id: 1 },
-        signal: 'workspace_folder_configured',
+        signal: {
+          kind: 'owner_scope_configured',
+          scope: 'workspace_folder',
+        },
       },
       phase: 'finished',
       checkpoint: null,
@@ -334,6 +337,15 @@ describe('execution v1 contract', () => {
     };
 
     expect(validateSkillActivation(activation)).toBe(true);
+    expect(
+      validateSkillActivation({
+        ...activation,
+        inputBindings: {
+          ...activation.inputBindings,
+          signal: 'workspace_folder_configured',
+        },
+      }),
+    ).toBe(false);
     expect(validateSkillActivation({ ...activation, finishedAt: null })).toBe(
       false,
     );
@@ -345,7 +357,10 @@ describe('execution v1 contract', () => {
         'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
       inputBindings: {
         owner: { type: 'assistant', id: 1 },
-        signal: 'document_search_available',
+        signal: {
+          kind: 'capability_available',
+          capability: 'documents.search',
+        },
       },
     };
     expect(validateSkillActivation(researchActivation)).toBe(true);

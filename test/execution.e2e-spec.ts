@@ -2815,7 +2815,10 @@ describe('execution PostgreSQL integration', () => {
           skillId: 'workspace-document-workflow',
           version: 'workspace-document-workflow/1',
           activationReason: 'signal_match',
-          activationSignal: 'workspace_folder_configured',
+          activationSignal: {
+            kind: 'owner_scope_configured',
+            scope: 'workspace_folder',
+          },
           contentHash:
             'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
         }),
@@ -2848,7 +2851,10 @@ describe('execution PostgreSQL integration', () => {
       activationReason: 'signal_match',
       inputBindings: {
         owner: { type: 'assistant', id: 1 },
-        signal: 'workspace_folder_configured',
+        signal: {
+          kind: 'owner_scope_configured',
+          scope: 'workspace_folder',
+        },
       },
       phase: 'instructions_loaded',
       checkpoint: null,
@@ -3169,7 +3175,10 @@ describe('execution PostgreSQL integration', () => {
           skillId: 'evidence-research-workflow',
           activationReason: 'signal_match',
           inputBindings: expect.objectContaining({
-            signal: 'document_search_available',
+            signal: {
+              kind: 'capability_available',
+              capability: 'documents.search',
+            },
           }),
         }),
       ]);

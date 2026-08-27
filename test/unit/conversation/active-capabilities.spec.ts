@@ -38,10 +38,12 @@ describe('active capability selection', () => {
         'workspace_files.delete',
       ]),
     );
-    expect(withoutFolder.skillSignals).toEqual(['document_search_available']);
+    expect(withoutFolder.skillSignals).toEqual([
+      { kind: 'capability_available', capability: 'documents.search' },
+    ]);
     expect(withFolder.skillSignals).toEqual([
-      'document_search_available',
-      'workspace_folder_configured',
+      { kind: 'capability_available', capability: 'documents.search' },
+      { kind: 'owner_scope_configured', scope: 'workspace_folder' },
     ]);
     expect(withFolder.skills.map(({ skillId }) => skillId)).toEqual([
       'workspace-document-workflow',
@@ -75,7 +77,10 @@ describe('active capability selection', () => {
           skillId: 'workspace-document-workflow',
           version: 'workspace-document-workflow/1',
           activationReason: 'signal_match',
-          activationSignal: 'workspace_folder_configured',
+          activationSignal: {
+            kind: 'owner_scope_configured',
+            scope: 'workspace_folder',
+          },
           contentHash:
             'sha256:c755864bb8f6b113ff62c4912c20277bf66e71d37819921de46111a24c7cec91',
         }),
@@ -177,7 +182,10 @@ describe('active capability selection', () => {
         skillId: 'evidence-research-workflow',
         version: 'evidence-research-workflow/1',
         activationReason: 'signal_match',
-        activationSignal: 'document_search_available',
+        activationSignal: {
+          kind: 'capability_available',
+          capability: 'documents.search',
+        },
         contentHash:
           'sha256:902f4eb209b750d9b7a62c8cb9daa297158e45a284a8f857fba3a676dcea8002',
         resources: [

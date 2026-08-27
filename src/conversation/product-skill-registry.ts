@@ -4,12 +4,24 @@ export const WORKSPACE_DOCUMENT_SKILL_ID = 'workspace-document-workflow';
 export const WORKSPACE_DOCUMENT_SKILL_VERSION = 'workspace-document-workflow/1';
 export const EVIDENCE_RESEARCH_SKILL_ID = 'evidence-research-workflow';
 export const EVIDENCE_RESEARCH_SKILL_VERSION = 'evidence-research-workflow/1';
-export const WORKSPACE_FOLDER_CONFIGURED_SIGNAL = 'workspace_folder_configured';
-export const DOCUMENT_SEARCH_AVAILABLE_SIGNAL = 'document_search_available';
+export const WORKSPACE_FOLDER_CONFIGURED_SIGNAL = {
+  kind: 'owner_scope_configured',
+  scope: 'workspace_folder',
+} as const;
+export const DOCUMENT_SEARCH_AVAILABLE_SIGNAL = {
+  kind: 'capability_available',
+  capability: 'documents.search',
+} as const;
 
 export type ProductSkillSignal =
   | typeof WORKSPACE_FOLDER_CONFIGURED_SIGNAL
   | typeof DOCUMENT_SEARCH_AVAILABLE_SIGNAL;
+
+export function productSkillSignalKey(signal: ProductSkillSignal): string {
+  return signal.kind === 'capability_available'
+    ? `${signal.kind}:${signal.capability}`
+    : `${signal.kind}:${signal.scope}`;
+}
 
 export const WORKSPACE_DOCUMENT_SKILL_INSTRUCTIONS = [
   'Use the configured workspace folder as an optional source of context and ' +
@@ -174,10 +186,10 @@ export function selectProductSkills(
   signals: readonly ProductSkillSignal[],
   availableCapabilities: ReadonlySet<string>,
 ): ActiveProductSkill[] {
-  const signalSet = new Set(signals);
+  const signalSet = new Set(signals.map(productSkillSignalKey));
   return PRODUCT_SKILL_REGISTRY.filter(
     (skill) =>
-      signalSet.has(skill.activationCriteria.signal) &&
+      signalSet.has(productSkillSignalKey(skill.activationCriteria.signal)) &&
       skill.requiredCapabilities.every((capability) =>
         availableCapabilities.has(capability),
       ),

@@ -4,6 +4,10 @@ import { EntityManager } from 'typeorm';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import type { ActiveCapabilitySet } from './active-capabilities';
 import {
+  ProductSkillSignal,
+  productSkillSignalKey,
+} from './product-skill-registry';
+import {
   SkillActivationEntity,
   SkillActivationStatus,
 } from './skill-activation.entity';
@@ -26,7 +30,8 @@ export async function createSkillActivations(
           skillId: activation.skillId,
           version: activation.skillVersion,
           contentHash: activation.contentHash,
-          activationSignal: String(activation.inputBindings.signal ?? ''),
+          activationSignal: activation.inputBindings
+            .signal as ProductSkillSignal,
         }),
       )
       .sort();
@@ -169,10 +174,10 @@ function skillIdentity(skill: {
   skillId: string;
   version: string;
   contentHash: string;
-  activationSignal: string;
+  activationSignal: ProductSkillSignal;
 }): string {
   return (
     `${skill.skillId}\0${skill.version}\0${skill.contentHash}` +
-    `\0${skill.activationSignal}`
+    `\0${productSkillSignalKey(skill.activationSignal)}`
   );
 }
