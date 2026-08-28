@@ -29,6 +29,7 @@ import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
 import { BibliographyEntryEntity } from '../bibliography/bibliography-entry.entity';
 import { UserTaskEntity } from '../user-task/user-task.entity';
 import { WorkerEntity } from '../worker/worker.entity';
+import { WorkerCredentialEventEntity } from '../worker/worker-credential-event.entity';
 import { UserEntity } from '../auth/user.entity';
 import { PermissionGroupEntity } from '../auth/permission-group.entity';
 import { DataSourceEntity } from '../data-source/data-source.entity';
@@ -98,6 +99,7 @@ export const getTypeOrmConfig = async (
       BibliographyEntryEntity,
       UserTaskEntity,
       WorkerEntity,
+      WorkerCredentialEventEntity,
       UserEntity,
       PermissionGroupEntity,
       DataSourceEntity,
