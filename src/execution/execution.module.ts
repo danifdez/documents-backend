@@ -16,6 +16,7 @@ import { BrowserWorkController } from '../worker/browser-work.controller';
 import { ExecutionEffectJournalService } from './execution-effect-journal.service';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 import { ExecutionRetentionService } from './execution-retention.service';
+import { ExecutionCompletionValidator } from './execution-completion-validator';
 
 @Module({
   imports: [DatabaseModule, WorkerModule],
@@ -37,6 +38,7 @@ import { ExecutionRetentionService } from './execution-retention.service';
     ExecutionConfirmationService,
     ExecutionEffectJournalService,
     ExecutionRetentionService,
+    ExecutionCompletionValidator,
   ],
   exports: [
     ExecutionService,

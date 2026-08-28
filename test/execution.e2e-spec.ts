@@ -31,6 +31,7 @@ import { CreateSkillActivations1757668140750 } from '../migrations/1757668140750
 import { CreateExecutionEffectJournal1757668140760 } from '../migrations/1757668140760-CreateExecutionEffectJournal';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
+import { ExecutionCompletionValidator } from '../src/execution/execution-completion-validator';
 import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
 import { ExecutionEntity } from '../src/execution/execution.entity';
 import { ExecutionResultReceiptEntity } from '../src/execution/execution-result-receipt.entity';
@@ -239,6 +240,7 @@ describe('execution PostgreSQL integration', () => {
       budgets,
       artifactStorage,
       artifactService,
+      new ExecutionCompletionValidator(),
     );
     attemptService = new ExecutionAttemptService(
       dataSource,
