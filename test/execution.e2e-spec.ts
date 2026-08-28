@@ -67,6 +67,7 @@ import { ExecutionEffectJournalService } from '../src/execution/execution-effect
 import { ExecutionAgentLoopService } from '../src/execution-coordinator/execution-agent-loop.service';
 import { ExecutionTerminalCandidateService } from '../src/execution-coordinator/execution-terminal-candidate.service';
 import { ExecutionArtifactStorageService } from '../src/execution/execution-artifact-storage.service';
+import { ExecutionArtifactService } from '../src/execution/execution-artifact.service';
 import { ChatExecutionPayload } from '../src/execution/execution-task-payload.types';
 import {
   assertOperationBudgetProjection,
@@ -222,6 +223,11 @@ describe('execution PostgreSQL integration', () => {
               : fallback,
     } as any;
     const artifactStorage = new ExecutionArtifactStorageService(config);
+    const artifactService = new ExecutionArtifactService(
+      dataSource.getRepository(ExecutionStepEntity),
+      dataSource.getRepository(ExecutionArtifactEntity),
+      artifactStorage,
+    );
     budgets = new ExecutionProgressService(dataSource, config);
     service = new ExecutionService(
       dataSource,
@@ -232,6 +238,7 @@ describe('execution PostgreSQL integration', () => {
       new ExecutionContractValidator(),
       budgets,
       artifactStorage,
+      artifactService,
     );
     attemptService = new ExecutionAttemptService(
       dataSource,

@@ -87,6 +87,7 @@ import {
 } from '../conversation/skill-activation';
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
+import { ExecutionArtifactService } from './execution-artifact.service';
 import {
   defaultArtifactExpiry,
   derivedArtifactPolicy,
@@ -272,6 +273,7 @@ export class ExecutionService {
     private readonly contractValidator: ExecutionContractValidator,
     private readonly progress: ExecutionProgressService,
     private readonly artifactStorage: ExecutionArtifactStorageService,
+    private readonly artifacts: ExecutionArtifactService,
   ) {}
 
   resolveAccessScope(user: unknown): ExecutionAccessScope {
@@ -3159,11 +3161,11 @@ export class ExecutionService {
         .findOneBy({ artifactId, rootExecutionId });
       if (!artifact) throw new NotFoundException('artifact_not_found');
       if (artifact.contentState === 'withdrawn') {
-        return this.derivedArtifactClosure(manager, rootExecutionId, [
+        return this.artifacts.derivedArtifactClosure(manager, rootExecutionId, [
           artifactId,
         ]);
       }
-      const affected = await this.retireArtifactGraph(
+      const affected = await this.artifacts.retireGraph(
         manager,
         rootExecutionId,
         [artifactId],
@@ -3215,18 +3217,22 @@ export class ExecutionService {
             sourceId,
       );
       if (existing) {
-        return this.derivedArtifactClosure(
+        return this.artifacts.derivedArtifactClosure(
           manager,
           rootExecutionId,
-          await this.artifactsForSource(manager, rootExecutionId, sourceId),
+          await this.artifacts.findIdsForSource(
+            manager,
+            rootExecutionId,
+            sourceId,
+          ),
         );
       }
-      const direct = await this.artifactsForSource(
+      const direct = await this.artifacts.findIdsForSource(
         manager,
         rootExecutionId,
         sourceId,
       );
-      const affected = await this.retireArtifactGraph(
+      const affected = await this.artifacts.retireGraph(
         manager,
         rootExecutionId,
         direct,
@@ -3275,7 +3281,7 @@ export class ExecutionService {
           lock: { mode: 'pessimistic_write' },
         });
         if (!root) return { count: 0, ownerPrincipal: null };
-        const affected = await this.retireArtifactGraph(
+        const affected = await this.artifacts.retireGraph(
           manager,
           rootExecutionId,
           artifactIds,
@@ -3327,90 +3333,6 @@ export class ExecutionService {
     });
     if (!root) throw new NotFoundException('Execution not found');
     return root;
-  }
-
-  private async artifactsForSource(
-    manager: EntityManager,
-    rootExecutionId: string,
-    sourceId: string,
-  ): Promise<string[]> {
-    const rows = await manager
-      .getRepository(ExecutionArtifactEntity)
-      .createQueryBuilder('artifact')
-      .where('artifact.root_execution_id = :rootExecutionId', {
-        rootExecutionId,
-      })
-      .andWhere('artifact.input_source_ids @> :sourceRef::jsonb', {
-        sourceRef: JSON.stringify([sourceId]),
-      })
-      .getMany();
-    return rows.map((artifact) => artifact.artifactId);
-  }
-
-  private async derivedArtifactClosure(
-    manager: EntityManager,
-    rootExecutionId: string,
-    seedArtifactIds: string[],
-  ): Promise<string[]> {
-    const artifacts = await manager
-      .getRepository(ExecutionArtifactEntity)
-      .findBy({ rootExecutionId });
-    const affected = new Set(seedArtifactIds);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const artifact of artifacts) {
-        if (
-          affected.has(artifact.artifactId) ||
-          !artifact.derivedFromArtifactIds.some((id) => affected.has(id))
-        ) {
-          continue;
-        }
-        affected.add(artifact.artifactId);
-        changed = true;
-      }
-    }
-    return [...affected].sort();
-  }
-
-  private async retireArtifactGraph(
-    manager: EntityManager,
-    rootExecutionId: string,
-    seedArtifactIds: string[],
-    state: 'expired' | 'withdrawn',
-    reason: string,
-    deletedAt: Date,
-  ): Promise<string[]> {
-    const closure = await this.derivedArtifactClosure(
-      manager,
-      rootExecutionId,
-      seedArtifactIds,
-    );
-    if (!closure.length) return [];
-    const repository = manager.getRepository(ExecutionArtifactEntity);
-    const artifacts = await repository
-      .createQueryBuilder('artifact')
-      .addSelect('artifact.body')
-      .where('artifact.root_execution_id = :rootExecutionId', {
-        rootExecutionId,
-      })
-      .andWhere('artifact.artifact_id IN (:...artifactIds)', {
-        artifactIds: closure,
-      })
-      .getMany();
-    const active = artifacts.filter(
-      (artifact) => artifact.contentState === 'active',
-    );
-    for (const artifact of active) {
-      await this.artifactStorage.deleteBody(artifact);
-      artifact.body = null;
-      artifact.storageRef = `${state}:v1:${artifact.artifactId}`;
-      artifact.contentState = state;
-      artifact.withdrawalReason = reason;
-      artifact.contentDeletedAt = deletedAt;
-    }
-    if (active.length) await repository.save(active);
-    return active.map((artifact) => artifact.artifactId).sort();
   }
 
   private async appendEvidenceLifecycleEvent(

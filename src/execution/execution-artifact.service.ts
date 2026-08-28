@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionStepEntity } from './execution-step.entity';
@@ -80,5 +80,89 @@ export class ExecutionArtifactService {
         }
       }),
     );
+  }
+
+  async findIdsForSource(
+    manager: EntityManager,
+    rootExecutionId: string,
+    sourceId: string,
+  ): Promise<string[]> {
+    const rows = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .where('artifact.root_execution_id = :rootExecutionId', {
+        rootExecutionId,
+      })
+      .andWhere('artifact.input_source_ids @> :sourceRef::jsonb', {
+        sourceRef: JSON.stringify([sourceId]),
+      })
+      .getMany();
+    return rows.map((artifact) => artifact.artifactId);
+  }
+
+  async derivedArtifactClosure(
+    manager: EntityManager,
+    rootExecutionId: string,
+    seedArtifactIds: string[],
+  ): Promise<string[]> {
+    const artifacts = await manager
+      .getRepository(ExecutionArtifactEntity)
+      .findBy({ rootExecutionId });
+    const affected = new Set(seedArtifactIds);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const artifact of artifacts) {
+        if (
+          affected.has(artifact.artifactId) ||
+          !artifact.derivedFromArtifactIds.some((id) => affected.has(id))
+        ) {
+          continue;
+        }
+        affected.add(artifact.artifactId);
+        changed = true;
+      }
+    }
+    return [...affected].sort();
+  }
+
+  async retireGraph(
+    manager: EntityManager,
+    rootExecutionId: string,
+    seedArtifactIds: string[],
+    state: 'expired' | 'withdrawn',
+    reason: string,
+    deletedAt: Date,
+  ): Promise<string[]> {
+    const closure = await this.derivedArtifactClosure(
+      manager,
+      rootExecutionId,
+      seedArtifactIds,
+    );
+    if (!closure.length) return [];
+    const repository = manager.getRepository(ExecutionArtifactEntity);
+    const artifacts = await repository
+      .createQueryBuilder('artifact')
+      .addSelect('artifact.body')
+      .where('artifact.root_execution_id = :rootExecutionId', {
+        rootExecutionId,
+      })
+      .andWhere('artifact.artifact_id IN (:...artifactIds)', {
+        artifactIds: closure,
+      })
+      .getMany();
+    const active = artifacts.filter(
+      (artifact) => artifact.contentState === 'active',
+    );
+    for (const artifact of active) {
+      await this.storage.deleteBody(artifact);
+      artifact.body = null;
+      artifact.storageRef = `${state}:v1:${artifact.artifactId}`;
+      artifact.contentState = state;
+      artifact.withdrawalReason = reason;
+      artifact.contentDeletedAt = deletedAt;
+    }
+    if (active.length) await repository.save(active);
+    return active.map((artifact) => artifact.artifactId).sort();
   }
 }
