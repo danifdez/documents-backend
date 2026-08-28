@@ -1,7 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateMemoryEntries1757668140740 implements MigrationInterface {
-  name = 'CreateMemoryEntries1757668140740';
+  // Migration names are persisted and must remain stable across code renames.
+  name = 'ReplaceAssistantMemory1757668140740';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
