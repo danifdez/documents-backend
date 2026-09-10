@@ -56,6 +56,8 @@ export interface SummarizeMapPayload extends FinalizerIdentity {
 export interface SummarizeReducePayload extends FinalizerIdentity {
   targetLanguage: string;
   sourceLanguage?: string;
+  final: boolean;
+  reductionLevel: number;
   partials?: unknown[];
 }
 

@@ -17,13 +17,18 @@ describe('reduction tree', () => {
       }),
     }));
 
-    const steps = buildReductionTree(leaves, ({ dependencyStepIds }) => ({
-      stepKind: ExecutionStepKind.CODE,
-      dependsOnStepIds: dependencyStepIds,
-      work: executionTaskWork('summarize-reduce', {
-        targetLanguage: 'en',
+    const steps = buildReductionTree(
+      leaves,
+      ({ dependencyStepIds, level, final }) => ({
+        stepKind: ExecutionStepKind.CODE,
+        dependsOnStepIds: dependencyStepIds,
+        work: executionTaskWork('summarize-reduce', {
+          targetLanguage: 'en',
+          final,
+          reductionLevel: level,
+        }),
       }),
-    }));
+    );
     const reductions = steps.slice(leaves.length);
 
     expect(reductions.length).toBeGreaterThan(1);

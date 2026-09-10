@@ -252,25 +252,67 @@ describe('ModelService execution identities', () => {
     );
   });
 
-  it('fans long summaries out into parallel map steps and one reduce', () => {
-    const content = Array.from(
-      { length: 1_501 },
-      (_, index) => `word-${index}`,
+  it('fans long summaries out without splitting paragraphs', () => {
+    const firstParagraph = Array.from(
+      { length: 1_000 },
+      (_, index) => `first-${index}`,
     ).join(' ');
+    const secondParagraph = Array.from(
+      { length: 501 },
+      (_, index) => `second-${index}`,
+    ).join(' ');
+    const content = `${firstParagraph}\n\n${secondParagraph}`;
 
     const steps = buildSummarizeWorkflowSteps(content, 'en', 'es');
 
     expect(steps).toHaveLength(3);
-    expect(steps.slice(0, 2)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ requiredCapabilities: ['summarize-map'] }),
-      ]),
+    expect(steps[0].work.payload).toEqual(
+      expect.objectContaining({ content: firstParagraph }),
+    );
+    expect(steps[1].work.payload).toEqual(
+      expect.objectContaining({ content: secondParagraph }),
     );
     expect(steps[2]).toEqual(
       expect.objectContaining({
         dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
         requiredCapabilities: ['summarize-reduce'],
+        work: expect.objectContaining({
+          payload: expect.objectContaining({ final: true, reductionLevel: 1 }),
+        }),
       }),
+    );
+  });
+
+  it('reduces many summary chunks in bounded intermediate stages', () => {
+    const content = Array.from({ length: 8 }, (_, paragraphIndex) =>
+      Array.from(
+        { length: 1_000 },
+        (_, wordIndex) => `paragraph-${paragraphIndex}-${wordIndex}`,
+      ).join(' '),
+    ).join('\n\n');
+
+    const steps = buildSummarizeWorkflowSteps(content, 'en', 'es');
+    const maps = steps.filter((step) => step.work.taskType === 'summarize-map');
+    const reductions = steps.filter(
+      (step) => step.work.taskType === 'summarize-reduce',
+    );
+    const intermediate = reductions.slice(0, -1);
+    const final = reductions.at(-1)!;
+
+    expect(maps).toHaveLength(8);
+    expect(intermediate).toHaveLength(3);
+    expect(
+      intermediate.every(
+        (step) =>
+          (step.dependsOnStepIds?.length ?? 0) <= 3 &&
+          (step.work.payload as { final: boolean }).final === false,
+      ),
+    ).toBe(true);
+    expect(final.dependsOnStepIds).toEqual(
+      intermediate.map((step) => step.stepId),
+    );
+    expect(final.work.payload).toEqual(
+      expect.objectContaining({ final: true, reductionLevel: 2 }),
     );
   });
 
