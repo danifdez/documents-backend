@@ -1608,6 +1608,7 @@ describe('ExecutionAttemptService', () => {
   it('persists a failed result as a terminal intent without bypassing the outbox', async () => {
     const step = {
       ...readyStep(),
+      stepKind: ExecutionStepKind.INFERENCE,
       status: ExecutionStepStatus.RESULT_RECEIVED,
       currentAttemptId: ATTEMPT_ID,
     };
@@ -1615,7 +1616,10 @@ describe('ExecutionAttemptService', () => {
       ...runningAttempt(),
       status: ExecutionStepAttemptStatus.RESULT_RECEIVED,
     };
-    const operation = dispatchedOperation();
+    const operation = {
+      ...dispatchedOperation(),
+      operationKind: ExecutionOperationKind.INFERENCE,
+    };
     const execution = {
       executionId: EXECUTION_ID,
       status: ExecutionStatus.RUNNING,
@@ -1630,6 +1634,10 @@ describe('ExecutionAttemptService', () => {
     receiptRepo.findOne.mockResolvedValue({
       result: {
         status: 'failed',
+        output: {
+          kind: 'inference',
+          outcome: { kind: 'failed' },
+        },
         error: { code: 'MODEL_FAILED', message: 'Model failed' },
       },
     });
@@ -1643,6 +1651,19 @@ describe('ExecutionAttemptService', () => {
       expect.objectContaining({
         status: ExecutionStatus.RUNNING,
         phase: 'terminal_pending_failed',
+      }),
+    );
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'operation.finished',
+        envelope: expect.objectContaining({
+          payload: expect.objectContaining({
+            operationKind: 'inference',
+            status: 'failed',
+            outcome: 'invalid',
+            error: { code: 'MODEL_FAILED', message: 'Model failed' },
+          }),
+        }),
       }),
     );
   });

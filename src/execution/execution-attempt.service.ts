@@ -83,6 +83,12 @@ const RECOVERABLE_LOCAL_EFFECT_TASKS = new Set<string>([
   WORKSPACE_FILE_WRITE_TOOL_NAME,
   WORKSPACE_FILE_DELETE_TOOL_NAME,
 ]);
+const CANONICAL_INFERENCE_OUTCOMES = new Set([
+  'tool_requests',
+  'final_text',
+  'structured_result',
+  'invalid',
+]);
 
 export interface RecoverableLocalEffectAssignment {
   assignment: StepAssignment;
@@ -157,6 +163,11 @@ function operationKindForStep(
     return ExecutionOperationKind.VERIFICATION;
   }
   return ExecutionOperationKind.ARTIFACT_PROCESSING;
+}
+
+function canonicalInferenceOutcome(value: unknown): string {
+  const outcome = typeof value === 'string' ? value : 'invalid';
+  return CANONICAL_INFERENCE_OUTCOMES.has(outcome) ? outcome : 'invalid';
 }
 
 @Injectable()
@@ -1859,7 +1870,7 @@ export class ExecutionAttemptService {
           status: eventStatus,
           ...(operationKind === ExecutionOperationKind.INFERENCE
             ? {
-                outcome: String(outcome?.kind ?? 'invalid'),
+                outcome: canonicalInferenceOutcome(outcome?.kind),
                 ...(typeof outcome?.reason === 'string'
                   ? { reason: outcome.reason }
                   : {}),
