@@ -38,4 +38,12 @@ describe('text chunks', () => {
     ]);
     expect(chunks.join(' ')).toBe(text);
   });
+
+  it('limits complete semantic units without cutting their contents', () => {
+    const paragraphs = ['one', 'two', 'three', 'four'];
+
+    expect(
+      chunkTextParts([{ text: paragraphs.join('\n\n') }], 1_500, 3),
+    ).toEqual(['one\n\ntwo\n\nthree', 'four']);
+  });
 });

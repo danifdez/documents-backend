@@ -249,6 +249,16 @@ describe('ModelService execution identities', () => {
             operationKind: 'artifact_processing',
             recoveryClass: 'read_only_replayable',
           }),
+          expect.objectContaining({
+            stepKind: 'inference',
+            requiredCapabilities: ['summarize-compose'],
+          }),
+          expect.objectContaining({
+            stepKind: 'code',
+            requiredCapabilities: ['summarize-finalize'],
+            operationKind: 'artifact_processing',
+            recoveryClass: 'read_only_replayable',
+          }),
         ],
       },
     );
@@ -267,14 +277,15 @@ describe('ModelService execution identities', () => {
 
     const steps = buildSummarizeWorkflowSteps(content, 'en', 'es');
 
-    expect(steps).toHaveLength(3);
+    expect(steps).toHaveLength(5);
     expect(steps[0].work.payload).toEqual(
       expect.objectContaining({ content: firstParagraph }),
     );
     expect(steps[1].work.payload).toEqual(
       expect.objectContaining({ content: secondParagraph }),
     );
-    expect(steps[2]).toEqual(
+    const inventory = steps[2];
+    expect(inventory).toEqual(
       expect.objectContaining({
         stepKind: 'code',
         operationKind: 'artifact_processing',
@@ -282,7 +293,29 @@ describe('ModelService execution identities', () => {
         dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
         requiredCapabilities: ['summarize-reduce'],
         work: expect.objectContaining({
+          payload: expect.objectContaining({ reductionLevel: 1 }),
+        }),
+      }),
+    );
+    const composition = steps[3];
+    expect(composition).toEqual(
+      expect.objectContaining({
+        stepKind: 'inference',
+        dependsOnStepIds: [inventory.stepId],
+        requiredCapabilities: ['summarize-compose'],
+        work: expect.objectContaining({
+          coordination: expect.objectContaining({ resultKey: 'ideas' }),
+        }),
+      }),
+    );
+    expect(steps[4]).toEqual(
+      expect.objectContaining({
+        stepKind: 'code',
+        dependsOnStepIds: [composition.stepId],
+        requiredCapabilities: ['summarize-finalize'],
+        work: expect.objectContaining({
           payload: expect.objectContaining({ final: true, reductionLevel: 1 }),
+          coordination: expect.objectContaining({ resultKey: 'responses' }),
         }),
       }),
     );
@@ -298,39 +331,56 @@ describe('ModelService execution identities', () => {
 
     const steps = buildSummarizeWorkflowSteps(content, 'en', 'es');
     const maps = steps.filter((step) => step.work.taskType === 'summarize-map');
-    const reductions = steps.filter(
+    const inventories = steps.filter(
       (step) => step.work.taskType === 'summarize-reduce',
     );
-    const intermediate = reductions.slice(0, -1);
-    const final = reductions.at(-1)!;
+    const compositions = steps.filter(
+      (step) => step.work.taskType === 'summarize-compose',
+    );
+    const finalizations = steps.filter(
+      (step) => step.work.taskType === 'summarize-finalize',
+    );
 
     expect(maps).toHaveLength(8);
-    expect(intermediate).toHaveLength(2);
+    expect(inventories).toHaveLength(3);
     expect(
-      intermediate.every(
+      inventories.every(
         (step) =>
-          (step.dependsOnStepIds?.length ?? 0) <= 7 &&
+          (step.dependsOnStepIds?.length ?? 0) <= 3 &&
           step.stepKind === 'code' &&
-          step.operationKind === 'artifact_processing' &&
-          (step.work.payload as { final: boolean }).final === false,
+          step.operationKind === 'artifact_processing',
       ),
     ).toBe(true);
-    expect(final.stepKind).toBe('code');
-    expect(final.operationKind).toBe('artifact_processing');
-    expect(final.recoveryClass).toBe('read_only_replayable');
-    expect(final.dependsOnStepIds).toEqual(
-      intermediate.map((step) => step.stepId),
-    );
-    expect(final.work.payload).toEqual(
-      expect.objectContaining({ final: true, reductionLevel: 2 }),
-    );
     expect(
-      reductions.every(
+      inventories.every(
         (step) =>
           (step.work.coordination as { resultKey?: string } | undefined)
             ?.resultKey === 'ideas',
       ),
     ).toBe(true);
+    expect(compositions).toHaveLength(3);
+    expect(
+      compositions.every(
+        (step, index) =>
+          step.stepKind === 'inference' &&
+          step.dependsOnStepIds?.[0] === inventories[index].stepId &&
+          step.requiredCapabilities?.[0] === 'summarize-compose' &&
+          (step.work.coordination as { resultKey?: string } | undefined)
+            ?.resultKey === 'ideas',
+      ),
+    ).toBe(true);
+    expect(finalizations).toHaveLength(1);
+    expect(finalizations[0]).toEqual(
+      expect.objectContaining({
+        stepKind: 'code',
+        dependsOnStepIds: compositions.map((step) => step.stepId),
+        requiredCapabilities: ['summarize-finalize'],
+        work: expect.objectContaining({
+          payload: expect.objectContaining({ final: true, reductionLevel: 1 }),
+          coordination: expect.objectContaining({ resultKey: 'responses' }),
+        }),
+      }),
+    );
   });
 
   it('fans long entity documents out into map steps and deterministic reduce', () => {

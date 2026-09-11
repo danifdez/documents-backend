@@ -56,6 +56,17 @@ export interface SummarizeMapPayload extends FinalizerIdentity {
 export interface SummarizeReducePayload extends FinalizerIdentity {
   targetLanguage: string;
   sourceLanguage?: string;
+  reductionLevel: number;
+  partials?: unknown[];
+}
+
+export interface SummarizeComposePayload extends FinalizerIdentity {
+  targetLanguage: string;
+  sourceLanguage?: string;
+  partials?: unknown[];
+}
+
+export interface SummarizeFinalizePayload extends FinalizerIdentity {
   final: boolean;
   reductionLevel: number;
   partials?: unknown[];
@@ -366,6 +377,8 @@ interface StaticExecutionPayloadByTaskType {
   summarize: SummarizeExecutionPayload;
   'summarize-map': SummarizeMapPayload;
   'summarize-reduce': SummarizeReducePayload;
+  'summarize-compose': SummarizeComposePayload;
+  'summarize-finalize': SummarizeFinalizePayload;
   translate: TranslateExecutionPayload;
   'translate-map': TranslateMapPayload;
   'translate-reduce': TranslateReducePayload;

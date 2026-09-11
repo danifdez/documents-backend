@@ -19,12 +19,11 @@ describe('reduction tree', () => {
 
     const steps = buildReductionTree(
       leaves,
-      ({ dependencyStepIds, level, final }) => ({
+      ({ dependencyStepIds, level }) => ({
         stepKind: ExecutionStepKind.CODE,
         dependsOnStepIds: dependencyStepIds,
         work: executionTaskWork('summarize-reduce', {
           targetLanguage: 'en',
-          final,
           reductionLevel: level,
         }),
       }),
