@@ -244,8 +244,10 @@ describe('ModelService execution identities', () => {
             requiredCapabilities: ['summarize-map'],
           }),
           expect.objectContaining({
-            stepKind: 'inference',
+            stepKind: 'code',
             requiredCapabilities: ['summarize-reduce'],
+            operationKind: 'artifact_processing',
+            recoveryClass: 'read_only_replayable',
           }),
         ],
       },
@@ -254,11 +256,11 @@ describe('ModelService execution identities', () => {
 
   it('fans long summaries out without splitting paragraphs', () => {
     const firstParagraph = Array.from(
-      { length: 1_000 },
+      { length: 700 },
       (_, index) => `first-${index}`,
     ).join(' ');
     const secondParagraph = Array.from(
-      { length: 501 },
+      { length: 351 },
       (_, index) => `second-${index}`,
     ).join(' ');
     const content = `${firstParagraph}\n\n${secondParagraph}`;
@@ -274,6 +276,9 @@ describe('ModelService execution identities', () => {
     );
     expect(steps[2]).toEqual(
       expect.objectContaining({
+        stepKind: 'code',
+        operationKind: 'artifact_processing',
+        recoveryClass: 'read_only_replayable',
         dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
         requiredCapabilities: ['summarize-reduce'],
         work: expect.objectContaining({
@@ -286,7 +291,7 @@ describe('ModelService execution identities', () => {
   it('reduces many summary chunks in bounded intermediate stages', () => {
     const content = Array.from({ length: 8 }, (_, paragraphIndex) =>
       Array.from(
-        { length: 1_000 },
+        { length: 700 },
         (_, wordIndex) => `paragraph-${paragraphIndex}-${wordIndex}`,
       ).join(' '),
     ).join('\n\n');
@@ -300,14 +305,19 @@ describe('ModelService execution identities', () => {
     const final = reductions.at(-1)!;
 
     expect(maps).toHaveLength(8);
-    expect(intermediate).toHaveLength(3);
+    expect(intermediate).toHaveLength(2);
     expect(
       intermediate.every(
         (step) =>
-          (step.dependsOnStepIds?.length ?? 0) <= 3 &&
+          (step.dependsOnStepIds?.length ?? 0) <= 7 &&
+          step.stepKind === 'code' &&
+          step.operationKind === 'artifact_processing' &&
           (step.work.payload as { final: boolean }).final === false,
       ),
     ).toBe(true);
+    expect(final.stepKind).toBe('code');
+    expect(final.operationKind).toBe('artifact_processing');
+    expect(final.recoveryClass).toBe('read_only_replayable');
     expect(final.dependsOnStepIds).toEqual(
       intermediate.map((step) => step.stepId),
     );

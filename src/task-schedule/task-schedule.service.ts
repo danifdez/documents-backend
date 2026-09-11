@@ -24,8 +24,11 @@ export class TaskScheduleService {
     const loadAvg = os.loadavg()[0];
     const cpuUsagePercent = (loadAvg / cpuCount) * 100;
     const totalMemory = os.totalmem();
-    const freeMemory = os.freemem();
-    const usedMemory = totalMemory - freeMemory;
+    const availableMemory = Math.min(
+      totalMemory,
+      Math.max(0, process.availableMemory()),
+    );
+    const usedMemory = totalMemory - availableMemory;
     const memoryUsagePercent = (usedMemory / totalMemory) * 100;
 
     const processMemoryUsage = process.memoryUsage();
@@ -45,18 +48,18 @@ export class TaskScheduleService {
   async handleCron() {
     await this.executionCoordinatorService.prepareAgentWork();
     await this.executionCoordinatorService.acceptResults();
+    await this.executionCoordinatorService.finalizeReady();
     await this.executionCoordinatorService.publishNotifications();
     const { cpuUsagePercent, memoryUsagePercent } = this.getCPUAndMemoryUsage();
 
     if (cpuUsagePercent > 80 || memoryUsagePercent > 80) {
       this.logger.warn(
-        `Skipping execution processing: ${cpuUsagePercent.toFixed(2)}% CPU, ` +
+        `Skipping new tool execution: ${cpuUsagePercent.toFixed(2)}% CPU, ` +
           `${memoryUsagePercent.toFixed(2)}% memory.`,
       );
       return;
     }
 
-    await this.executionCoordinatorService.finalizeReady();
     await this.executionCoordinatorService.executeReadyTools();
     await this.executionCoordinatorService.acceptResults();
     await this.executionCoordinatorService.finalizeReady();

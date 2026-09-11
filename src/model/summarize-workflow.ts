@@ -1,13 +1,16 @@
 import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { ExecutionOperationKind } from '../execution/execution-operation-kind.enum';
+// eslint-disable-next-line max-len
+import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
 import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { extractTextFromHtml } from '../utils/text';
 import { buildReductionTree } from './reduction-tree';
 import { chunkTextParts } from './text-chunks';
 
-const MAP_WORD_BUDGET = 1_500;
-const REDUCTION_FAN_IN = 3;
+const MAP_WORD_BUDGET = 700;
+const REDUCTION_FAN_IN = 7;
 
 export function buildSummarizeWorkflowSteps(
   content: string,
@@ -37,7 +40,7 @@ export function buildSummarizeWorkflowSteps(
   return buildReductionTree(
     mapSteps,
     ({ dependencyStepIds, level, final }) => ({
-      stepKind: ExecutionStepKind.INFERENCE,
+      stepKind: ExecutionStepKind.CODE,
       dependsOnStepIds: dependencyStepIds,
       work: {
         ...executionTaskWork('summarize-reduce', {
@@ -53,6 +56,8 @@ export function buildSummarizeWorkflowSteps(
         },
       },
       requiredCapabilities: ['summarize-reduce'],
+      operationKind: ExecutionOperationKind.ARTIFACT_PROCESSING,
+      recoveryClass: ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
     }),
     REDUCTION_FAN_IN,
   );
