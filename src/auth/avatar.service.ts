@@ -1,9 +1,11 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as sharp from 'sharp';
+import type { SharpConstructor } from 'sharp';
 import { UserEntity } from './user.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
+
+const sharp = require('sharp') as SharpConstructor;
 
 const AVATAR_SIZE = 256;
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
