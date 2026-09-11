@@ -12,6 +12,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import type { Response } from 'express';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../auth/decorators/public.decorator';
 import { WorkerService } from '../worker/worker.service';
 import { WorkerKind } from '../worker/worker-kind.enum';
@@ -97,6 +98,7 @@ export class ExecutionProtocolController {
   }
 
   @Post('attempts/:attemptId/lease')
+  @SkipThrottle()
   async renewLease(
     @Param('attemptId') attemptId: string,
     @Headers('x-worker-id') workerId: string,
@@ -112,6 +114,7 @@ export class ExecutionProtocolController {
   }
 
   @Get('attempts/:attemptId/control')
+  @SkipThrottle()
   async control(
     @Param('attemptId') attemptId: string,
     @Headers('x-worker-id') workerId: string,

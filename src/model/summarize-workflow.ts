@@ -49,7 +49,7 @@ export function buildSummarizeWorkflowSteps(
         coordination: {
           kind: 'map-reduce-reduce/1',
           mapStepIds: dependencyStepIds,
-          resultKey: 'response',
+          resultKey: 'ideas',
         },
       },
       requiredCapabilities: ['summarize-reduce'],

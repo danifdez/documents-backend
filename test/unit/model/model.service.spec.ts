@@ -314,6 +314,13 @@ describe('ModelService execution identities', () => {
     expect(final.work.payload).toEqual(
       expect.objectContaining({ final: true, reductionLevel: 2 }),
     );
+    expect(
+      reductions.every(
+        (step) =>
+          (step.work.coordination as { resultKey?: string } | undefined)
+            ?.resultKey === 'ideas',
+      ),
+    ).toBe(true);
   });
 
   it('fans long entity documents out into map steps and deterministic reduce', () => {

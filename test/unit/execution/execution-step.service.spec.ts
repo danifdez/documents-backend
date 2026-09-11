@@ -253,7 +253,7 @@ describe('ExecutionStepService', () => {
         coordination: {
           kind: 'map-reduce-reduce/1',
           mapStepIds: [DEPENDENCY_ID, SECOND_DEPENDENCY_ID],
-          resultKey: 'response',
+          resultKey: 'ideas',
         },
       },
     };
@@ -267,7 +267,7 @@ describe('ExecutionStepService', () => {
           kind: 'inference',
           outcome: {
             kind: 'structured_result',
-            value: { response: 'second' },
+            value: { ideas: ['second'] },
           },
         },
       },
@@ -278,7 +278,7 @@ describe('ExecutionStepService', () => {
           kind: 'inference',
           outcome: {
             kind: 'structured_result',
-            value: { response: 'first' },
+            value: { ideas: ['first'] },
           },
         },
       },
@@ -287,7 +287,7 @@ describe('ExecutionStepService', () => {
     await expect(service.releaseDependents(DEPENDENCY_ID)).resolves.toBe(1);
     expect(reduce.work.payload).toEqual({
       targetLanguage: 'en',
-      partials: ['first', 'second'],
+      partials: [['first'], ['second']],
     });
     expect(reduce.status).toBe(ExecutionStepStatus.READY);
   });
