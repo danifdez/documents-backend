@@ -9,10 +9,6 @@ import { buildSummarizeWorkflowSteps } from '../../../src/model/summarize-workfl
 describe('compound model workflows', () => {
   it.each([
     [
-      'summarize',
-      (text: string) => buildSummarizeWorkflowSteps(text, 'es', 'en'),
-    ],
-    [
       'entities',
       (text: string) => buildEntityExtractionWorkflowSteps([{ text }]),
     ],
@@ -57,6 +53,41 @@ describe('compound model workflows', () => {
           (step.dependsOnStepIds?.length ?? 0) <= 8,
       ),
     ).toBe(true);
+  });
+
+  it('summarizes through smart maps and one global composition', () => {
+    const paragraph = Array.from(
+      { length: 120 },
+      (_, index) => `word-${index}`,
+    ).join(' ');
+    const steps = buildSummarizeWorkflowSteps(
+      Array.from({ length: 18 }, () => paragraph).join('\n\n'),
+      'es',
+      'es',
+    );
+    const maps = steps.filter((step) => step.work.taskType === 'summarize-map');
+    const compositions = steps.filter(
+      (step) => step.work.taskType === 'summarize-compose',
+    );
+
+    expect(maps).toHaveLength(1);
+    expect(compositions).toHaveLength(1);
+    expect(compositions[0]).toEqual(
+      expect.objectContaining({
+        stepKind: 'inference',
+        dependsOnStepIds: maps.map((step) => step.stepId),
+        requiredCapabilities: ['summarize-compose'],
+        work: expect.objectContaining({
+          taskType: 'summarize-compose',
+          payload: expect.objectContaining({ targetLanguage: 'es' }),
+          coordination: expect.objectContaining({
+            mapStepIds: maps.map((step) => step.stepId),
+            resultKey: 'ideas',
+          }),
+        }),
+      }),
+    );
+    expect(steps).toHaveLength(2);
   });
 
   it('carries exact keyword statistics across intermediate levels', () => {

@@ -218,7 +218,7 @@ describe('ModelService execution identities', () => {
     );
   });
 
-  it('creates summarize as a durable map-reduce step graph', async () => {
+  it('creates summarize as map inventories plus one global composition', async () => {
     await expect(
       service.summarize(
         'en',
@@ -244,20 +244,8 @@ describe('ModelService execution identities', () => {
             requiredCapabilities: ['summarize-map'],
           }),
           expect.objectContaining({
-            stepKind: 'code',
-            requiredCapabilities: ['summarize-reduce'],
-            operationKind: 'artifact_processing',
-            recoveryClass: 'read_only_replayable',
-          }),
-          expect.objectContaining({
             stepKind: 'inference',
             requiredCapabilities: ['summarize-compose'],
-          }),
-          expect.objectContaining({
-            stepKind: 'code',
-            requiredCapabilities: ['summarize-finalize'],
-            operationKind: 'artifact_processing',
-            recoveryClass: 'read_only_replayable',
           }),
         ],
       },
@@ -266,63 +254,35 @@ describe('ModelService execution identities', () => {
 
   it('fans long summaries out without splitting paragraphs', () => {
     const firstParagraph = Array.from(
-      { length: 700 },
+      { length: 600 },
       (_, index) => `first-${index}`,
     ).join(' ');
     const secondParagraph = Array.from(
-      { length: 351 },
+      { length: 451 },
       (_, index) => `second-${index}`,
     ).join(' ');
     const content = `${firstParagraph}\n\n${secondParagraph}`;
 
     const steps = buildSummarizeWorkflowSteps(content, 'en', 'es');
 
-    expect(steps).toHaveLength(5);
-    expect(steps[0].work.payload).toEqual(
-      expect.objectContaining({ content: firstParagraph }),
-    );
-    expect(steps[1].work.payload).toEqual(
-      expect.objectContaining({ content: secondParagraph }),
-    );
-    const inventory = steps[2];
-    expect(inventory).toEqual(
-      expect.objectContaining({
-        stepKind: 'code',
-        operationKind: 'artifact_processing',
-        recoveryClass: 'read_only_replayable',
-        dependsOnStepIds: [steps[0].stepId, steps[1].stepId],
-        requiredCapabilities: ['summarize-reduce'],
-        work: expect.objectContaining({
-          payload: expect.objectContaining({ reductionLevel: 1 }),
-        }),
-      }),
-    );
-    const composition = steps[3];
+    expect(steps).toHaveLength(2);
+    expect(steps[0].work.payload).toEqual(expect.objectContaining({ content }));
+    const composition = steps[1];
     expect(composition).toEqual(
       expect.objectContaining({
         stepKind: 'inference',
-        dependsOnStepIds: [inventory.stepId],
+        dependsOnStepIds: [steps[0].stepId],
         requiredCapabilities: ['summarize-compose'],
         work: expect.objectContaining({
+          payload: expect.objectContaining({ targetLanguage: 'en' }),
           coordination: expect.objectContaining({ resultKey: 'ideas' }),
-        }),
-      }),
-    );
-    expect(steps[4]).toEqual(
-      expect.objectContaining({
-        stepKind: 'code',
-        dependsOnStepIds: [composition.stepId],
-        requiredCapabilities: ['summarize-finalize'],
-        work: expect.objectContaining({
-          payload: expect.objectContaining({ final: true, reductionLevel: 1 }),
-          coordination: expect.objectContaining({ resultKey: 'responses' }),
         }),
       }),
     );
   });
 
-  it('reduces many summary chunks in bounded intermediate stages', () => {
-    const content = Array.from({ length: 8 }, (_, paragraphIndex) =>
+  it('sends every map inventory to one global composition', () => {
+    const content = Array.from({ length: 21 }, (_, paragraphIndex) =>
       Array.from(
         { length: 700 },
         (_, wordIndex) => `paragraph-${paragraphIndex}-${wordIndex}`,
@@ -331,56 +291,25 @@ describe('ModelService execution identities', () => {
 
     const steps = buildSummarizeWorkflowSteps(content, 'en', 'es');
     const maps = steps.filter((step) => step.work.taskType === 'summarize-map');
-    const inventories = steps.filter(
-      (step) => step.work.taskType === 'summarize-reduce',
-    );
     const compositions = steps.filter(
       (step) => step.work.taskType === 'summarize-compose',
     );
-    const finalizations = steps.filter(
-      (step) => step.work.taskType === 'summarize-finalize',
-    );
-
-    expect(maps).toHaveLength(8);
-    expect(inventories).toHaveLength(3);
-    expect(
-      inventories.every(
-        (step) =>
-          (step.dependsOnStepIds?.length ?? 0) <= 3 &&
-          step.stepKind === 'code' &&
-          step.operationKind === 'artifact_processing',
-      ),
-    ).toBe(true);
-    expect(
-      inventories.every(
-        (step) =>
-          (step.work.coordination as { resultKey?: string } | undefined)
-            ?.resultKey === 'ideas',
-      ),
-    ).toBe(true);
-    expect(compositions).toHaveLength(3);
-    expect(
-      compositions.every(
-        (step, index) =>
-          step.stepKind === 'inference' &&
-          step.dependsOnStepIds?.[0] === inventories[index].stepId &&
-          step.requiredCapabilities?.[0] === 'summarize-compose' &&
-          (step.work.coordination as { resultKey?: string } | undefined)
-            ?.resultKey === 'ideas',
-      ),
-    ).toBe(true);
-    expect(finalizations).toHaveLength(1);
-    expect(finalizations[0]).toEqual(
+    expect(maps).toHaveLength(6);
+    expect(compositions).toHaveLength(1);
+    expect(compositions[0]).toEqual(
       expect.objectContaining({
-        stepKind: 'code',
-        dependsOnStepIds: compositions.map((step) => step.stepId),
-        requiredCapabilities: ['summarize-finalize'],
+        stepKind: 'inference',
+        dependsOnStepIds: maps.map((step) => step.stepId),
+        requiredCapabilities: ['summarize-compose'],
         work: expect.objectContaining({
-          payload: expect.objectContaining({ final: true, reductionLevel: 1 }),
-          coordination: expect.objectContaining({ resultKey: 'responses' }),
+          coordination: expect.objectContaining({
+            mapStepIds: maps.map((step) => step.stepId),
+            resultKey: 'ideas',
+          }),
         }),
       }),
     );
+    expect(new Set(steps.map((step) => step.stepId)).size).toBe(steps.length);
   });
 
   it('fans long entity documents out into map steps and deterministic reduce', () => {
