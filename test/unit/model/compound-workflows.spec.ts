@@ -82,7 +82,7 @@ describe('compound model workflows', () => {
           payload: expect.objectContaining({ targetLanguage: 'es' }),
           coordination: expect.objectContaining({
             mapStepIds: maps.map((step) => step.stepId),
-            resultKey: 'ideas',
+            resultKey: 'summary',
           }),
         }),
       }),

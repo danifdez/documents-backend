@@ -218,7 +218,7 @@ describe('ModelService execution identities', () => {
     );
   });
 
-  it('creates summarize as map inventories plus one global composition', async () => {
+  it('creates summarize as section summaries plus one global composition', async () => {
     await expect(
       service.summarize(
         'en',
@@ -275,13 +275,13 @@ describe('ModelService execution identities', () => {
         requiredCapabilities: ['summarize-compose'],
         work: expect.objectContaining({
           payload: expect.objectContaining({ targetLanguage: 'en' }),
-          coordination: expect.objectContaining({ resultKey: 'ideas' }),
+          coordination: expect.objectContaining({ resultKey: 'summary' }),
         }),
       }),
     );
   });
 
-  it('sends every map inventory to one global composition', () => {
+  it('sends every section summary to one global composition', () => {
     const content = Array.from({ length: 21 }, (_, paragraphIndex) =>
       Array.from(
         { length: 700 },
@@ -304,7 +304,7 @@ describe('ModelService execution identities', () => {
         work: expect.objectContaining({
           coordination: expect.objectContaining({
             mapStepIds: maps.map((step) => step.stepId),
-            resultKey: 'ideas',
+            resultKey: 'summary',
           }),
         }),
       }),

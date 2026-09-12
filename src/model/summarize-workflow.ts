@@ -19,7 +19,7 @@ export function buildSummarizeWorkflowSteps(
   return buildMapComposeWorkflow({
     items: chunks,
     emptyInputError: 'Summarization content is empty',
-    resultKey: 'ideas',
+    resultKey: 'summary',
     map: (content, chunkIndex) => ({
       work: executionTaskWork('summarize-map', {
         content,
