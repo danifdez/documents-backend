@@ -39,15 +39,13 @@ describe('DatasetExtractionService', () => {
     );
   });
 
-  it('creates row extraction as inference with failure reconciliation', async () => {
+  it('creates row extraction as a map-reduce workflow', async () => {
     const recordRepository = {};
     const resourceService = {
       getContentById: jest.fn().mockResolvedValue('Readable content'),
     };
     const executionService = {
-      createInference: jest
-        .fn()
-        .mockResolvedValue({ executionId: 'execution-id' }),
+      create: jest.fn().mockResolvedValue({ executionId: 'execution-id' }),
     };
     const service = new DatasetExtractionService(
       {} as any,
@@ -74,7 +72,7 @@ describe('DatasetExtractionService', () => {
         11,
       ),
     ).resolves.toEqual({ executionId: 'execution-id' });
-    expect(executionService.createInference).toHaveBeenCalledWith(
+    expect(executionService.create).toHaveBeenCalledWith(
       'dataset.extract-row',
       expect.any(String),
       expect.objectContaining({
@@ -83,7 +81,20 @@ describe('DatasetExtractionService', () => {
         resourceId: 7,
         documentText: 'Readable content',
       }),
-      { finalizeOnFailure: true },
+      {
+        steps: expect.arrayContaining([
+          expect.objectContaining({
+            work: expect.objectContaining({
+              taskType: 'dataset.extract-row-map',
+            }),
+          }),
+          expect.objectContaining({
+            work: expect.objectContaining({
+              taskType: 'dataset.extract-row-reduce',
+            }),
+          }),
+        ]),
+      },
     );
   });
 });

@@ -5,6 +5,10 @@ import { canonicalJson, contentHash } from '../execution/execution-canonical';
 import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
 import {
+  REDUCTION_TREE_FAN_IN,
+  buildMapReduceWorkflow,
+} from '../execution/map-reduce-workflow';
+import {
   ChatExecutionPayload,
   executionTaskWork,
 } from '../execution/execution-task-payload.types';
@@ -23,7 +27,6 @@ export const CONTEXT_INPUT_FINAL_COORDINATION =
 
 const MAX_CHUNK_CHARS = 12_000;
 const MIN_BOUNDARY_SEARCH_CHARS = 7_200;
-const REDUCTION_FAN_IN = 8;
 const HIGH_PRIORITY = 100;
 
 interface ContextChunk {
@@ -82,7 +85,7 @@ export async function buildContextInputWorkflow(
     algorithm: 'deterministic-text-boundaries/1',
     offsetUnit: 'utf16-code-unit',
     maxChunkChars: MAX_CHUNK_CHARS,
-    reductionFanIn: REDUCTION_FAN_IN,
+    reductionFanIn: REDUCTION_TREE_FAN_IN,
     chunks: chunks.map(({ index, start, end, contentHash: hash }) => ({
       index,
       start,
@@ -111,14 +114,15 @@ export async function buildContextInputWorkflow(
     body: planBody,
   });
 
-  const mapSteps = chunks.map((chunk) => ({
-    stepId: randomUUID(),
-    stepKind: ExecutionStepKind.INFERENCE,
-    inputArtifactRefs: [
-      { role: 'context_chunk_plan', artifactId: planArtifactId },
-    ],
-    work: {
-      ...executionTaskWork(CONTEXT_INPUT_MAP_TASK, {
+  const reductionSteps = buildMapReduceWorkflow({
+    items: chunks,
+    emptyInputError: 'Context input produced no chunks',
+    fanIn: REDUCTION_TREE_FAN_IN,
+    map: (chunk) => ({
+      inputArtifactRefs: [
+        { role: 'context_chunk_plan', artifactId: planArtifactId },
+      ],
+      work: executionTaskWork(CONTEXT_INPUT_MAP_TASK, {
         planArtifactId,
         chunkIndex: chunk.index,
         start: chunk.start,
@@ -126,59 +130,30 @@ export async function buildContextInputWorkflow(
         contentHash: chunk.contentHash,
         content: chunk.content,
       }),
-    },
-    requiredCapabilities: [CONTEXT_INPUT_MAP_TASK],
-    priority: HIGH_PRIORITY,
-    causedByEventId: input.causedByEventId,
-  }));
+      requiredCapabilities: [CONTEXT_INPUT_MAP_TASK],
+      priority: HIGH_PRIORITY,
+      causedByEventId: input.causedByEventId,
+    }),
+    reduce: ({ level, groupIndex }) => ({
+      inputArtifactRefs: [
+        { role: 'context_chunk_plan', artifactId: planArtifactId },
+      ],
+      work: executionTaskWork(CONTEXT_INPUT_REDUCE_TASK, {
+        planArtifactId,
+        level,
+        groupIndex,
+      }),
+      requiredCapabilities: [CONTEXT_INPUT_REDUCE_TASK],
+      priority: HIGH_PRIORITY,
+      causedByEventId: input.causedByEventId,
+      resultKey: 'digest',
+    }),
+  });
 
+  const finalReductionStepId = reductionSteps.at(-1)!.stepId!;
   const steps: Array<Omit<CreateExecutionStepInput, 'executionId'>> = [
-    ...mapSteps,
+    ...reductionSteps,
   ];
-  let level = 1;
-  let currentStepIds: string[] = mapSteps.map((step) => step.stepId);
-  while (currentStepIds.length > 1) {
-    const nextStepIds: string[] = [];
-    for (
-      let index = 0;
-      index < currentStepIds.length;
-      index += REDUCTION_FAN_IN
-    ) {
-      const dependencyIds = currentStepIds.slice(
-        index,
-        index + REDUCTION_FAN_IN,
-      );
-      const stepId = randomUUID();
-      steps.push({
-        stepId,
-        stepKind: ExecutionStepKind.INFERENCE,
-        dependsOnStepIds: dependencyIds,
-        inputArtifactRefs: [
-          { role: 'context_chunk_plan', artifactId: planArtifactId },
-        ],
-        work: {
-          ...executionTaskWork(CONTEXT_INPUT_REDUCE_TASK, {
-            planArtifactId,
-            level,
-            groupIndex: nextStepIds.length,
-          }),
-          coordination: {
-            kind: 'map-reduce-reduce/1',
-            mapStepIds: dependencyIds,
-            resultKey: 'digest',
-          },
-        },
-        requiredCapabilities: [CONTEXT_INPUT_REDUCE_TASK],
-        priority: HIGH_PRIORITY,
-        causedByEventId: input.causedByEventId,
-      });
-      nextStepIds.push(stepId);
-    }
-    currentStepIds = nextStepIds;
-    level += 1;
-  }
-
-  const finalReductionStepId = currentStepIds[0] ?? mapSteps[0].stepId;
   steps.push({
     stepKind: ExecutionStepKind.INFERENCE,
     dependsOnStepIds: [finalReductionStepId],

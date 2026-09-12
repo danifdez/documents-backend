@@ -301,6 +301,15 @@ export interface DatasetExtractRowPayload extends FinalizerIdentity {
   model: string;
 }
 
+export interface DatasetExtractRowMapPayload extends DatasetExtractRowPayload {
+  chunkIndex: number;
+}
+
+export interface DatasetExtractRowReducePayload extends FinalizerIdentity {
+  final: boolean;
+  partials?: unknown[];
+}
+
 export interface DatasetProposeColumnsPayload extends FinalizerIdentity {
   projectId: number | null;
   resources: Array<{ id: number; title: string; excerpt: string }>;
@@ -407,6 +416,8 @@ interface StaticExecutionPayloadByTaskType {
   'indexed-file-search': IndexedFileSearchPayload;
   'data-source-sync': DataSourceSyncExecutionPayload;
   'dataset.extract-row': DatasetExtractRowPayload;
+  'dataset.extract-row-map': DatasetExtractRowMapPayload;
+  'dataset.extract-row-reduce': DatasetExtractRowReducePayload;
   'dataset.propose-columns': DatasetProposeColumnsPayload;
   'assistant-chat': ChatExecutionPayload;
   'agent-chat': ChatExecutionPayload;

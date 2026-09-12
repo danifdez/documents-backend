@@ -1,13 +1,14 @@
-import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import {
+  REDUCTION_TREE_FAN_IN,
+  buildMapReduceWorkflow,
+} from '../execution/map-reduce-workflow';
 import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionOperationKind } from '../execution/execution-operation-kind.enum';
 // eslint-disable-next-line max-len
 import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { chunkTextParts } from './text-chunks';
-import { buildReductionTree } from './reduction-tree';
-import { REDUCTION_TREE_FAN_IN } from './reduction-tree';
 
 const MAP_WORD_BUDGET = 1_500;
 
@@ -16,42 +17,30 @@ export function buildKeywordsWorkflowSteps(
   targetLanguage: string,
 ): Array<Omit<CreateExecutionStepInput, 'executionId'>> {
   const chunks = chunkTextParts(textParts, MAP_WORD_BUDGET);
-  if (!chunks.length) throw new Error('Keywords content is empty');
-
-  const mapSteps = chunks.map((content, chunkIndex) => ({
-    stepId: randomUUID(),
-    stepKind: ExecutionStepKind.INFERENCE,
-    work: {
-      ...executionTaskWork('keywords-map', {
+  return buildMapReduceWorkflow({
+    items: chunks,
+    emptyInputError: 'Keywords content is empty',
+    map: (content, chunkIndex) => ({
+      work: executionTaskWork('keywords-map', {
         content,
         chunkIndex,
         targetLanguage,
       }),
-    },
-    requiredCapabilities: ['keywords-map'],
-  }));
-  return buildReductionTree(
-    mapSteps,
-    ({ dependencyStepIds, level, groupIndex, final }) => ({
+      requiredCapabilities: ['keywords-map'],
+    }),
+    reduce: ({ level, groupIndex, final }) => ({
       stepKind: ExecutionStepKind.CODE,
-      dependsOnStepIds: dependencyStepIds,
-      work: {
-        ...executionTaskWork('keywords-reduce', {
-          final,
-          inputKind: level === 1 ? 'candidates' : 'statistics',
-          ...(level === 1
-            ? { leafStartIndex: groupIndex * REDUCTION_TREE_FAN_IN }
-            : {}),
-        }),
-        coordination: {
-          kind: 'map-reduce-reduce/1',
-          mapStepIds: dependencyStepIds,
-          resultKey: level === 1 ? 'keywords' : 'keyword_statistics',
-        },
-      },
+      work: executionTaskWork('keywords-reduce', {
+        final,
+        inputKind: level === 1 ? 'candidates' : 'statistics',
+        ...(level === 1
+          ? { leafStartIndex: groupIndex * REDUCTION_TREE_FAN_IN }
+          : {}),
+      }),
       requiredCapabilities: ['keywords-reduce'],
       operationKind: ExecutionOperationKind.ARTIFACT_PROCESSING,
       recoveryClass: ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
+      resultKey: level === 1 ? 'keywords' : 'keyword_statistics',
     }),
-  );
+  });
 }

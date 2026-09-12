@@ -1,7 +1,6 @@
-import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { buildMapComposeWorkflow } from '../execution/map-reduce-workflow';
 import { executionTaskWork } from '../execution/execution-task-payload.types';
-import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { extractTextFromHtml } from '../utils/text';
 import { chunkTextParts } from './text-chunks';
 
@@ -17,38 +16,25 @@ export function buildSummarizeWorkflowSteps(
     extracted.length ? extracted : [{ text: content }],
     MAP_WORD_BUDGET,
   );
-  if (!chunks.length) throw new Error('Summarization content is empty');
-
-  const mapSteps = chunks.map((chunk, chunkIndex) => ({
-    stepId: randomUUID(),
-    stepKind: ExecutionStepKind.INFERENCE,
-    work: {
-      ...executionTaskWork('summarize-map', {
-        content: chunk,
+  return buildMapComposeWorkflow({
+    items: chunks,
+    emptyInputError: 'Summarization content is empty',
+    resultKey: 'ideas',
+    map: (content, chunkIndex) => ({
+      work: executionTaskWork('summarize-map', {
+        content,
         chunkIndex,
         targetLanguage,
         sourceLanguage,
       }),
-    },
-    requiredCapabilities: ['summarize-map'],
-  }));
-  const dependencyStepIds = mapSteps.map((step) => step.stepId);
-  const compositionStep = {
-    stepId: randomUUID(),
-    stepKind: ExecutionStepKind.INFERENCE,
-    dependsOnStepIds: dependencyStepIds,
-    work: {
-      ...executionTaskWork('summarize-compose', {
+      requiredCapabilities: ['summarize-map'],
+    }),
+    compose: () => ({
+      work: executionTaskWork('summarize-compose', {
         targetLanguage,
         sourceLanguage,
       }),
-      coordination: {
-        kind: 'map-reduce-reduce/1' as const,
-        mapStepIds: dependencyStepIds,
-        resultKey: 'ideas',
-      },
-    },
-    requiredCapabilities: ['summarize-compose'],
-  };
-  return [...mapSteps, compositionStep];
+      requiredCapabilities: ['summarize-compose'],
+    }),
+  });
 }

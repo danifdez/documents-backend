@@ -13,6 +13,7 @@ import { ResourceService } from '../resource/resource.service';
 import { ResourceEntity } from '../resource/resource.entity';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
+import { buildDatasetExtractionWorkflowSteps } from './dataset-extraction-workflow';
 
 const DEFAULT_MODEL = 'Qwen3-8B-Q5_K_M.gguf';
 const DEFAULT_PROMPT_VERSION = 'v1-2026-05';
@@ -323,11 +324,12 @@ export class DatasetExtractionService {
       model: dataset.extractionConfig?.model ?? DEFAULT_MODEL,
     };
 
-    return await this.executionService.createInference(
+    const steps = buildDatasetExtractionWorkflowSteps(payload);
+    return await this.executionService.create(
       'dataset.extract-row',
       ExecutionPriority.NORMAL,
       payload,
-      { finalizeOnFailure: true },
+      { steps },
     );
   }
 }

@@ -1,11 +1,10 @@
-import { randomUUID } from 'crypto';
 import { CreateExecutionStepInput } from '../execution/execution-control-plane.types';
+import { buildMapReduceWorkflow } from '../execution/map-reduce-workflow';
 import { executionTaskWork } from '../execution/execution-task-payload.types';
 import { ExecutionOperationKind } from '../execution/execution-operation-kind.enum';
 // eslint-disable-next-line max-len
 import { ExecutionOperationRecoveryClass } from '../execution/execution-operation-recovery-class.enum';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
-import { buildReductionTree } from './reduction-tree';
 
 const MAP_BATCH_SIZE = 32;
 const MAX_WORDS_PER_PIECE = 400;
@@ -59,51 +58,46 @@ export function buildTranslateWorkflowSteps(input: {
       ...(normalized.path === undefined ? {} : { path: normalized.path }),
     }));
   });
-  const mapSteps = input.targetLanguages.flatMap((targetLanguage) =>
+  const mapInputs = input.targetLanguages.flatMap((targetLanguage) =>
     batch(units, MAP_BATCH_SIZE).map((mapUnits, batchIndex) => ({
-      stepId: randomUUID(),
-      stepKind: ExecutionStepKind.INFERENCE,
-      work: {
-        ...executionTaskWork('translate-map', {
-          sourceLanguage: input.sourceLanguage,
-          targetLanguage,
-          batchIndex,
-          units: mapUnits,
-        }),
-      },
-      requiredCapabilities: ['translate-map'],
+      targetLanguage,
+      mapUnits,
+      batchIndex,
     })),
   );
 
-  return buildReductionTree(
-    mapSteps,
-    ({ dependencyStepIds, level, groupIndex, final }) => ({
+  return buildMapReduceWorkflow({
+    items: mapInputs,
+    emptyInputError: 'Translation produced no map inputs',
+    map: ({ targetLanguage, mapUnits, batchIndex }) => ({
+      work: executionTaskWork('translate-map', {
+        sourceLanguage: input.sourceLanguage,
+        targetLanguage,
+        batchIndex,
+        units: mapUnits,
+      }),
+      requiredCapabilities: ['translate-map'],
+    }),
+    reduce: ({ level, groupIndex, final }) => ({
       stepKind: ExecutionStepKind.CODE,
-      dependsOnStepIds: dependencyStepIds,
-      work: {
-        ...executionTaskWork('translate-reduce', {
-          final,
-          level,
-          groupIndex,
-          ...(final
-            ? {
-                responseMode: input.responseMode,
-                itemCount: input.texts.length,
-                targetLanguages: input.targetLanguages,
-              }
-            : {}),
-        }),
-        coordination: {
-          kind: 'map-reduce-reduce/1',
-          mapStepIds: dependencyStepIds,
-          resultKey: 'translations',
-        },
-      },
+      work: executionTaskWork('translate-reduce', {
+        final,
+        level,
+        groupIndex,
+        ...(final
+          ? {
+              responseMode: input.responseMode,
+              itemCount: input.texts.length,
+              targetLanguages: input.targetLanguages,
+            }
+          : {}),
+      }),
       requiredCapabilities: ['translate-reduce'],
       operationKind: ExecutionOperationKind.ARTIFACT_PROCESSING,
       recoveryClass: ExecutionOperationRecoveryClass.READ_ONLY_REPLAYABLE,
+      resultKey: 'translations',
     }),
-  );
+  });
 }
 
 function normalizeTextItem(item: string | TranslationTextItem) {
