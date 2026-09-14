@@ -5,7 +5,7 @@ export class CreateExecutionConfirmations1757668140720 implements MigrationInter
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "execution_confirmations" (
+      CREATE TABLE IF NOT EXISTS "execution_confirmations" (
         "confirmation_id" uuid NOT NULL,
         "execution_id" uuid NOT NULL,
         "operation_id" uuid NOT NULL,
@@ -32,11 +32,11 @@ export class CreateExecutionConfirmations1757668140720 implements MigrationInter
       )
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_execution_confirmations_operation"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_execution_confirmations_operation"
       ON "execution_confirmations" ("operation_id")
     `);
     await queryRunner.query(`
-      CREATE INDEX "IDX_execution_confirmations_owner_status"
+      CREATE INDEX IF NOT EXISTS "IDX_execution_confirmations_owner_status"
       ON "execution_confirmations" ("owner_principal", "status", "created_at")
     `);
   }
