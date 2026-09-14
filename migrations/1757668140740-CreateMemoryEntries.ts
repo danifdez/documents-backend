@@ -6,7 +6,7 @@ export class CreateMemoryEntries1757668140740 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "memory_entries" (
+      CREATE TABLE IF NOT EXISTS "memory_entries" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "assistant_id" integer,
         "agent_id" integer,
@@ -91,22 +91,22 @@ export class CreateMemoryEntries1757668140740 implements MigrationInterface {
       )
     `);
     await queryRunner.query(`
-      CREATE INDEX "IDX_memory_entries_assistant_updated"
+      CREATE INDEX IF NOT EXISTS "IDX_memory_entries_assistant_updated"
       ON "memory_entries" ("assistant_id", "updated_at" DESC)
       WHERE "assistant_id" IS NOT NULL
     `);
     await queryRunner.query(`
-      CREATE INDEX "IDX_memory_entries_agent_updated"
+      CREATE INDEX IF NOT EXISTS "IDX_memory_entries_agent_updated"
       ON "memory_entries" ("agent_id", "updated_at" DESC)
       WHERE "agent_id" IS NOT NULL
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_memory_entries_assistant_content"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_memory_entries_assistant_content"
       ON "memory_entries" ("assistant_id", "content_hash")
       WHERE "assistant_id" IS NOT NULL
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_memory_entries_agent_content"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_memory_entries_agent_content"
       ON "memory_entries" ("agent_id", "content_hash")
       WHERE "agent_id" IS NOT NULL
     `);

@@ -5,7 +5,7 @@ export class CreateSkillActivations1757668140750 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "execution_skill_activations" (
+      CREATE TABLE IF NOT EXISTS "execution_skill_activations" (
         "activation_id" uuid NOT NULL,
         "execution_id" uuid NOT NULL,
         "schema_version" varchar(50) NOT NULL,
@@ -42,11 +42,11 @@ export class CreateSkillActivations1757668140750 implements MigrationInterface {
       )
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_execution_skill_activations_identity"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_execution_skill_activations_identity"
       ON "execution_skill_activations" ("execution_id", "skill_id")
     `);
     await queryRunner.query(`
-      CREATE INDEX "IDX_execution_skill_activations_execution"
+      CREATE INDEX IF NOT EXISTS "IDX_execution_skill_activations_execution"
       ON "execution_skill_activations" ("execution_id", "status")
     `);
   }

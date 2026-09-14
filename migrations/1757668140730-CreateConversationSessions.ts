@@ -5,7 +5,7 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "conversation_sessions" (
+      CREATE TABLE IF NOT EXISTS "conversation_sessions" (
         "session_id" uuid NOT NULL,
         "owner_type" varchar(20) NOT NULL,
         "owner_id" integer NOT NULL,
@@ -24,12 +24,12 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
       )
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_conversation_sessions_owner"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_conversation_sessions_owner"
       ON "conversation_sessions" ("owner_type", "owner_id")
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "conversation_artifact_revisions" (
+      CREATE TABLE IF NOT EXISTS "conversation_artifact_revisions" (
         "artifact_id" uuid NOT NULL,
         "revision" integer NOT NULL,
         "session_id" uuid NOT NULL,
@@ -56,12 +56,12 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
       )
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_conversation_artifact_revisions_session_revision"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_conversation_artifact_revisions_session_revision"
       ON "conversation_artifact_revisions" ("session_id", "revision")
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "conversation_turns" (
+      CREATE TABLE IF NOT EXISTS "conversation_turns" (
         "turn_id" uuid NOT NULL,
         "session_id" uuid NOT NULL,
         "root_execution_id" uuid NOT NULL,
@@ -102,52 +102,70 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
       )
     `);
     await queryRunner.query(`
-      CREATE INDEX "IDX_conversation_turns_session_status"
+      CREATE INDEX IF NOT EXISTS "IDX_conversation_turns_session_status"
       ON "conversation_turns" ("session_id", "status", "created_at")
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_conversation_turns_active_session"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_conversation_turns_active_session"
       ON "conversation_turns" ("session_id") WHERE "status" = 'active'
     `);
 
-    await queryRunner.query(`
-      ALTER TABLE "executions"
-      ADD CONSTRAINT "FK_executions_session"
-      FOREIGN KEY ("session_id") REFERENCES "conversation_sessions"("session_id")
-      ON DELETE RESTRICT
-    `);
-    await queryRunner.query(`
-      ALTER TABLE "executions"
-      ADD CONSTRAINT "FK_executions_turn"
-      FOREIGN KEY ("turn_id") REFERENCES "conversation_turns"("turn_id")
-      ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
-    `);
-    await queryRunner.query(`
-      ALTER TABLE "conversation_turns"
-      ADD CONSTRAINT "FK_conversation_turns_root_execution"
-      FOREIGN KEY ("root_execution_id") REFERENCES "executions"("execution_id")
-      ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
-    `);
-    await queryRunner.query(`
-      ALTER TABLE "conversation_turns"
-      ADD CONSTRAINT "FK_conversation_turns_request_artifact"
-      FOREIGN KEY ("request_artifact_id") REFERENCES "execution_artifacts"("artifact_id")
-      ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
-    `);
-    await queryRunner.query(`
-      ALTER TABLE "conversation_sessions"
-      ADD CONSTRAINT "FK_conversation_sessions_active_turn"
-      FOREIGN KEY ("active_turn_id") REFERENCES "conversation_turns"("turn_id")
-      ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
-    `);
+    await this.addConstraintIfMissing(
+      queryRunner,
+      'executions',
+      'FK_executions_session',
+      'FOREIGN KEY ("session_id") REFERENCES "conversation_sessions"("session_id") ON DELETE RESTRICT',
+    );
+    await this.addConstraintIfMissing(
+      queryRunner,
+      'executions',
+      'FK_executions_turn',
+      'FOREIGN KEY ("turn_id") REFERENCES "conversation_turns"("turn_id") ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED',
+    );
+    await this.addConstraintIfMissing(
+      queryRunner,
+      'conversation_turns',
+      'FK_conversation_turns_root_execution',
+      'FOREIGN KEY ("root_execution_id") REFERENCES "executions"("execution_id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED',
+    );
+    await this.addConstraintIfMissing(
+      queryRunner,
+      'conversation_turns',
+      'FK_conversation_turns_request_artifact',
+      'FOREIGN KEY ("request_artifact_id") REFERENCES "execution_artifacts"("artifact_id") ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED',
+    );
+    await this.addConstraintIfMissing(
+      queryRunner,
+      'conversation_sessions',
+      'FK_conversation_sessions_active_turn',
+      'FOREIGN KEY ("active_turn_id") REFERENCES "conversation_turns"("turn_id") ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED',
+    );
     for (const table of ['assistant_messages', 'agent_messages']) {
-      await queryRunner.query(`
-        ALTER TABLE "${table}"
-        ADD CONSTRAINT "FK_${table}_turn"
-        FOREIGN KEY ("turn_id") REFERENCES "conversation_turns"("turn_id")
-        ON DELETE CASCADE
-      `);
+      await this.addConstraintIfMissing(
+        queryRunner,
+        table,
+        `FK_${table}_turn`,
+        'FOREIGN KEY ("turn_id") REFERENCES "conversation_turns"("turn_id") ON DELETE CASCADE',
+      );
     }
+  }
+
+  private async addConstraintIfMissing(
+    queryRunner: QueryRunner,
+    table: string,
+    constraint: string,
+    definition: string,
+  ): Promise<void> {
+    await queryRunner.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = '${constraint}' AND conrelid = '"${table}"'::regclass
+        ) THEN
+          ALTER TABLE "${table}" ADD CONSTRAINT "${constraint}" ${definition};
+        END IF;
+      END $$
+    `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

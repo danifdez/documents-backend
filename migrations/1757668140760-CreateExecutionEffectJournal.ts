@@ -5,7 +5,7 @@ export class CreateExecutionEffectJournal1757668140760 implements MigrationInter
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "execution_effect_journal" (
+      CREATE TABLE IF NOT EXISTS "execution_effect_journal" (
         "journal_id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "execution_id" uuid NOT NULL,
         "effect_key" varchar(160) NOT NULL,
@@ -60,11 +60,11 @@ export class CreateExecutionEffectJournal1757668140760 implements MigrationInter
       )
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_execution_effect_journal_identity"
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_execution_effect_journal_identity"
       ON "execution_effect_journal" ("execution_id", "effect_key")
     `);
     await queryRunner.query(`
-      CREATE INDEX "IDX_execution_effect_journal_execution"
+      CREATE INDEX IF NOT EXISTS "IDX_execution_effect_journal_execution"
       ON "execution_effect_journal" ("execution_id", "status")
     `);
   }
