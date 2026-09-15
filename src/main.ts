@@ -44,6 +44,6 @@ async function bootstrap() {
   app.use(bodyParser.json({ limit: bodyLimit }));
   app.use(bodyParser.urlencoded({ limit: bodyLimit, extended: true }));
 
-  await app.listen(configService.get('PORT', 3000));
+  await app.listen(configService.get('PORT', 3000), configService.get<string | undefined>('HOST'));
 }
 bootstrap();
