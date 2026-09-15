@@ -40,6 +40,7 @@ export class DocService {
       .createQueryBuilder('d')
       .where('d.threadId = :threadId', { threadId })
       .andWhere('d."resourceId" IS NULL')
+      .andWhere('d.status <> :workspaceStatus', { workspaceStatus: 'workspace' })
       .orderBy('d.created_at', 'DESC')
       .getMany();
   }
@@ -50,6 +51,7 @@ export class DocService {
       .createQueryBuilder('d')
       .where('d.projectId = :projectId', { projectId })
       .andWhere('d."resourceId" IS NULL')
+      .andWhere('d.status <> :workspaceStatus', { workspaceStatus: 'workspace' })
       .orderBy('d.created_at', 'DESC')
       .getMany();
   }
