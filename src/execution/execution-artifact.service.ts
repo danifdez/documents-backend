@@ -49,6 +49,11 @@ export class ExecutionArtifactService {
         rootExecutionId: true,
         kind: true,
         producedByAttemptId: true,
+        contentHash: true,
+        size: true,
+        storageRef: true,
+        contentState: true,
+        expiresAt: true,
         body: true,
       },
       where: {

@@ -54,6 +54,7 @@ cp -a "$SERVICE_DIR/contracts" "$BUNDLE/contracts"
 log_info "Installing Backend production dependencies"
 mkdir -p "$BUNDLE/runtime/puppeteer"
 PUPPETEER_CACHE_DIR="$BUNDLE/runtime/puppeteer" run_logged "$LOG_FILE.dependencies" npm --prefix "$BUNDLE" ci --omit=dev
+PUPPETEER_CACHE_DIR="$BUNDLE/runtime/puppeteer" run_logged "$LOG_FILE.dependencies" npm --prefix "$BUNDLE" exec puppeteer browsers install chrome
 
 REVISION="$(git_revision "$SERVICE_DIR")"
 node - "$BUNDLE/component-manifest.json" "$VERSION" "$TARGET" "$REVISION" "$NODE_VERSION" <<'NODE'

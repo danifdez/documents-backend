@@ -61,6 +61,18 @@ describe('ExecutionArtifactService', () => {
         }),
       }),
     );
+    expect(artifacts.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          contentHash: true,
+          size: true,
+          storageRef: true,
+          contentState: true,
+          expiresAt: true,
+          body: true,
+        }),
+      }),
+    );
   });
 
   it('resolves the complete derived artifact closure in stable order', async () => {
