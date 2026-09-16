@@ -7,6 +7,7 @@ import { ExecutionStepKind } from '../src/execution/execution-step-kind.enum';
 import { DocEntity } from '../src/doc/doc.entity';
 import { CommentEntity } from '../src/comment/comment.entity';
 import { NoteEntity } from '../src/note/note.entity';
+import { FavoriteEntity } from '../src/favorite/favorite.entity';
 import { MarkEntity } from '../src/mark/mark.entity';
 import { CanvasEntity } from '../src/canvas/canvas.entity';
 import { DatasetEntity } from '../src/dataset/dataset.entity';
@@ -404,4 +405,18 @@ export function buildResourceType(
     updatedAt: now,
     ...overrides,
   } as ResourceTypeEntity;
+}
+
+export function buildFavorite(
+  overrides: Partial<FavoriteEntity> = {},
+): FavoriteEntity {
+  return {
+    id: 1,
+    project: buildProject(),
+    url: 'https://ejemplo.com/pagina',
+    title: 'Página de ejemplo',
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  } as FavoriteEntity;
 }

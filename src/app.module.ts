@@ -26,6 +26,7 @@ import { ExportModule } from './export/export.module';
 import { CanvasModule } from './canvas/canvas.module';
 import { DatasetModule } from './dataset/dataset.module';
 import { NoteModule } from './note/note.module';
+import { FavoriteModule } from './favorite/favorite.module';
 import { CalendarEventModule } from './calendar-event/calendar-event.module';
 import { TimelineModule } from './timeline/timeline.module';
 import { ResourceDateModule } from './resource-date/resource-date.module';
@@ -99,6 +100,7 @@ export class AppModule {
 
       // Base modules (always loaded)
       NoteModule,
+      FavoriteModule,
       CalendarEventModule,
       UserTaskModule,
       AssistantModule,

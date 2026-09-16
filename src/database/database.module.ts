@@ -61,6 +61,7 @@ import { ConversationArtifactRevisionEntity } from '../conversation/conversation
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
 import { ExecutionEffectJournalEntity } from '../execution/execution-effect-journal.entity';
 import { WorkerCredentialEventEntity } from '../worker/worker-credential-event.entity';
+import { FavoriteEntity } from '../favorite/favorite.entity';
 
 @Module({
   imports: [
@@ -130,6 +131,7 @@ import { WorkerCredentialEventEntity } from '../worker/worker-credential-event.e
       ConversationArtifactRevisionEntity,
       SkillActivationEntity,
       ExecutionEffectJournalEntity,
+      FavoriteEntity,
     ]),
   ],
   providers: [...databaseProviders],
