@@ -199,6 +199,60 @@ describe('ExecutionService queue state', () => {
     );
   });
 
+  it('records a failed chat turn and publishes the error to the client', async () => {
+    const execution = {
+      executionId: EXECUTION_ID,
+      rootExecutionId: EXECUTION_ID,
+      taskType: 'assistant-chat',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      status: ExecutionStatus.RUNNING,
+      phase: 'terminal_pending_failed',
+      payload: { ownerId: 1 },
+      error: { code: 'STEP_EXECUTION_FAILED', message: 'grammar exploded' },
+      lastSequence: '3',
+      lastEventId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
+      completionKind: null,
+      completionReason: null,
+      cancellationRequestedAt: null,
+      cancellationReason: null,
+    };
+    executionRepo.findOne.mockResolvedValue(execution);
+    executionRepo.save.mockImplementation(async (value) => value);
+    const reply = {
+      id: 11,
+      role: 'assistant',
+      content: '',
+      error: 'grammar exploded',
+      executionId: EXECUTION_ID,
+      createdAt: new Date('2026-09-18T16:31:55.000Z'),
+    };
+    const finishConversationTurn = jest
+      .spyOn(service as any, 'finishConversationTurn')
+      .mockResolvedValue(reply);
+
+    await service.updateStatus(
+      EXECUTION_ID,
+      ExecutionStatus.FAILED,
+      'grammar exploded',
+      { completionReason: 'worker_failed' },
+    );
+
+    expect(finishConversationTurn).toHaveBeenCalledWith(
+      expect.anything(),
+      execution,
+      expect.anything(),
+      { reply: '', error: 'grammar exploded' },
+    );
+    expect(outboxRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionId: EXECUTION_ID,
+        socketEvent: 'assistantResponse',
+        payload: expect.objectContaining({ assistantId: 1 }),
+      }),
+    );
+  });
+
   it('returns null when the execution does not exist', async () => {
     executionRepo.findOne.mockResolvedValue(null);
 

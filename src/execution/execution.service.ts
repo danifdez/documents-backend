@@ -1787,16 +1787,41 @@ export class ExecutionService {
         }
       }
 
+      let conversationMessage: ChatMessageEntity | null = null;
       if (TERMINAL_STATES.has(status)) {
         await finishSkillActivations(manager, execution.executionId, status);
-        await this.finishConversationTurn(
-          manager,
-          execution,
+        const turnStatus =
           status === ExecutionStatus.COMPLETED
             ? ConversationTurnStatus.COMPLETED
             : status === ExecutionStatus.CANCELLED
               ? ConversationTurnStatus.CANCELLED
-              : ConversationTurnStatus.FAILED,
+              : ConversationTurnStatus.FAILED;
+        // A chat turn that fails without going through its processor finalizer
+        // (worker_failed, missing processor, finalization error) still owes the
+        // user an answer: without a persisted reply the client keeps the turn
+        // pending forever, since `chatPublication` is built from a message.
+        const failureResponse =
+          status === ExecutionStatus.FAILED &&
+          ['assistant-chat', 'agent-chat'].includes(execution.taskType) &&
+          !options?.publication
+            ? {
+                reply: '',
+                error: redactExecutionText(
+                  failureMessage ??
+                    (typeof (execution.error as Record<string, unknown> | null)
+                      ?.message === 'string'
+                      ? String(
+                          (execution.error as Record<string, unknown>).message,
+                        )
+                      : 'The assistant could not complete the request'),
+                ),
+              }
+            : undefined;
+        conversationMessage = await this.finishConversationTurn(
+          manager,
+          execution,
+          turnStatus,
+          failureResponse,
         );
       }
 
@@ -1850,7 +1875,8 @@ export class ExecutionService {
           manager,
           execution,
           stateEvent.eventId,
-          options?.publication,
+          options?.publication ??
+            this.chatPublication(execution, conversationMessage),
         );
       }
       return execution;
