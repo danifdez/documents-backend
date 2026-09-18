@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FavoriteEntity } from './favorite.entity';
+import { FavoriteCategoryEntity } from './favorite-category.entity';
 import { CreateFavoriteDto, UpdateFavoriteDto } from './dto/favorite.dto';
 
 @Injectable()
@@ -9,31 +10,57 @@ export class FavoriteService {
   constructor(
     @InjectRepository(FavoriteEntity)
     private readonly repository: Repository<FavoriteEntity>,
-  ) { }
+    @InjectRepository(FavoriteCategoryEntity)
+    private readonly categoryRepository: Repository<FavoriteCategoryEntity>,
+  ) {}
 
   async findByProject(projectId: number): Promise<FavoriteEntity[]> {
     return await this.repository.find({
       where: { project: { id: projectId } },
+      relations: ['category'],
       order: { createdAt: 'DESC' },
     });
   }
 
   async findOne(id: number): Promise<FavoriteEntity | null> {
-    return await this.repository.findOneBy({ id });
+    return await this.repository.findOne({
+      where: { id },
+      relations: ['category'],
+    });
   }
 
-  // Idempotente por (proyecto, url): marcar la misma página dos veces no crea
-  // dos filas. Si ya estaba y llega un título distinto, se actualiza; si no,
-  // se devuelve la que hay.
+  private async resolveCategory(
+    projectId: number,
+    categoryId: number | null | undefined,
+  ): Promise<FavoriteCategoryEntity | null> {
+    if (categoryId === undefined || categoryId === null) return null;
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId, project: { id: projectId } },
+    });
+    if (!category) {
+      throw new BadRequestException('Category does not belong to this project');
+    }
+    return category;
+  }
+
   async upsert(dto: CreateFavoriteDto): Promise<FavoriteEntity> {
     const existing = await this.repository.findOne({
       where: { project: { id: dto.projectId }, url: dto.url },
     });
+
+    const category = await this.resolveCategory(dto.projectId, dto.categoryId);
+
     if (existing) {
+      let changed = false;
       if (dto.title !== undefined && dto.title !== existing.title) {
         existing.title = dto.title;
-        return await this.repository.save(existing);
+        changed = true;
       }
+      if (dto.categoryId !== undefined) {
+        existing.category = category;
+        changed = true;
+      }
+      if (changed) return await this.repository.save(existing);
       return existing;
     }
 
@@ -41,6 +68,7 @@ export class FavoriteService {
       project: { id: dto.projectId } as any,
       url: dto.url,
       title: dto.title ?? '',
+      category,
     });
     return await this.repository.save(created);
   }
@@ -49,9 +77,29 @@ export class FavoriteService {
     id: number,
     dto: UpdateFavoriteDto,
   ): Promise<FavoriteEntity | null> {
-    const favorite = await this.repository.findOneBy({ id });
+    const favorite = await this.repository.findOne({
+      where: { id },
+      relations: ['category', 'project'],
+    });
     if (!favorite) return null;
+
+    if (dto.url !== undefined && dto.url !== favorite.url) {
+      const clash = await this.repository.findOne({
+        where: { project: { id: favorite.project.id }, url: dto.url },
+      });
+      if (clash && clash.id !== id) {
+        throw new BadRequestException('Another favorite already uses that URL');
+      }
+      favorite.url = dto.url;
+    }
+
     if (dto.title !== undefined) favorite.title = dto.title;
+    if (dto.categoryId !== undefined) {
+      favorite.category = await this.resolveCategory(
+        favorite.project.id,
+        dto.categoryId,
+      );
+    }
     return await this.repository.save(favorite);
   }
 
@@ -62,9 +110,6 @@ export class FavoriteService {
     return { deleted: true };
   }
 
-  // Borrado por (proyecto, url): el navegador conoce la dirección que marcó,
-  // no el identificador de la fila, así que puede quitar el favorito sin
-  // haberse traído antes la lista.
   async removeByUrl(
     projectId: number,
     url: string,

@@ -59,6 +59,7 @@ import { ConversationArtifactRevisionEntity } from '../conversation/conversation
 import { ExecutionEffectJournalEntity } from '../execution/execution-effect-journal.entity';
 import { SkillActivationEntity } from '../conversation/skill-activation.entity';
 import { FavoriteEntity } from '../favorite/favorite.entity';
+import { FavoriteCategoryEntity } from '../favorite/favorite-category.entity';
 
 export const getTypeOrmConfig = async (
   configService: ConfigService,
@@ -130,6 +131,7 @@ export const getTypeOrmConfig = async (
       ExecutionEffectJournalEntity,
       SkillActivationEntity,
       FavoriteEntity,
+      FavoriteCategoryEntity,
     ],
     synchronize: false,
     // Apply pending migrations on every boot so that updates ship their schema

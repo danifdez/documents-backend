@@ -5,34 +5,34 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
-import { FavoriteCategoryEntity } from './favorite-category.entity';
 
-@Entity({ name: 'favorites' })
-export class FavoriteEntity {
+@Entity({ name: 'favorite_categories' })
+export class FavoriteCategoryEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
   @ManyToOne(() => ProjectEntity, { nullable: false, onDelete: 'CASCADE' })
   project: ProjectEntity;
 
-  @Column()
-  url: string;
+  @Column({ name: 'parentId', nullable: true })
+  parentId: number | null;
 
-  @Column({ default: '' })
-  title: string;
-
-  @Column({ name: 'categoryId', nullable: true })
-  categoryId: number | null;
-
-  @ManyToOne(() => FavoriteCategoryEntity, {
+  @ManyToOne(() => FavoriteCategoryEntity, (category) => category.children, {
     nullable: true,
     onDelete: 'SET NULL',
   })
-  @JoinColumn({ name: 'categoryId' })
-  category: FavoriteCategoryEntity | null;
+  @JoinColumn({ name: 'parentId' })
+  parent: FavoriteCategoryEntity | null;
+
+  @OneToMany(() => FavoriteCategoryEntity, (category) => category.parent)
+  children: FavoriteCategoryEntity[];
+
+  @Column()
+  name: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

@@ -1,4 +1,10 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsNumber,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateFavoriteDto {
   @IsNumber()
@@ -13,6 +19,10 @@ export class CreateFavoriteDto {
   @IsOptional()
   @MaxLength(300)
   title?: string;
+
+  @IsOptional()
+  @IsNumber()
+  categoryId?: number | null;
 }
 
 export class UpdateFavoriteDto {
@@ -20,4 +30,14 @@ export class UpdateFavoriteDto {
   @IsOptional()
   @MaxLength(300)
   title?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsNotEmpty()
+  @MaxLength(2000)
+  url?: string;
+
+  @IsOptional()
+  @IsNumber()
+  categoryId?: number | null;
 }
