@@ -18,7 +18,7 @@ export class MarkService {
   }
 
   async create(mark: Partial<MarkEntity>): Promise<MarkEntity> {
-    const created = this.repository.create(mark);
+    const created = this.repository.create({ type: 'highlight', ...mark });
     return await this.repository.save(created);
   }
 
@@ -60,6 +60,10 @@ export class MarkService {
       doc: saved.doc,
       resource: saved.resource,
       content: saved.content,
+      type: saved.type,
+      prefix: saved.prefix,
+      suffix: saved.suffix,
+      position: saved.position,
       createdAt: saved.createdAt ?? (saved as any).created_at,
       updatedAt: saved.updatedAt ?? (saved as any).updated_at,
     };

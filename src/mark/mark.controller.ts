@@ -33,6 +33,10 @@ export class MarkController {
   async create(@Body() dto: CreateMarkDto): Promise<MarkEntity> {
     const markData: Partial<MarkEntity> = {
       content: dto.content,
+      type: dto.type ?? 'highlight',
+      prefix: dto.prefix ?? null,
+      suffix: dto.suffix ?? null,
+      position: dto.position ?? null,
     };
 
     if (dto.doc) {

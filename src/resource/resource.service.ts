@@ -204,6 +204,23 @@ export class ResourceService {
     return await this.repo.findOne({ where: { hash } });
   }
 
+  // El navegador busca por la dirección de la página para saber si lo que está
+  // viendo ya es un recurso del proyecto.
+  async findByUrl(
+    url: string,
+    projectId?: number,
+  ): Promise<ResourceEntity | null> {
+    const where: Record<string, any> = { url };
+    if (projectId) {
+      where.project = { id: projectId };
+    }
+    return await this.repo.findOne({
+      where,
+      order: { id: 'DESC' },
+      relations: ['project'],
+    });
+  }
+
   async findByEntityId(entityId: number): Promise<ResourceEntity[]> {
     return await this.repo
       .createQueryBuilder('resource')

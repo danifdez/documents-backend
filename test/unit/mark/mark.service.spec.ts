@@ -32,6 +32,20 @@ describe('MarkService', () => {
     expect(await service.create({ content: 'test' })).toEqual(m);
   });
 
+  it('should default type to highlight', async () => {
+    repo.create.mockImplementation((value: any) => value);
+    repo.save.mockImplementation(async (value: any) => value);
+    const created = await service.create({ content: 'test' });
+    expect(created.type).toBe('highlight');
+  });
+
+  it('should keep explicit type', async () => {
+    repo.create.mockImplementation((value: any) => value);
+    repo.save.mockImplementation(async (value: any) => value);
+    const created = await service.create({ content: 'test', type: 'idea' });
+    expect(created.type).toBe('idea');
+  });
+
   it('should find by doc', async () => {
     repo.find.mockResolvedValue([buildMark()]);
     expect(await service.findByDoc(1)).toHaveLength(1);

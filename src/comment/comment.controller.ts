@@ -35,6 +35,10 @@ export class CommentController {
   async create(@Body() dto: CreateCommentDto): Promise<CommentEntity> {
     const commentData: Partial<CommentEntity> = {
       content: dto.content,
+      quote: dto.quote ?? null,
+      prefix: dto.prefix ?? null,
+      suffix: dto.suffix ?? null,
+      position: dto.position ?? null,
     };
 
     if (dto.doc) {

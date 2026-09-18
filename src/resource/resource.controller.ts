@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Req, Res, HttpException, HttpStatus, ParseIntPipe, Optional } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Req, Res, HttpException, HttpStatus, ParseIntPipe, Optional, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
 import { ResourceService } from './resource.service';
@@ -19,6 +19,16 @@ export class ResourceController {
   @Get()
   async findAll(): Promise<ResourceEntity[]> {
     return await this.resourceService.findAllWithProjects();
+  }
+
+  @Get('by-url')
+  async getByUrl(
+    @Query('url') url: string,
+    @Query('projectId') projectId?: string,
+  ): Promise<ResourceEntity | null> {
+    if (!url) return null;
+    const project = projectId ? Number(projectId) : undefined;
+    return await this.resourceService.findByUrl(url, project);
   }
 
   @Get('pending')

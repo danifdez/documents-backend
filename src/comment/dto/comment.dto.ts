@@ -4,6 +4,22 @@ export class CreateCommentDto {
   @IsString()
   content: string;
 
+  @IsString()
+  @IsOptional()
+  quote?: string;
+
+  @IsString()
+  @IsOptional()
+  prefix?: string;
+
+  @IsString()
+  @IsOptional()
+  suffix?: string;
+
+  @IsNumber()
+  @IsOptional()
+  position?: number;
+
   @IsNumber()
   @IsOptional()
   doc?: number;
@@ -17,4 +33,20 @@ export class UpdateCommentDto {
   @IsString()
   @IsOptional()
   content?: string;
+
+  @IsString()
+  @IsOptional()
+  quote?: string;
+
+  @IsString()
+  @IsOptional()
+  prefix?: string;
+
+  @IsString()
+  @IsOptional()
+  suffix?: string;
+
+  @IsNumber()
+  @IsOptional()
+  position?: number;
 }

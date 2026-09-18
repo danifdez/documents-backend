@@ -180,6 +180,10 @@ export function buildComment(
   return {
     id: 1,
     content: 'Test comment',
+    quote: null,
+    prefix: null,
+    suffix: null,
+    position: null,
     doc: null,
     resource: null,
     createdAt: now,
@@ -204,6 +208,10 @@ export function buildMark(overrides: Partial<MarkEntity> = {}): MarkEntity {
   return {
     id: 1,
     content: 'Test mark',
+    type: 'highlight',
+    prefix: null,
+    suffix: null,
+    position: null,
     doc: null,
     resource: null,
     createdAt: now,
