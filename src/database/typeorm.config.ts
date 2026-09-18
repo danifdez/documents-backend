@@ -142,5 +142,14 @@ export const getTypeOrmConfig = async (
     migrations: [__dirname + '/../../migrations/*.js'],
     migrationsRun: configService.get('RUN_MIGRATIONS') !== 'false',
     logging: false,
+    // Apache AGE stores each graph in a schema named after the graph, and the
+    // default `"$user", public` search_path lets that schema shadow `public`
+    // when the database role is also named `documents` (the standalone install
+    // does exactly that). Pinning the connection to `public` keeps TypeORM's
+    // unqualified migration bookkeeping and DDL out of the graph schema. AGE
+    // queries opt back in with their own `SET search_path`.
+    extra: {
+      options: '-c search_path=public',
+    },
   };
 };

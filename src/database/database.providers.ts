@@ -13,7 +13,17 @@ export const databaseProviders = [
       const password = String(configService.get('POSTGRES_PASSWORD') ?? '');
       const database = String(configService.get('POSTGRES_DB') ?? 'documents');
 
-      const pool = new Pool({ host, port, user, password, database });
+      // Pin the search_path: the AGE `documents` graph lives in a schema named
+      // `documents`, which shadows `public` for a role of the same name under
+      // the default `"$user", public`. See typeorm.config.ts.
+      const pool = new Pool({
+        host,
+        port,
+        user,
+        password,
+        database,
+        options: '-c search_path=public',
+      });
 
       await pool.query('SELECT 1');
       await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
