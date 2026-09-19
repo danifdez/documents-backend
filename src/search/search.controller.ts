@@ -3,6 +3,7 @@ import { SearchService } from './search.service';
 import { SearchResultDto } from './dto/search-result.dto';
 import { PageEntitiesDto, PageEntityMatch } from './dto/page-entities.dto';
 import { PageBlocksDto, PageBlockResult } from './dto/page-blocks.dto';
+import { PageMatchesDto, PageMatchesResult } from './dto/page-matches.dto';
 
 @Controller('search')
 export class SearchController {
@@ -16,6 +17,17 @@ export class SearchController {
   @Post('page-blocks')
   async pageBlocks(@Body() dto: PageBlocksDto): Promise<PageBlockResult[]> {
     return await this.searchService.searchBlocks(dto.blocks, dto.projectId);
+  }
+
+  @Post('page-matches')
+  async pageMatches(@Body() dto: PageMatchesDto): Promise<PageMatchesResult> {
+    const [entities, knowledge, timeline, bibliography] = await Promise.all([
+      this.searchService.matchEntitiesInText(dto.text, dto.projectId),
+      this.searchService.matchKnowledgeInText(dto.text),
+      this.searchService.matchTimelineInText(dto.text, dto.projectId),
+      this.searchService.matchBibliographyInText(dto.text, dto.projectId),
+    ]);
+    return { entities, knowledge, timeline, bibliography };
   }
 
   @Post('')

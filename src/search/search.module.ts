@@ -12,6 +12,8 @@ import { KnowledgeBaseModule } from 'src/knowledge-base/knowledge-base.module';
 import { EntityModule } from 'src/entity/entity.module';
 import { DatasetModule } from 'src/dataset/dataset.module';
 import { ProjectModule } from 'src/project/project.module';
+import { TimelineModule } from 'src/timeline/timeline.module';
+import { BibliographyModule } from 'src/bibliography/bibliography.module';
 
 // SearchService's @Optional() constructor dependencies (notes, canvas, KB,
 // events, entities, datasets) were never wired here, so global search via
@@ -30,6 +32,8 @@ import { ProjectModule } from 'src/project/project.module';
     EntityModule,
     DatasetModule,
     ProjectModule,
+    TimelineModule,
+    BibliographyModule,
   ],
   controllers: [SearchController],
   providers: [SearchService],

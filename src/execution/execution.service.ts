@@ -51,7 +51,11 @@ import {
   ExecutionOutboxStatus,
 } from '../execution-outbox/execution-outbox.entity';
 import { ExecutionPublication } from '../execution-outbox/execution-publication';
-import { canonicalHash, contentHash } from './execution-canonical';
+import {
+  canonicalHash,
+  canonicalProfileValue,
+  contentHash,
+} from './execution-canonical';
 import {
   appendBackendExecutionEvent,
   BackendExecutionEventData,
@@ -115,6 +119,7 @@ export {
   canonicalDomainHash,
   canonicalHash,
   canonicalJson,
+  canonicalProfileValue,
   contentHash,
 } from './execution-canonical';
 
@@ -2158,7 +2163,11 @@ export class ExecutionService {
           schemaVersion: EXECUTION_EVENT_SCHEMA,
         };
         delete envelope.contentHash;
-        const withHash = { ...envelope, contentHash: canonicalHash(envelope) };
+        const profiled = canonicalProfileValue(envelope) as Record<
+          string,
+          unknown
+        >;
+        const withHash = { ...profiled, contentHash: canonicalHash(profiled) };
         const row = eventRepo.create({
           eventId,
           rootExecutionId,

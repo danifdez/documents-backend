@@ -49,6 +49,7 @@ export class RelationshipController {
   @Get('neighborhood')
   async queryNeighborhood(
     @Query('names') namesStr: string,
+    @Query('projectId') projectIdStr?: string,
   ): Promise<RelationshipGraph> {
     const entityNames = namesStr
       ? namesStr
@@ -56,7 +57,8 @@ export class RelationshipController {
           .map((n) => n.trim())
           .filter(Boolean)
       : [];
-    return this.service.queryNeighborhood(entityNames);
+    const projectId = projectIdStr ? parseInt(projectIdStr, 10) : undefined;
+    return this.service.queryNeighborhood(entityNames, projectId);
   }
 
   @Post()

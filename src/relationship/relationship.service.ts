@@ -26,8 +26,11 @@ export class RelationshipService {
     return this.graphService.queryByResource(resourceId);
   }
 
-  queryNeighborhood(entityNames: string[]): Promise<RelationshipGraph> {
-    return this.graphService.queryNeighborhood(entityNames);
+  queryNeighborhood(
+    entityNames: string[],
+    projectId?: number,
+  ): Promise<RelationshipGraph> {
+    return this.graphService.queryNeighborhood(entityNames, projectId);
   }
 
   queryByProject(

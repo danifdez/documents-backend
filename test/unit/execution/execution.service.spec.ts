@@ -2,6 +2,7 @@ import {
   canonicalHash,
   canonicalDomainHash,
   canonicalJson,
+  canonicalProfileValue,
   contentHash,
   ExecutionService,
 } from '../../../src/execution/execution.service';
@@ -267,6 +268,27 @@ describe('ExecutionService primitives', () => {
       canonicalDomainHash({ a: 1, b: 0.5 }),
     );
     expect(contentHash('execution')).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('encodes floats before they enter the canonical event profile', () => {
+    expect(
+      canonicalProfileValue({
+        results: [{ score: 0.883236437798016, name: 'uno' }],
+      }),
+    ).toEqual({ results: [{ score: '0.883236437798016', name: 'uno' }] });
+    expect(canonicalProfileValue({ a: 1, b: null, c: 'x' })).toEqual({
+      a: 1,
+      b: null,
+      c: 'x',
+    });
+    expect(() =>
+      canonicalHash(
+        canonicalProfileValue({ results: [{ score: 0.5 }] }) as Record<
+          string,
+          unknown
+        >,
+      ),
+    ).not.toThrow();
   });
 
   it('rejects evaluation export before reading evidence without consent', async () => {

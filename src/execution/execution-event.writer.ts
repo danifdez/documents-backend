@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { EntityManager } from 'typeorm';
-import { canonicalHash } from './execution-canonical';
+import { canonicalHash, canonicalProfileValue } from './execution-canonical';
 import { EXECUTION_EVENT_SCHEMA } from './execution.constants';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
@@ -69,7 +69,9 @@ export async function appendBackendExecutionEvent(
       redactionApplied: data.redactionApplied ?? false,
     },
   };
-  const cleanEnvelope = JSON.parse(JSON.stringify(envelope));
+  const cleanEnvelope = JSON.parse(
+    JSON.stringify(canonicalProfileValue(envelope)),
+  );
   cleanEnvelope.contentHash = canonicalHash(cleanEnvelope);
   const row = manager.getRepository(ExecutionEventEntity).create({
     eventId,

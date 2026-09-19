@@ -1,19 +1,34 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { DocService } from 'src/doc/doc.service';
-import { ResourceService } from 'src/resource/resource.service';
-import { CanvasService } from 'src/canvas/canvas.service';
-import { NoteService } from 'src/note/note.service';
-import { CalendarEventService } from 'src/calendar-event/calendar-event.service';
-import { KnowledgeEntryService } from 'src/knowledge-base/knowledge-entry.service';
-import { EntityService } from 'src/entity/entity.service';
-import { DatasetService } from 'src/dataset/dataset.service';
-import { ProjectService } from 'src/project/project.service';
+import { DocService } from '../doc/doc.service';
+import { ResourceService } from '../resource/resource.service';
+import { CanvasService } from '../canvas/canvas.service';
+import { NoteService } from '../note/note.service';
+import { CalendarEventService } from '../calendar-event/calendar-event.service';
+import { KnowledgeEntryService } from '../knowledge-base/knowledge-entry.service';
+import { EntityService } from '../entity/entity.service';
+import { DatasetService } from '../dataset/dataset.service';
+import { ProjectService } from '../project/project.service';
+import { TimelineService } from '../timeline/timeline.service';
+import { BibliographyService } from '../bibliography/bibliography.service';
 import * as cheerio from 'cheerio';
 import { SearchResultDto } from './dto/search-result.dto';
 import { PageEntityMatch } from './dto/page-entities.dto';
 import { PageBlockResult } from './dto/page-blocks.dto';
+import {
+  bibliographyCitationForms,
+  entityTermsOf,
+  knowledgeTermsOf,
+  matchDateInText,
+  matchTaggedTermsInText,
+  matchTermsInText,
+} from './page-match.util';
+import {
+  PageKnowledgeMatch,
+  PageTimelineMatch,
+  PageBibliographyMatch,
+} from './dto/page-matches.dto';
 
 type Highlight = (text: string, chars?: number) => string;
 
@@ -137,6 +152,8 @@ export class SearchService {
     @Optional() private readonly entityService?: EntityService,
     @Optional() private readonly datasetService?: DatasetService,
     @Optional() private readonly projectService?: ProjectService,
+    @Optional() private readonly timelineService?: TimelineService,
+    @Optional() private readonly bibliographyService?: BibliographyService,
   ) {
     const docs: SearchCollection = {
       required: true,
@@ -313,56 +330,8 @@ export class SearchService {
     const seenIds = new Set<number>();
 
     for (const entity of entities) {
-      // Collect all terms to match for this entity
-      const terms: string[] = [];
-
-      if (entity.name && entity.name.length >= 3) {
-        terms.push(entity.name);
-      }
-
-      // Aliases
-      if (entity.aliases && Array.isArray(entity.aliases)) {
-        for (const alias of entity.aliases) {
-          if (alias.value && alias.value.length >= 3) {
-            terms.push(alias.value);
-          }
-        }
-      }
-
-      // Translations
-      if (entity.translations && typeof entity.translations === 'object') {
-        for (const value of Object.values(entity.translations)) {
-          if (typeof value === 'string' && value.length >= 3) {
-            terms.push(value);
-          }
-        }
-      }
-
-      // Check which terms appear in the text using Unicode-aware boundary matching
-      // \b doesn't work with accented chars (é, ñ, etc.), so we use lookaround with
-      // a character class that covers word chars + Unicode letters
-      const matchedTerms: string[] = [];
-      for (const term of terms) {
-        // Use case-insensitive indexOf first (fast path), then verify boundaries
-        const lowerText = normalizedText.toLowerCase();
-        const lowerTerm = term.toLowerCase();
-        let searchFrom = 0;
-        while (searchFrom < lowerText.length) {
-          const idx = lowerText.indexOf(lowerTerm, searchFrom);
-          if (idx === -1) break;
-
-          // Check that the character before and after is not a letter/digit (word boundary)
-          const charBefore = idx > 0 ? lowerText[idx - 1] : ' ';
-          const charAfter = idx + lowerTerm.length < lowerText.length ? lowerText[idx + lowerTerm.length] : ' ';
-          const isWordChar = (c: string) => /[\p{L}\p{N}_]/u.test(c);
-
-          if (!isWordChar(charBefore) && !isWordChar(charAfter)) {
-            matchedTerms.push(term);
-            break;
-          }
-          searchFrom = idx + 1;
-        }
-      }
+      const terms = entityTermsOf(entity);
+      const matchedTerms = matchTermsInText(normalizedText, terms);
 
       if (matchedTerms.length > 0 && !seenIds.has(entity.id)) {
         seenIds.add(entity.id);
@@ -376,6 +345,123 @@ export class SearchService {
       }
     }
 
+    return matches;
+  }
+
+  async matchKnowledgeInText(text: string): Promise<PageKnowledgeMatch[]> {
+    const normalized = (text ?? '').slice(0, 10000);
+    if (!normalized.trim() || !this.knowledgeEntryService) {
+      return [];
+    }
+
+    let entries: any[];
+    try {
+      entries = await this.knowledgeEntryService.findAll();
+    } catch {
+      return [];
+    }
+
+    const matches: PageKnowledgeMatch[] = [];
+    for (const entry of entries) {
+      const matchedTerms = matchTermsInText(normalized, knowledgeTermsOf(entry));
+      if (matchedTerms.length > 0) {
+        matches.push({
+          id: entry.id,
+          title: entry.title,
+          summary: entry.summary ?? null,
+          matchedTerms: [...new Set(matchedTerms)],
+        });
+      }
+    }
+    return matches;
+  }
+
+  async matchTimelineInText(
+    text: string,
+    projectId?: number,
+  ): Promise<PageTimelineMatch[]> {
+    const normalized = (text ?? '').slice(0, 10000);
+    if (!normalized.trim() || !projectId || !this.timelineService) {
+      return [];
+    }
+
+    let timelines: any[];
+    try {
+      timelines = await this.timelineService.findByProject(projectId);
+    } catch {
+      return [];
+    }
+
+    const matches: PageTimelineMatch[] = [];
+    for (const timeline of timelines) {
+      const events = Array.isArray(timeline.timelineData)
+        ? timeline.timelineData
+        : [];
+      for (const event of events) {
+        // La fecha de inicio manda; si no aparece, se prueba con la de fin,
+        // que es como se escribe un periodo en prosa.
+        const found =
+          matchDateInText(normalized, event?.date) ??
+          matchDateInText(normalized, event?.endDate);
+        if (!found) {
+          continue;
+        }
+        matches.push({
+          timelineId: timeline.id,
+          timelineName: timeline.name,
+          eventId: event.id ?? null,
+          title: event.title ?? '',
+          date: event.date,
+          endDate: event.endDate ?? null,
+          description: event.description ?? null,
+          matchedTerm: found.term,
+          precision: found.precision,
+        });
+      }
+    }
+    return matches;
+  }
+
+  async matchBibliographyInText(
+    text: string,
+    projectId?: number,
+  ): Promise<PageBibliographyMatch[]> {
+    const normalized = (text ?? '').slice(0, 10000);
+    if (!normalized.trim() || !this.bibliographyService) {
+      return [];
+    }
+
+    let entries: any[];
+    try {
+      entries = projectId
+        ? await this.bibliographyService.findByProject(projectId)
+        : await this.bibliographyService.findAll();
+    } catch {
+      return [];
+    }
+
+    const matches: PageBibliographyMatch[] = [];
+    for (const entry of entries) {
+      const matched = matchTaggedTermsInText(
+        normalized,
+        bibliographyCitationForms(entry),
+      );
+      if (matched.length > 0) {
+        matches.push({
+          id: entry.id,
+          citeKey: entry.citeKey ?? null,
+          title: entry.title ?? null,
+          creators: entry.creators ?? null,
+          year: entry.year ?? null,
+          journal: entry.journal ?? null,
+          publisher: entry.publisher ?? null,
+          doi: entry.doi ?? null,
+          url: entry.url ?? null,
+          matchedTerms: [...new Set(matched.map((m) => m.term))],
+          matchKinds: [...new Set(matched.map((m) => m.kind))],
+        });
+      }
+    }
     return matches;
   }
 
