@@ -8,6 +8,7 @@ import { DocEntity } from '../doc/doc.entity';
 import { ThreadEntity } from '../thread/thread.entity';
 import { CommentEntity } from '../comment/comment.entity';
 import { MarkEntity } from '../mark/mark.entity';
+import { ReadingPointEntity } from '../reading-point/reading-point.entity';
 import { NoteEntity } from '../note/note.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { FileStorageModule } from '../file-storage/file-storage.module';
@@ -21,6 +22,7 @@ export class OfflineModule {
       ThreadEntity,
       CommentEntity,
       MarkEntity,
+      ReadingPointEntity,
       ProjectEntity,
       NoteEntity,
     ];

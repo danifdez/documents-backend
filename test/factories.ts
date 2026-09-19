@@ -9,6 +9,7 @@ import { CommentEntity } from '../src/comment/comment.entity';
 import { NoteEntity } from '../src/note/note.entity';
 import { FavoriteEntity } from '../src/favorite/favorite.entity';
 import { MarkEntity } from '../src/mark/mark.entity';
+import { ReadingPointEntity } from '../src/reading-point/reading-point.entity';
 import { CanvasEntity } from '../src/canvas/canvas.entity';
 import { DatasetEntity } from '../src/dataset/dataset.entity';
 import { BibliographyEntryEntity } from '../src/bibliography/bibliography-entry.entity';
@@ -218,6 +219,27 @@ export function buildMark(overrides: Partial<MarkEntity> = {}): MarkEntity {
     updatedAt: now,
     ...overrides,
   } as MarkEntity;
+}
+
+export function buildReadingPoint(
+  overrides: Partial<ReadingPointEntity> = {},
+): ReadingPointEntity {
+  return {
+    id: 1,
+    kind: 'section',
+    label: 'Section',
+    fragmentId: null,
+    exact: 'Test point',
+    prefix: null,
+    suffix: null,
+    position: 0,
+    ratio: 0,
+    doc: null,
+    resource: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  } as ReadingPointEntity;
 }
 
 export function buildCanvas(

@@ -16,6 +16,7 @@ import { VoiceModule } from './voice/voice.module';
 import { ConfigModule } from '@nestjs/config';
 import { CommentModule } from './comment/comment.module';
 import { MarkModule } from './mark/mark.module';
+import { ReadingPointModule } from './reading-point/reading-point.module';
 import { ModelModule } from './model/model.module';
 import { SearchModule } from './search/search.module';
 import { EntityTypeModule } from './entity-type/entity-type.module';
@@ -89,6 +90,7 @@ export class AppModule {
       VoiceModule,
       CommentModule,
       MarkModule,
+      ReadingPointModule,
       ModelModule,
       ReferenceModule,
       SearchModule,

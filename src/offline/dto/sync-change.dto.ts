@@ -1,7 +1,7 @@
 import { IsNumber, IsIn, IsObject, IsDateString } from 'class-validator';
 
 export class SyncChangeDto {
-  @IsIn(['doc', 'comment', 'mark', 'note', 'resource'])
+  @IsIn(['doc', 'comment', 'mark', 'reading-point', 'note', 'resource'])
   entityType: string;
 
   @IsNumber()

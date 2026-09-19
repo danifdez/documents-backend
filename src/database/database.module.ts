@@ -7,6 +7,7 @@ import { ResourceEntity } from '../resource/resource.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { DocEntity } from '../doc/doc.entity';
 import { MarkEntity } from '../mark/mark.entity';
+import { ReadingPointEntity } from '../reading-point/reading-point.entity';
 import { CommentEntity } from '../comment/comment.entity';
 import { ResourceTypeEntity } from '../resource-type/resource-type.entity';
 import { ThreadEntity } from '../thread/thread.entity';
@@ -79,6 +80,7 @@ import { FavoriteCategoryEntity } from '../favorite/favorite-category.entity';
       ProjectEntity,
       DocEntity,
       MarkEntity,
+      ReadingPointEntity,
       CommentEntity,
       ResourceTypeEntity,
       ThreadEntity,
