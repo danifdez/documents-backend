@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TimelineEntity } from './timeline.entity';
-import { CreateTimelineDto, UpdateTimelineDto } from './dto/timeline.dto';
+import { randomUUID } from 'crypto';
+import { TimelineEntity, TimelineEvent } from './timeline.entity';
+import {
+  AppendTimelineEventDto,
+  CreateTimelineDto,
+  UpdateTimelineDto,
+} from './dto/timeline.dto';
 
 @Injectable()
 export class TimelineService {
@@ -55,6 +60,29 @@ export class TimelineService {
     const timeline = await this.repository.preload({ id, ...data });
     if (!timeline) return null;
     return await this.repository.save(timeline);
+  }
+
+  async appendEvent(
+    id: number,
+    dto: AppendTimelineEventDto,
+  ): Promise<{ timelineId: number; event: TimelineEvent } | null> {
+    const timeline = await this.repository.findOne({ where: { id } });
+    if (!timeline) return null;
+
+    const event: TimelineEvent = {
+      id: randomUUID(),
+      title: dto.title,
+      date: dto.date,
+      color: dto.color ?? '#3b82f6',
+    };
+    if (dto.description !== undefined) event.description = dto.description;
+    if (dto.endDate !== undefined) event.endDate = dto.endDate;
+    if (dto.docId !== undefined) event.docId = dto.docId;
+    if (dto.resourceId !== undefined) event.resourceId = dto.resourceId;
+
+    timeline.timelineData = [...(timeline.timelineData ?? []), event];
+    await this.repository.save(timeline);
+    return { timelineId: timeline.id, event };
   }
 
   async remove(id: number): Promise<{ deleted: boolean }> {

@@ -164,6 +164,7 @@ export class EntityService {
 
         const entity = this.repository.create({
             name: createEntityDto.name,
+            description: createEntityDto.description,
             translations: createEntityDto.translations,
             aliases: createEntityDto.aliases,
             entityType,

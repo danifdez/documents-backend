@@ -57,6 +57,23 @@ describe('EntityService', () => {
       expect(result).toEqual(entity);
     });
 
+    it('should persist the description on create', async () => {
+      const et = buildEntityType();
+      entityTypeService.findOne.mockResolvedValue(et);
+      const entity = buildEntity();
+      repo.create.mockReturnValue(entity);
+      repo.save.mockResolvedValue(entity);
+
+      await service.create({
+        name: 'Test',
+        entityTypeId: 1,
+        description: 'Fuente: https://example.com',
+      });
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ description: 'Fuente: https://example.com' }),
+      );
+    });
+
     it('should throw NotFoundException if entityType not found', async () => {
       entityTypeService.findOne.mockResolvedValue(null);
       await expect(service.create({ name: 'Test', entityTypeId: 999 })).rejects.toThrow(NotFoundException);

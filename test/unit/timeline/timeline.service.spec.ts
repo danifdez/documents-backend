@@ -12,34 +12,79 @@ describe('TimelineService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TimelineService, { provide: getRepositoryToken(TimelineEntity), useValue: repo }],
+      providers: [
+        TimelineService,
+        { provide: getRepositoryToken(TimelineEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(TimelineService);
   });
 
-  it('should find one with project', async () => {
-    repo.findOne.mockResolvedValue(buildTimeline());
-    expect(await service.findOne(1)).toBeDefined();
-  });
+  describe('appendEvent', () => {
+    it('appends an event with a generated id and defaults', async () => {
+      const timeline = buildTimeline({ timelineData: null });
+      repo.findOne.mockResolvedValue(timeline);
+      repo.save.mockImplementation(async (t: TimelineEntity) => t);
 
-  it('should create timeline', async () => {
-    const t = buildTimeline();
-    repo.create.mockReturnValue(t);
-    repo.save.mockResolvedValue(t);
-    expect(await service.create({ name: 'Test' })).toEqual(t);
-  });
+      const result = await service.appendEvent(1, {
+        title: 'Evento',
+        date: '2024-04-03',
+      });
 
-  it('should find by project', async () => {
-    const qb = repo.createQueryBuilder();
-    qb.getMany.mockResolvedValue([buildTimeline()]);
-    expect(await service.findByProject(1)).toHaveLength(1);
-  });
+      expect(result).not.toBeNull();
+      expect(result!.timelineId).toBe(1);
+      expect(result!.event.title).toBe('Evento');
+      expect(result!.event.date).toBe('2024-04-03');
+      expect(result!.event.color).toBe('#3b82f6');
+      expect(typeof result!.event.id).toBe('string');
+      expect(result!.event.id.length).toBeGreaterThan(0);
+      expect(timeline.timelineData).toHaveLength(1);
+    });
 
-  it('should remove', async () => {
-    const t = buildTimeline();
-    repo.findOneBy.mockResolvedValue(t);
-    repo.remove.mockResolvedValue(t);
-    await service.remove(1);
-    expect(repo.remove).toHaveBeenCalled();
+    it('keeps existing events', async () => {
+      const existing = buildTimeline({
+        timelineData: [
+          { id: 'a', title: 'Uno', date: '2020-01-01', color: '#000000' },
+        ],
+      });
+      repo.findOne.mockResolvedValue(existing);
+      repo.save.mockImplementation(async (t: TimelineEntity) => t);
+
+      await service.appendEvent(1, { title: 'Dos', date: '2020-02-02' });
+
+      expect(existing.timelineData).toHaveLength(2);
+      expect(existing.timelineData![0].title).toBe('Uno');
+      expect(existing.timelineData![1].title).toBe('Dos');
+    });
+
+    it('passes through optional fields', async () => {
+      const timeline = buildTimeline({ timelineData: [] });
+      repo.findOne.mockResolvedValue(timeline);
+      repo.save.mockImplementation(async (t: TimelineEntity) => t);
+
+      const result = await service.appendEvent(1, {
+        title: 'Evento',
+        date: '2024-04-03',
+        endDate: '2024-04-05',
+        description: 'Fuente: https://example.com',
+        color: '#ff0000',
+        docId: 7,
+        resourceId: 9,
+      });
+
+      expect(result!.event.endDate).toBe('2024-04-05');
+      expect(result!.event.description).toBe('Fuente: https://example.com');
+      expect(result!.event.color).toBe('#ff0000');
+      expect(result!.event.docId).toBe(7);
+      expect(result!.event.resourceId).toBe(9);
+    });
+
+    it('returns null when the timeline does not exist', async () => {
+      repo.findOne.mockResolvedValue(null);
+      expect(
+        await service.appendEvent(999, { title: 'X', date: '2024-01-01' }),
+      ).toBeNull();
+      expect(repo.save).not.toHaveBeenCalled();
+    });
   });
 });

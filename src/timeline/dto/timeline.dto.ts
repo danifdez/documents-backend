@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, IsArray, IsBoolean, IsIn, IsObject, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, IsArray, IsBoolean, IsIn, IsObject, IsDateString, MaxLength } from 'class-validator';
 import { TimelineLayoutType } from '../timeline.entity';
 
 export class CreateTimelineDto {
@@ -79,4 +79,36 @@ export class UpdateTimelineDto {
     @IsNumber()
     @IsOptional()
     projectId?: number;
+}
+
+export class AppendTimelineEventDto {
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(200)
+    title: string;
+
+    @IsString()
+    @IsOptional()
+    description?: string;
+
+    @IsDateString()
+    @IsNotEmpty()
+    date: string;
+
+    @IsDateString()
+    @IsOptional()
+    endDate?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(20)
+    color?: string;
+
+    @IsNumber()
+    @IsOptional()
+    docId?: number;
+
+    @IsNumber()
+    @IsOptional()
+    resourceId?: number;
 }

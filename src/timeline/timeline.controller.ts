@@ -1,7 +1,21 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+  NotFoundException,
+} from '@nestjs/common';
 import { TimelineService } from './timeline.service';
-import { TimelineEntity } from './timeline.entity';
-import { CreateTimelineDto, UpdateTimelineDto } from './dto/timeline.dto';
+import { TimelineEntity, TimelineEvent } from './timeline.entity';
+import {
+  AppendTimelineEventDto,
+  CreateTimelineDto,
+  UpdateTimelineDto,
+} from './dto/timeline.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 
@@ -23,6 +37,19 @@ export class TimelineController {
   @RequirePermissions(Permission.TIMELINES)
   async create(@Body() dto: CreateTimelineDto): Promise<TimelineEntity> {
     return await this.timelineService.create(dto);
+  }
+
+  @Post(':id/events')
+  @RequirePermissions(Permission.TIMELINES)
+  async appendEvent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AppendTimelineEventDto,
+  ): Promise<{ timelineId: number; event: TimelineEvent }> {
+    const result = await this.timelineService.appendEvent(id, dto);
+    if (!result) {
+      throw new NotFoundException(`Timeline with id ${id} not found`);
+    }
+    return result;
   }
 
   @Patch(':id')
