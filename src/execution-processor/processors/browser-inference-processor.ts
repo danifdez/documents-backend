@@ -11,8 +11,21 @@ export class BrowserInferenceProcessor implements ExecutionProcessor {
   async process(execution: ExecutionEntity) {
     const result = execution.result as Record<string, unknown> | null;
     if (!result || typeof result.content !== 'string') {
-      return { success: false, reason: 'invalid_browser_inference_result' };
+      return {
+        success: false,
+        reason: 'invalid_browser_inference_result',
+        publication: {
+          socketEvent: 'browserInferenceResponse',
+          payload: { executionId: execution.executionId, status: 'failed' },
+        },
+      };
     }
-    return { success: true };
+    return {
+      success: true,
+      publication: {
+        socketEvent: 'browserInferenceResponse',
+        payload: { executionId: execution.executionId, status: 'completed' },
+      },
+    };
   }
 }
