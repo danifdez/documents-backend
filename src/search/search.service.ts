@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { DocService } from '../doc/doc.service';
@@ -14,6 +14,10 @@ import { TimelineService } from '../timeline/timeline.service';
 import { BibliographyService } from '../bibliography/bibliography.service';
 import * as cheerio from 'cheerio';
 import { SearchResultDto } from './dto/search-result.dto';
+import {
+  EvidenceSearchResultDto,
+  EvidenceSourceDto,
+} from './dto/evidence-search.dto';
 import { PageEntityMatch } from './dto/page-entities.dto';
 import { PageBlockResult } from './dto/page-blocks.dto';
 import {
@@ -249,6 +253,57 @@ export class SearchService {
     return this.searchGlobal(searchTerm);
   }
 
+  async findEvidence(
+    query: string,
+    projectId: number,
+    limit = 3,
+  ): Promise<EvidenceSearchResultDto> {
+    const project = await this.projectService?.findOne(projectId);
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const exact = await this.globalSearch(query.trim(), projectId);
+    const sources = this.evidenceSources(exact, projectId, limit);
+    if (sources.length > 0) {
+      return { projectId, sources };
+    }
+
+    // A refuted claim is not always present literally in a source. Search its
+    // distinctive terms inside the same project to recover, for example, the
+    // correct date that contradicts it.
+    const seen = new Set<string>();
+    for (const term of this.evidenceFallbackTerms(query)) {
+      const candidates = await this.globalSearch(term, projectId);
+      for (const source of this.evidenceSources(candidates, projectId, limit)) {
+        const key = `${source.collection}:${source.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        sources.push(source);
+        if (sources.length === limit) {
+          return { projectId, sources };
+        }
+      }
+      if (sources.length > 0) {
+        return { projectId, sources };
+      }
+    }
+
+    return { projectId, sources };
+  }
+
+  private evidenceSources(
+    results: SearchResultDto[],
+    projectId: number,
+    limit: number,
+  ): EvidenceSourceDto[] {
+    return results
+      .filter((result) => result.collection === 'docs' || result.collection === 'resources')
+      .map((result) => this.toEvidenceSource(result, projectId))
+      .filter((source): source is EvidenceSourceDto => source !== null)
+      .slice(0, limit);
+  }
+
   private async searchInProject(searchTerm: string, projectId: number): Promise<SearchResultDto[]> {
     return this.searchCollections(this.projectCollections, searchTerm, projectId);
   }
@@ -291,6 +346,89 @@ export class SearchService {
       collection: config.collection,
       ...config.highlights(r, highlight),
     }));
+  }
+
+  private toEvidenceSource(
+    result: SearchResultDto,
+    projectId: number,
+  ): EvidenceSourceDto | null {
+    const excerpt = this.evidenceExcerpt(result);
+    if (!excerpt) {
+      return null;
+    }
+    return {
+      collection: result.collection,
+      id: result.id,
+      name: this.plainText(result.name) || `${result.collection} ${result.id}`,
+      score: result.score,
+      excerpt,
+      retrieval: 'lexical',
+      provenance: {
+        projectId,
+        collection: result.collection,
+        id: result.id,
+      },
+    };
+  }
+
+  private evidenceExcerpt(result: SearchResultDto): string {
+    const highlighted =
+      result.highlightedContent
+      || result.highlightedTitle
+      || result.highlightedName
+      || result.name;
+    const $ = cheerio.load(highlighted || '');
+    const matched = this.plainText($('strong').first().text());
+    if (matched.length >= 20) return this.shortenExcerpt(matched);
+    const text = this.plainText(highlighted);
+    const matchIndex = matched
+      ? text.toLocaleLowerCase().indexOf(matched.toLocaleLowerCase())
+      : -1;
+    if (matchIndex < 0) return '';
+    const sentenceStart = Math.max(
+      text.lastIndexOf('.', matchIndex - 1),
+      text.lastIndexOf('!', matchIndex - 1),
+      text.lastIndexOf('?', matchIndex - 1),
+    ) + 1;
+    const remaining = text.slice(matchIndex + matched.length);
+    const nextPunctuation = remaining.search(/[.!?]/);
+    if (nextPunctuation < 0 || (text.endsWith('...') &&
+        nextPunctuation >= remaining.length - 3)) return '';
+    let excerpt = text.slice(
+      sentenceStart,
+      matchIndex + matched.length + nextPunctuation + 1,
+    ).trim();
+    const capital = excerpt.search(/[A-ZÁÉÍÓÚÜÑ]/);
+    if (capital > 0) excerpt = excerpt.slice(capital);
+    return excerpt.length >= 20 ? this.shortenExcerpt(excerpt) : '';
+  }
+
+  private evidenceFallbackTerms(query: string): string[] {
+    const generic = new Set([
+      'afirmacion', 'afirmación', 'documento', 'evidencia', 'fuente',
+      'reglamento', 'informacion', 'información', 'establece',
+    ]);
+    const terms = this.plainText(query).toLocaleLowerCase()
+      .match(/[a-záéíóúüñ0-9]{4,}/gi) || [];
+    return [...new Set(terms)]
+      .filter((term) => !generic.has(term))
+      .sort((left, right) => right.length - left.length)
+      .slice(0, 4);
+  }
+
+  private plainText(value: string): string {
+    return cheerio.load(value || '')
+      .text()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private shortenExcerpt(value: string): string {
+    const maxChars = 600;
+    if (value.length <= maxChars) {
+      return value;
+    }
+    return `${value.slice(0, maxChars - 1).trimEnd()}…`;
   }
 
   async matchEntitiesInText(text: string, projectId?: number): Promise<PageEntityMatch[]> {

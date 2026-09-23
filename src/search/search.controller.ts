@@ -4,6 +4,12 @@ import { SearchResultDto } from './dto/search-result.dto';
 import { PageEntitiesDto, PageEntityMatch } from './dto/page-entities.dto';
 import { PageBlocksDto, PageBlockResult } from './dto/page-blocks.dto';
 import { PageMatchesDto, PageMatchesResult } from './dto/page-matches.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
+import {
+  EvidenceSearchDto,
+  EvidenceSearchResultDto,
+} from './dto/evidence-search.dto';
 
 @Controller('search')
 export class SearchController {
@@ -28,6 +34,18 @@ export class SearchController {
       this.searchService.matchBibliographyInText(dto.text, dto.projectId),
     ]);
     return { entities, knowledge, timeline, bibliography };
+  }
+
+  @RequirePermissions(Permission.ASK)
+  @Post('evidence')
+  async evidence(
+    @Body() dto: EvidenceSearchDto,
+  ): Promise<EvidenceSearchResultDto> {
+    return await this.searchService.findEvidence(
+      dto.query,
+      dto.projectId,
+      dto.limit,
+    );
   }
 
   @Post('')
