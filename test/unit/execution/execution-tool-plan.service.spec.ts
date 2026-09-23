@@ -1,4 +1,5 @@
 import { canonicalHash } from '../../../src/execution/execution-canonical';
+import { ExecutionContractValidator } from '../../../src/execution/execution-contract-validator';
 import { ExecutionEntity } from '../../../src/execution/execution.entity';
 import { ExecutionEventEntity } from '../../../src/execution/execution-event.entity';
 import { ExecutionOperationEntity } from '../../../src/execution/execution-operation.entity';
@@ -110,6 +111,7 @@ describe('ExecutionToolPlanService', () => {
             'browser.type_text',
             'browser.select_option',
             'browser.read_current_page',
+            'browser.run_task',
             'workspace_files.list',
             'workspace_files.search',
             'workspace_files.read',
@@ -470,6 +472,62 @@ describe('ExecutionToolPlanService', () => {
         requiredCapabilities: ['tool.browser.read_current_page/1'],
       }),
     );
+  });
+
+  it('prepares a confirmed browser task for a dedicated tab', async () => {
+    const prepared = await service.prepare(
+      invocation({
+        name: 'browser.run_task',
+        arguments: { goal: '  Research the latest release  ' },
+      }),
+    );
+
+    expect(prepared.plan.plan).toEqual(
+      expect.objectContaining({
+        toolName: 'browser.run_task',
+        descriptorVersion: 'browser.run_task/1',
+        normalizedArguments: { goal: 'Research the latest release' },
+        resources: [
+          {
+            resourceKey: 'browser:active-page',
+            mode: 'exclusive',
+            kind: 'browser_page',
+          },
+        ],
+        policyDecision: expect.objectContaining({
+          decision: 'confirmation_required',
+          rule: 'paired_browser_task_requires_confirmation',
+        }),
+        recoveryClass: 'non_resumable',
+        requiredCapabilities: ['tool.browser.run_task/1'],
+      }),
+    );
+    expect(() =>
+      new ExecutionContractValidator().assertToolPlan(
+        prepared.plan.plan as unknown as Record<string, unknown>,
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects empty or secret browser tasks', async () => {
+    await expect(
+      service.prepare(
+        invocation({ name: 'browser.run_task', arguments: { goal: '  ' } }),
+      ),
+    ).rejects.toThrow('invalid_arguments');
+    await expect(
+      service.prepare(
+        invocation({
+          name: 'browser.run_task',
+          arguments: { goal: 'Search the web' },
+          executionContext: {
+            executionId: EXECUTION_ID,
+            causedByEventId: EVENT_ID,
+            dataClassification: 'secret',
+          },
+        }),
+      ),
+    ).rejects.toThrow('data_policy_violation');
   });
 
   it('rejects non-http browser targets', async () => {

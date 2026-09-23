@@ -151,6 +151,51 @@ describe('WorkerService', () => {
     expect(repo.update).not.toHaveBeenCalled();
   });
 
+  it('advertises autonomous tasks only for a compatible browser heartbeat', async () => {
+    repo.update = jest.fn().mockResolvedValue({ affected: 1 });
+
+    await service.heartbeatBrowser('browser-id', { browserTaskVersion: 1 });
+    expect(repo.update).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        capabilities: expect.arrayContaining(['tool.browser.run_task/1']),
+      }),
+    );
+
+    await service.heartbeatBrowser('browser-id', { version: 'legacy' });
+    const capabilities = (repo.update as jest.Mock).mock.calls[1][1]
+      .capabilities as string[];
+    expect(capabilities).not.toContain('tool.browser.run_task/1');
+  });
+
+  it('reports whether the current owner has a ready browser task worker', async () => {
+    const browser = buildWorker({
+      workerKind: WorkerKind.BROWSER,
+      ownerPrincipal: '7',
+      capabilities: ['tool.browser.run_task/1'],
+      lastHeartbeat: new Date(),
+    });
+    repo.find!.mockResolvedValue([]);
+    await expect(service.browserTaskStatus('7')).resolves.toBe('not_paired');
+
+    repo.find!.mockResolvedValue([browser]);
+    await expect(service.browserTaskStatus('7')).resolves.toBe('ready');
+    expect(repo.find).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        workerKind: WorkerKind.BROWSER,
+        ownerPrincipal: '7',
+      }),
+    });
+
+    browser.capabilities = ['tool.browser.read_current_page/1'];
+    await expect(service.browserTaskStatus('7')).resolves.toBe(
+      'update_required',
+    );
+
+    browser.lastHeartbeat = new Date(Date.now() - 120_000);
+    await expect(service.browserTaskStatus('7')).resolves.toBe('offline');
+  });
+
   it('updates only a live Models identity during heartbeat', async () => {
     repo.update = jest.fn().mockResolvedValue({ affected: 1 });
 

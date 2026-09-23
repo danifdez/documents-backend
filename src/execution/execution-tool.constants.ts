@@ -22,6 +22,10 @@ export const BROWSER_READ_TOOL_NAME = 'browser.read_current_page';
 export const BROWSER_READ_TOOL_VERSION = 'browser.read_current_page/1';
 export const BROWSER_READ_TOOL_CAPABILITY = 'tool.browser.read_current_page/1';
 
+export const BROWSER_RUN_TASK_TOOL_NAME = 'browser.run_task';
+export const BROWSER_RUN_TASK_TOOL_VERSION = 'browser.run_task/1';
+export const BROWSER_RUN_TASK_TOOL_CAPABILITY = 'tool.browser.run_task/1';
+
 export const BROWSER_NAVIGATE_TOOL_NAME = 'browser.navigate';
 export const BROWSER_NAVIGATE_TOOL_VERSION = 'browser.navigate/1';
 export const BROWSER_NAVIGATE_TOOL_CAPABILITY = 'tool.browser.navigate/1';

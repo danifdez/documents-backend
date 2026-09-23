@@ -14,6 +14,9 @@ import {
   BROWSER_READ_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_NAME,
   BROWSER_READ_TOOL_VERSION,
+  BROWSER_RUN_TASK_TOOL_CAPABILITY,
+  BROWSER_RUN_TASK_TOOL_NAME,
+  BROWSER_RUN_TASK_TOOL_VERSION,
   BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
   BROWSER_SELECT_OPTION_TOOL_NAME,
   BROWSER_SELECT_OPTION_TOOL_VERSION,
@@ -163,6 +166,20 @@ export async function buildActiveCapabilitySet(
       ),
     );
   }
+  if (
+    input.browserFederationEnabled &&
+    (await hasPairedBrowser(manager, input.ownerPrincipal, [
+      BROWSER_RUN_TASK_TOOL_CAPABILITY,
+    ]))
+  ) {
+    tools.push(
+      tool(
+        BROWSER_RUN_TASK_TOOL_NAME,
+        BROWSER_RUN_TASK_TOOL_VERSION,
+        'paired_browser',
+      ),
+    );
+  }
   const skillSignals: ProductSkillSignal[] = [DOCUMENT_SEARCH_AVAILABLE_SIGNAL];
   if (input.folderScope) {
     skillSignals.push(WORKSPACE_FOLDER_CONFIGURED_SIGNAL);
@@ -191,6 +208,14 @@ function tool(
 async function hasPairedBrowser(
   manager: EntityManager,
   ownerPrincipal: string,
+  capabilities: string[] = [
+    BROWSER_READ_TOOL_CAPABILITY,
+    BROWSER_NAVIGATE_TOOL_CAPABILITY,
+    BROWSER_GO_BACK_TOOL_CAPABILITY,
+    BROWSER_CLICK_TOOL_CAPABILITY,
+    BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
+    BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
+  ],
 ): Promise<boolean> {
   return manager
     .getRepository(WorkerEntity)
@@ -205,14 +230,7 @@ async function hasPairedBrowser(
       threshold: new Date(Date.now() - BROWSER_HEARTBEAT_MAX_AGE_MS),
     })
     .andWhere('worker.capabilities @> :capabilities::jsonb', {
-      capabilities: JSON.stringify([
-        BROWSER_READ_TOOL_CAPABILITY,
-        BROWSER_NAVIGATE_TOOL_CAPABILITY,
-        BROWSER_GO_BACK_TOOL_CAPABILITY,
-        BROWSER_CLICK_TOOL_CAPABILITY,
-        BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
-        BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
-      ]),
+      capabilities: JSON.stringify(capabilities),
     })
     .getExists();
 }

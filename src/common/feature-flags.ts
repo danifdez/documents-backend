@@ -24,11 +24,12 @@ export function readFeaturesFromEnv(): FeatureMap {
 
   const result = {} as FeatureMap;
   for (const flag of FEATURE_FLAGS) {
+    if (flag === 'browser_federation') {
+      result[flag] = false;
+      continue;
+    }
     const envKey = `FEATURE_${flag.toUpperCase()}`;
-    result[flag] =
-      flag === 'browser_federation'
-        ? process.env[envKey] === 'true'
-        : process.env[envKey] !== 'false';
+    result[flag] = process.env[envKey] !== 'false';
   }
   return result;
 }

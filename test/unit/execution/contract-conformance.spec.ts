@@ -542,6 +542,13 @@ describe('execution v1 contract', () => {
     };
 
     expect(validateActiveContext(activeContext)).toBe(true);
+    const withBrowserTask = structuredClone(activeContext);
+    withBrowserTask.layers.contextual.activeCapabilities.tools.push({
+      name: 'browser.run_task',
+      descriptorVersion: 'browser.run_task/1',
+      availabilityBasis: 'paired_browser',
+    });
+    expect(validateActiveContext(withBrowserTask)).toBe(true);
     expect(
       validateActiveContext({
         ...activeContext,

@@ -27,6 +27,7 @@ import {
   BROWSER_GO_BACK_TOOL_CAPABILITY,
   BROWSER_NAVIGATE_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_CAPABILITY,
+  BROWSER_RUN_TASK_TOOL_CAPABILITY,
   BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
   BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
 } from '../execution/execution-tool.constants';
@@ -91,11 +92,41 @@ export class WorkerService {
         BROWSER_CLICK_TOOL_CAPABILITY,
         BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
         BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
+        ...(metadata.browserTaskVersion === 1
+          ? [BROWSER_RUN_TASK_TOOL_CAPABILITY]
+          : []),
       ],
       [ExecutionStepKind.TOOL],
       1,
       metadata,
     );
+  }
+
+  async browserTaskStatus(
+    ownerPrincipal: string,
+  ): Promise<'ready' | 'update_required' | 'offline' | 'not_paired'> {
+    const browsers = await this.repo.find({
+      where: {
+        workerKind: WorkerKind.BROWSER,
+        ownerPrincipal,
+        revokedAt: IsNull(),
+      },
+    });
+    if (!browsers.length) return 'not_paired';
+    const threshold = Date.now() - 60_000;
+    const online = browsers.filter(
+      (browser) =>
+        browser.status === 'online' &&
+        browser.lastHeartbeat.getTime() > threshold,
+    );
+    if (
+      online.some((browser) =>
+        browser.capabilities.includes(BROWSER_RUN_TASK_TOOL_CAPABILITY),
+      )
+    ) {
+      return 'ready';
+    }
+    return online.length ? 'update_required' : 'offline';
   }
 
   private async register(
@@ -290,6 +321,9 @@ export class WorkerService {
           BROWSER_CLICK_TOOL_CAPABILITY,
           BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
           BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
+          ...(metadata.browserTaskVersion === 1
+            ? [BROWSER_RUN_TASK_TOOL_CAPABILITY]
+            : []),
         ],
         stepKinds: [ExecutionStepKind.TOOL],
         maximumConcurrency: 1,

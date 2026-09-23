@@ -1,24 +1,41 @@
 import { ConfigService } from '@nestjs/config';
+import { AppStateService } from '../../../src/app-state/app-state.service';
 import { FeatureFlagService } from '../../../src/common/feature-flags.service';
 
 describe('FeatureFlagService', () => {
-  it('keeps browser federation disabled unless explicitly enabled', () => {
-    const config = { get: jest.fn().mockReturnValue(undefined) };
-    const service = new FeatureFlagService(config as unknown as ConfigService);
+  const config = {
+    get: jest.fn().mockReturnValue(undefined),
+  } as unknown as ConfigService;
 
+  it('changes browser availability through the saved setting', async () => {
+    const appState = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue(undefined),
+    } as unknown as AppStateService;
+    const service = new FeatureFlagService(config, appState);
+
+    await service.onModuleInit();
     expect(service.isEnabled('browser_federation')).toBe(false);
     expect(service.isEnabled('canvas')).toBe(true);
+
+    await service.setBrowserFederationEnabled(true);
+    expect(service.isEnabled('browser_federation')).toBe(true);
+    expect(appState.set).toHaveBeenCalledWith(
+      'browser_federation_enabled',
+      true,
+      String,
+    );
+
+    await service.setBrowserFederationEnabled(false);
+    expect(service.isEnabled('browser_federation')).toBe(false);
   });
 
-  it('enables browser federation only for the exact true value', () => {
-    const enabled = new FeatureFlagService({
-      get: jest.fn().mockReturnValue('true'),
-    } as unknown as ConfigService);
-    const uppercase = new FeatureFlagService({
-      get: jest.fn().mockReturnValue('TRUE'),
-    } as unknown as ConfigService);
-
-    expect(enabled.isEnabled('browser_federation')).toBe(true);
-    expect(uppercase.isEnabled('browser_federation')).toBe(false);
+  it('restores the browser setting on startup', async () => {
+    const appState = {
+      get: jest.fn().mockResolvedValue(true),
+    } as unknown as AppStateService;
+    const service = new FeatureFlagService(config, appState);
+    await service.onModuleInit();
+    expect(service.isEnabled('browser_federation')).toBe(true);
   });
 });

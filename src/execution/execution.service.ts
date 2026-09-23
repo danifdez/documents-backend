@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { FeatureFlagService } from '../common/feature-flags.service';
 import { randomUUID } from 'crypto';
 import {
   DataSource,
@@ -210,6 +211,7 @@ export class ExecutionService {
     private readonly artifactStorage: ExecutionArtifactStorageService,
     private readonly artifacts: ExecutionArtifactService,
     private readonly completionValidator: ExecutionCompletionValidator,
+    private readonly featureFlags: FeatureFlagService,
   ) {}
 
   resolveAccessScope(user: unknown): ExecutionAccessScope {
@@ -1376,7 +1378,7 @@ export class ExecutionService {
   }
 
   private browserFederationEnabled(): boolean {
-    return this.config.get('FEATURE_BROWSER_FEDERATION') === 'true';
+    return this.featureFlags.isEnabled('browser_federation');
   }
 
   async create<TTaskType extends ExecutionTaskType>(

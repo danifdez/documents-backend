@@ -215,9 +215,7 @@ describe('execution PostgreSQL integration', () => {
 
     const config = {
       get: (key: string, fallback?: unknown) =>
-        key === 'FEATURE_BROWSER_FEDERATION'
-          ? 'true'
-          : key === 'EXECUTION_ARTIFACT_STORAGE_DIR'
+        key === 'EXECUTION_ARTIFACT_STORAGE_DIR'
             ? artifactDirectory
             : key === 'EXECUTION_ARTIFACT_INLINE_MAX_BYTES'
               ? String(8 * 1024 * 1024)
@@ -241,6 +239,7 @@ describe('execution PostgreSQL integration', () => {
       artifactStorage,
       artifactService,
       new ExecutionCompletionValidator(),
+      { isEnabled: (flag: string) => flag === 'browser_federation' } as any,
     );
     attemptService = new ExecutionAttemptService(
       dataSource,

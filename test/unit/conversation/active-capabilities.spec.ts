@@ -122,6 +122,11 @@ describe('active capability selection', () => {
       availabilityBasis: 'paired_browser',
     });
     expect(selected.tools).toContainEqual({
+      name: 'browser.run_task',
+      descriptorVersion: 'browser.run_task/1',
+      availabilityBasis: 'paired_browser',
+    });
+    expect(selected.tools).toContainEqual({
       name: 'browser.navigate',
       descriptorVersion: 'browser.navigate/1',
       availabilityBasis: 'paired_browser',
@@ -163,6 +168,37 @@ describe('active capability selection', () => {
         ]),
       },
     );
+  });
+
+  it('does not offer autonomous tasks to an older paired browser', async () => {
+    const query = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getExists: jest
+        .fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false),
+    };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue({
+        createQueryBuilder: jest.fn().mockReturnValue(query),
+      }),
+    };
+
+    const selected = await buildActiveCapabilitySet(manager as any, {
+      ownerType: 'assistant',
+      ownerId: 1,
+      ownerPrincipal: 'paired-user',
+      folderScope: null,
+      browserFederationEnabled: true,
+    });
+
+    expect(
+      selected.tools.some((tool) => tool.name === 'browser.navigate'),
+    ).toBe(true);
+    expect(
+      selected.tools.some((tool) => tool.name === 'browser.run_task'),
+    ).toBe(false);
   });
 
   it('selects evidence research without requiring a configured folder', async () => {

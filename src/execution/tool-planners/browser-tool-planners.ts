@@ -13,6 +13,9 @@ import {
   BROWSER_READ_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_NAME,
   BROWSER_READ_TOOL_VERSION,
+  BROWSER_RUN_TASK_TOOL_CAPABILITY,
+  BROWSER_RUN_TASK_TOOL_NAME,
+  BROWSER_RUN_TASK_TOOL_VERSION,
   BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
   BROWSER_SELECT_OPTION_TOOL_NAME,
   BROWSER_SELECT_OPTION_TOOL_VERSION,
@@ -26,6 +29,7 @@ import {
 } from '../execution-tool.types';
 import {
   BROWSER_READ_TIMEOUT_MS,
+  BROWSER_TASK_TIMEOUT_MS,
   CONFIRMATION_TIMEOUT_MS,
   ToolPlanPreparer,
 } from './tool-plan-preparer';
@@ -37,6 +41,69 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function prepareBrowserTask(
+  invocation: ToolInvocationContract,
+): ToolPlanContract {
+  if (invocation.executionContext.dataClassification === 'secret') {
+    throw new BadRequestException('data_policy_violation');
+  }
+  if (
+    Object.keys(invocation.arguments).some((key) => key !== 'goal') ||
+    typeof invocation.arguments.goal !== 'string'
+  ) {
+    throw new BadRequestException('invalid_arguments');
+  }
+  const goal = invocation.arguments.goal.trim();
+  if (!goal || goal.length > 4_000) {
+    throw new BadRequestException('invalid_arguments');
+  }
+  const preparedAt = new Date();
+  const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
+  return {
+    schemaVersion: 'tool-plan/1',
+    operationId: randomUUID(),
+    toolCallId: invocation.toolCallId,
+    toolName: BROWSER_RUN_TASK_TOOL_NAME,
+    descriptorVersion: BROWSER_RUN_TASK_TOOL_VERSION,
+    normalizedArguments: { goal },
+    resources: [
+      {
+        resourceKey: 'browser:active-page',
+        mode: 'exclusive',
+        kind: 'browser_page',
+      },
+    ],
+    effects: [
+      {
+        effectClass: 'external_irreversible',
+        resourceKey: 'browser:active-page',
+        description: `Run browser task: ${goal.slice(0, 200)}`,
+        reversible: false,
+        verificationRequired: true,
+      },
+    ],
+    policyDecision: {
+      decision: 'confirmation_required',
+      rule: 'paired_browser_task_requires_confirmation',
+      expiresAt: expiresAt.toISOString(),
+    },
+    confirmationRequirement: {
+      confirmationId: randomUUID(),
+      reason: 'The browser agent can visit websites and interact with them.',
+      prompt: `Run this task in a separate IA Browser tab? ${goal.slice(0, 200)}`,
+      scope: 'once',
+      expiresAt: expiresAt.toISOString(),
+    },
+    recoveryClass: 'non_resumable',
+    idempotencyKey: `browser-task:${invocation.toolCallId}`,
+    requiredCapabilities: [BROWSER_RUN_TASK_TOOL_CAPABILITY],
+    deadline: new Date(
+      preparedAt.getTime() + BROWSER_TASK_TIMEOUT_MS,
+    ).toISOString(),
+    preparedAt: preparedAt.toISOString(),
+  };
 }
 
 function prepareBrowserRead(
@@ -527,6 +594,7 @@ function prepareBrowserSelectOption(
 export const BROWSER_TOOL_PLAN_PREPARERS: ReadonlyArray<
   readonly [string, ToolPlanPreparer]
 > = [
+  [BROWSER_RUN_TASK_TOOL_NAME, prepareBrowserTask],
   [BROWSER_READ_TOOL_NAME, prepareBrowserRead],
   [BROWSER_NAVIGATE_TOOL_NAME, prepareBrowserNavigate],
   [BROWSER_GO_BACK_TOOL_NAME, prepareBrowserGoBack],

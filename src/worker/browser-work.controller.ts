@@ -31,6 +31,7 @@ import {
   BROWSER_GO_BACK_TOOL_CAPABILITY,
   BROWSER_NAVIGATE_TOOL_CAPABILITY,
   BROWSER_READ_TOOL_CAPABILITY,
+  BROWSER_RUN_TASK_TOOL_CAPABILITY,
   BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
   BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
 } from '../execution/execution-tool.constants';
@@ -101,7 +102,8 @@ export class BrowserWorkController {
           BROWSER_CLICK_TOOL_CAPABILITY,
           BROWSER_TYPE_TEXT_TOOL_CAPABILITY,
           BROWSER_SELECT_OPTION_TOOL_CAPABILITY,
-        ],
+          BROWSER_RUN_TASK_TOOL_CAPABILITY,
+        ].filter((capability) => worker.capabilities.includes(capability)),
         leaseDurationMs: body.leaseDurationMs,
         enforceRegisteredWorkerCapacity: true,
       },
