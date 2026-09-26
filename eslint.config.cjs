@@ -7,6 +7,9 @@ module.exports = [
   prettierRecommended,
   {
     files: ['src/**/*.ts', 'test/**/*.ts'],
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
+    },
     languageOptions: {
       parserOptions: {
         project: './tsconfig.json',
