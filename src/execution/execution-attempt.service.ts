@@ -45,7 +45,11 @@ import { executionStepOutputValue } from './execution-step-result';
 import { ExecutionStepKind } from './execution-step-kind.enum';
 import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
 import { ToolResultContract } from './execution-tool.types';
-import { COORDINATION_PENDING_PHASE } from './execution.constants';
+import {
+  AGENT_LOOP_TASK_TYPES,
+  COORDINATION_PENDING_PHASE,
+  isAgentLoopTaskType,
+} from './execution.constants';
 import { ExecutionEventEntity } from './execution-event.entity';
 import {
   appendBackendExecutionEvent,
@@ -259,11 +263,7 @@ export class ExecutionAttemptService {
                 SELECT 1
                 FROM "executions" governed_execution
                 WHERE governed_execution."execution_id" = "execution_steps"."execution_id"
-                  AND governed_execution."task_type" IN (
-                    'assistant-chat',
-                    'agent-chat',
-                    'delegated-agent'
-                  )
+                  AND governed_execution."task_type" = ANY($6::text[])
               )
             )
             AND EXISTS (
@@ -305,6 +305,7 @@ export class ExecutionAttemptService {
           input.ownerPrincipal ?? null,
           EXECUTION_AGE_PRIORITY_INTERVAL_SECONDS,
           EXECUTION_DEADLINE_URGENCY_SECONDS,
+          [...AGENT_LOOP_TASK_TYPES],
         ],
       );
       if (!rows.length) return null;
@@ -1606,9 +1607,7 @@ export class ExecutionAttemptService {
     }
     if (
       step.stepKind === ExecutionStepKind.INFERENCE &&
-      ['assistant-chat', 'agent-chat', 'delegated-agent'].includes(
-        execution.taskType,
-      ) &&
+      isAgentLoopTaskType(execution.taskType) &&
       !['context-input-map', 'context-input-reduce'].includes(
         String(step.work?.taskType ?? ''),
       ) &&

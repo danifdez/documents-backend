@@ -1,3 +1,5 @@
+import { isChatTurnTaskType } from './execution.constants';
+
 export function executionStepOutputValue(
   output: unknown,
   taskType?: string,
@@ -8,7 +10,7 @@ export function executionStepOutputValue(
     const outcome = record.outcome as Record<string, unknown> | undefined;
     if (outcome?.kind === 'structured_result') return outcome.value;
     if (outcome?.kind === 'final_text') {
-      if (taskType === 'assistant-chat' || taskType === 'agent-chat') {
+      if (isChatTurnTaskType(taskType ?? '')) {
         return { reply: outcome.text, error: null };
       }
       return outcome.text;

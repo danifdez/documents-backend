@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'crypto';
 import { IndexedFileOwnerType } from '../../indexed-file/indexed-file.entity';
 import { sanitizeFilename } from '../../indexed-file/path.util';
 import { ExecutionEntity } from '../execution.entity';
-import type { ChatExecutionPayload } from '../execution-task-payload.types';
 import {
   WORKSPACE_FILE_DELETE_TOOL_CAPABILITY,
   WORKSPACE_FILE_DELETE_TOOL_NAME,
@@ -30,17 +29,8 @@ import {
   PLAN_TIMEOUT_MS,
   ToolPlanPreparer,
   buildToolPlan,
+  chatTurnPayload,
 } from './tool-plan-preparer';
-
-function chatPayload(execution: ExecutionEntity): ChatExecutionPayload {
-  if (
-    execution.taskType !== 'assistant-chat' &&
-    execution.taskType !== 'agent-chat'
-  ) {
-    throw new BadRequestException('invalid_chat_execution_type');
-  }
-  return execution.payload as ChatExecutionPayload;
-}
 
 function workingFolderOwner(execution: ExecutionEntity): {
   ownerType: IndexedFileOwnerType;
@@ -53,7 +43,7 @@ function workingFolderOwner(execution: ExecutionEntity): {
       : execution.taskType === 'agent-chat'
         ? 'agent'
         : null;
-  const payload = chatPayload(execution);
+  const payload = chatTurnPayload(execution);
   const ownerId = Number(payload.ownerId);
   if (
     !ownerType ||

@@ -3,6 +3,7 @@ import { ExecutionEntity } from '../../execution/execution.entity';
 import { ExecutionService } from '../../execution/execution.service';
 import { ExecutionCompletion } from '../../execution/execution.types';
 import { executionPayloadOwnerId } from '../../execution/execution-task-payload.types';
+import { AGENT_LOOP_TASK_TYPES } from '../../execution/execution.constants';
 import { ExecutionProcessor } from '../execution-processor.interface';
 
 type ChatExecutionResult = {
@@ -17,11 +18,7 @@ type ChatExecutionResult = {
 @Injectable()
 export class AssistantChatProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(AssistantChatProcessor.name);
-  private readonly taskTypes = new Set([
-    'assistant-chat',
-    'agent-chat',
-    'delegated-agent',
-  ]);
+  private readonly taskTypes = new Set<string>(AGENT_LOOP_TASK_TYPES);
 
   constructor(private readonly executionService: ExecutionService) {}
 

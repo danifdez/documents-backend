@@ -30,6 +30,7 @@ import {
 } from '../conversation/context-input-workflow';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { contentHash } from './execution-canonical';
+import { isChatTurnTaskType } from './execution.constants';
 import type { ChatExecutionPayload } from './execution-task-payload.types';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 
@@ -415,7 +416,7 @@ async function materializeContextInput(
   if (!finish) throw new ConflictException('context_reduction_finish_missing');
 
   const work = (candidate.work ?? {}) as Record<string, unknown>;
-  if (work.taskType !== 'assistant-chat' && work.taskType !== 'agent-chat') {
+  if (!isChatTurnTaskType(work.taskType)) {
     throw new ConflictException('invalid_context_reduction_task');
   }
   const payload =

@@ -1,3 +1,5 @@
+import type { ExecutionTaskType } from './execution-task-payload.types';
+
 export const EXECUTION_SCHEMA = 'execution/1';
 export const EXECUTION_EVENT_SCHEMA = 'execution-event/1';
 export const EXECUTION_BUNDLE_SCHEMA = 'execution-bundle/1';
@@ -7,6 +9,44 @@ export const EXECUTION_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const EXECUTION_CONTENT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 export const COORDINATION_PENDING_PHASE = 'coordination_pending';
+
+/**
+ * Task types that run the agent loop: chat turns and delegated agents.
+ */
+export const AGENT_LOOP_TASK_TYPES = [
+  'assistant-chat',
+  'agent-chat',
+  'delegated-agent',
+] as const satisfies readonly ExecutionTaskType[];
+
+/**
+ * Task types that own a conversation turn and a tool loop.
+ */
+export const CHAT_TURN_TASK_TYPES = [
+  'assistant-chat',
+  'agent-chat',
+] as const satisfies readonly ExecutionTaskType[];
+
+export type AgentLoopTaskType = (typeof AGENT_LOOP_TASK_TYPES)[number];
+export type ChatTurnTaskType = (typeof CHAT_TURN_TASK_TYPES)[number];
+
+export function isAgentLoopTaskType(
+  taskType: unknown,
+): taskType is AgentLoopTaskType {
+  return (
+    typeof taskType === 'string' &&
+    (AGENT_LOOP_TASK_TYPES as readonly string[]).includes(taskType)
+  );
+}
+
+export function isChatTurnTaskType(
+  taskType: unknown,
+): taskType is ChatTurnTaskType {
+  return (
+    typeof taskType === 'string' &&
+    (CHAT_TURN_TASK_TYPES as readonly string[]).includes(taskType)
+  );
+}
 
 export const EXECUTION_EVENT_PAYLOADS: Record<string, string> = {
   'execution.created': 'execution.created/1',

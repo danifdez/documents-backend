@@ -21,6 +21,7 @@ import { WorkerEntity } from '../../../src/worker/worker.entity';
 import { WorkerKind } from '../../../src/worker/worker-kind.enum';
 import { ExecutionEffectJournalEntity } from '../../../src/execution/execution-effect-journal.entity';
 import { LOCAL_TOOL_RUNTIME_WORKER_ID } from '../../../src/execution/execution-tool.constants';
+import { AGENT_LOOP_TASK_TYPES } from '../../../src/execution/execution.constants';
 
 const EXECUTION_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca701';
 const STEP_ID = '018f1d8a-54d7-7d63-a1ee-5e9a6adca702';
@@ -637,15 +638,36 @@ describe('ExecutionAttemptService', () => {
     );
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining('FOR UPDATE SKIP LOCKED'),
-      [[ExecutionStepKind.SERVICE], ['detect-language'], null, 60, 300],
+      [
+        [ExecutionStepKind.SERVICE],
+        ['detect-language'],
+        null,
+        60,
+        300,
+        [...AGENT_LOOP_TASK_TYPES],
+      ],
     );
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining(`"executions"."status" IN ('queued', 'running')`),
-      [[ExecutionStepKind.SERVICE], ['detect-language'], null, 60, 300],
+      [
+        [ExecutionStepKind.SERVICE],
+        ['detect-language'],
+        null,
+        60,
+        300,
+        [...AGENT_LOOP_TASK_TYPES],
+      ],
     );
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining('"deadline" ASC NULLS LAST'),
-      [[ExecutionStepKind.SERVICE], ['detect-language'], null, 60, 300],
+      [
+        [ExecutionStepKind.SERVICE],
+        ['detect-language'],
+        null,
+        60,
+        300,
+        [...AGENT_LOOP_TASK_TYPES],
+      ],
     );
   });
 

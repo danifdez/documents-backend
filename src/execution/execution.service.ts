@@ -33,6 +33,7 @@ import {
   EXECUTION_EVENT_SCHEMA,
   EXECUTION_SCHEMA,
   EXECUTION_UUID_PATTERN,
+  isChatTurnTaskType,
 } from './execution.constants';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
 import { ExecutionStepEntity } from './execution-step.entity';
@@ -230,7 +231,7 @@ export class ExecutionService {
       | ConversationTurnStatus.CANCELLED,
     response?: { reply: string; error: string | null },
   ): Promise<ChatMessageEntity | null> {
-    if (!['assistant-chat', 'agent-chat'].includes(execution.taskType)) {
+    if (!isChatTurnTaskType(execution.taskType)) {
       return null;
     }
     if (!execution.sessionId || !execution.turnId) {
@@ -1311,7 +1312,7 @@ export class ExecutionService {
     message: string,
     causedByEventId: string,
   ): Promise<void> {
-    if (!['assistant-chat', 'agent-chat'].includes(execution.taskType)) {
+    if (!isChatTurnTaskType(execution.taskType)) {
       throw new ConflictException('invalid_chat_execution_type');
     }
     const taskType =
@@ -1809,7 +1810,7 @@ export class ExecutionService {
         // pending forever, since `chatPublication` is built from a message.
         const failureResponse =
           status === ExecutionStatus.FAILED &&
-          ['assistant-chat', 'agent-chat'].includes(execution.taskType) &&
+          isChatTurnTaskType(execution.taskType) &&
           !options?.publication
             ? {
                 reply: '',

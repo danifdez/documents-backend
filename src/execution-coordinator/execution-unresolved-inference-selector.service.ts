@@ -1,18 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { COORDINATION_PENDING_PHASE } from '../execution/execution.constants';
+import {
+  AGENT_LOOP_TASK_TYPES,
+  COORDINATION_PENDING_PHASE,
+  isAgentLoopTaskType,
+} from '../execution/execution.constants';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionStepEntity } from '../execution/execution-step.entity';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
 import { ExecutionStepStatus } from '../execution/execution-step-status.enum';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionNextStepSelector } from './execution-next-work.types';
-
-const AGENT_LOOP_TASK_TYPES = [
-  'assistant-chat',
-  'agent-chat',
-  'delegated-agent',
-];
 
 @Injectable()
 export class ExecutionUnresolvedInferenceSelectorService implements ExecutionNextStepSelector {
@@ -38,7 +36,7 @@ export class ExecutionUnresolvedInferenceSelectorService implements ExecutionNex
         ORDER BY step."updated_at"
         LIMIT $1
       `,
-      [limit, AGENT_LOOP_TASK_TYPES, COORDINATION_PENDING_PHASE],
+      [limit, [...AGENT_LOOP_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let selected = 0;
     for (const row of rows) {
@@ -78,7 +76,7 @@ export class ExecutionUnresolvedInferenceSelectorService implements ExecutionNex
           execution.status,
         ) ||
         execution.phase !== COORDINATION_PENDING_PHASE ||
-        AGENT_LOOP_TASK_TYPES.includes(execution.taskType) ||
+        isAgentLoopTaskType(execution.taskType) ||
         execution.cancellationRequestedAt
       ) {
         return false;

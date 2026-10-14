@@ -1,6 +1,9 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { ExecutionEntity } from './execution.entity';
-import { EXECUTION_UUID_PATTERN } from './execution.constants';
+import {
+  AGENT_LOOP_TASK_TYPES,
+  EXECUTION_UUID_PATTERN,
+} from './execution.constants';
 import type {
   OperationBudgetBucket,
   OperationBudgetGrant,
@@ -13,11 +16,7 @@ import type {
   ProgressGrantRequest,
 } from './execution.types';
 
-const CHAT_TASK_TYPES = new Set([
-  'assistant-chat',
-  'agent-chat',
-  'delegated-agent',
-]);
+const CHAT_TASK_TYPES = new Set<string>(AGENT_LOOP_TASK_TYPES);
 const EXCLUDED_CHAT_INFERENCE_PHASES = new Set([
   'memory_extraction',
   'structured_output_repair',

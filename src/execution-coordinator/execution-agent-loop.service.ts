@@ -24,7 +24,12 @@ import {
   ChatExecutionPayload,
   executionTaskWork,
 } from '../execution/execution-task-payload.types';
-import { COORDINATION_PENDING_PHASE } from '../execution/execution.constants';
+import {
+  AGENT_LOOP_TASK_TYPES,
+  CHAT_TURN_TASK_TYPES,
+  COORDINATION_PENDING_PHASE,
+  isChatTurnTaskType,
+} from '../execution/execution.constants';
 import { ExecutionArtifactStorageService } from '../execution/execution-artifact-storage.service';
 import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 import { derivedArtifactPolicy } from '../execution/execution-artifact-policy';
@@ -39,8 +44,6 @@ import {
   RuntimeDirective,
 } from './execution-next-work.types';
 
-const CHAT_TASK_TYPES = ['assistant-chat', 'agent-chat', 'delegated-agent'];
-const TOOL_LOOP_TASK_TYPES = ['assistant-chat', 'agent-chat'];
 const DEFAULT_POLICY = {
   normal: 3,
   normalInferenceSoftLimit: 2,
@@ -117,7 +120,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
           ORDER BY step."priority" DESC, step."available_at", step."created_at"
           LIMIT 1
         `,
-        [CHAT_TASK_TYPES],
+        [[...AGENT_LOOP_TASK_TYPES]],
       );
       if (!rows.length) break;
       const changed = await this.prepareInference(String(rows[0].step_id));
@@ -147,7 +150,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         ORDER BY receipt."received_at"
         LIMIT $1
       `,
-      [limit, TOOL_LOOP_TASK_TYPES, COORDINATION_PENDING_PHASE],
+      [limit, [...CHAT_TURN_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
     for (const row of rows) {
@@ -175,7 +178,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         ORDER BY step."updated_at"
         LIMIT $1
       `,
-      [limit, TOOL_LOOP_TASK_TYPES, COORDINATION_PENDING_PHASE],
+      [limit, [...CHAT_TURN_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
     for (const row of rows) {
@@ -204,7 +207,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         ORDER BY step."updated_at"
         LIMIT $1
       `,
-      [limit, CHAT_TASK_TYPES, COORDINATION_PENDING_PHASE],
+      [limit, [...AGENT_LOOP_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
     for (const row of rows) {
@@ -966,7 +969,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
           ? 'forced_finalization'
           : 'agent_loop';
     const taskType = input.source.work.taskType;
-    if (taskType !== 'assistant-chat' && taskType !== 'agent-chat') {
+    if (!isChatTurnTaskType(taskType)) {
       throw new ConflictException('invalid_agent_inference_task');
     }
     const continuation = await createExecutionStep(manager, {
@@ -1023,10 +1026,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
   }
 
   private stepPayload(step: ExecutionStepEntity): ChatExecutionPayload {
-    if (
-      step.work.taskType !== 'assistant-chat' &&
-      step.work.taskType !== 'agent-chat'
-    ) {
+    if (!isChatTurnTaskType(step.work.taskType)) {
       throw new ConflictException('invalid_agent_inference_task');
     }
     if (!step.work.payload || typeof step.work.payload !== 'object') {

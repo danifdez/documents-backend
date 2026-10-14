@@ -1,5 +1,8 @@
+import { BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ExecutionEntity } from '../execution.entity';
+import type { ChatExecutionPayload } from '../execution-task-payload.types';
+import { isChatTurnTaskType } from '../execution.constants';
 import {
   ToolInvocationContract,
   ToolPlanContract,
@@ -15,6 +18,15 @@ export type ToolPlanPreparer = (
   invocation: ToolInvocationContract,
   execution: ExecutionEntity,
 ) => ToolPlanContract;
+
+export function chatTurnPayload(
+  execution: ExecutionEntity,
+): ChatExecutionPayload {
+  if (!isChatTurnTaskType(execution.taskType)) {
+    throw new BadRequestException('invalid_chat_execution_type');
+  }
+  return execution.payload as ChatExecutionPayload;
+}
 
 type ToolPlanDraft = Omit<
   ToolPlanContract,

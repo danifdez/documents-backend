@@ -2,7 +2,6 @@ import { BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { resolveProductSkillResource } from '../../conversation/product-skill-registry';
 import { ExecutionEntity } from '../execution.entity';
-import type { ChatExecutionPayload } from '../execution-task-payload.types';
 import {
   AGENT_DELEGATE_TOOL_CAPABILITY,
   AGENT_DELEGATE_TOOL_NAME,
@@ -27,17 +26,8 @@ import {
   PLAN_TIMEOUT_MS,
   ToolPlanPreparer,
   buildToolPlan,
+  chatTurnPayload,
 } from './tool-plan-preparer';
-
-function chatPayload(execution: ExecutionEntity): ChatExecutionPayload {
-  if (
-    execution.taskType !== 'assistant-chat' &&
-    execution.taskType !== 'agent-chat'
-  ) {
-    throw new BadRequestException('invalid_chat_execution_type');
-  }
-  return execution.payload as ChatExecutionPayload;
-}
 
 function prepareDocumentsSearch(
   invocation: ToolInvocationContract,
@@ -88,7 +78,7 @@ function prepareSkillResourceLoad(
   invocation: ToolInvocationContract,
   execution: ExecutionEntity,
 ): ToolPlanContract {
-  const payload = chatPayload(execution);
+  const payload = chatTurnPayload(execution);
   if (invocation.executionContext.dataClassification === 'secret') {
     throw new BadRequestException('data_policy_violation');
   }

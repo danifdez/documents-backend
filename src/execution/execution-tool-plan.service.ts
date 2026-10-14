@@ -32,8 +32,8 @@ import { AGENT_DELEGATE_TOOL_NAME } from './execution-tool.constants';
 import { ExecutionConfirmationService } from './execution-confirmation.service';
 import { ExecutionConfirmationStatus } from './execution-confirmation.types';
 import { ExecutionService } from './execution.service';
-import type { ChatExecutionPayload } from './execution-task-payload.types';
 import { getToolPlanPreparer } from './tool-planners';
+import { chatTurnPayload } from './tool-planners/tool-plan-preparer';
 
 export interface PreparedToolPlan {
   invocation: ExecutionToolInvocationEntity;
@@ -226,7 +226,7 @@ export class ExecutionToolPlanService {
           throw new ConflictException('delegation_depth_exceeded');
         }
         const goal = String(plan.normalizedArguments.goal ?? '');
-        const parentPayload = this.chatPayload(execution);
+        const parentPayload = chatTurnPayload(execution);
         const child = await this.executions.createChildInference(
           manager,
           execution,
@@ -499,7 +499,7 @@ export class ExecutionToolPlanService {
     invocation: ToolInvocationContract,
     execution: ExecutionEntity,
   ): ToolPlanContract {
-    const payload = this.chatPayload(execution);
+    const payload = chatTurnPayload(execution);
     const selectedTools = Array.isArray(payload.activeCapabilities?.tools)
       ? payload.activeCapabilities.tools
       : [];
@@ -586,16 +586,6 @@ export class ExecutionToolPlanService {
       throw new ConflictException('tool_request_source_not_accepted');
     }
     return [source.stepId];
-  }
-
-  private chatPayload(execution: ExecutionEntity): ChatExecutionPayload {
-    if (
-      execution.taskType !== 'assistant-chat' &&
-      execution.taskType !== 'agent-chat'
-    ) {
-      throw new BadRequestException('invalid_chat_execution_type');
-    }
-    return execution.payload as ChatExecutionPayload;
   }
 
   private assertUuid(value: string, field: string): void {
