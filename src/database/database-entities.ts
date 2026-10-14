@@ -1,0 +1,125 @@
+import { ResourceEntity } from '../resource/resource.entity';
+import { ProjectEntity } from '../project/project.entity';
+import { DocEntity } from '../doc/doc.entity';
+import { MarkEntity } from '../mark/mark.entity';
+import { ReadingPointEntity } from '../reading-point/reading-point.entity';
+import { CommentEntity } from '../comment/comment.entity';
+import { ResourceTypeEntity } from '../resource-type/resource-type.entity';
+import { ThreadEntity } from '../thread/thread.entity';
+import { EntityTypeEntity } from '../entity-type/entity-type.entity';
+import { EntityEntity } from '../entity/entity.entity';
+import { ResourceEntityEntity } from '../resource-entity/resource-entity.entity';
+import { AuthorEntity } from '../author/author.entity';
+import { ResourceAuthorEntity } from '../author/resource-author.entity';
+import { PendingEntityEntity } from '../pending-entity/pending-entity.entity';
+import { EntityProjectEntity } from '../entity-project/entity-project.entity';
+import { CanvasEntity } from '../canvas/canvas.entity';
+import { DatasetEntity } from '../dataset/dataset.entity';
+import { DatasetRecordEntity } from '../dataset/dataset-record.entity';
+import { DatasetRelationEntity } from '../dataset/dataset-relation.entity';
+import { DatasetRecordLinkEntity } from '../dataset/dataset-record-link.entity';
+import { DatasetChartEntity } from '../dataset/dataset-chart.entity';
+import { NoteEntity } from '../note/note.entity';
+import { CalendarEventEntity } from '../calendar-event/calendar-event.entity';
+import { EventOccurrenceCompletionEntity } from '../calendar-event/event-occurrence-completion.entity';
+import { KnowledgeEntryEntity } from '../knowledge-base/knowledge-entry.entity';
+import { TimelineEntity } from '../timeline/timeline.entity';
+import { ResourceDateEntity } from '../resource-date/resource-date.entity';
+import { BibliographyEntryEntity } from '../bibliography/bibliography-entry.entity';
+import { UserTaskEntity } from '../user-task/user-task.entity';
+import { WorkerEntity } from '../worker/worker.entity';
+import { UserEntity } from '../auth/user.entity';
+import { PermissionGroupEntity } from '../auth/permission-group.entity';
+import { DataSourceEntity } from '../data-source/data-source.entity';
+import { DataSourceSyncLogEntity } from '../data-source/data-source-sync-log.entity';
+import { AssistantEntity } from '../assistant/assistant.entity';
+import { AssistantMessageEntity } from '../assistant/assistant-message.entity';
+import { MemoryEntryEntity } from '../memory/memory-entry.entity';
+import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
+import { AgentEntity } from '../agent/agent.entity';
+import { AgentMessageEntity } from '../agent/agent-message.entity';
+import { AppStateEntity } from '../app-state/app-state.entity';
+import { ExecutionEntity } from '../execution/execution.entity';
+import { ExecutionEventEntity } from '../execution/execution-event.entity';
+import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
+import { ExecutionStepEntity } from '../execution/execution-step.entity';
+import { ExecutionStepDependencyEntity } from '../execution/execution-step-dependency.entity';
+import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
+import { ExecutionResultReceiptEntity } from '../execution/execution-result-receipt.entity';
+import { ExecutionOutboxEntity } from '../execution-outbox/execution-outbox.entity';
+import { ExecutionOperationEntity } from '../execution/execution-operation.entity';
+import { ExecutionToolInvocationEntity } from '../execution/execution-tool-invocation.entity';
+import { ExecutionToolPlanEntity } from '../execution/execution-tool-plan.entity';
+import { ExecutionConfirmationEntity } from '../execution/execution-confirmation.entity';
+import { ConversationSessionEntity } from '../conversation/conversation-session.entity';
+import { ConversationTurnEntity } from '../conversation/conversation-turn.entity';
+import { ConversationArtifactRevisionEntity } from '../conversation/conversation-artifact-revision.entity';
+import { SkillActivationEntity } from '../conversation/skill-activation.entity';
+import { ExecutionEffectJournalEntity } from '../execution/execution-effect-journal.entity';
+import { WorkerCredentialEventEntity } from '../worker/worker-credential-event.entity';
+import { FavoriteEntity } from '../favorite/favorite.entity';
+import { FavoriteCategoryEntity } from '../favorite/favorite-category.entity';
+
+export const DATABASE_ENTITIES = [
+  ResourceEntity,
+  ProjectEntity,
+  DocEntity,
+  MarkEntity,
+  ReadingPointEntity,
+  CommentEntity,
+  ResourceTypeEntity,
+  ThreadEntity,
+  EntityTypeEntity,
+  EntityEntity,
+  ResourceEntityEntity,
+  AuthorEntity,
+  ResourceAuthorEntity,
+  PendingEntityEntity,
+  EntityProjectEntity,
+  CanvasEntity,
+  DatasetEntity,
+  DatasetRecordEntity,
+  DatasetRelationEntity,
+  DatasetRecordLinkEntity,
+  DatasetChartEntity,
+  NoteEntity,
+  CalendarEventEntity,
+  EventOccurrenceCompletionEntity,
+  KnowledgeEntryEntity,
+  TimelineEntity,
+  ResourceDateEntity,
+  BibliographyEntryEntity,
+  UserTaskEntity,
+  WorkerEntity,
+  UserEntity,
+  PermissionGroupEntity,
+  DataSourceEntity,
+  DataSourceSyncLogEntity,
+  AssistantEntity,
+  AssistantMessageEntity,
+  MemoryEntryEntity,
+  IndexedFileEntity,
+  AgentEntity,
+  AgentMessageEntity,
+  AppStateEntity,
+  ExecutionEntity,
+  ExecutionEventEntity,
+  ExecutionArtifactEntity,
+  ExecutionStepEntity,
+  ExecutionStepDependencyEntity,
+  ExecutionStepAttemptEntity,
+  ExecutionResultReceiptEntity,
+  ExecutionOutboxEntity,
+  ExecutionOperationEntity,
+  ExecutionToolInvocationEntity,
+  ExecutionToolPlanEntity,
+  ExecutionConfirmationEntity,
+  ConversationSessionEntity,
+  ConversationTurnEntity,
+  ConversationArtifactRevisionEntity,
+  SkillActivationEntity,
+  ExecutionEffectJournalEntity,
+  WorkerCredentialEventEntity,
+  FavoriteEntity,
+  FavoriteCategoryEntity,
+];
