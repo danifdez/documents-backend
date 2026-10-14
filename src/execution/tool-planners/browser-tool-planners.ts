@@ -32,6 +32,7 @@ import {
   BROWSER_TASK_TIMEOUT_MS,
   CONFIRMATION_TIMEOUT_MS,
   ToolPlanPreparer,
+  buildToolPlan,
 } from './tool-plan-preparer';
 
 function isHttpUrl(value: string): boolean {
@@ -61,49 +62,49 @@ function prepareBrowserTask(
   }
   const preparedAt = new Date();
   const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: BROWSER_RUN_TASK_TOOL_NAME,
-    descriptorVersion: BROWSER_RUN_TASK_TOOL_VERSION,
-    normalizedArguments: { goal },
-    resources: [
-      {
-        resourceKey: 'browser:active-page',
-        mode: 'exclusive',
-        kind: 'browser_page',
-      },
-    ],
-    effects: [
-      {
-        effectClass: 'external_irreversible',
-        resourceKey: 'browser:active-page',
-        description: `Run browser task: ${goal.slice(0, 200)}`,
-        reversible: false,
-        verificationRequired: true,
-      },
-    ],
-    policyDecision: {
-      decision: 'confirmation_required',
-      rule: 'paired_browser_task_requires_confirmation',
-      expiresAt: expiresAt.toISOString(),
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: BROWSER_RUN_TASK_TOOL_NAME,
+      descriptorVersion: BROWSER_RUN_TASK_TOOL_VERSION,
+      timeoutMs: BROWSER_TASK_TIMEOUT_MS,
     },
-    confirmationRequirement: {
-      confirmationId: randomUUID(),
-      reason: 'The browser agent can visit websites and interact with them.',
-      prompt: `Run this task in a separate IA Browser tab? ${goal.slice(0, 200)}`,
-      scope: 'once',
-      expiresAt: expiresAt.toISOString(),
+    {
+      normalizedArguments: { goal },
+      resources: [
+        {
+          resourceKey: 'browser:active-page',
+          mode: 'exclusive',
+          kind: 'browser_page',
+        },
+      ],
+      effects: [
+        {
+          effectClass: 'external_irreversible',
+          resourceKey: 'browser:active-page',
+          description: `Run browser task: ${goal.slice(0, 200)}`,
+          reversible: false,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_task_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'The browser agent can visit websites and interact with them.',
+        prompt: `Run this task in a separate IA Browser tab? ${goal.slice(0, 200)}`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'non_resumable',
+      idempotencyKey: `browser-task:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_RUN_TASK_TOOL_CAPABILITY],
     },
-    recoveryClass: 'non_resumable',
-    idempotencyKey: `browser-task:${invocation.toolCallId}`,
-    requiredCapabilities: [BROWSER_RUN_TASK_TOOL_CAPABILITY],
-    deadline: new Date(
-      preparedAt.getTime() + BROWSER_TASK_TIMEOUT_MS,
-    ).toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    preparedAt,
+  );
 }
 
 function prepareBrowserRead(
@@ -137,35 +138,33 @@ function prepareBrowserRead(
   ) {
     throw new BadRequestException('invalid_arguments');
   }
-  const preparedAt = new Date();
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: BROWSER_READ_TOOL_NAME,
-    descriptorVersion: BROWSER_READ_TOOL_VERSION,
-    normalizedArguments: {
-      expectedUrl,
-      maxChars: Number(requestedMaxChars),
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: BROWSER_READ_TOOL_NAME,
+      descriptorVersion: BROWSER_READ_TOOL_VERSION,
+      timeoutMs: BROWSER_READ_TIMEOUT_MS,
     },
-    resources: [
-      {
-        resourceKey: 'browser:active-page',
-        mode: 'shared',
-        kind: 'browser_page',
+    {
+      normalizedArguments: {
+        expectedUrl,
+        maxChars: Number(requestedMaxChars),
       },
-    ],
-    effects: [],
-    policyDecision: { decision: 'allowed', rule: 'paired_browser_read' },
-    confirmationRequirement: null,
-    recoveryClass: 'read_only_replayable',
-    idempotencyKey: null,
-    requiredCapabilities: [BROWSER_READ_TOOL_CAPABILITY],
-    deadline: new Date(
-      preparedAt.getTime() + BROWSER_READ_TIMEOUT_MS,
-    ).toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+      resources: [
+        {
+          resourceKey: 'browser:active-page',
+          mode: 'shared',
+          kind: 'browser_page',
+        },
+      ],
+      effects: [],
+      policyDecision: { decision: 'allowed', rule: 'paired_browser_read' },
+      confirmationRequirement: null,
+      recoveryClass: 'read_only_replayable',
+      idempotencyKey: null,
+      requiredCapabilities: [BROWSER_READ_TOOL_CAPABILITY],
+    },
+  );
 }
 
 function prepareBrowserNavigate(
@@ -198,41 +197,43 @@ function prepareBrowserNavigate(
   const preparedAt = new Date();
   const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
   const resourceKey = 'browser:active-page';
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: BROWSER_NAVIGATE_TOOL_NAME,
-    descriptorVersion: BROWSER_NAVIGATE_TOOL_VERSION,
-    normalizedArguments: { url, expectedCurrentUrl },
-    resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
-    effects: [
-      {
-        effectClass: 'external_reversible',
-        resourceKey,
-        description: `Navigate IA Browser to: ${url}`,
-        reversible: true,
-        verificationRequired: true,
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: BROWSER_NAVIGATE_TOOL_NAME,
+      descriptorVersion: BROWSER_NAVIGATE_TOOL_VERSION,
+      timeoutMs: CONFIRMATION_TIMEOUT_MS,
+    },
+    {
+      normalizedArguments: { url, expectedCurrentUrl },
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_reversible',
+          resourceKey,
+          description: `Navigate IA Browser to: ${url}`,
+          reversible: true,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_navigation_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
       },
-    ],
-    policyDecision: {
-      decision: 'confirmation_required',
-      rule: 'paired_browser_navigation_requires_confirmation',
-      expiresAt: expiresAt.toISOString(),
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Navigation changes the active page in the paired IA Browser.',
+        prompt: `Navigate IA Browser to "${url}"?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-navigate:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_NAVIGATE_TOOL_CAPABILITY],
     },
-    confirmationRequirement: {
-      confirmationId: randomUUID(),
-      reason: 'Navigation changes the active page in the paired IA Browser.',
-      prompt: `Navigate IA Browser to "${url}"?`,
-      scope: 'once',
-      expiresAt: expiresAt.toISOString(),
-    },
-    recoveryClass: 'effect_checked',
-    idempotencyKey: `browser-navigate:${invocation.toolCallId}`,
-    requiredCapabilities: [BROWSER_NAVIGATE_TOOL_CAPABILITY],
-    deadline: expiresAt.toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    preparedAt,
+  );
 }
 
 function prepareBrowserGoBack(
@@ -256,41 +257,43 @@ function prepareBrowserGoBack(
   const preparedAt = new Date();
   const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
   const resourceKey = 'browser:active-page';
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: BROWSER_GO_BACK_TOOL_NAME,
-    descriptorVersion: BROWSER_GO_BACK_TOOL_VERSION,
-    normalizedArguments: { expectedCurrentUrl },
-    resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
-    effects: [
-      {
-        effectClass: 'external_reversible',
-        resourceKey,
-        description: `Go back from: ${expectedCurrentUrl}`,
-        reversible: true,
-        verificationRequired: true,
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: BROWSER_GO_BACK_TOOL_NAME,
+      descriptorVersion: BROWSER_GO_BACK_TOOL_VERSION,
+      timeoutMs: CONFIRMATION_TIMEOUT_MS,
+    },
+    {
+      normalizedArguments: { expectedCurrentUrl },
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_reversible',
+          resourceKey,
+          description: `Go back from: ${expectedCurrentUrl}`,
+          reversible: true,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_history_navigation_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
       },
-    ],
-    policyDecision: {
-      decision: 'confirmation_required',
-      rule: 'paired_browser_history_navigation_requires_confirmation',
-      expiresAt: expiresAt.toISOString(),
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Going back changes the active page in the paired IA Browser.',
+        prompt: `Go back from "${expectedCurrentUrl}" in IA Browser?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-go-back:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_GO_BACK_TOOL_CAPABILITY],
     },
-    confirmationRequirement: {
-      confirmationId: randomUUID(),
-      reason: 'Going back changes the active page in the paired IA Browser.',
-      prompt: `Go back from "${expectedCurrentUrl}" in IA Browser?`,
-      scope: 'once',
-      expiresAt: expiresAt.toISOString(),
-    },
-    recoveryClass: 'effect_checked',
-    idempotencyKey: `browser-go-back:${invocation.toolCallId}`,
-    requiredCapabilities: [BROWSER_GO_BACK_TOOL_CAPABILITY],
-    deadline: expiresAt.toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    preparedAt,
+  );
 }
 
 function prepareBrowserClick(
@@ -335,50 +338,52 @@ function prepareBrowserClick(
   const resourceKey = 'browser:active-page';
   const labelForPrompt = JSON.stringify(expectedLabel);
   const urlForPrompt = JSON.stringify(expectedCurrentUrl);
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: BROWSER_CLICK_TOOL_NAME,
-    descriptorVersion: BROWSER_CLICK_TOOL_VERSION,
-    normalizedArguments: {
-      expectedCurrentUrl,
-      elementIndex,
-      expectedKind,
-      expectedLabel,
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: BROWSER_CLICK_TOOL_NAME,
+      descriptorVersion: BROWSER_CLICK_TOOL_VERSION,
+      timeoutMs: CONFIRMATION_TIMEOUT_MS,
     },
-    resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
-    effects: [
-      {
-        effectClass: 'external_irreversible',
-        resourceKey,
-        description:
-          `Click ${expectedKind} "${expectedLabel}" ` +
-          `(control ${elementIndex}) on ${expectedCurrentUrl}`,
-        reversible: false,
-        verificationRequired: true,
+    {
+      normalizedArguments: {
+        expectedCurrentUrl,
+        elementIndex,
+        expectedKind,
+        expectedLabel,
       },
-    ],
-    policyDecision: {
-      decision: 'confirmation_required',
-      rule: 'paired_browser_click_requires_confirmation',
-      expiresAt: expiresAt.toISOString(),
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_irreversible',
+          resourceKey,
+          description:
+            `Click ${expectedKind} "${expectedLabel}" ` +
+            `(control ${elementIndex}) on ${expectedCurrentUrl}`,
+          reversible: false,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_click_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Clicking a page control can trigger an external action.',
+        prompt:
+          `Click ${expectedKind} ${labelForPrompt} ` +
+          `(control ${elementIndex}) on ${urlForPrompt}?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-click:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_CLICK_TOOL_CAPABILITY],
     },
-    confirmationRequirement: {
-      confirmationId: randomUUID(),
-      reason: 'Clicking a page control can trigger an external action.',
-      prompt:
-        `Click ${expectedKind} ${labelForPrompt} ` +
-        `(control ${elementIndex}) on ${urlForPrompt}?`,
-      scope: 'once',
-      expiresAt: expiresAt.toISOString(),
-    },
-    recoveryClass: 'effect_checked',
-    idempotencyKey: `browser-click:${invocation.toolCallId}`,
-    requiredCapabilities: [BROWSER_CLICK_TOOL_CAPABILITY],
-    deadline: expiresAt.toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    preparedAt,
+  );
 }
 
 function prepareBrowserTypeText(
@@ -437,52 +442,54 @@ function prepareBrowserTypeText(
   const labelForPrompt = JSON.stringify(expectedLabel);
   const textForPrompt = JSON.stringify(text);
   const urlForPrompt = JSON.stringify(expectedCurrentUrl);
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: BROWSER_TYPE_TEXT_TOOL_NAME,
-    descriptorVersion: BROWSER_TYPE_TEXT_TOOL_VERSION,
-    normalizedArguments: {
-      expectedCurrentUrl,
-      elementIndex,
-      expectedLabel,
-      expectedCurrentValue,
-      expectedCurrentValueTruncated: false,
-      text,
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: BROWSER_TYPE_TEXT_TOOL_NAME,
+      descriptorVersion: BROWSER_TYPE_TEXT_TOOL_VERSION,
+      timeoutMs: CONFIRMATION_TIMEOUT_MS,
     },
-    resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
-    effects: [
-      {
-        effectClass: 'external_irreversible',
-        resourceKey,
-        description:
-          `Type text into field "${expectedLabel}" ` +
-          `(control ${elementIndex}) on ${expectedCurrentUrl}`,
-        reversible: false,
-        verificationRequired: true,
+    {
+      normalizedArguments: {
+        expectedCurrentUrl,
+        elementIndex,
+        expectedLabel,
+        expectedCurrentValue,
+        expectedCurrentValueTruncated: false,
+        text,
       },
-    ],
-    policyDecision: {
-      decision: 'confirmation_required',
-      rule: 'paired_browser_type_text_requires_confirmation',
-      expiresAt: expiresAt.toISOString(),
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_irreversible',
+          resourceKey,
+          description:
+            `Type text into field "${expectedLabel}" ` +
+            `(control ${elementIndex}) on ${expectedCurrentUrl}`,
+          reversible: false,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_type_text_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Typing can trigger input handlers on an external page.',
+        prompt:
+          `Type ${textForPrompt} into field ${labelForPrompt} ` +
+          `(control ${elementIndex}) on ${urlForPrompt} without submitting?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-type-text:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_TYPE_TEXT_TOOL_CAPABILITY],
     },
-    confirmationRequirement: {
-      confirmationId: randomUUID(),
-      reason: 'Typing can trigger input handlers on an external page.',
-      prompt:
-        `Type ${textForPrompt} into field ${labelForPrompt} ` +
-        `(control ${elementIndex}) on ${urlForPrompt} without submitting?`,
-      scope: 'once',
-      expiresAt: expiresAt.toISOString(),
-    },
-    recoveryClass: 'effect_checked',
-    idempotencyKey: `browser-type-text:${invocation.toolCallId}`,
-    requiredCapabilities: [BROWSER_TYPE_TEXT_TOOL_CAPABILITY],
-    deadline: expiresAt.toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    preparedAt,
+  );
 }
 
 function prepareBrowserSelectOption(
@@ -541,54 +548,56 @@ function prepareBrowserSelectOption(
   const preparedAt = new Date();
   const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
   const resourceKey = 'browser:active-page';
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: BROWSER_SELECT_OPTION_TOOL_NAME,
-    descriptorVersion: BROWSER_SELECT_OPTION_TOOL_VERSION,
-    normalizedArguments: {
-      expectedCurrentUrl,
-      elementIndex,
-      expectedLabel,
-      expectedCurrentValue,
-      expectedCurrentValueTruncated: false,
-      optionValue,
-      expectedOptionLabel,
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: BROWSER_SELECT_OPTION_TOOL_NAME,
+      descriptorVersion: BROWSER_SELECT_OPTION_TOOL_VERSION,
+      timeoutMs: CONFIRMATION_TIMEOUT_MS,
     },
-    resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
-    effects: [
-      {
-        effectClass: 'external_irreversible',
-        resourceKey,
-        description:
-          `Select option "${expectedOptionLabel}" in field ` +
-          `"${expectedLabel}" (control ${elementIndex}) on ${expectedCurrentUrl}`,
-        reversible: false,
-        verificationRequired: true,
+    {
+      normalizedArguments: {
+        expectedCurrentUrl,
+        elementIndex,
+        expectedLabel,
+        expectedCurrentValue,
+        expectedCurrentValueTruncated: false,
+        optionValue,
+        expectedOptionLabel,
       },
-    ],
-    policyDecision: {
-      decision: 'confirmation_required',
-      rule: 'paired_browser_select_option_requires_confirmation',
-      expiresAt: expiresAt.toISOString(),
+      resources: [{ resourceKey, mode: 'exclusive', kind: 'browser_page' }],
+      effects: [
+        {
+          effectClass: 'external_irreversible',
+          resourceKey,
+          description:
+            `Select option "${expectedOptionLabel}" in field ` +
+            `"${expectedLabel}" (control ${elementIndex}) on ${expectedCurrentUrl}`,
+          reversible: false,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'paired_browser_select_option_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Selecting an option can trigger handlers on an external page.',
+        prompt:
+          `Select ${JSON.stringify(expectedOptionLabel)} in field ` +
+          `${JSON.stringify(expectedLabel)} (control ${elementIndex}) on ` +
+          `${JSON.stringify(expectedCurrentUrl)} without submitting?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `browser-select-option:${invocation.toolCallId}`,
+      requiredCapabilities: [BROWSER_SELECT_OPTION_TOOL_CAPABILITY],
     },
-    confirmationRequirement: {
-      confirmationId: randomUUID(),
-      reason: 'Selecting an option can trigger handlers on an external page.',
-      prompt:
-        `Select ${JSON.stringify(expectedOptionLabel)} in field ` +
-        `${JSON.stringify(expectedLabel)} (control ${elementIndex}) on ` +
-        `${JSON.stringify(expectedCurrentUrl)} without submitting?`,
-      scope: 'once',
-      expiresAt: expiresAt.toISOString(),
-    },
-    recoveryClass: 'effect_checked',
-    idempotencyKey: `browser-select-option:${invocation.toolCallId}`,
-    requiredCapabilities: [BROWSER_SELECT_OPTION_TOOL_CAPABILITY],
-    deadline: expiresAt.toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    preparedAt,
+  );
 }
 
 export const BROWSER_TOOL_PLAN_PREPARERS: ReadonlyArray<

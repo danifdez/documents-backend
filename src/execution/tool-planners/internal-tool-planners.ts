@@ -26,6 +26,7 @@ import {
   DELEGATION_TIMEOUT_MS,
   PLAN_TIMEOUT_MS,
   ToolPlanPreparer,
+  buildToolPlan,
 } from './tool-plan-preparer';
 
 function chatPayload(execution: ExecutionEntity): ChatExecutionPayload {
@@ -57,30 +58,30 @@ function prepareDocumentsSearch(
     throw new BadRequestException('invalid_arguments');
   }
   const limit = Math.min(50, Math.max(1, Number(requestedLimit)));
-  const preparedAt = new Date();
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: DOCUMENT_SEARCH_TOOL_NAME,
-    descriptorVersion: DOCUMENT_SEARCH_TOOL_VERSION,
-    normalizedArguments: { query, limit },
-    resources: [
-      {
-        resourceKey: 'documents:collection',
-        mode: 'shared',
-        kind: 'document_collection',
-      },
-    ],
-    effects: [],
-    policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
-    confirmationRequirement: null,
-    recoveryClass: 'read_only_replayable',
-    idempotencyKey: null,
-    requiredCapabilities: [DOCUMENT_SEARCH_TOOL_CAPABILITY],
-    deadline: new Date(preparedAt.getTime() + PLAN_TIMEOUT_MS).toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: DOCUMENT_SEARCH_TOOL_NAME,
+      descriptorVersion: DOCUMENT_SEARCH_TOOL_VERSION,
+      timeoutMs: PLAN_TIMEOUT_MS,
+    },
+    {
+      normalizedArguments: { query, limit },
+      resources: [
+        {
+          resourceKey: 'documents:collection',
+          mode: 'shared',
+          kind: 'document_collection',
+        },
+      ],
+      effects: [],
+      policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
+      confirmationRequirement: null,
+      recoveryClass: 'read_only_replayable',
+      idempotencyKey: null,
+      requiredCapabilities: [DOCUMENT_SEARCH_TOOL_CAPABILITY],
+    },
+  );
 }
 
 function prepareSkillResourceLoad(
@@ -131,41 +132,41 @@ function prepareSkillResourceLoad(
   if (!selected || !resource) {
     throw new BadRequestException('skill_resource_not_active');
   }
-  const preparedAt = new Date();
   const resourceKey = [
     'product-skill',
     resource.skillVersion,
     resource.resourceId,
     resource.contentHash,
   ].join(':');
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: SKILL_RESOURCE_LOAD_TOOL_NAME,
-    descriptorVersion: SKILL_RESOURCE_LOAD_TOOL_VERSION,
-    normalizedArguments: identity as Record<string, unknown>,
-    resources: [
-      {
-        resourceKey,
-        mode: 'shared',
-        kind: 'product_skill_resource',
-        id: resource.resourceId,
-        version: resource.contentHash,
-      },
-    ],
-    effects: [],
-    policyDecision: {
-      decision: 'allowed',
-      rule: 'active_product_skill_resource_read',
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: SKILL_RESOURCE_LOAD_TOOL_NAME,
+      descriptorVersion: SKILL_RESOURCE_LOAD_TOOL_VERSION,
+      timeoutMs: PLAN_TIMEOUT_MS,
     },
-    confirmationRequirement: null,
-    recoveryClass: 'read_only_replayable',
-    idempotencyKey: null,
-    requiredCapabilities: [SKILL_RESOURCE_LOAD_TOOL_CAPABILITY],
-    deadline: new Date(preparedAt.getTime() + PLAN_TIMEOUT_MS).toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    {
+      normalizedArguments: identity as Record<string, unknown>,
+      resources: [
+        {
+          resourceKey,
+          mode: 'shared',
+          kind: 'product_skill_resource',
+          id: resource.resourceId,
+          version: resource.contentHash,
+        },
+      ],
+      effects: [],
+      policyDecision: {
+        decision: 'allowed',
+        rule: 'active_product_skill_resource_read',
+      },
+      confirmationRequirement: null,
+      recoveryClass: 'read_only_replayable',
+      idempotencyKey: null,
+      requiredCapabilities: [SKILL_RESOURCE_LOAD_TOOL_CAPABILITY],
+    },
+  );
 }
 
 function prepareUserTaskCreate(
@@ -193,47 +194,49 @@ function prepareUserTaskCreate(
   }
   const preparedAt = new Date();
   const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: USER_TASK_CREATE_TOOL_NAME,
-    descriptorVersion: USER_TASK_CREATE_TOOL_VERSION,
-    normalizedArguments: { title, description },
-    resources: [
-      {
-        resourceKey: 'user-tasks:collection',
-        mode: 'exclusive',
-        kind: 'user_task_collection',
-      },
-    ],
-    effects: [
-      {
-        effectClass: 'local_reversible',
-        resourceKey: 'user-tasks:collection',
-        description: `Create task: ${title}`,
-        reversible: true,
-        verificationRequired: true,
-      },
-    ],
-    policyDecision: {
-      decision: 'confirmation_required',
-      rule: 'user_task_create_requires_confirmation',
-      expiresAt: expiresAt.toISOString(),
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: USER_TASK_CREATE_TOOL_NAME,
+      descriptorVersion: USER_TASK_CREATE_TOOL_VERSION,
+      timeoutMs: CONFIRMATION_TIMEOUT_MS,
     },
-    confirmationRequirement: {
-      confirmationId: randomUUID(),
-      reason: 'Creating a task changes local workspace data.',
-      prompt: `Create the task "${title}"?`,
-      scope: 'once',
-      expiresAt: expiresAt.toISOString(),
+    {
+      normalizedArguments: { title, description },
+      resources: [
+        {
+          resourceKey: 'user-tasks:collection',
+          mode: 'exclusive',
+          kind: 'user_task_collection',
+        },
+      ],
+      effects: [
+        {
+          effectClass: 'local_reversible',
+          resourceKey: 'user-tasks:collection',
+          description: `Create task: ${title}`,
+          reversible: true,
+          verificationRequired: true,
+        },
+      ],
+      policyDecision: {
+        decision: 'confirmation_required',
+        rule: 'user_task_create_requires_confirmation',
+        expiresAt: expiresAt.toISOString(),
+      },
+      confirmationRequirement: {
+        confirmationId: randomUUID(),
+        reason: 'Creating a task changes local workspace data.',
+        prompt: `Create the task "${title}"?`,
+        scope: 'once',
+        expiresAt: expiresAt.toISOString(),
+      },
+      recoveryClass: 'effect_checked',
+      idempotencyKey: `user-task:${invocation.toolCallId}`,
+      requiredCapabilities: [USER_TASK_CREATE_TOOL_CAPABILITY],
     },
-    recoveryClass: 'effect_checked',
-    idempotencyKey: `user-task:${invocation.toolCallId}`,
-    requiredCapabilities: [USER_TASK_CREATE_TOOL_CAPABILITY],
-    deadline: expiresAt.toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    preparedAt,
+  );
 }
 
 function prepareAgentDelegation(
@@ -250,35 +253,35 @@ function prepareAgentDelegation(
     throw new BadRequestException('invalid_arguments');
   }
   const preparedAt = new Date();
-  return {
-    schemaVersion: 'tool-plan/1',
-    operationId: randomUUID(),
-    toolCallId: invocation.toolCallId,
-    toolName: AGENT_DELEGATE_TOOL_NAME,
-    descriptorVersion: AGENT_DELEGATE_TOOL_VERSION,
-    normalizedArguments: { goal },
-    resources: [
-      {
-        resourceKey: `execution-tree:${invocation.executionContext.executionId}`,
-        mode: 'shared',
-        kind: 'execution_tree',
-      },
-    ],
-    effects: [],
-    policyDecision: {
-      decision: 'allowed',
-      rule: 'bounded_internal_delegation',
-      conditions: ['max_depth_1', 'single_inference', 'join_all'],
+  return buildToolPlan(
+    invocation,
+    {
+      toolName: AGENT_DELEGATE_TOOL_NAME,
+      descriptorVersion: AGENT_DELEGATE_TOOL_VERSION,
+      timeoutMs: DELEGATION_TIMEOUT_MS,
     },
-    confirmationRequirement: null,
-    recoveryClass: 'idempotent',
-    idempotencyKey: `delegation:${invocation.toolCallId}`,
-    requiredCapabilities: [AGENT_DELEGATE_TOOL_CAPABILITY],
-    deadline: new Date(
-      preparedAt.getTime() + DELEGATION_TIMEOUT_MS,
-    ).toISOString(),
-    preparedAt: preparedAt.toISOString(),
-  };
+    {
+      normalizedArguments: { goal },
+      resources: [
+        {
+          resourceKey: `execution-tree:${invocation.executionContext.executionId}`,
+          mode: 'shared',
+          kind: 'execution_tree',
+        },
+      ],
+      effects: [],
+      policyDecision: {
+        decision: 'allowed',
+        rule: 'bounded_internal_delegation',
+        conditions: ['max_depth_1', 'single_inference', 'join_all'],
+      },
+      confirmationRequirement: null,
+      recoveryClass: 'idempotent',
+      idempotencyKey: `delegation:${invocation.toolCallId}`,
+      requiredCapabilities: [AGENT_DELEGATE_TOOL_CAPABILITY],
+    },
+    preparedAt,
+  );
 }
 
 export const INTERNAL_TOOL_PLAN_PREPARERS: ReadonlyArray<

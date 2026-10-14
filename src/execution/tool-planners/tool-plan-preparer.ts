@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { ExecutionEntity } from '../execution.entity';
 import {
   ToolInvocationContract,
@@ -14,3 +15,38 @@ export type ToolPlanPreparer = (
   invocation: ToolInvocationContract,
   execution: ExecutionEntity,
 ) => ToolPlanContract;
+
+type ToolPlanDraft = Omit<
+  ToolPlanContract,
+  | 'schemaVersion'
+  | 'operationId'
+  | 'toolCallId'
+  | 'toolName'
+  | 'descriptorVersion'
+  | 'deadline'
+  | 'preparedAt'
+>;
+
+export interface ToolPlanIdentity {
+  toolName: string;
+  descriptorVersion: string;
+  timeoutMs: number;
+}
+
+export function buildToolPlan(
+  invocation: ToolInvocationContract,
+  identity: ToolPlanIdentity,
+  plan: ToolPlanDraft,
+  preparedAt: Date = new Date(),
+): ToolPlanContract {
+  return {
+    schemaVersion: 'tool-plan/1',
+    operationId: randomUUID(),
+    toolCallId: invocation.toolCallId,
+    toolName: identity.toolName,
+    descriptorVersion: identity.descriptorVersion,
+    ...plan,
+    deadline: new Date(preparedAt.getTime() + identity.timeoutMs).toISOString(),
+    preparedAt: preparedAt.toISOString(),
+  };
+}
