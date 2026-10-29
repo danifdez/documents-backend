@@ -986,4 +986,83 @@ describe('ExecutionToolRuntimeService', () => {
     );
     expect(attempts.receiveRecoveredEffectResult).toHaveBeenCalledTimes(1);
   });
+
+  describe('plan execution policy', () => {
+    const readPlan = (request: any) => (service as any).readPlan(request);
+
+    it('accepts every read-only tool plan', () => {
+      for (const request of [
+        assignment(),
+        skillResourceAssignment(),
+        delegationAssignment(),
+        workspaceReadAssignment(),
+      ]) {
+        expect(readPlan(request).confirmationStatus).toBeNull();
+      }
+    });
+
+    it('rejects tools that the local runtime does not execute', () => {
+      const request: any = assignment();
+      request.work.toolPlan.toolName = 'browser.navigate';
+      request.work.toolPlan.descriptorVersion = 'browser.navigate/1';
+
+      expect(() => readPlan(request)).toThrow('tool_plan_not_executable');
+    });
+
+    it('rejects read-only plans that carry effects or confirmation', () => {
+      const withConfirmation: any = assignment();
+      withConfirmation.work.toolPlan.confirmationRequirement = {
+        confirmationId: CHILD_EXECUTION_ID,
+        reason: 'Local mutation',
+        prompt: 'Continue?',
+        scope: 'once',
+      };
+      const withEffects: any = assignment();
+      withEffects.work.toolPlan.effects = [
+        {
+          effectClass: 'local_reversible',
+          resourceKey: 'documents:collection',
+          description: 'Mutate documents',
+          reversible: true,
+        },
+      ];
+
+      expect(() => readPlan(withConfirmation)).toThrow(
+        'tool_plan_not_executable',
+      );
+      expect(() => readPlan(withEffects)).toThrow('tool_plan_not_executable');
+    });
+
+    it('rejects delegation that exceeds the depth or join policy', () => {
+      const tooDeep: any = delegationAssignment();
+      tooDeep.work.delegationDepth = 2;
+      const joinAny: any = delegationAssignment();
+      joinAny.work.joinPolicy = 'any';
+
+      expect(() => readPlan(tooDeep)).toThrow('tool_plan_not_executable');
+      expect(() => readPlan(joinAny)).toThrow('tool_plan_not_executable');
+    });
+
+    it('returns the recorded decision for tools that require confirmation', () => {
+      expect(readPlan(taskAssignment('approved')).confirmationStatus).toBe(
+        'approved',
+      );
+      expect(readPlan(taskAssignment('denied')).confirmationStatus).toBe(
+        'denied',
+      );
+      expect(readPlan(workspaceWriteAssignment()).confirmationStatus).toBe(
+        'approved',
+      );
+    });
+
+    it('rejects confirming plans without requirement or with a stale version', () => {
+      const noRequirement: any = workspaceWriteAssignment();
+      noRequirement.work.toolPlan.confirmationRequirement = null;
+      const staleVersion: any = workspaceWriteAssignment();
+      staleVersion.work.toolPlan.descriptorVersion = 'workspace_files.write/2';
+
+      expect(() => readPlan(noRequirement)).toThrow('tool_plan_not_executable');
+      expect(() => readPlan(staleVersion)).toThrow('tool_plan_not_executable');
+    });
+  });
 });

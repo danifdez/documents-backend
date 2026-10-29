@@ -89,6 +89,64 @@ interface WorkspaceFileEffectObservation extends Record<string, unknown> {
   file: WorkspaceFileSnapshot;
 }
 
+interface ToolExecutionPolicy {
+  readonly version: string;
+  readonly decision: 'allowed' | 'confirmation_required';
+  readonly effectCount: number;
+  readonly isValidWork?: (work: StepAssignment['work']) => boolean;
+}
+
+function allowedTool(
+  version: string,
+  isValidWork?: (work: StepAssignment['work']) => boolean,
+): ToolExecutionPolicy {
+  return {
+    version,
+    decision: 'allowed',
+    effectCount: 0,
+    isValidWork,
+  };
+}
+
+function confirmationTool(version: string): ToolExecutionPolicy {
+  return {
+    version,
+    decision: 'confirmation_required',
+    effectCount: 1,
+  };
+}
+
+/**
+ * Executable plans are recognized by tool name. A tool that is not listed
+ * here can never be executed by the local runtime.
+ */
+const EXECUTABLE_TOOL_POLICIES: Record<string, ToolExecutionPolicy> = {
+  [DOCUMENT_SEARCH_TOOL_NAME]: allowedTool(DOCUMENT_SEARCH_TOOL_VERSION),
+  [SKILL_RESOURCE_LOAD_TOOL_NAME]: allowedTool(
+    SKILL_RESOURCE_LOAD_TOOL_VERSION,
+  ),
+  [AGENT_DELEGATE_TOOL_NAME]: allowedTool(
+    AGENT_DELEGATE_TOOL_VERSION,
+    (work) => work.joinPolicy === 'all' && work.delegationDepth === 1,
+  ),
+  [WORKSPACE_FILE_READ_TOOL_NAME]: allowedTool(
+    WORKSPACE_FILE_READ_TOOL_VERSION,
+  ),
+  [WORKSPACE_FILE_LIST_TOOL_NAME]: allowedTool(
+    WORKSPACE_FILE_LIST_TOOL_VERSION,
+  ),
+  [WORKSPACE_FILE_SEARCH_TOOL_NAME]: allowedTool(
+    WORKSPACE_FILE_SEARCH_TOOL_VERSION,
+  ),
+  [WORKSPACE_FILE_WRITE_TOOL_NAME]: confirmationTool(
+    WORKSPACE_FILE_WRITE_TOOL_VERSION,
+  ),
+  [WORKSPACE_FILE_DELETE_TOOL_NAME]: confirmationTool(
+    WORKSPACE_FILE_DELETE_TOOL_VERSION,
+  ),
+  [USER_TASK_CREATE_TOOL_NAME]: confirmationTool(USER_TASK_CREATE_TOOL_VERSION),
+};
+
 @Injectable()
 export class ExecutionToolRuntimeService {
   private readonly logger = new Logger(ExecutionToolRuntimeService.name);
@@ -220,10 +278,11 @@ export class ExecutionToolRuntimeService {
         result = await this.executeWorkspaceFileList(plan);
       } else if (plan.toolName === WORKSPACE_FILE_SEARCH_TOOL_NAME) {
         result = await this.executeWorkspaceFileSearch(plan);
-      } else if (plan.toolName === WORKSPACE_FILE_WRITE_TOOL_NAME) {
-        result = await this.executeWorkspaceFileWrite(assignment, plan);
-      } else if (plan.toolName === WORKSPACE_FILE_DELETE_TOOL_NAME) {
-        result = await this.executeWorkspaceFileDelete(assignment, plan);
+      } else if (
+        plan.toolName === WORKSPACE_FILE_WRITE_TOOL_NAME ||
+        plan.toolName === WORKSPACE_FILE_DELETE_TOOL_NAME
+      ) {
+        result = await this.executeWorkspaceFileMutation(assignment, plan);
       } else {
         result = await this.executeUserTaskCreate(plan);
       }
@@ -303,118 +362,42 @@ export class ExecutionToolRuntimeService {
     const plan = assignment.work.toolPlan as ToolPlanContract | undefined;
     if (!plan) throw new Error('tool_plan_missing');
     this.contracts.assertToolPlan(plan as unknown as Record<string, unknown>);
-    if (plan.operationId !== assignment.operationId) {
-      throw new Error('tool_plan_not_executable');
-    }
-    if (plan.toolName === DOCUMENT_SEARCH_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== DOCUMENT_SEARCH_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'allowed' ||
-        plan.confirmationRequirement !== null ||
-        plan.effects.length !== 0
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return { plan, confirmationStatus: null };
-    }
-    if (plan.toolName === SKILL_RESOURCE_LOAD_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== SKILL_RESOURCE_LOAD_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'allowed' ||
-        plan.confirmationRequirement !== null ||
-        plan.effects.length !== 0
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return { plan, confirmationStatus: null };
-    }
-    if (plan.toolName === AGENT_DELEGATE_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== AGENT_DELEGATE_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'allowed' ||
-        plan.confirmationRequirement !== null ||
-        plan.effects.length !== 0 ||
-        assignment.work.joinPolicy !== 'all' ||
-        assignment.work.delegationDepth !== 1
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return { plan, confirmationStatus: null };
-    }
-    if (plan.toolName === WORKSPACE_FILE_READ_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== WORKSPACE_FILE_READ_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'allowed' ||
-        plan.confirmationRequirement !== null ||
-        plan.effects.length !== 0
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return { plan, confirmationStatus: null };
-    }
-    if (plan.toolName === WORKSPACE_FILE_LIST_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== WORKSPACE_FILE_LIST_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'allowed' ||
-        plan.confirmationRequirement !== null ||
-        plan.effects.length !== 0
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return { plan, confirmationStatus: null };
-    }
-    if (plan.toolName === WORKSPACE_FILE_SEARCH_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== WORKSPACE_FILE_SEARCH_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'allowed' ||
-        plan.confirmationRequirement !== null ||
-        plan.effects.length !== 0
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return { plan, confirmationStatus: null };
-    }
-    if (plan.toolName === WORKSPACE_FILE_WRITE_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== WORKSPACE_FILE_WRITE_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'confirmation_required' ||
-        !plan.confirmationRequirement ||
-        plan.effects.length !== 1
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return {
-        plan,
-        confirmationStatus: this.readConfirmationDecision(assignment, plan),
-      };
-    }
-    if (plan.toolName === WORKSPACE_FILE_DELETE_TOOL_NAME) {
-      if (
-        plan.descriptorVersion !== WORKSPACE_FILE_DELETE_TOOL_VERSION ||
-        plan.policyDecision.decision !== 'confirmation_required' ||
-        !plan.confirmationRequirement ||
-        plan.effects.length !== 1
-      ) {
-        throw new Error('tool_plan_not_executable');
-      }
-      return {
-        plan,
-        confirmationStatus: this.readConfirmationDecision(assignment, plan),
-      };
-    }
+    const policy = EXECUTABLE_TOOL_POLICIES[plan.toolName];
     if (
-      plan.toolName !== USER_TASK_CREATE_TOOL_NAME ||
-      plan.descriptorVersion !== USER_TASK_CREATE_TOOL_VERSION ||
-      plan.policyDecision.decision !== 'confirmation_required' ||
-      !plan.confirmationRequirement ||
-      plan.effects.length !== 1
+      plan.operationId !== assignment.operationId ||
+      !policy ||
+      !this.isExecutableToolPlan(policy, assignment.work, plan)
     ) {
       throw new Error('tool_plan_not_executable');
     }
     return {
       plan,
-      confirmationStatus: this.readConfirmationDecision(assignment, plan),
+      confirmationStatus:
+        policy.decision === 'confirmation_required'
+          ? this.readConfirmationDecision(assignment, plan)
+          : null,
     };
+  }
+
+  private isExecutableToolPlan(
+    policy: ToolExecutionPolicy,
+    work: StepAssignment['work'],
+    plan: ToolPlanContract,
+  ): boolean {
+    if (
+      plan.descriptorVersion !== policy.version ||
+      plan.policyDecision.decision !== policy.decision ||
+      plan.effects.length !== policy.effectCount
+    ) {
+      return false;
+    }
+    const requiresConfirmation = policy.decision === 'confirmation_required';
+    if (requiresConfirmation) {
+      if (!plan.confirmationRequirement) return false;
+    } else if (plan.confirmationRequirement !== null) {
+      return false;
+    }
+    return policy.isValidWork ? policy.isValidWork(work) : true;
   }
 
   private readConfirmationDecision(
@@ -619,31 +602,7 @@ export class ExecutionToolRuntimeService {
     };
   }
 
-  private async executeWorkspaceFileWrite(
-    assignment: StepAssignment,
-    plan: ToolPlanContract,
-  ): Promise<ToolResultContract> {
-    try {
-      const observation = await this.runWorkspaceFileEffect(
-        assignment,
-        plan,
-        false,
-      );
-      return this.workspaceObservationResult(
-        assignment,
-        plan,
-        observation,
-        observation.reason === 'execution_cancelled_before_effect',
-      );
-    } catch (error) {
-      return this.unknownWorkspaceMutation(
-        plan,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
-
-  private async executeWorkspaceFileDelete(
+  private async executeWorkspaceFileMutation(
     assignment: StepAssignment,
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
