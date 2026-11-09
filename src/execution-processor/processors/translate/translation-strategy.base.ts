@@ -26,23 +26,6 @@ export abstract class TranslationStrategyBase implements TranslationStrategy {
       throw new Error(errorMessage);
     }
   }
-
-  // Batch strategies accept an empty response array, hence no length check here.
-  protected getBatchResults(
-    execution: ExecutionEntity,
-    translationType: string,
-  ): TranslationResults {
-    this.ensureExecutionResult(execution);
-
-    const results = execution.result as TranslationResults;
-    if (!results?.response || !Array.isArray(results.response)) {
-      const errorMessage = `Invalid translation result format for ${translationType}: ${JSON.stringify(results)}`;
-      this.logger.error(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    return results;
-  }
 }
 
 // Template method for strategies that translate a single entity resolved by

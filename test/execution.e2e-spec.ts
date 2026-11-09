@@ -95,7 +95,6 @@ import { AssistantEntity } from '../src/assistant/assistant.entity';
 import { AgentEntity } from '../src/agent/agent.entity';
 import { MemoryEntryEntity } from '../src/memory/memory-entry.entity';
 import { SkillActivationEntity } from '../src/conversation/skill-activation.entity';
-import { advanceSkillActivation } from '../src/conversation/skill-activation';
 import { ActiveCapabilitySet } from '../src/conversation/active-capabilities';
 
 interface BrowserMutationMatrixCase {
@@ -233,7 +232,6 @@ describe('execution PostgreSQL integration', () => {
       dataSource.getRepository(ExecutionEntity),
       dataSource.getRepository(ExecutionEventEntity),
       dataSource.getRepository(ExecutionArtifactEntity),
-      config,
       new ExecutionContractValidator(),
       budgets,
       artifactStorage,
@@ -2783,7 +2781,7 @@ describe('execution PostgreSQL integration', () => {
             dependsOnStepIds: [firstMapId, secondMapId],
             work: {
               taskType: 'summarize-reduce',
-              payload: { targetLanguage: 'en' },
+              payload: { targetLanguage: 'en', reductionLevel: 1 },
               coordination: {
                 kind: 'map-reduce-reduce/1',
                 mapStepIds: [firstMapId, secondMapId],
@@ -3285,34 +3283,6 @@ describe('execution PostgreSQL integration', () => {
       finishedAt: null,
     });
 
-    await dataSource.transaction((manager) =>
-      advanceSkillActivation(
-        manager,
-        active.activationId,
-        'instructions_loaded',
-        'workspace_inspection',
-        { inspectedFiles: ['budget.xlsx'] },
-      ),
-    );
-    await expect(
-      repo.findOneByOrFail({ activationId: active.activationId }),
-    ).resolves.toMatchObject({
-      phase: 'workspace_inspection',
-      checkpoint: { inspectedFiles: ['budget.xlsx'] },
-      status: 'active',
-    });
-    await expect(
-      dataSource.transaction((manager) =>
-        advanceSkillActivation(
-          manager,
-          active.activationId,
-          'instructions_loaded',
-          'stale_overwrite',
-          {},
-        ),
-      ),
-    ).rejects.toThrow('skill_activation_phase_stale');
-
     await service.completeExecution(
       accepted.execution.executionId,
       'The document is ready.',
@@ -3323,7 +3293,7 @@ describe('execution PostgreSQL integration', () => {
       repo.findOneByOrFail({ activationId: active.activationId }),
     ).resolves.toMatchObject({
       phase: 'finished',
-      checkpoint: { inspectedFiles: ['budget.xlsx'] },
+      checkpoint: null,
       status: 'completed',
       finishedAt: expect.any(Date),
     });

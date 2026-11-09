@@ -166,9 +166,4 @@ export class RelationshipService {
     );
     return { executionId: execution.executionId };
   }
-
-  async deleteByResource(resourceId: number): Promise<{ success: true }> {
-    await this.graphService.deleteByResource(resourceId);
-    return { success: true };
-  }
 }

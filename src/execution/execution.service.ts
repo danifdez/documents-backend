@@ -5,7 +5,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { FeatureFlagService } from '../common/feature-flags.service';
 import { randomUUID } from 'crypto';
 import {
@@ -116,7 +115,6 @@ import {
   rejectSensitiveArtifactBody,
 } from './execution-data-policy';
 
-export { redactExecutionText } from './execution-data-policy';
 export {
   canonicalDomainHash,
   canonicalHash,
@@ -206,7 +204,6 @@ export class ExecutionService {
     private readonly eventRepo: Repository<ExecutionEventEntity>,
     @InjectRepository(ExecutionArtifactEntity)
     private readonly artifactRepo: Repository<ExecutionArtifactEntity>,
-    private readonly config: ConfigService,
     private readonly contractValidator: ExecutionContractValidator,
     private readonly progress: ExecutionProgressService,
     private readonly artifactStorage: ExecutionArtifactStorageService,
@@ -1612,10 +1609,6 @@ export class ExecutionService {
         priority: STEP_PRIORITY[priority],
       },
     });
-  }
-
-  async findAll(): Promise<ExecutionEntity[]> {
-    return this.executionRepo.find({ order: { createdAt: 'DESC' } });
   }
 
   async findOne(executionId: string): Promise<ExecutionEntity | null> {

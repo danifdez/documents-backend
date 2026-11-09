@@ -512,31 +512,6 @@ export class PendingEntityService {
   }
 
   /**
-   * Update translations for a specific pending entity
-   */
-  async updateTranslations(
-    id: number,
-    translations: EntityTranslation,
-  ): Promise<PendingEntityEntity | null> {
-    const entity = await this.repository.findOneBy({ id });
-    if (!entity) return null;
-
-    entity.translations = { ...entity.translations, ...translations };
-    return await this.repository.save(entity);
-  }
-
-  /**
-   * Batch update translations for multiple pending entities
-   */
-  async batchUpdateTranslations(
-    updates: Array<{ id: number; translations: EntityTranslation }>,
-  ): Promise<void> {
-    for (const update of updates) {
-      await this.updateTranslations(update.id, update.translations);
-    }
-  }
-
-  /**
    * Retranslate entity when name changes
    * Updates the current language and triggers missing translations.
    */

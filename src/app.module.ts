@@ -1,7 +1,5 @@
 import { resolve } from 'path';
 import { DynamicModule, Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { ReferenceModule } from './reference/reference.module';
 import { ProjectModule } from './project/project.module';
 import { ThreadModule } from './thread/thread.module';
@@ -129,9 +127,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports,
-      controllers: [AppController],
       providers: [
-        AppService,
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: ConditionalAuthGuard },
         { provide: APP_GUARD, useClass: PermissionsGuard },

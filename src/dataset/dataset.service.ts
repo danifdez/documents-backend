@@ -723,13 +723,6 @@ export class DatasetService {
         });
     }
 
-    async findOneChart(chartId: number): Promise<DatasetChartEntity | null> {
-        return await this.chartRepository.findOne({
-            where: { id: chartId },
-            relations: ['dataset'],
-        });
-    }
-
     async createChart(datasetId: number, dto: CreateDatasetChartDto): Promise<DatasetChartEntity> {
         const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
         if (!dataset) {

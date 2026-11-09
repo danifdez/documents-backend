@@ -15,32 +15,6 @@ describe('VectorStoreService', () => {
     service = new VectorStoreService(dataSource as any);
   });
 
-  it('replaces workspace vectors in one transaction', async () => {
-    await service.replaceWorkspaceSource('resource', 'resource_7', 3, [
-      {
-        id: 'resource_7:1',
-        embedding,
-        payload: { text: 'Ada', source_id: 'forged', project_id: 99 },
-      },
-    ]);
-
-    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
-    expect(manager.query).toHaveBeenNthCalledWith(
-      1,
-      'DELETE FROM rag_chunks WHERE source_id = $1',
-      ['resource_7'],
-    );
-    expect(manager.query.mock.calls[1][0]).toContain('INSERT INTO rag_chunks');
-    expect(manager.query.mock.calls[1][1]).toEqual([
-      'resource_7:1',
-      expect.stringMatching(/^\[1,0,/),
-      'resource',
-      'resource_7',
-      '3',
-      '{"text":"Ada","source_id":"resource_7","project_id":3,"source_type":"resource"}',
-    ]);
-  });
-
   it('serializes stored candidates as an attempt-scoped artifact', async () => {
     dataSource.query.mockResolvedValue([
       {
@@ -63,11 +37,15 @@ describe('VectorStoreService', () => {
 
   it('rejects malformed model output before writing', async () => {
     await expect(
-      service.replaceWorkspaceSource('resource', 'resource_7', null, [
-        { id: 'bad', embedding: [1], payload: {} },
-      ]),
+      service.replaceWorkspaceSourceVerified(
+        'resource',
+        'resource_7',
+        null,
+        [{ id: 'bad', embedding: [1], payload: {} }],
+        manager as any,
+      ),
     ).rejects.toThrow('384 finite values');
-    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(manager.query).not.toHaveBeenCalled();
   });
 
   it('atomically replaces and verifies workspace vectors', async () => {

@@ -85,7 +85,6 @@ describe('IndexedFileService', () => {
 
     executionService = { create: jest.fn(async () => ({ id: 1 })) };
     vectorStore = {
-      indexedFileCandidates: jest.fn().mockResolvedValue([]),
       vectorCandidatesArtifact: jest.fn().mockReturnValue({
         role: 'vector_candidates',
         kind: 'vector_candidates',

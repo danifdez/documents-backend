@@ -81,33 +81,6 @@ export async function finishSkillActivations(
     .execute();
 }
 
-export async function advanceSkillActivation(
-  manager: EntityManager,
-  activationId: string,
-  expectedPhase: string,
-  nextPhase: string,
-  checkpoint: Record<string, unknown>,
-): Promise<SkillActivationEntity> {
-  const repo = manager.getRepository(SkillActivationEntity);
-  const activation = await repo.findOne({
-    where: { activationId },
-    lock: { mode: 'pessimistic_write' },
-  });
-  if (!activation) throw new ConflictException('skill_activation_not_found');
-  if (activation.status !== 'active') {
-    throw new ConflictException('skill_activation_not_active');
-  }
-  if (activation.phase !== expectedPhase) {
-    throw new ConflictException('skill_activation_phase_stale');
-  }
-  if (!nextPhase.trim() || nextPhase.length > 80) {
-    throw new ConflictException('skill_activation_phase_invalid');
-  }
-  activation.phase = nextPhase;
-  activation.checkpoint = checkpoint;
-  return repo.save(activation);
-}
-
 export async function recordLoadedSkillResource(
   manager: EntityManager,
   executionId: string,

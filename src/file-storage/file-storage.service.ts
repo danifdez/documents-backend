@@ -48,14 +48,6 @@ export class FileStorageService {
     };
   }
 
-  async fileExists(hash: string, extension: string): Promise<boolean> {
-    try {
-      return await fs.pathExists(this.getFullPath(hash, extension));
-    } catch {
-      return false;
-    }
-  }
-
   public getRelativePath(hash: string, extension: string): string {
     const firstDir = hash.substring(0, 3);
     const secondDir = hash.substring(3, 6);
@@ -125,15 +117,6 @@ export class FileStorageService {
     const toPath = this.getFilePath(relativePath);
     await this.ensureDirectoryExists(path.dirname(toPath));
     await fs.move(fromPath, toPath, { overwrite: true });
-  }
-
-  async deleteFromArchive(relativePath: string): Promise<boolean> {
-    try {
-      await fs.unlink(this.getArchiveFilePath(relativePath));
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   public calculateHash(buffer: Buffer): string {

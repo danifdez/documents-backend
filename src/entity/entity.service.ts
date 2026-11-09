@@ -260,56 +260,6 @@ export class EntityService {
         return savedEntity;
     }
 
-    /**
-     * Update only the translations JSONB column for an entity using a direct query
-     * to avoid triggering relation metadata handling in TypeORM save routines.
-     */
-    async updateTranslations(id: number, translations: EntityTranslation): Promise<EntityEntity | null> {
-        await this.repository.createQueryBuilder()
-            .update()
-            .set({ translations: Object.keys(translations).length > 0 ? translations : null })
-            .where('id = :id', { id })
-            .execute();
-
-        return await this.findOne(id);
-    }
-
-    /**
-     * Merge new translations into the existing translations JSONB column using SQL jsonb concatenation.
-     * This avoids loading the entity and touching relation metadata.
-     */
-    async mergeTranslations(id: number, translations: EntityTranslation): Promise<EntityEntity | null> {
-        // If there are no translations to merge, just return the entity
-        if (!translations || Object.keys(translations).length === 0) {
-            return await this.findOne(id);
-        }
-
-        // Use raw SQL to merge JSONB objects (existing translations || new translations)
-        await this.repository.query(
-            `UPDATE entities SET translations = COALESCE(translations, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
-            [JSON.stringify(translations), id]
-        );
-
-        return await this.findOne(id);
-    }
-
-    /**
-     * Merge new translations into the existing translations JSONB column using SQL jsonb concatenation.
-     * This version does not return the entity to avoid loading relations.
-     */
-    async mergeTranslationsOnly(id: number, translations: EntityTranslation): Promise<void> {
-        // If there are no translations to merge, do nothing
-        if (!translations || Object.keys(translations).length === 0) {
-            return;
-        }
-
-        // Use raw SQL to merge JSONB objects (existing translations || new translations)
-        await this.repository.query(
-            `UPDATE entities SET translations = COALESCE(translations, '{}'::jsonb) || $1::jsonb WHERE id = $2`,
-            [JSON.stringify(translations), id]
-        );
-    }
-
     async remove(id: number): Promise<void> {
         await this.repository.delete({ id });
     }

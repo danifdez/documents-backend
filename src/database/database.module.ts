@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
-import { databaseProviders } from './database.providers';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { getTypeOrmConfig } from './typeorm.config';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DATABASE_ENTITIES } from './database-entities';
+import { DatabaseExtensionsService } from './database-extensions.service';
 
 @Module({
   imports: [
@@ -16,7 +16,7 @@ import { DATABASE_ENTITIES } from './database-entities';
     }),
     TypeOrmModule.forFeature([...DATABASE_ENTITIES]),
   ],
-  providers: [...databaseProviders],
-  exports: [...databaseProviders, TypeOrmModule],
+  providers: [DatabaseExtensionsService],
+  exports: [DatabaseExtensionsService, TypeOrmModule],
 })
 export class DatabaseModule {}

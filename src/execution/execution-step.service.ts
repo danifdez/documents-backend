@@ -1,11 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
-  Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
 import { ExecutionOperationEntity } from './execution-operation.entity';
@@ -459,103 +458,4 @@ async function materializeContextInput(
     },
   ];
   candidate.work = { ...work, payload: effectivePayload };
-}
-
-@Injectable()
-export class ExecutionStepService {
-  constructor(
-    private readonly dataSource: DataSource,
-    private readonly artifactStorage: ExecutionArtifactStorageService,
-  ) {}
-
-  async createStep(
-    input: CreateExecutionStepInput,
-  ): Promise<ExecutionStepEntity> {
-    return this.dataSource.transaction((manager) =>
-      createExecutionStep(manager, input),
-    );
-  }
-
-  async addDependency(stepId: string, dependsOnStepId: string): Promise<void> {
-    if (stepId === dependsOnStepId) {
-      throw new BadRequestException('step_dependency_cycle');
-    }
-
-    await this.dataSource.transaction(async (manager) => {
-      const stepRepo = manager.getRepository(ExecutionStepEntity);
-      const steps = await stepRepo.find({
-        where: { stepId: In([stepId, dependsOnStepId]) },
-        lock: { mode: 'pessimistic_write' },
-      });
-      const step = steps.find((item) => item.stepId === stepId);
-      const dependency = steps.find((item) => item.stepId === dependsOnStepId);
-      if (!step || !dependency) throw new NotFoundException('step_not_found');
-      if (step.executionId !== dependency.executionId) {
-        throw new BadRequestException('invalid_step_dependency');
-      }
-      if (
-        [
-          ExecutionStepStatus.RUNNING,
-          ExecutionStepStatus.RESULT_RECEIVED,
-          ExecutionStepStatus.COMPLETED,
-          ExecutionStepStatus.FAILED,
-          ExecutionStepStatus.CANCELLED,
-        ].includes(step.status)
-      ) {
-        throw new ConflictException('step_dependencies_frozen');
-      }
-
-      const cycle = await manager.query(
-        `
-          WITH RECURSIVE dependency_tree("depends_on_step_id") AS (
-            SELECT "depends_on_step_id"
-            FROM "execution_step_dependencies"
-            WHERE "step_id" = $1
-            UNION
-            SELECT dependency."depends_on_step_id"
-            FROM "execution_step_dependencies" dependency
-            INNER JOIN dependency_tree tree
-              ON dependency."step_id" = tree."depends_on_step_id"
-          )
-          SELECT 1
-          FROM dependency_tree
-          WHERE "depends_on_step_id" = $2
-          LIMIT 1
-        `,
-        [dependsOnStepId, stepId],
-      );
-      if (cycle.length) throw new BadRequestException('step_dependency_cycle');
-
-      const dependencyRepo = manager.getRepository(
-        ExecutionStepDependencyEntity,
-      );
-      const existing = await dependencyRepo.findOneBy({
-        stepId,
-        dependsOnStepId,
-      });
-      if (!existing) {
-        await dependencyRepo.save(
-          dependencyRepo.create({ stepId, dependsOnStepId }),
-        );
-      }
-      if (
-        step.status === ExecutionStepStatus.READY &&
-        dependency.status !== ExecutionStepStatus.COMPLETED
-      ) {
-        step.status = ExecutionStepStatus.BLOCKED;
-        step.version += 1;
-        await stepRepo.save(step);
-      }
-    });
-  }
-
-  async releaseDependents(completedStepId: string): Promise<number> {
-    return this.dataSource.transaction((manager) =>
-      releaseExecutionStepDependents(
-        manager,
-        completedStepId,
-        this.artifactStorage,
-      ),
-    );
-  }
 }

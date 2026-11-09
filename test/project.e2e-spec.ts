@@ -80,7 +80,7 @@ describe('ProjectController (e2e)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveLength(1);
-      expect(projectService.search).toHaveBeenCalledWith('Matching');
+      expect(projectService.search).toHaveBeenCalledWith('Matching', false);
     });
 
     it('should handle missing query parameter', async () => {

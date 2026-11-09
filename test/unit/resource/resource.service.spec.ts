@@ -323,14 +323,5 @@ describe('ResourceService', () => {
         [1, 2],
       );
     });
-
-    it('clearResourceEntities should delete all', async () => {
-      repo.query.mockResolvedValue(undefined);
-      await service.clearResourceEntities(1);
-      expect(repo.query).toHaveBeenCalledWith(
-        expect.stringContaining('DELETE FROM resource_entities'),
-        [1],
-      );
-    });
   });
 });

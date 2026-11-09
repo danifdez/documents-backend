@@ -300,13 +300,6 @@ export class ResourceService {
     });
   }
 
-  async clearResourceEntities(resourceId: number): Promise<void> {
-    await this.repo.query(
-      'DELETE FROM resource_entities WHERE resource_id = $1',
-      [resourceId],
-    );
-  }
-
   async addEntityToResource(
     resourceId: number,
     entity: EntityEntity,
@@ -371,22 +364,6 @@ export class ResourceService {
       'DELETE FROM resource_authors WHERE resource_id = $1',
       [resourceId],
     );
-  }
-
-  async findByAuthorId(authorId: number): Promise<ResourceEntity[]> {
-    return await this.repo
-      .createQueryBuilder('resource')
-      .innerJoin('resource.authors', 'author')
-      .where('author.id = :authorId', { authorId })
-      .getMany();
-  }
-
-  async findByAuthorName(authorName: string): Promise<ResourceEntity[]> {
-    return await this.repo
-      .createQueryBuilder('resource')
-      .innerJoin('resource.authors', 'author')
-      .where('author.name ILIKE :authorName', { authorName: `%${authorName}%` })
-      .getMany();
   }
 
   async getEntitiesByResourceId(resourceId: number): Promise<any[]> {

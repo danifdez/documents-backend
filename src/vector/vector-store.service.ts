@@ -22,29 +22,6 @@ export type WorkspaceVectorSourceType = 'resource' | 'doc' | 'knowledge';
 export class VectorStoreService {
   constructor(private readonly dataSource: DataSource) {}
 
-  async replaceWorkspaceSource(
-    sourceType: WorkspaceVectorSourceType,
-    sourceId: string,
-    projectId: number | null,
-    points: VectorPointInput[],
-  ): Promise<void> {
-    const validated = this.workspacePoints(
-      sourceType,
-      sourceId,
-      projectId,
-      points,
-    );
-    await this.dataSource.transaction((manager) =>
-      this.replaceWorkspaceSourceWithManager(
-        sourceType,
-        sourceId,
-        projectId,
-        validated,
-        manager,
-      ),
-    );
-  }
-
   async replaceWorkspaceSourceVerified(
     sourceType: WorkspaceVectorSourceType,
     sourceId: string,
@@ -160,22 +137,6 @@ export class VectorStoreService {
         ],
       );
     }
-  }
-
-  async replaceIndexedFile(
-    indexedFileId: number,
-    ownerTag: string,
-    points: VectorPointInput[],
-  ): Promise<void> {
-    const validated = this.indexedFilePoints(indexedFileId, ownerTag, points);
-    await this.dataSource.transaction((manager) =>
-      this.replaceIndexedFileWithManager(
-        indexedFileId,
-        ownerTag,
-        validated,
-        manager,
-      ),
-    );
   }
 
   async replaceIndexedFileVerified(
@@ -313,21 +274,6 @@ export class VectorStoreService {
        ORDER BY id
        LIMIT $2`,
       [projectId == null ? null : String(projectId), safeLimit],
-    );
-    return rows.map((row) => this.rowToCandidate(row));
-  }
-
-  async indexedFileCandidates(
-    ownerTag: string,
-    limit = MAX_CANDIDATES,
-  ): Promise<VectorCandidate[]> {
-    const rows = await this.dataSource.query(
-      `SELECT id, embedding::text AS embedding, payload
-       FROM indexed_file_chunks
-       WHERE owner_tag = $1
-       ORDER BY id
-       LIMIT $2`,
-      [ownerTag, this.safeLimit(limit)],
     );
     return rows.map((row) => this.rowToCandidate(row));
   }
