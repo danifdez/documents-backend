@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { FeatureFlagService } from '../common/feature-flags.service';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 import { randomUUID } from 'crypto';
 import {
   DataSource,
@@ -213,10 +214,7 @@ export class ExecutionService {
   ) {}
 
   resolveAccessScope(user: unknown): ExecutionAccessScope {
-    const record =
-      user && typeof user === 'object' ? (user as Record<string, unknown>) : {};
-    const owner = record.userId ?? record.sub ?? 'standalone';
-    return { ownerPrincipal: String(owner) };
+    return { ownerPrincipal: ownerPrincipalFromUser(user) };
   }
 
   private async finishConversationTurn(

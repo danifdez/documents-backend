@@ -12,9 +12,13 @@ import { AgentMessageEntity } from './agent-message.entity';
 @Entity({ name: 'agents' })
 @Index('IDX_agents_pinned_last_seen_at', ['pinned', 'lastSeenAt'])
 @Index('IDX_agents_expires_at', ['expiresAt'])
+@Index('IDX_agents_owner', ['ownerPrincipal'])
 export class AgentEntity {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @Column({ name: 'owner_principal', length: 200 })
+  ownerPrincipal: string;
 
   @Column({ length: 100 })
   name: string;

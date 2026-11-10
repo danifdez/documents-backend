@@ -1,17 +1,22 @@
 import {
   Entity,
-  PrimaryColumn,
+  PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { AssistantMessageEntity } from './assistant-message.entity';
 
 @Entity({ name: 'assistants' })
+@Index('UQ_assistants_owner', ['ownerPrincipal'], { unique: true })
 export class AssistantEntity {
-  @PrimaryColumn({ type: 'integer', default: 1 })
+  @PrimaryGeneratedColumn()
   id: number;
+
+  @Column({ name: 'owner_principal', length: 200 })
+  ownerPrincipal: string;
 
   @Column({ length: 100 })
   name: string;

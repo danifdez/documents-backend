@@ -23,8 +23,9 @@ export class MemoryService {
   async list(
     ownerType: MemoryOwnerType,
     ownerId: number,
+    ownerPrincipal: string,
   ): Promise<MemoryEntryEntity[]> {
-    await this.ensureOwner(ownerType, ownerId);
+    await this.ensureOwner(ownerType, ownerId, ownerPrincipal);
     return this.memoryRepo.find({
       where: this.ownerWhere(ownerType, ownerId),
       order: { updatedAt: 'DESC', id: 'ASC' },
@@ -35,8 +36,9 @@ export class MemoryService {
     ownerType: MemoryOwnerType,
     ownerId: number,
     dto: CreateMemoryEntryDto,
+    ownerPrincipal: string,
   ): Promise<MemoryEntryEntity> {
-    await this.ensureOwner(ownerType, ownerId);
+    await this.ensureOwner(ownerType, ownerId, ownerPrincipal);
     const values = this.normalized(dto);
     const now = new Date();
     return this.memoryRepo.save(
@@ -65,8 +67,9 @@ export class MemoryService {
     ownerId: number,
     id: string,
     dto: UpdateMemoryEntryDto,
+    ownerPrincipal: string,
   ): Promise<MemoryEntryEntity> {
-    await this.ensureOwner(ownerType, ownerId);
+    await this.ensureOwner(ownerType, ownerId, ownerPrincipal);
     const entry = await this.memoryRepo.findOne({
       where: { id, ...this.ownerWhere(ownerType, ownerId) },
     });
@@ -95,8 +98,9 @@ export class MemoryService {
     ownerType: MemoryOwnerType,
     ownerId: number,
     id: string,
+    ownerPrincipal: string,
   ): Promise<void> {
-    await this.ensureOwner(ownerType, ownerId);
+    await this.ensureOwner(ownerType, ownerId, ownerPrincipal);
     const result = await this.memoryRepo.delete({
       id,
       ...this.ownerWhere(ownerType, ownerId),
@@ -108,8 +112,9 @@ export class MemoryService {
   async clear(
     ownerType: MemoryOwnerType,
     ownerId: number,
+    ownerPrincipal: string,
   ): Promise<{ deleted: number }> {
-    await this.ensureOwner(ownerType, ownerId);
+    await this.ensureOwner(ownerType, ownerId, ownerPrincipal);
     const result = await this.memoryRepo.delete(
       this.ownerWhere(ownerType, ownerId),
     );
@@ -128,11 +133,12 @@ export class MemoryService {
   private async ensureOwner(
     ownerType: MemoryOwnerType,
     ownerId: number,
+    ownerPrincipal: string,
   ): Promise<void> {
     const owner =
       ownerType === 'assistant'
-        ? await this.assistantRepo.findOneBy({ id: ownerId })
-        : await this.agentRepo.findOneBy({ id: ownerId });
+        ? await this.assistantRepo.findOneBy({ id: ownerId, ownerPrincipal })
+        : await this.agentRepo.findOneBy({ id: ownerId, ownerPrincipal });
     if (!owner)
       throw new NotFoundException(`${ownerType} ${ownerId} not found`);
   }

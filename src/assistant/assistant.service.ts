@@ -37,8 +37,12 @@ export class AssistantService implements OnApplicationBootstrap {
   }
 
   async onApplicationBootstrap(): Promise<void> {
+    // In server mode assistants are created lazily for each authenticated
+    // principal. Only standalone mode needs a global default row.
+    if (process.env.AUTH_ENABLED === 'true') return;
+
     try {
-      const personal = await this.ensureDefault();
+      const personal = await this.ensureDefault('standalone');
       this.logger.log(`Personal assistant ready (id=${personal.id})`);
     } catch (e: any) {
       this.logger.error(
@@ -47,28 +51,44 @@ export class AssistantService implements OnApplicationBootstrap {
     }
   }
 
-  async ensureDefault(): Promise<AssistantEntity> {
+  async ensureDefault(ownerPrincipal: string): Promise<AssistantEntity> {
     let personal = await this.assistantRepo.findOne({
-      where: { id: 1 },
+      where: { ownerPrincipal },
+      order: { id: 'ASC' },
     });
     if (!personal) {
       personal = this.assistantRepo.create({
-        id: 1,
         name: 'Assistant',
         icon: '◇',
         sub: 'Your personal assistant',
+        ownerPrincipal,
       });
-      personal = await this.assistantRepo.save(personal);
+      try {
+        personal = await this.assistantRepo.save(personal);
+      } catch (error) {
+        // The unique owner index makes concurrent first requests safe: the
+        // loser re-reads the row created by the winner.
+        if ((error as { code?: string }).code === '23505') {
+          personal = await this.assistantRepo.findOne({
+            where: { ownerPrincipal },
+            order: { id: 'ASC' },
+          });
+          if (personal) return personal;
+        }
+        throw error;
+      }
     }
     return personal;
   }
 
-  async list(): Promise<AssistantEntity[]> {
-    return [await this.ensureDefault()];
+  async list(ownerPrincipal: string): Promise<AssistantEntity[]> {
+    return [await this.ensureDefault(ownerPrincipal)];
   }
 
-  async findOne(id: number): Promise<AssistantEntity> {
-    const a = await this.assistantRepo.findOne({ where: { id } });
+  async findOne(id: number, ownerPrincipal: string): Promise<AssistantEntity> {
+    const a = await this.assistantRepo.findOne({
+      where: { id, ownerPrincipal },
+    });
     if (!a) throw new NotFoundException(`Assistant ${id} not found`);
     return a;
   }
@@ -76,8 +96,9 @@ export class AssistantService implements OnApplicationBootstrap {
   async updateWorkingFolder(
     id: number,
     folderScope: string | null,
+    ownerPrincipal: string,
   ): Promise<AssistantEntity> {
-    const assistant = await this.findOne(id);
+    const assistant = await this.findOne(id, ownerPrincipal);
     const nextScope = await this.resolveFolderScope(folderScope);
     if (assistant.folderScope === nextScope) return assistant;
     assistant.folderScope = nextScope;
@@ -91,9 +112,10 @@ export class AssistantService implements OnApplicationBootstrap {
 
   async getMessages(
     assistantId: number,
+    ownerPrincipal: string,
     opts: { limit?: number; before?: number } = {},
   ): Promise<{ messages: AssistantMessageEntity[]; hasMore: boolean }> {
-    await this.findOne(assistantId);
+    await this.findOne(assistantId, ownerPrincipal);
     return this.messages.page(assistantId, opts);
   }
 
@@ -107,7 +129,10 @@ export class AssistantService implements OnApplicationBootstrap {
     userMessage: AssistantMessageEntity;
     executionId: string;
   }> {
-    const assistant = await this.findOne(assistantId);
+    const assistant = await this.findOne(
+      assistantId,
+      accessScope.ownerPrincipal,
+    );
 
     // Touch lastSeenAt
     assistant.lastSeenAt = new Date();

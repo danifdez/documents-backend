@@ -14,6 +14,7 @@ import {
   BadRequestException,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -27,6 +28,10 @@ import { IndexedFileDto, toIndexedFileDto } from './dto/indexed-file.dto';
 import { WriteIndexedFileDto } from './dto/write-indexed-file.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
+import {
+  AgentOwnedGuard,
+  AssistantOwnedGuard,
+} from '../auth/guards/owned-resource.guard';
 
 abstract class IndexedFileBaseController {
   protected abstract ownerType: IndexedFileOwnerType;
@@ -159,6 +164,7 @@ abstract class IndexedFileBaseController {
 
 @Controller('assistants/:assistantId/indexed-files')
 @RequirePermissions(Permission.WRITE)
+@UseGuards(AssistantOwnedGuard)
 export class AssistantIndexedFileController extends IndexedFileBaseController {
   protected ownerType: IndexedFileOwnerType = 'assistant';
 
@@ -257,6 +263,7 @@ export class AssistantIndexedFileController extends IndexedFileBaseController {
 
 @Controller('agents/:agentId/indexed-files')
 @RequirePermissions(Permission.WRITE)
+@UseGuards(AgentOwnedGuard)
 export class AgentIndexedFileController extends IndexedFileBaseController {
   protected ownerType: IndexedFileOwnerType = 'agent';
 

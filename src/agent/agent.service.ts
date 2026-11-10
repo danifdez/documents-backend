@@ -43,22 +43,28 @@ export class AgentService {
     });
   }
 
-  async findAll(): Promise<AgentEntity[]> {
+  async findAll(ownerPrincipal: string): Promise<AgentEntity[]> {
     return this.agentRepo
       .createQueryBuilder('a')
+      .where('a.owner_principal = :ownerPrincipal', { ownerPrincipal })
       .orderBy('a.pinned', 'DESC')
       .addOrderBy('a.last_seen_at', 'DESC', 'NULLS LAST')
       .addOrderBy('a.id', 'DESC')
       .getMany();
   }
 
-  async findOne(id: number): Promise<AgentEntity> {
-    const a = await this.agentRepo.findOne({ where: { id } });
+  async findOne(id: number, ownerPrincipal: string): Promise<AgentEntity> {
+    const a = await this.agentRepo.findOne({
+      where: { id, ownerPrincipal },
+    });
     if (!a) throw new NotFoundException(`Agent ${id} not found`);
     return a;
   }
 
-  async create(dto: CreateAgentDto): Promise<AgentEntity> {
+  async create(
+    dto: CreateAgentDto,
+    ownerPrincipal: string,
+  ): Promise<AgentEntity> {
     const folderScope = await this.resolveFolderScope(dto.folderScope);
     const pinned = dto.pinned ?? false;
     const now = Date.now();
@@ -73,12 +79,17 @@ export class AgentService {
       pinned,
       lastSeenAt: null,
       expiresAt,
+      ownerPrincipal,
     });
     return this.agentRepo.save(created);
   }
 
-  async update(id: number, dto: UpdateAgentDto): Promise<AgentEntity> {
-    const a = await this.findOne(id);
+  async update(
+    id: number,
+    dto: UpdateAgentDto,
+    ownerPrincipal: string,
+  ): Promise<AgentEntity> {
+    const a = await this.findOne(id, ownerPrincipal);
     const previousFolderScope = a.folderScope;
     const previousPinned = a.pinned;
 
@@ -119,8 +130,22 @@ export class AgentService {
     return saved;
   }
 
-  async remove(id: number): Promise<void> {
-    const a = await this.findOne(id);
+  async remove(id: number, ownerPrincipal: string): Promise<void> {
+    const a = await this.findOne(id, ownerPrincipal);
+    await this.removeEntity(a);
+  }
+
+  /**
+   * System cleanup path used by the expiration cron. It intentionally skips
+   * the user ownership check because the caller already selected expired rows.
+   */
+  async removeSystem(id: number): Promise<void> {
+    const a = await this.agentRepo.findOneBy({ id });
+    if (!a) return;
+    await this.removeEntity(a);
+  }
+
+  private async removeEntity(a: AgentEntity): Promise<void> {
     await this.executionService.retireConversation('agent', a.id);
     try {
       await this.indexedFileService.clearAllForOwner({
@@ -137,9 +162,10 @@ export class AgentService {
 
   async getMessages(
     agentId: number,
+    ownerPrincipal: string,
     opts: { limit?: number; before?: number } = {},
   ): Promise<{ messages: AgentMessageEntity[]; hasMore: boolean }> {
-    await this.findOne(agentId);
+    await this.findOne(agentId, ownerPrincipal);
     return this.messages.page(agentId, opts);
   }
 
@@ -153,7 +179,7 @@ export class AgentService {
     userMessage: AgentMessageEntity;
     executionId: string;
   }> {
-    const agent = await this.findOne(agentId);
+    const agent = await this.findOne(agentId, accessScope.ownerPrincipal);
 
     this.touchInteraction(agent);
     await this.agentRepo.save(agent);

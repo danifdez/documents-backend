@@ -5,9 +5,10 @@ import {
   AssistantMemoryController,
 } from './memory.controller';
 import { MemoryService } from './memory.service';
+import { OwnershipModule } from '../auth/ownership.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, OwnershipModule],
   controllers: [AssistantMemoryController, AgentMemoryController],
   providers: [MemoryService],
   exports: [MemoryService],

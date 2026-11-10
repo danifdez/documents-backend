@@ -8,9 +8,10 @@ import { IndexedFileBootstrapService } from './indexed-file-bootstrap.service';
 import { DatabaseModule } from '../database/database.module';
 import { ExecutionModule } from '../execution/execution.module';
 import { VectorModule } from '../vector/vector.module';
+import { OwnershipModule } from '../auth/ownership.module';
 
 @Module({
-  imports: [DatabaseModule, ExecutionModule, VectorModule],
+  imports: [DatabaseModule, ExecutionModule, VectorModule, OwnershipModule],
   controllers: [AssistantIndexedFileController, AgentIndexedFileController],
   providers: [IndexedFileService, IndexedFileBootstrapService],
   exports: [IndexedFileService],

@@ -17,6 +17,7 @@ import { CreateResourceDates1757668140030 } from '../migrations/1757668140030-Cr
 import { CreateAssistantTables1757668140070 } from '../migrations/1757668140070-CreateAssistantTables';
 import { CreateIndexedFiles1757668140100 } from '../migrations/1757668140100-CreateIndexedFiles';
 import { CreateAgents1757668140110 } from '../migrations/1757668140110-CreateAgents';
+import { AddOwnershipToAssistantsAndAgents1789800000000 } from '../migrations/1789800000000-AddOwnershipToAssistantsAndAgents';
 import { CreateAgentMessages1757668140111 } from '../migrations/1757668140111-CreateAgentMessages';
 import { CreateUserTasks1757668140200 } from '../migrations/1757668140200-CreateUserTasks';
 import { CreateVectorTables1757668140320 } from '../migrations/1757668140320-CreateVectorTables';
@@ -189,6 +190,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateAssistantTables1757668140070().up(runner);
     await new CreateIndexedFiles1757668140100().up(runner);
     await new CreateAgents1757668140110().up(runner);
+    await new AddOwnershipToAssistantsAndAgents1789800000000().up(runner);
     await new CreateAgentMessages1757668140111().up(runner);
     await new CreateUserTasks1757668140200().up(runner);
     await new CreateVectorTables1757668140320().up(runner);
@@ -203,12 +205,12 @@ describe('execution PostgreSQL integration', () => {
     await new CreateSkillActivations1757668140750().up(runner);
     await new CreateExecutionEffectJournal1757668140760().up(runner);
     await runner.query(`
-      INSERT INTO "assistants" ("id", "name", "icon", "sub")
-      VALUES (1, 'Assistant', '◇', 'Personal assistant')
+      INSERT INTO "assistants" ("id", "name", "icon", "sub", "owner_principal")
+      VALUES (1, 'Assistant', '◇', 'Personal assistant', 'standalone')
     `);
     await runner.query(`
-      INSERT INTO "agents" ("id", "name", "pinned")
-      VALUES (1, 'Test agent', true)
+      INSERT INTO "agents" ("id", "name", "pinned", "owner_principal")
+      VALUES (1, 'Test agent', true, 'standalone')
     `);
     await runner.release();
 
@@ -584,6 +586,20 @@ describe('execution PostgreSQL integration', () => {
         AND table_name = 'assistants'
         AND column_name = 'folder_scope'
     `);
+    const assistantOwnerColumns = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'assistants'
+        AND column_name = 'owner_principal'
+    `);
+    const agentOwnerColumns = await dataSource.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'agents'
+        AND column_name = 'owner_principal'
+    `);
     const indexedFileOwnerColumns = await dataSource.query(`
       SELECT column_name
       FROM information_schema.columns
@@ -614,13 +630,13 @@ describe('execution PostgreSQL integration', () => {
     expect(retiredDateColumns).toEqual([]);
     expect(retiredAssistantColumns).toEqual([]);
     expect(assistantFolderColumns).toEqual([{ column_name: 'folder_scope' }]);
+    expect(assistantOwnerColumns).toEqual([{ column_name: 'owner_principal' }]);
+    expect(agentOwnerColumns).toEqual([{ column_name: 'owner_principal' }]);
     expect(indexedFileOwnerColumns).toEqual([
       { column_name: 'owner_id' },
       { column_name: 'owner_type' },
     ]);
-    expect(singletonConstraint).toEqual([
-      { conname: 'CHK_assistants_singleton' },
-    ]);
+    expect(singletonConstraint).toEqual([]);
     expect(indexedOwnerConstraint).toHaveLength(1);
     expect(indexedOwnerConstraint[0].definition).toContain("'assistant'");
     expect(indexedOwnerConstraint[0].definition).toContain("'agent'");
@@ -2028,8 +2044,8 @@ describe('execution PostgreSQL integration', () => {
       expect.arrayContaining(cases.map((item) => item.capability)),
     );
     await dataSource.query(`
-      INSERT INTO "agents" ("id", "name", "pinned")
-      SELECT id, 'Browser mutation agent ' || id, true
+      INSERT INTO "agents" ("id", "name", "pinned", "owner_principal")
+      SELECT id, 'Browser mutation agent ' || id, true, 'standalone'
       FROM generate_series(2, 5) AS id
       ON CONFLICT ("id") DO NOTHING
     `);

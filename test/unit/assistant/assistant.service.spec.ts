@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { NotFoundException } from '@nestjs/common';
 import { AssistantService } from '../../../src/assistant/assistant.service';
 import { AssistantEntity } from '../../../src/assistant/assistant.entity';
 import { AssistantMessageEntity } from '../../../src/assistant/assistant-message.entity';
@@ -82,8 +83,8 @@ describe('AssistantService — personal assistant', () => {
     service = module.get(AssistantService);
   });
 
-  it('creates and returns the fixed singleton when the table is empty', async () => {
-    const result = await service.list();
+  it('creates and returns the principal assistant when the table is empty', async () => {
+    const result = await service.list('standalone');
 
     expect(result).toEqual([
       expect.objectContaining({ id: 1, name: 'Assistant' }),
@@ -91,16 +92,31 @@ describe('AssistantService — personal assistant', () => {
     expect(assistantRepo.store.size).toBe(1);
   });
 
-  it('configures a working folder on the singleton and clears stale indexed rows', async () => {
+  it('isolates assistants per principal', async () => {
+    const first = await service.list('user-a');
+    const second = await service.list('user-b');
+
+    expect(first[0].id).not.toBe(second[0].id);
+    await expect(
+      service.findOne(second[0].id, 'user-a'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('configures a working folder on the principal assistant and clears stale indexed rows', async () => {
     const scope = await fs.mkdtemp(path.join(os.tmpdir(), 'assistant-scope-'));
     try {
       assistantRepo.store.set(1, {
         id: 1,
         name: 'Assistant',
         folderScope: null,
+        ownerPrincipal: 'standalone',
       });
 
-      const assistant = await service.updateWorkingFolder(1, scope);
+      const assistant = await service.updateWorkingFolder(
+        1,
+        scope,
+        'standalone',
+      );
 
       expect(assistant.folderScope).toBe(scope);
       expect(indexedFiles.clearAllForOwner).toHaveBeenCalledWith({
@@ -132,7 +148,11 @@ function createPagingMessageRepo(
 describe('AssistantService — getMessages() pagination', () => {
   async function build(rows: Array<{ id: number; assistantId: number }>) {
     const assistantRepo = createMockRepo();
-    assistantRepo.store.set(1, { id: 1, name: 'Assistant' });
+    assistantRepo.store.set(1, {
+      id: 1,
+      name: 'Assistant',
+      ownerPrincipal: 'standalone',
+    });
     const messageRepo = createPagingMessageRepo(rows);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -178,7 +198,7 @@ describe('AssistantService — getMessages() pagination', () => {
 
   it('returns the newest page in ascending order with hasMore=true when more remain', async () => {
     const { service, messageRepo } = await build(seed(60));
-    const { messages, hasMore } = await service.getMessages(1, { limit: 50 });
+    const { messages, hasMore } = await service.getMessages(1, 'standalone', { limit: 50 });
     expect(messageRepo.find).toHaveBeenCalledWith(
       expect.objectContaining({ order: { id: 'DESC' }, take: 51 }),
     );
@@ -190,14 +210,14 @@ describe('AssistantService — getMessages() pagination', () => {
 
   it('returns hasMore=false when the page is not full', async () => {
     const { service } = await build(seed(30));
-    const { messages, hasMore } = await service.getMessages(1, { limit: 50 });
+    const { messages, hasMore } = await service.getMessages(1, 'standalone', { limit: 50 });
     expect(messages).toHaveLength(30);
     expect(hasMore).toBe(false);
   });
 
   it('uses the before cursor (LessThan) to page backwards', async () => {
     const { service, messageRepo } = await build(seed(60));
-    const { messages, hasMore } = await service.getMessages(1, {
+    const { messages, hasMore } = await service.getMessages(1, 'standalone', {
       limit: 50,
       before: 11,
     });

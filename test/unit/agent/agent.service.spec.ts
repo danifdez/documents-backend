@@ -121,7 +121,7 @@ describe('AgentService', () => {
   describe('create', () => {
     it('sets expiresAt to now + 2 days when not pinned', async () => {
       const before = Date.now();
-      const a = await service.create({ name: 'Vacation' });
+      const a = await service.create({ name: 'Vacation' }, 'standalone');
       const after = Date.now();
 
       expect(a.pinned).toBe(false);
@@ -132,29 +132,34 @@ describe('AgentService', () => {
     });
 
     it('leaves expiresAt null when pinned', async () => {
-      const a = await service.create({ name: 'Pinned', pinned: true });
+      const a = await service.create({ name: 'Pinned', pinned: true }, 'standalone');
       expect(a.pinned).toBe(true);
       expect(a.expiresAt).toBeNull();
     });
 
     it('lastSeenAt starts as null', async () => {
-      const a = await service.create({ name: 'X' });
+      const a = await service.create({ name: 'X' }, 'standalone');
       expect(a.lastSeenAt).toBeNull();
+    });
+
+    it('stores the owner principal', async () => {
+      const a = await service.create({ name: 'A' }, 'user-a');
+      expect(a.ownerPrincipal).toBe('user-a');
     });
   });
 
   describe('update', () => {
     it('pinned false → true clears expiresAt', async () => {
-      const a = await service.create({ name: 'A' });
-      const updated = await service.update(a.id, { pinned: true });
+      const a = await service.create({ name: 'A' }, 'standalone');
+      const updated = await service.update(a.id, { pinned: true }, 'standalone');
       expect(updated.pinned).toBe(true);
       expect(updated.expiresAt).toBeNull();
     });
 
     it('pinned true → false sets expiresAt to now + 1 day (grace)', async () => {
-      const a = await service.create({ name: 'A', pinned: true });
+      const a = await service.create({ name: 'A', pinned: true }, 'standalone');
       const before = Date.now();
-      const updated = await service.update(a.id, { pinned: false });
+      const updated = await service.update(a.id, { pinned: false }, 'standalone');
       const after = Date.now();
       expect(updated.pinned).toBe(false);
       expect(updated.expiresAt).not.toBeNull();
@@ -168,10 +173,10 @@ describe('AgentService', () => {
     });
 
     it('does not touch expiresAt when pinned is unchanged', async () => {
-      const a = await service.create({ name: 'A' });
+      const a = await service.create({ name: 'A' }, 'standalone');
       const originalExpiresAt = (a.expiresAt as Date).getTime();
       await new Promise((r) => setTimeout(r, 10));
-      const updated = await service.update(a.id, { name: 'A-renamed' });
+      const updated = await service.update(a.id, { name: 'A-renamed' }, 'standalone');
       expect((updated.expiresAt as Date).getTime()).toBe(originalExpiresAt);
       expect(updated.name).toBe('A-renamed');
     });
@@ -188,10 +193,11 @@ describe('AgentService', () => {
         systemPrompt: null,
         icon: null,
         sub: null,
+        ownerPrincipal: 'standalone',
       });
       // Force folderScope change via direct path bypass: pass null which
       // resolveFolderScope normalises to null without touching disk.
-      await service.update(1, { folderScope: null as any });
+      await service.update(1, { folderScope: null as any }, 'standalone');
       // No-op (null → null doesn't differ); clearAllForOwner shouldn't fire.
       expect(indexedFileService.clearAllForOwner).not.toHaveBeenCalled();
     });
@@ -199,7 +205,7 @@ describe('AgentService', () => {
 
   describe('sendMessage', () => {
     it('resets expiresAt to now + 2 days when not pinned', async () => {
-      const a = await service.create({ name: 'A' });
+      const a = await service.create({ name: 'A' }, 'standalone');
       // Move expiresAt backwards so we can assert the bump.
       const stale = new Date(Date.now() - 60_000);
       (agentRepo.store.get(a.id) as any).expiresAt = stale;
@@ -215,14 +221,14 @@ describe('AgentService', () => {
     });
 
     it('keeps expiresAt null when pinned', async () => {
-      const a = await service.create({ name: 'A', pinned: true });
+      const a = await service.create({ name: 'A', pinned: true }, 'standalone');
       await service.sendMessage(a.id, 'hello');
       const refreshed = agentRepo.store.get(a.id) as any;
       expect(refreshed.expiresAt).toBeNull();
     });
 
     it('persists the user message and creates an agent execution', async () => {
-      const a = await service.create({ name: 'A' });
+      const a = await service.create({ name: 'A' }, 'standalone');
       const { userMessage, executionId } = await service.sendMessage(
         a.id,
         'hi',
@@ -240,7 +246,7 @@ describe('AgentService', () => {
     });
 
     it('updates lastSeenAt', async () => {
-      const a = await service.create({ name: 'A' });
+      const a = await service.create({ name: 'A' }, 'standalone');
       expect(a.lastSeenAt).toBeNull();
       await service.sendMessage(a.id, 'hi');
       const refreshed = agentRepo.store.get(a.id) as any;
@@ -248,7 +254,7 @@ describe('AgentService', () => {
     });
 
     it('propagates execution creation failures', async () => {
-      const agent = await service.create({ name: 'A' });
+      const agent = await service.create({ name: 'A' }, 'standalone');
       executionService.createForChat.mockRejectedValueOnce(
         new Error('execution storage unavailable'),
       );
@@ -261,10 +267,10 @@ describe('AgentService', () => {
 
   describe('remove', () => {
     it('removes the agent and clears indexed files', async () => {
-      const a = await service.create({ name: 'A' });
+      const a = await service.create({ name: 'A' }, 'standalone');
       await service.sendMessage(a.id, 'hi');
       expect(agentRepo.store.size).toBe(1);
-      await service.remove(a.id);
+      await service.remove(a.id, 'standalone');
 
       expect(agentRepo.store.size).toBe(0);
       expect(executionService.retireConversation).toHaveBeenCalledWith(
@@ -280,7 +286,7 @@ describe('AgentService', () => {
     });
 
     it('throws when the agent does not exist', async () => {
-      await expect(service.remove(999)).rejects.toThrow(NotFoundException);
+      await expect(service.remove(999, 'standalone')).rejects.toThrow(NotFoundException);
     });
 
     it('does not touch the filesystem (no fs.unlink involved)', async () => {
@@ -290,8 +296,8 @@ describe('AgentService', () => {
       // (the only collaborator that could touch disk) and asserting
       // it was invoked with clearAllForOwner (which by design only
       // touches DB/vectors, never the filesystem).
-      const a = await service.create({ name: 'A' });
-      await service.remove(a.id);
+      const a = await service.create({ name: 'A' }, 'standalone');
+      await service.remove(a.id, 'standalone');
       expect(indexedFileService.clearAllForOwner).toHaveBeenCalledTimes(1);
       expect(indexedFileService.clearAllForOwner).toHaveBeenCalledWith({
         ownerType: 'agent',
@@ -302,7 +308,14 @@ describe('AgentService', () => {
 
   describe('findOne', () => {
     it('throws NotFoundException when missing', async () => {
-      await expect(service.findOne(123)).rejects.toThrow(NotFoundException);
+      await expect(service.findOne(123, 'standalone')).rejects.toThrow(NotFoundException);
+    });
+
+    it('does not expose another principal agent', async () => {
+      const a = await service.create({ name: 'A' }, 'user-a');
+      await expect(service.findOne(a.id, 'user-b')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

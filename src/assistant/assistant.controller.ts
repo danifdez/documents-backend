@@ -16,6 +16,7 @@ import {
   UpdateAssistantWorkingFolderDto,
 } from './dto/assistant.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 import { ExecutionService } from '../execution/execution.service';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
@@ -29,15 +30,16 @@ export class AssistantController {
   ) {}
 
   @Get()
-  async list(): Promise<AssistantEntity[]> {
-    return this.service.list();
+  async list(@CurrentUser() user: unknown): Promise<AssistantEntity[]> {
+    return this.service.list(ownerPrincipalFromUser(user));
   }
 
   @Get(':id')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: unknown,
   ): Promise<AssistantEntity> {
-    return this.service.findOne(id);
+    return this.service.findOne(id, ownerPrincipalFromUser(user));
   }
 
   @Patch(':id/working-folder')
@@ -45,17 +47,26 @@ export class AssistantController {
   async updateWorkingFolder(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateAssistantWorkingFolderDto,
+    @CurrentUser() user: unknown,
   ): Promise<AssistantEntity> {
-    return this.service.updateWorkingFolder(id, dto.folderScope);
+    return this.service.updateWorkingFolder(
+      id,
+      dto.folderScope,
+      ownerPrincipalFromUser(user),
+    );
   }
 
   @Get(':id/messages')
   async getMessages(
     @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: unknown,
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
     @Query('before', new ParseIntPipe({ optional: true })) before?: number,
   ): Promise<{ messages: AssistantMessageEntity[]; hasMore: boolean }> {
-    return this.service.getMessages(id, { limit, before });
+    return this.service.getMessages(id, ownerPrincipalFromUser(user), {
+      limit,
+      before,
+    });
   }
 
   @Post(':id/messages')

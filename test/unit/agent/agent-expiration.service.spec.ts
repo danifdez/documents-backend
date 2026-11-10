@@ -21,12 +21,12 @@ function createMockAgentRepo() {
 describe('AgentExpirationService', () => {
     let service: AgentExpirationService;
     let agentRepo: ReturnType<typeof createMockAgentRepo>;
-    let agentService: { remove: jest.Mock };
+    let agentService: { removeSystem: jest.Mock };
 
     beforeEach(async () => {
         agentRepo = createMockAgentRepo();
         agentService = {
-            remove: jest.fn(async (id: number) => {
+            removeSystem: jest.fn(async (id: number) => {
                 agentRepo.store.delete(id);
             }),
         };
@@ -48,7 +48,7 @@ describe('AgentExpirationService', () => {
     it('does nothing when no agent has expiresAt set', async () => {
         seed([{ id: 1, name: 'Pinned', expiresAt: null, pinned: true }]);
         await service.runDailyCleanup();
-        expect(agentService.remove).not.toHaveBeenCalled();
+        expect(agentService.removeSystem).not.toHaveBeenCalled();
         expect(agentRepo.store.size).toBe(1);
     });
 
@@ -60,34 +60,34 @@ describe('AgentExpirationService', () => {
             { id: 3, name: 'NotYet', expiresAt: new Date(now + 60_000) },
         ]);
         await service.runDailyCleanup();
-        expect(agentService.remove).toHaveBeenCalledTimes(1);
-        expect(agentService.remove).toHaveBeenCalledWith(2);
+        expect(agentService.removeSystem).toHaveBeenCalledTimes(1);
+        expect(agentService.removeSystem).toHaveBeenCalledWith(2);
         expect(agentRepo.store.has(1)).toBe(true);
         expect(agentRepo.store.has(3)).toBe(true);
         expect(agentRepo.store.has(2)).toBe(false);
     });
 
-    it('keeps cleaning when one remove() fails', async () => {
+    it('keeps cleaning when one removeSystem() fails', async () => {
         const now = Date.now();
         seed([
             { id: 2, name: 'A', expiresAt: new Date(now - 60_000) },
             { id: 3, name: 'B', expiresAt: new Date(now - 30_000) },
         ]);
-        agentService.remove.mockImplementationOnce(async () => {
+        agentService.removeSystem.mockImplementationOnce(async () => {
             throw new Error('vector store unavailable');
         });
         await service.runDailyCleanup();
-        expect(agentService.remove).toHaveBeenCalledTimes(2);
+        expect(agentService.removeSystem).toHaveBeenCalledTimes(2);
         // The second one still ran.
-        expect(agentService.remove).toHaveBeenNthCalledWith(2, 3);
+        expect(agentService.removeSystem).toHaveBeenNthCalledWith(2, 3);
     });
 
-    it('delegates to AgentService.remove (which handles the cascade)', async () => {
+    it('delegates to AgentService.removeSystem (which handles the cascade)', async () => {
         // The expiration service does NOT touch indexed_files, vectors or
-        // the filesystem directly — it goes through AgentService.remove so
+        // the filesystem directly — it goes through AgentService.removeSystem so
         // the cascade and "do not touch disk" policy stay in one place.
         seed([{ id: 7, name: 'X', expiresAt: new Date(Date.now() - 1_000) }]);
         await service.runDailyCleanup();
-        expect(agentService.remove).toHaveBeenCalledWith(7);
+        expect(agentService.removeSystem).toHaveBeenCalledWith(7);
     });
 });

@@ -35,7 +35,7 @@ export class AgentExpirationService {
     const removed: Array<{ id: number; name: string }> = [];
     for (const a of expired) {
       try {
-        await this.agentService.remove(a.id);
+        await this.agentService.removeSystem(a.id);
         removed.push({ id: a.id, name: a.name });
       } catch (e: any) {
         this.logger.error(
