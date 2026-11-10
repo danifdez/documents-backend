@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import {
   PendingEntityEntity,
   EntityAlias,
@@ -234,7 +234,7 @@ export class PendingEntityService {
     // Get the resource to check language and working content
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
-      throw new Error(`Resource with id ${resourceId} not found`);
+      throw new NotFoundException(`Resource with id ${resourceId} not found`);
     }
 
     for (const pending of pendingEntities) {
@@ -253,7 +253,30 @@ export class PendingEntityService {
       }
     }
 
-    // Update resource status to 'confirmed' and launch ingest-content execution.
+    // Never mark the resource confirmed or enqueue a new ingest when nothing
+    // was actually confirmed. Otherwise a failed batch would leave the
+    // resource in a confirmed state with no entities behind it.
+    if (confirmed === 0) {
+      return { confirmed, errors };
+    }
+
+    errors.push(
+      ...(await this.finalizeResourceConfirmation(resourceId, resource)),
+    );
+
+    return { confirmed, errors };
+  }
+
+  /**
+   * Marks a resource as confirmed and schedules the post-confirmation work.
+   * Shared by bulk and single-entity confirmation so both paths stay aligned.
+   */
+  private async finalizeResourceConfirmation(
+    resourceId: number,
+    resource: ResourceEntity,
+  ): Promise<string[]> {
+    const errors: string[] = [];
+
     // Content is ingested as-is (original language, multilingual embedding):
     // aliases are recorded on the entity but no longer substituted into the
     // indexed text.
@@ -276,7 +299,7 @@ export class PendingEntityService {
 
     // Trigger relationship extraction if feature enabled
     const features = readFeaturesFromEnv();
-    if (features.relationships && confirmed > 0) {
+    if (features.relationships) {
       try {
         const allEntities =
           await this.entityService.findByResourceId(resourceId);
@@ -313,7 +336,7 @@ export class PendingEntityService {
       }
     }
 
-    return { confirmed, errors };
+    return errors;
   }
 
   async confirmEntity(
@@ -347,6 +370,24 @@ export class PendingEntityService {
       }
 
       await this.materializePendingEntity(pending, resource);
+
+      // The single-entity path must run the same post-confirmation work as the
+      // bulk path once the resource has no pending entities left.
+      const remaining = await this.repository.count({
+        where: { resourceId: pending.resourceId, status: Not('merged') },
+      });
+      if (remaining === 0) {
+        const errors = await this.finalizeResourceConfirmation(
+          pending.resourceId,
+          resource,
+        );
+        if (errors.length > 0) {
+          return {
+            success: true,
+            message: `Entity confirmed, but: ${errors.join('; ')}`,
+          };
+        }
+      }
 
       return { success: true, message: 'Entity confirmed successfully' };
     } catch (error) {

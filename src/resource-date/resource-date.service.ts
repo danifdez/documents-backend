@@ -17,8 +17,8 @@ export class ResourceDateService {
     });
   }
 
-  async remove(id: number): Promise<boolean> {
-    const result = await this.repo.delete({ id });
+  async remove(resourceId: number, id: number): Promise<boolean> {
+    const result = await this.repo.delete({ id, resourceId });
     return (result.affected ?? 0) > 0;
   }
 }

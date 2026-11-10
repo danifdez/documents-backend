@@ -15,10 +15,10 @@ export class ResourceDateController {
 
   @Delete(':id')
   async remove(
-    @Param('resourceId', ParseIntPipe) _resourceId: number,
+    @Param('resourceId', ParseIntPipe) resourceId: number,
     @Param('id', ParseIntPipe) id: number,
   ): Promise<{ deleted: boolean }> {
-    const deleted = await this.service.remove(id);
+    const deleted = await this.service.remove(resourceId, id);
     return { deleted };
   }
 }

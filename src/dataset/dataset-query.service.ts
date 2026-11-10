@@ -139,16 +139,19 @@ export class DatasetQueryService {
 
         if (params.groupBy) {
             const groupField = this.validateFieldKey(dataset, params.groupBy);
+            const groupExpression = 'data->>$2';
+            queryParams.push(groupField);
 
             if (fn === 'count') {
-                query = `SELECT data->>'${groupField}' as "group", COUNT(*)::integer as "value"
+                query = `SELECT ${groupExpression} as "group", COUNT(*)::integer as "value"
                          FROM dataset_records WHERE dataset_id = $1
-                         GROUP BY data->>'${groupField}'
+                         GROUP BY ${groupExpression}
                          ORDER BY "value" DESC`;
             } else {
-                query = `SELECT data->>'${groupField}' as "group", ${fn}((data->>'${field}')::numeric) as "value"
+                queryParams.push(field);
+                query = `SELECT ${groupExpression} as "group", ${fn}((data->>$3)::numeric) as "value"
                          FROM dataset_records WHERE dataset_id = $1
-                         GROUP BY data->>'${groupField}'
+                         GROUP BY ${groupExpression}
                          ORDER BY "value" DESC`;
             }
         } else {
@@ -156,7 +159,8 @@ export class DatasetQueryService {
                 query = `SELECT COUNT(*)::integer as "value"
                          FROM dataset_records WHERE dataset_id = $1`;
             } else {
-                query = `SELECT ${fn}((data->>'${field}')::numeric) as "value"
+                queryParams.push(field);
+                query = `SELECT ${fn}((data->>$2)::numeric) as "value"
                          FROM dataset_records WHERE dataset_id = $1`;
             }
         }
@@ -172,12 +176,15 @@ export class DatasetQueryService {
         return key;
     }
 
-    private validateAggregateFunction(fn: string): string {
-        const valid = ['count', 'sum', 'avg', 'min', 'max'];
-        if (!valid.includes(fn)) {
+    private validateAggregateFunction(
+        fn: string,
+    ): 'count' | 'sum' | 'avg' | 'min' | 'max' {
+        const normalized = fn.toLowerCase();
+        const valid = ['count', 'sum', 'avg', 'min', 'max'] as const;
+        if (!valid.includes(normalized as (typeof valid)[number])) {
             throw new BadRequestException(`Invalid aggregate function: "${fn}". Valid: ${valid.join(', ')}`);
         }
-        return fn.toUpperCase();
+        return normalized as (typeof valid)[number];
     }
 
     private getSqlOperator(op: string): string {

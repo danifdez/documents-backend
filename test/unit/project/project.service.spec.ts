@@ -9,17 +9,12 @@ import { buildProject } from '../../factories';
 describe('ProjectService', () => {
   let service: ProjectService;
   let repo: MockRepository<ProjectEntity>;
-  let mockQueryRunner: Record<string, jest.Mock>;
-  let dataSource: { createQueryRunner: jest.Mock };
+  let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
     repo = createMockRepository();
-    mockQueryRunner = {
-      query: jest.fn(),
-      release: jest.fn(),
-    };
     dataSource = {
-      createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
+      query: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -173,7 +168,7 @@ describe('ProjectService', () => {
       ];
 
       // Mock all 10 query calls in order
-      mockQueryRunner.query
+      dataSource.query
         .mockResolvedValueOnce([countsRow]) // counts
         .mockResolvedValueOnce(languages) // languages
         .mockResolvedValueOnce(keywordsRaw) // keywords
@@ -187,9 +182,7 @@ describe('ProjectService', () => {
 
       const result = await service.getStats(1);
 
-      expect(dataSource.createQueryRunner).toHaveBeenCalled();
-      expect(mockQueryRunner.release).toHaveBeenCalled();
-      expect(mockQueryRunner.query).toHaveBeenCalledTimes(10);
+      expect(dataSource.query).toHaveBeenCalledTimes(10);
 
       // Verify structure
       expect(result.resourceCount).toBe('5');
@@ -228,7 +221,7 @@ describe('ProjectService', () => {
         entityCount: '0',
       };
 
-      mockQueryRunner.query
+      dataSource.query
         .mockResolvedValueOnce([emptyCountsRow])
         .mockResolvedValueOnce([]) // languages
         .mockResolvedValueOnce([]) // keywords
@@ -251,7 +244,7 @@ describe('ProjectService', () => {
     });
 
     it('should handle key points stored as already-parsed arrays', async () => {
-      mockQueryRunner.query
+      dataSource.query
         .mockResolvedValueOnce([
           {
             resourceCount: '0',
@@ -281,10 +274,10 @@ describe('ProjectService', () => {
       ]);
     });
 
-    it('should always release queryRunner even if queries succeed', async () => {
+    it('should issue all stats queries', async () => {
       // Setup minimal mock data
       for (let i = 0; i < 10; i++) {
-        mockQueryRunner.query.mockResolvedValueOnce(
+        dataSource.query.mockResolvedValueOnce(
           i === 0
             ? [
                 {
@@ -300,7 +293,21 @@ describe('ProjectService', () => {
         );
       }
       await service.getStats(1);
-      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
+      expect(dataSource.query).toHaveBeenCalledTimes(10);
+    });
+
+    it('should use the real snake_case join columns', async () => {
+      dataSource.query.mockResolvedValue([]);
+      await service.getStats(1);
+
+      const sql = dataSource.query.mock.calls.map((call) => call[0]).join('\n');
+      expect(sql).toContain('FROM datasets WHERE project_id = $1');
+      expect(sql).toContain('ep.entity_id = e.id');
+      expect(sql).toContain('ep.project_id = $1');
+      expect(sql).toContain('e.entity_type_id = et.id');
+      expect(sql).toContain('re.resource_id');
+      expect(sql).toContain('ra.resource_id');
+      expect(sql).not.toContain('"projectId" = $1) AS "datasetCount"');
     });
   });
 });

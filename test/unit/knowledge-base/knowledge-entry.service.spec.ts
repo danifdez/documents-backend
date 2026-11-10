@@ -54,6 +54,22 @@ describe('KnowledgeEntryService', () => {
     });
   });
 
+  describe('findByEntityId', () => {
+    it('returns every entry linked to the entity', async () => {
+      const entries = [
+        buildKnowledgeEntry({ id: 1, entityId: 7 }),
+        buildKnowledgeEntry({ id: 2, entityId: 7 }),
+      ];
+      repo.find.mockResolvedValue(entries);
+
+      expect(await service.findByEntityId(7)).toEqual(entries);
+      expect(repo.find).toHaveBeenCalledWith({
+        where: { entityId: 7 },
+        relations: ['entity', 'entity.entityType'],
+      });
+    });
+  });
+
   describe('search', () => {
     it('should return empty array for empty search term', async () => {
       expect(await service.search('')).toEqual([]);

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
+import { Brackets } from 'typeorm';
 import { EntityService } from '../../../src/entity/entity.service';
 import { EntityEntity } from '../../../src/entity/entity.entity';
 import { EntityTypeService } from '../../../src/entity-type/entity-type.service';
@@ -16,6 +17,12 @@ describe('EntityService', () => {
 
   beforeEach(async () => {
     repo = createMockRepository();
+    const manager = repo.manager as any;
+    manager.query = jest.fn().mockResolvedValue([]);
+    manager.getRepository = jest.fn().mockReturnValue(repo);
+    manager.transaction = jest.fn(async (work: (m: any) => unknown) =>
+      work(manager),
+    );
     entityTypeService = { findOne: jest.fn(), findByName: jest.fn() };
     resourceService = { findOne: jest.fn() };
 
@@ -76,7 +83,9 @@ describe('EntityService', () => {
 
     it('should throw NotFoundException if entityType not found', async () => {
       entityTypeService.findOne.mockResolvedValue(null);
-      await expect(service.create({ name: 'Test', entityTypeId: 999 })).rejects.toThrow(NotFoundException);
+      await expect(
+        service.create({ name: 'Test', entityTypeId: 999 }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -103,6 +112,24 @@ describe('EntityService', () => {
     });
   });
 
+  describe('findByNameTypeAndLocale', () => {
+    it('keeps the entity type filter outside the name/translation/alias OR group', async () => {
+      const qb = repo.createQueryBuilder();
+      qb.getOne.mockResolvedValue(buildEntity());
+
+      await service.findByNameTypeAndLocale('Ada', 7, 'es');
+
+      expect(qb.where).toHaveBeenCalledWith('entityType.id = :entityTypeId', {
+        entityTypeId: 7,
+      });
+      expect(qb.andWhere).toHaveBeenCalledTimes(1);
+      expect((qb.andWhere as jest.Mock).mock.calls[0][0]).toBeInstanceOf(
+        Brackets,
+      );
+      expect(qb.orWhere).not.toHaveBeenCalled();
+    });
+  });
+
   describe('merge', () => {
     it('should throw NotFoundException if source not found', async () => {
       repo.findOne.mockResolvedValueOnce(null);
@@ -113,6 +140,27 @@ describe('EntityService', () => {
       repo.findOne.mockResolvedValueOnce(buildEntity({ id: 1 }));
       repo.findOne.mockResolvedValueOnce(null);
       await expect(service.merge(1, 999)).rejects.toThrow(NotFoundException);
+    });
+
+    it('moves project and knowledge references inside one transaction', async () => {
+      const source = buildEntity({ id: 1, name: 'Source' });
+      const target = buildEntity({ id: 2, name: 'Target' });
+      repo.findOne.mockResolvedValueOnce(source).mockResolvedValueOnce(target);
+      repo.save.mockResolvedValue(target);
+      repo.delete.mockResolvedValue({ affected: 1 });
+
+      await service.merge(1, 2);
+
+      expect((repo.manager as any).transaction).toHaveBeenCalledTimes(1);
+      expect((repo.manager as any).query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO entity_projects'),
+        [2, 1],
+      );
+      expect((repo.manager as any).query).toHaveBeenCalledWith(
+        expect.stringContaining('knowledge_entries'),
+        [2, 1],
+      );
+      expect(repo.delete).toHaveBeenCalledWith({ id: 1 });
     });
   });
 
@@ -129,7 +177,9 @@ describe('EntityService', () => {
 
     it('should throw NotFoundException if entity type name not found', async () => {
       entityTypeService.findByName.mockResolvedValue(null);
-      await expect(service.findOrCreate('Test', 'Unknown')).rejects.toThrow(NotFoundException);
+      await expect(service.findOrCreate('Test', 'Unknown')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

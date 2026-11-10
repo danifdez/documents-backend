@@ -1,9 +1,13 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsBoolean, IsIn, IsObject, ValidateNested, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsBoolean, IsIn, IsObject, ValidateNested, MaxLength, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class DatasetFieldDto {
     @IsString()
     @IsNotEmpty()
+    @MaxLength(64)
+    @Matches(/^[a-z0-9_]+$/, {
+        message: 'key must contain only lowercase letters, digits and underscores',
+    })
     key: string;
 
     @IsString()
