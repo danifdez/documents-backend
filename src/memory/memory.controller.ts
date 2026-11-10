@@ -12,6 +12,8 @@ import {
 import { CreateMemoryEntryDto, UpdateMemoryEntryDto } from './dto/memory.dto';
 import { MemoryEntryEntity } from './memory-entry.entity';
 import { MemoryOwnerType, MemoryService } from './memory.service';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 abstract class OwnerMemoryController {
   protected abstract readonly ownerType: MemoryOwnerType;
@@ -19,6 +21,7 @@ abstract class OwnerMemoryController {
   constructor(protected readonly service: MemoryService) {}
 
   @Get()
+  @RequirePermissions(Permission.ASK)
   list(
     @Param('ownerId', ParseIntPipe) ownerId: number,
   ): Promise<MemoryEntryEntity[]> {
@@ -26,6 +29,7 @@ abstract class OwnerMemoryController {
   }
 
   @Post()
+  @RequirePermissions(Permission.WRITE)
   create(
     @Param('ownerId', ParseIntPipe) ownerId: number,
     @Body() dto: CreateMemoryEntryDto,
@@ -34,6 +38,7 @@ abstract class OwnerMemoryController {
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.WRITE)
   update(
     @Param('ownerId', ParseIntPipe) ownerId: number,
     @Param('id', ParseUUIDPipe) id: string,
@@ -43,6 +48,7 @@ abstract class OwnerMemoryController {
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.WRITE)
   remove(
     @Param('ownerId', ParseIntPipe) ownerId: number,
     @Param('id', ParseUUIDPipe) id: string,
@@ -51,6 +57,7 @@ abstract class OwnerMemoryController {
   }
 
   @Delete()
+  @RequirePermissions(Permission.WRITE)
   clear(
     @Param('ownerId', ParseIntPipe) ownerId: number,
   ): Promise<{ deleted: number }> {

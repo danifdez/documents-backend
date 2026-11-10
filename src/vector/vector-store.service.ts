@@ -270,7 +270,7 @@ export class VectorStoreService {
       `SELECT id, embedding::text AS embedding, payload
        FROM rag_chunks
        WHERE source_type IN ('resource', 'doc', 'knowledge')
-         AND ($1::text IS NULL OR project_id = $1)
+         AND project_id IS NOT DISTINCT FROM $1
        ORDER BY id
        LIMIT $2`,
       [projectId == null ? null : String(projectId), safeLimit],

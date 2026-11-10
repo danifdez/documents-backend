@@ -12,6 +12,7 @@ import { ReadingPointEntity } from '../reading-point/reading-point.entity';
 import { NoteEntity } from '../note/note.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { FileStorageModule } from '../file-storage/file-storage.module';
+import { DatabaseModule } from '../database/database.module';
 
 @Module({})
 export class OfflineModule {
@@ -32,6 +33,7 @@ export class OfflineModule {
       imports: [
         TypeOrmModule.forFeature(entities),
         FileStorageModule,
+        DatabaseModule,
       ],
       controllers: [OfflineController],
       providers: [OfflineService, OfflineEnabledGuard],

@@ -7,6 +7,9 @@ import { DataSourceEncryptionService } from './data-source-encryption.service';
 import { DataSourceProviderFactory } from './data-source-provider.factory';
 import { CreateDataSourceDto, UpdateDataSourceDto } from './dto/data-source.dto';
 
+const MASKED_VALUE = '****';
+const SENSITIVE_CONFIG_KEY = /(api[-_]?key|token|secret|password|authorization|auth|cookie)/i;
+
 @Injectable()
 export class DataSourceService {
     constructor(
@@ -84,14 +87,15 @@ export class DataSourceService {
         if (dto.name !== undefined) ds.name = dto.name;
         if (dto.description !== undefined) ds.description = dto.description || null;
         if (dto.config !== undefined) {
+            const mergedConfig = this.mergeConfig(ds.config, dto.config);
             const provider = this.providerFactory.getProvider(ds.providerType);
             if (provider) {
-                const errors = provider.validateConfig(dto.config);
+                const errors = provider.validateConfig(mergedConfig);
                 if (errors.length > 0) {
                     throw new BadRequestException(`Invalid config: ${errors.join(', ')}`);
                 }
             }
-            ds.config = dto.config;
+            ds.config = mergedConfig;
         }
         if (dto.credentials !== undefined) {
             ds.credentials = dto.credentials ? this.encryptionService.encrypt(dto.credentials) : null;
@@ -132,15 +136,14 @@ export class DataSourceService {
 
     getDecryptedCredentials(ds: DataSourceEntity): Record<string, any> | null {
         if (!ds.credentials) return null;
-        try {
-            return this.encryptionService.decrypt(ds.credentials);
-        } catch {
-            return null;
-        }
+        return this.encryptionService.decrypt(ds.credentials);
     }
 
     private sanitize(ds: DataSourceEntity): any {
-        const result: any = { ...ds };
+        const result: any = {
+            ...ds,
+            config: this.sanitizeConfig(ds.config),
+        };
         if (ds.credentials) {
             try {
                 const decrypted = this.encryptionService.decrypt(ds.credentials);
@@ -151,5 +154,77 @@ export class DataSourceService {
         }
         result.hasCredentials = !!ds.credentials;
         return result;
+    }
+
+    private sanitizeConfig(config: Record<string, any>): Record<string, any> {
+        return this.maskValue(config) as Record<string, any>;
+    }
+
+    private maskValue(value: any, key?: string): any {
+        if (Array.isArray(value)) {
+            return value.map((item) => this.maskValue(item));
+        }
+        if (value && typeof value === 'object') {
+            const masked: Record<string, any> = {};
+            for (const [childKey, childValue] of Object.entries(value)) {
+                masked[childKey] = this.maskValue(childValue, childKey);
+            }
+            return masked;
+        }
+        if (typeof value === 'string') {
+            if (key && SENSITIVE_CONFIG_KEY.test(key)) return MASKED_VALUE;
+            const trimmed = value.trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                try {
+                    return JSON.stringify(this.maskValue(JSON.parse(trimmed)));
+                } catch {
+                    return value;
+                }
+            }
+        }
+        return value;
+    }
+
+    /**
+     * Keeps previously stored secrets when the client sends back the masked
+     * value it received from `findAll`/`findOnePublic`.
+     */
+    private mergeConfig(existing: any, incoming: any): any {
+        if (incoming === MASKED_VALUE) return existing;
+
+        if (Array.isArray(incoming)) {
+            return incoming.map((item, index) =>
+                this.mergeConfig(Array.isArray(existing) ? existing[index] : undefined, item),
+            );
+        }
+
+        if (incoming && typeof incoming === 'object') {
+            const current =
+                existing && typeof existing === 'object' && !Array.isArray(existing)
+                    ? existing
+                    : {};
+            const merged: Record<string, any> = { ...current };
+            for (const [key, value] of Object.entries(incoming)) {
+                merged[key] = this.mergeConfig(current[key], value);
+            }
+            return merged;
+        }
+
+        if (typeof incoming === 'string') {
+            const trimmed = incoming.trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                try {
+                    const parsedExisting =
+                        typeof existing === 'string' ? JSON.parse(existing) : existing;
+                    return JSON.stringify(
+                        this.mergeConfig(parsedExisting, JSON.parse(trimmed)),
+                    );
+                } catch {
+                    return incoming;
+                }
+            }
+        }
+
+        return incoming;
     }
 }

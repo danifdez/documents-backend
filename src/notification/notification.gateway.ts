@@ -28,6 +28,7 @@ export class NotificationGateway implements OnGatewayConnection {
   handleConnection(client: Socket) {
     const authEnabled = this.configService.get('AUTH_ENABLED') === 'true';
     if (!authEnabled) {
+      client.join(this.executionRoom('standalone'));
       return;
     }
 
@@ -42,32 +43,63 @@ export class NotificationGateway implements OnGatewayConnection {
     }
 
     try {
-      this.jwtService.verify(token);
+      const payload = this.jwtService.verify(token);
+      const principal = String(
+        (payload as Record<string, unknown>).userId ??
+          (payload as Record<string, unknown>).sub ??
+          'standalone',
+      );
+      client.join(this.executionRoom(principal));
     } catch {
       this.logger.warn('WebSocket connection rejected: invalid token');
       client.disconnect(true);
     }
   }
 
-  async publishExecution(message: {
-    outboxId: string;
-    socketEvent: string;
-    payload: Record<string, unknown>;
-  }): Promise<boolean> {
-    if (!this.server || this.server.sockets.sockets.size === 0) return false;
-    const deliveries = await Promise.allSettled(
-      Array.from(this.server.sockets.sockets.values()).map((client) =>
-        client.timeout(5_000).emitWithAck('execution:publication', message),
-      ),
-    );
-    return deliveries.some(
-      (delivery) =>
-        delivery.status === 'fulfilled' &&
-        delivery.value &&
-        typeof delivery.value === 'object' &&
-        'accepted' in delivery.value &&
-        delivery.value.accepted === true,
-    );
+  private executionRoom(ownerPrincipal: string): string {
+    return `execution-owner:${ownerPrincipal}`;
+  }
+
+  async publishExecution(
+    ownerPrincipal: string,
+    message: {
+      outboxId: string;
+      socketEvent: string;
+      payload: Record<string, unknown>;
+    },
+  ): Promise<boolean> {
+    if (!this.server) return false;
+
+    const room = this.executionRoom(ownerPrincipal || 'standalone');
+    const roomSize =
+      this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    if (roomSize === 0) return false;
+
+    try {
+      const responses = await (
+        this.server.to(room).timeout(5_000) as unknown as {
+          emitWithAck: (
+            event: string,
+            payload: unknown,
+          ) => Promise<unknown>;
+        }
+      ).emitWithAck('execution:publication', message);
+      const deliveries = Array.isArray(responses) ? responses : [responses];
+      return deliveries.some(
+        (delivery) =>
+          delivery &&
+          typeof delivery === 'object' &&
+          'accepted' in delivery &&
+          (delivery as { accepted?: unknown }).accepted === true,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Execution publication ${message.outboxId} failed: ${
+          error instanceof Error ? error.message : 'timeout'
+        }`,
+      );
+      return false;
+    }
   }
 
   sendCalendarAlarm(data: {

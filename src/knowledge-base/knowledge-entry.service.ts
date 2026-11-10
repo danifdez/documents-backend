@@ -41,6 +41,22 @@ export class KnowledgeEntryService {
     });
   }
 
+  async findByProject(projectId: number): Promise<KnowledgeEntryEntity[]> {
+    return await this.repository
+      .createQueryBuilder('k')
+      .leftJoinAndSelect('k.entity', 'entity')
+      .leftJoinAndSelect('entity.entityType', 'entityType')
+      .where(
+        `k.entity_id IS NULL OR EXISTS (
+          SELECT 1 FROM entity_projects ep
+          WHERE ep.entity_id = k.entity_id AND ep.project_id = :projectId
+        )`,
+        { projectId },
+      )
+      .orderBy('k.updatedAt', 'DESC')
+      .getMany();
+  }
+
   async search(searchTerm: string): Promise<KnowledgeEntryEntity[]> {
     if (!searchTerm || searchTerm.trim() === '') return [];
     const like = `%${searchTerm}%`;

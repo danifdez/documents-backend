@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { DataSourceProvider, DataSourceProviderResult } from '../data-source-provider.interface';
+import { SafeUrlService } from '../safe-url.service';
 
 @Injectable()
 export class RestApiProvider implements DataSourceProvider {
@@ -39,7 +40,10 @@ export class RestApiProvider implements DataSourceProvider {
         },
     };
 
-    constructor(private readonly httpService: HttpService) {}
+    constructor(
+        private readonly httpService: HttpService,
+        private readonly safeUrl: SafeUrlService,
+    ) {}
 
     validateConfig(config: Record<string, any>): string[] {
         const errors: string[] = [];
@@ -62,6 +66,7 @@ export class RestApiProvider implements DataSourceProvider {
     }
 
     async fetch(config: Record<string, any>, credentials?: Record<string, any>, cursor?: string): Promise<DataSourceProviderResult> {
+        await this.safeUrl.assertSafe(config.url);
         const headers = this.buildHeaders(config, credentials);
         const allRecords: Record<string, any>[] = [];
         let currentCursor = cursor;
@@ -167,12 +172,22 @@ export class RestApiProvider implements DataSourceProvider {
                 try { body = JSON.parse(config.body); } catch { /* ignore */ }
             }
             return firstValueFrom(
-                this.httpService.post(config.url, body, { headers, params, timeout: 30000 }),
+                this.httpService.post(config.url, body, {
+                    headers,
+                    params,
+                    timeout: 30000,
+                    maxRedirects: 0,
+                }),
             );
         }
 
         return firstValueFrom(
-            this.httpService.get(config.url, { headers, params, timeout: 30000 }),
+            this.httpService.get(config.url, {
+                headers,
+                params,
+                timeout: 30000,
+                maxRedirects: 0,
+            }),
         );
     }
 

@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Param, Query, Body, UseGuards, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, UseGuards, NotFoundException, BadRequestException, ParseIntPipe } from '@nestjs/common';
 import { OfflineService } from './offline.service';
 import { OfflineEnabledGuard } from './guards/offline-enabled.guard';
-import { SyncChangeDto } from './dto/sync-change.dto';
+import { ApplySyncDto } from './dto/sync-change.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('offline')
 @UseGuards(OfflineEnabledGuard)
@@ -35,9 +37,13 @@ export class OfflineController {
   }
 
   @Post('sync')
-  async sync(@Body() body: { changes: SyncChangeDto[] }) {
+  @RequirePermissions(Permission.WRITE)
+  async sync(@Body() body: ApplySyncDto) {
     if (!body.changes || !Array.isArray(body.changes)) {
       throw new BadRequestException('Expected { changes: SyncChangeDto[] }');
+    }
+    if (body.changes.length > 500) {
+      throw new BadRequestException('Too many changes in one sync (max 500)');
     }
     return this.offlineService.applySync(body.changes);
   }
@@ -45,10 +51,12 @@ export class OfflineController {
   @Get('changes')
   async getChanges(
     @Query('since') since: string,
-    @Query('projectId') projectId: string,
+    @Query('projectId', ParseIntPipe) projectId: number,
   ) {
     if (!since) throw new BadRequestException('Missing "since" query parameter');
-    if (!projectId) throw new BadRequestException('Missing "projectId" query parameter');
-    return this.offlineService.getChangesSince(since, parseInt(projectId, 10));
+    if (Number.isNaN(new Date(since).getTime())) {
+      throw new BadRequestException('Invalid "since" query parameter');
+    }
+    return this.offlineService.getChangesSince(since, projectId);
   }
 }

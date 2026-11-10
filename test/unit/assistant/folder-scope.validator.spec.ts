@@ -65,4 +65,33 @@ describe('validateFolderScope', () => {
       expect(result.absolutePath).not.toBe(link);
     }
   });
+
+  it('rejects sensitive directories even inside an otherwise valid root', async () => {
+    const sshDir = path.join(tmpRoot, '.ssh');
+    await fs.mkdir(sshDir);
+    await expect(validateFolderScope(sshDir)).resolves.toEqual({
+      ok: false,
+      reason: 'forbidden_path',
+    });
+  });
+
+  it('honours INDEXED_FILE_ALLOWED_ROOTS when configured', async () => {
+    const allowedRoot = path.join(tmpRoot, 'allowed-root');
+    const otherRoot = path.join(tmpRoot, 'other-root');
+    await fs.mkdir(allowedRoot);
+    await fs.mkdir(otherRoot);
+    process.env.INDEXED_FILE_ALLOWED_ROOTS = allowedRoot;
+
+    try {
+      await expect(validateFolderScope(allowedRoot)).resolves.toMatchObject({
+        ok: true,
+      });
+      await expect(validateFolderScope(otherRoot)).resolves.toEqual({
+        ok: false,
+        reason: 'forbidden_path',
+      });
+    } finally {
+      delete process.env.INDEXED_FILE_ALLOWED_ROOTS;
+    }
+  });
 });

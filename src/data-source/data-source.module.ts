@@ -11,6 +11,7 @@ import {
   DATA_SOURCE_PROVIDERS,
 } from './data-source-provider.factory';
 import { DataSourceEncryptionService } from './data-source-encryption.service';
+import { SafeUrlService } from './safe-url.service';
 import { ExecutionModule } from '../execution/execution.module';
 
 // Import all providers
@@ -41,6 +42,7 @@ const providerClasses = [
     DataSourceScheduleService,
     DataSourceProviderFactory,
     DataSourceEncryptionService,
+    SafeUrlService,
     // Register each provider class in DI
     ...providerClasses,
     // Inject all providers as an array into the factory

@@ -2,23 +2,22 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Res, H
 import { Response } from 'express';
 import { DocService } from './doc.service';
 import { DocIngestService } from './doc-ingest.service';
+import { DocExportService } from './doc-export.service';
 import { DocEntity } from 'src/doc/doc.entity';
 import { CreateDocDto, UpdateDocDto } from './dto/doc.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const HTMLtoDOCX = require('html-to-docx');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const puppeteer = require('puppeteer');
 
 @Controller('docs')
 export class DocController {
   constructor(
     private readonly docService: DocService,
     private readonly docIngestService: DocIngestService,
+    private readonly docExportService: DocExportService,
   ) { }
 
   @Get(':id/export/docx')
+  @RequirePermissions(Permission.EXPORT)
   async exportDocx(
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
@@ -29,12 +28,7 @@ export class DocController {
     }
 
     const html = doc.content || '<p></p>';
-    const wrappedHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
-    const docxBuffer = await HTMLtoDOCX(wrappedHtml, null, {
-      table: { row: { cantSplit: true } },
-      footer: false,
-      header: false,
-    });
+    const docxBuffer = await this.docExportService.renderDocx(html);
 
     const safeName = (doc.name || 'document').replace(/[^\w\s.-]/g, '_').trim() || 'document';
     const encodedName = encodeURIComponent(doc.name || 'document');
@@ -44,6 +38,7 @@ export class DocController {
   }
 
   @Get(':id/export/pdf')
+  @RequirePermissions(Permission.EXPORT)
   async exportPdf(
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
@@ -54,23 +49,13 @@ export class DocController {
     }
 
     const html = doc.content || '<p></p>';
-    const wrappedHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:40px;line-height:1.6;color:#222}img{max-width:100%}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px}</style></head><body>${html}</body></html>`;
+    const pdfBuffer = await this.docExportService.renderPdf(html);
 
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-    try {
-      const page = await browser.newPage();
-      await page.setContent(wrappedHtml, { waitUntil: 'networkidle0' });
-      const pdfUint8 = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
-      const pdfBuffer = Buffer.from(pdfUint8);
-
-      const safeName = (doc.name || 'document').replace(/[^\w\s.-]/g, '_').trim() || 'document';
-      const encodedName = encodeURIComponent(doc.name || 'document');
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"; filename*=UTF-8''${encodedName}.pdf`);
-      res.end(pdfBuffer);
-    } finally {
-      await browser.close();
-    }
+    const safeName = (doc.name || 'document').replace(/[^\w\s.-]/g, '_').trim() || 'document';
+    const encodedName = encodeURIComponent(doc.name || 'document');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"; filename*=UTF-8''${encodedName}.pdf`);
+    res.end(pdfBuffer);
   }
 
   @Get(':id')

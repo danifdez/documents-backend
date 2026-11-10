@@ -33,6 +33,48 @@ const WINDOWS_FORBIDDEN_ROOTS = [
   'C:\\Program Files (x86)',
 ];
 
+const SENSITIVE_SEGMENTS = new Set([
+  '.ssh',
+  '.aws',
+  '.gnupg',
+  '.docker',
+  '.kube',
+  '.pki',
+  '.config',
+  '.npm',
+  '.netrc',
+  '.env',
+  '.git',
+  'node_modules',
+]);
+
+function isInside(root: string, candidate: string): boolean {
+  const normalizedRoot = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+  return candidate === root || candidate.startsWith(normalizedRoot);
+}
+
+function isSensitivePath(resolved: string): boolean {
+  const segments = resolved.split(path.sep).filter(Boolean);
+  if (segments.some((segment) => SENSITIVE_SEGMENTS.has(segment))) {
+    return true;
+  }
+
+  // Never index the backend checkout itself (it contains .env, source, keys).
+  const appRoot = path.resolve(process.cwd());
+  return isInside(appRoot, resolved);
+}
+
+function isInsideConfiguredRoots(resolved: string): boolean {
+  const configured = (process.env.INDEXED_FILE_ALLOWED_ROOTS ?? '')
+    .split(path.delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => path.resolve(value));
+
+  if (configured.length === 0) return true;
+  return configured.some((root) => isInside(root, resolved));
+}
+
 function isForbiddenPath(resolved: string): boolean {
   if (resolved === '~') return true;
 
@@ -76,7 +118,11 @@ export async function validateFolderScope(
     return { ok: false, reason: 'not_a_directory' };
   }
 
-  if (isForbiddenPath(resolved)) {
+  if (
+    isForbiddenPath(resolved) ||
+    isSensitivePath(resolved) ||
+    !isInsideConfiguredRoots(resolved)
+  ) {
     return { ok: false, reason: 'forbidden_path' };
   }
 

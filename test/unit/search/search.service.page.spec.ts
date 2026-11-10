@@ -5,13 +5,16 @@ import { SearchService } from '../../../src/search/search.service';
 // and has its own integration surface; these tests pin the pure composition of
 // each matcher: which service it asks and what it does with the answer.
 describe('SearchService page matchers', () => {
-  let knowledge: { findAll: jest.Mock };
+  let knowledge: { findAll: jest.Mock; findByProject: jest.Mock };
   let timeline: { findByProject: jest.Mock };
   let bibliography: { findByProject: jest.Mock; findAll: jest.Mock };
   let service: SearchService;
 
   beforeEach(() => {
-    knowledge = { findAll: jest.fn().mockResolvedValue([]) };
+    knowledge = {
+      findAll: jest.fn().mockResolvedValue([]),
+      findByProject: jest.fn().mockResolvedValue([]),
+    };
     timeline = { findByProject: jest.fn().mockResolvedValue([]) };
     bibliography = {
       findByProject: jest.fn().mockResolvedValue([]),
@@ -35,13 +38,15 @@ describe('SearchService page matchers', () => {
 
   describe('matchKnowledgeInText', () => {
     it('returns entries whose title appears in the text', async () => {
-      knowledge.findAll.mockResolvedValue([
+      knowledge.findByProject.mockResolvedValue([
         { id: 1, title: 'Sistema inmune', summary: 'Resumen', tags: null },
         { id: 2, title: 'Otra cosa', summary: null, tags: null },
       ]);
       const matches = await service.matchKnowledgeInText(
         'El sistema inmune protege el cuerpo.',
+        2,
       );
+      expect(knowledge.findByProject).toHaveBeenCalledWith(2);
       expect(matches).toHaveLength(1);
       expect(matches[0]).toEqual({
         id: 1,
@@ -51,9 +56,12 @@ describe('SearchService page matchers', () => {
       });
     });
 
-    it('returns nothing for empty text without asking the backend', async () => {
-      expect(await service.matchKnowledgeInText('   ')).toEqual([]);
-      expect(knowledge.findAll).not.toHaveBeenCalled();
+    it('returns nothing for empty text or without a project', async () => {
+      expect(await service.matchKnowledgeInText('   ', 2)).toEqual([]);
+      expect(await service.matchKnowledgeInText('texto', undefined)).toEqual(
+        [],
+      );
+      expect(knowledge.findByProject).not.toHaveBeenCalled();
     });
   });
 
@@ -128,10 +136,11 @@ describe('SearchService page matchers', () => {
       ).toEqual([]);
     });
 
-    it('falls back to every entry when there is no project', async () => {
-      bibliography.findAll.mockResolvedValue([]);
-      await service.matchBibliographyInText('texto', undefined);
-      expect(bibliography.findAll).toHaveBeenCalled();
+    it('returns no entries when there is no project', async () => {
+      await expect(
+        service.matchBibliographyInText('texto', undefined),
+      ).resolves.toEqual([]);
+      expect(bibliography.findAll).not.toHaveBeenCalled();
       expect(bibliography.findByProject).not.toHaveBeenCalled();
     });
   });

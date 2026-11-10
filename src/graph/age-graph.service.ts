@@ -132,7 +132,9 @@ export class AgeGraphService {
     projectId?: number,
   ): Promise<RelationshipGraph> {
     const normalized = text.trim().toLocaleLowerCase();
-    if (!normalized) return { entities: [], relationships: [] };
+    if (!normalized || projectId == null) {
+      return { entities: [], relationships: [] };
+    }
     const runner = await this.connect();
     let names: string[];
     try {

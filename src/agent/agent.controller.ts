@@ -22,8 +22,11 @@ import {
 } from './dto/agent.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ExecutionService } from '../execution/execution.service';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('agents')
+@RequirePermissions(Permission.ASK)
 export class AgentController {
   constructor(
     private readonly service: AgentService,
@@ -42,11 +45,13 @@ export class AgentController {
   }
 
   @Post()
+  @RequirePermissions(Permission.WRITE)
   async create(@Body() dto: CreateAgentDto): Promise<AgentDto> {
     return toAgentDto(await this.service.create(dto));
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.WRITE)
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateAgentDto,
@@ -55,6 +60,7 @@ export class AgentController {
   }
 
   @Delete(':id')
+  @RequirePermissions(Permission.WRITE)
   @HttpCode(204)
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.service.remove(id);

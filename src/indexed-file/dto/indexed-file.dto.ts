@@ -3,7 +3,6 @@ import { IndexedFileEntity } from '../indexed-file.entity';
 export class IndexedFileDto {
   id: number;
   filename: string;
-  filePath: string;
   mimeType: string;
   size: number;
   mtime: Date;
@@ -17,7 +16,6 @@ export function toIndexedFileDto(entity: IndexedFileEntity): IndexedFileDto {
   return {
     id: entity.id,
     filename: entity.filename,
-    filePath: entity.filePath,
     mimeType: entity.mimeType,
     size: typeof entity.size === 'string' ? Number(entity.size) : entity.size,
     mtime: entity.mtime,

@@ -29,7 +29,7 @@ export class SearchController {
   async pageMatches(@Body() dto: PageMatchesDto): Promise<PageMatchesResult> {
     const [entities, knowledge, timeline, bibliography] = await Promise.all([
       this.searchService.matchEntitiesInText(dto.text, dto.projectId),
-      this.searchService.matchKnowledgeInText(dto.text),
+      this.searchService.matchKnowledgeInText(dto.text, dto.projectId),
       this.searchService.matchTimelineInText(dto.text, dto.projectId),
       this.searchService.matchBibliographyInText(dto.text, dto.projectId),
     ]);

@@ -455,6 +455,8 @@ export class SearchService {
         )
       `;
       params.push(projectId);
+    } else {
+      query += ' WHERE e.global = true';
     }
 
     let entities: any[];
@@ -486,15 +488,18 @@ export class SearchService {
     return matches;
   }
 
-  async matchKnowledgeInText(text: string): Promise<PageKnowledgeMatch[]> {
+  async matchKnowledgeInText(
+    text: string,
+    projectId?: number,
+  ): Promise<PageKnowledgeMatch[]> {
     const normalized = (text ?? '').slice(0, 10000);
-    if (!normalized.trim() || !this.knowledgeEntryService) {
+    if (!normalized.trim() || !projectId || !this.knowledgeEntryService) {
       return [];
     }
 
     let entries: any[];
     try {
-      entries = await this.knowledgeEntryService.findAll();
+      entries = await this.knowledgeEntryService.findByProject(projectId);
     } catch {
       return [];
     }
@@ -565,15 +570,13 @@ export class SearchService {
     projectId?: number,
   ): Promise<PageBibliographyMatch[]> {
     const normalized = (text ?? '').slice(0, 10000);
-    if (!normalized.trim() || !this.bibliographyService) {
+    if (!normalized.trim() || !projectId || !this.bibliographyService) {
       return [];
     }
 
     let entries: any[];
     try {
-      entries = projectId
-        ? await this.bibliographyService.findByProject(projectId)
-        : await this.bibliographyService.findAll();
+      entries = await this.bibliographyService.findByProject(projectId);
     } catch {
       return [];
     }

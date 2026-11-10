@@ -4,8 +4,11 @@ import { DataSourceSyncService } from './data-source-sync.service';
 import { DataSourceScheduleService } from './data-source-schedule.service';
 import { DataSourceProviderFactory } from './data-source-provider.factory';
 import { CreateDataSourceDto, UpdateDataSourceDto, TestDataSourceDto } from './dto/data-source.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('data-sources')
+@RequirePermissions(Permission.DATASETS)
 export class DataSourceController {
     constructor(
         private readonly dataSourceService: DataSourceService,

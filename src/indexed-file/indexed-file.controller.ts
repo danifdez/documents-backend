@@ -25,6 +25,8 @@ import {
 import { IndexedFileOwnerType } from './indexed-file.entity';
 import { IndexedFileDto, toIndexedFileDto } from './dto/indexed-file.dto';
 import { WriteIndexedFileDto } from './dto/write-indexed-file.dto';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 abstract class IndexedFileBaseController {
   protected abstract ownerType: IndexedFileOwnerType;
@@ -156,6 +158,7 @@ abstract class IndexedFileBaseController {
 }
 
 @Controller('assistants/:assistantId/indexed-files')
+@RequirePermissions(Permission.WRITE)
 export class AssistantIndexedFileController extends IndexedFileBaseController {
   protected ownerType: IndexedFileOwnerType = 'assistant';
 
@@ -253,6 +256,7 @@ export class AssistantIndexedFileController extends IndexedFileBaseController {
 }
 
 @Controller('agents/:agentId/indexed-files')
+@RequirePermissions(Permission.WRITE)
 export class AgentIndexedFileController extends IndexedFileBaseController {
   protected ownerType: IndexedFileOwnerType = 'agent';
 

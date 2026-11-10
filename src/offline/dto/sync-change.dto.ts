@@ -1,4 +1,12 @@
-import { IsNumber, IsIn, IsObject, IsDateString } from 'class-validator';
+import {
+  IsArray,
+  IsDateString,
+  IsIn,
+  IsNumber,
+  IsObject,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class SyncChangeDto {
   @IsIn(['doc', 'comment', 'mark', 'reading-point', 'note', 'resource'])
@@ -15,4 +23,11 @@ export class SyncChangeDto {
 
   @IsDateString()
   updatedAt: string;
+}
+
+export class ApplySyncDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SyncChangeDto)
+  changes: SyncChangeDto[];
 }

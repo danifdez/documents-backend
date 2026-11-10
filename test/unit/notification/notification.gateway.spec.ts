@@ -7,43 +7,61 @@ describe('NotificationGateway execution publications', () => {
     payload: { response: 'done' },
   };
 
-  function client(response: unknown) {
-    const socket = {
-      timeout: jest.fn(),
-      emitWithAck: jest.fn().mockResolvedValue(response),
-    };
-    socket.timeout.mockReturnValue(socket);
-    return socket;
+  function gatewayWithRoom(roomSize: number, response: unknown) {
+    const timeout = { emitWithAck: jest.fn().mockResolvedValue(response) };
+    const to = { timeout: jest.fn().mockReturnValue(timeout) };
+    const serverTo = jest.fn().mockReturnValue(to);
+    const gateway = new NotificationGateway({} as any, {} as any);
+    gateway.server = {
+      sockets: {
+        adapter: {
+          rooms: new Map([['execution-owner:user-1', { size: roomSize }]]),
+        },
+      },
+      to: serverTo,
+    } as any;
+    return { gateway, serverTo, to, timeout };
   }
 
-  it('confirms publication only after a client accepts the outbox identity', async () => {
-    const gateway = new NotificationGateway({} as any, {} as any);
-    const accepted = client({ accepted: true });
-    gateway.server = {
-      sockets: { sockets: new Map([['client-1', accepted]]) },
-    } as any;
+  it('confirms publication only after the owner client accepts the outbox identity', async () => {
+    const { gateway, serverTo, to, timeout } = gatewayWithRoom(1, [
+      { accepted: true },
+    ]);
 
-    await expect(gateway.publishExecution(message)).resolves.toBe(true);
-    expect(accepted.timeout).toHaveBeenCalledWith(5_000);
-    expect(accepted.emitWithAck).toHaveBeenCalledWith(
+    await expect(gateway.publishExecution('user-1', message)).resolves.toBe(
+      true,
+    );
+    expect(serverTo).toHaveBeenCalledWith('execution-owner:user-1');
+    expect(to.timeout).toHaveBeenCalledWith(5_000);
+    expect(timeout.emitWithAck).toHaveBeenCalledWith(
       'execution:publication',
       message,
     );
   });
 
-  it('keeps the publication pending when every client rejects it', async () => {
-    const gateway = new NotificationGateway({} as any, {} as any);
-    const disconnected = client(null);
-    disconnected.emitWithAck.mockRejectedValue(new Error('disconnected'));
-    gateway.server = {
-      sockets: {
-        sockets: new Map([
-          ['client-1', client({ accepted: false })],
-          ['client-2', disconnected],
-        ]),
-      },
-    } as any;
+  it('keeps the publication pending when the owner rejects it', async () => {
+    const { gateway } = gatewayWithRoom(1, [{ accepted: false }]);
 
-    await expect(gateway.publishExecution(message)).resolves.toBe(false);
+    await expect(gateway.publishExecution('user-1', message)).resolves.toBe(
+      false,
+    );
+  });
+
+  it('does not publish when the owner has no connected clients', async () => {
+    const { gateway, serverTo } = gatewayWithRoom(0, []);
+
+    await expect(gateway.publishExecution('user-1', message)).resolves.toBe(
+      false,
+    );
+    expect(serverTo).not.toHaveBeenCalled();
+  });
+
+  it('keeps the publication pending when the acknowledgement times out', async () => {
+    const { gateway, timeout } = gatewayWithRoom(1, []);
+    timeout.emitWithAck.mockRejectedValue(new Error('timeout'));
+
+    await expect(gateway.publishExecution('user-1', message)).resolves.toBe(
+      false,
+    );
   });
 });

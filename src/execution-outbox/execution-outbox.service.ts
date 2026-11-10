@@ -7,6 +7,7 @@ interface ClaimedOutboxMessage {
   socket_event: string;
   payload: Record<string, unknown>;
   attempts: number;
+  owner_principal: string | null;
 }
 
 const PUBLISH_LEASE_MS = 30_000;
@@ -26,11 +27,14 @@ export class ExecutionOutboxService {
       const message = await this.claimNext();
       if (!message) break;
       try {
-        const delivered = await this.notificationGateway.publishExecution({
-          outboxId: message.outbox_id,
-          socketEvent: message.socket_event,
-          payload: message.payload,
-        });
+        const delivered = await this.notificationGateway.publishExecution(
+          message.owner_principal || 'standalone',
+          {
+            outboxId: message.outbox_id,
+            socketEvent: message.socket_event,
+            payload: message.payload,
+          },
+        );
         if (!delivered) throw new Error('no_connected_clients');
         await this.markPublished(message);
         published += 1;
@@ -73,7 +77,9 @@ export class ExecutionOutboxService {
           FROM candidate
           WHERE message."outbox_id" = candidate."outbox_id"
           RETURNING message."outbox_id", message."socket_event",
-                    message."payload", message."attempts"
+                    message."payload", message."attempts",
+                    (SELECT "owner_principal" FROM "executions"
+                     WHERE "execution_id" = message."execution_id") AS "owner_principal"
         `,
         [PUBLISH_LEASE_MS],
       )) as [ClaimedOutboxMessage[], number];

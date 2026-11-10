@@ -70,6 +70,21 @@ describe('KnowledgeEntryService', () => {
     });
   });
 
+  describe('findByProject', () => {
+    it('scopes entries through the linked entity project', async () => {
+      const qb = repo.createQueryBuilder();
+      const entries = [buildKnowledgeEntry({ id: 1 })];
+      qb.getMany.mockResolvedValue(entries);
+
+      expect(await service.findByProject(3)).toEqual(entries);
+      expect(qb.where).toHaveBeenCalledWith(
+        expect.stringContaining('entity_projects'),
+        { projectId: 3 },
+      );
+      expect(qb.orderBy).toHaveBeenCalledWith('k.updatedAt', 'DESC');
+    });
+  });
+
   describe('search', () => {
     it('should return empty array for empty search term', async () => {
       expect(await service.search('')).toEqual([]);

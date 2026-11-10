@@ -1,4 +1,4 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
@@ -22,7 +22,11 @@ export class PermissionsGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    if (!user) return true; // No user means public endpoint handled by auth guard
+    if (!user) {
+      // Fail closed: if a route declares permissions, the auth guard must have
+      // populated a user. Public routes must not declare permissions.
+      throw new UnauthorizedException('Authentication required');
+    }
 
     const userPermissions = user.permissions || {};
     const hasAll = requiredPermissions.every((perm) => userPermissions[perm] === true);

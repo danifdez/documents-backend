@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { DataSourceProvider, DataSourceProviderResult } from '../data-source-provider.interface';
+import { SafeUrlService } from '../safe-url.service';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { parse } = require('csv-parse/sync');
@@ -33,7 +34,10 @@ export class CsvUrlProvider implements DataSourceProvider {
         },
     };
 
-    constructor(private readonly httpService: HttpService) {}
+    constructor(
+        private readonly httpService: HttpService,
+        private readonly safeUrl: SafeUrlService,
+    ) {}
 
     validateConfig(config: Record<string, any>): string[] {
         const errors: string[] = [];
@@ -56,6 +60,7 @@ export class CsvUrlProvider implements DataSourceProvider {
     }
 
     async fetch(config: Record<string, any>, credentials?: Record<string, any>): Promise<DataSourceProviderResult> {
+        await this.safeUrl.assertSafe(config.url);
         const headers: Record<string, string> = {};
         if (credentials?.authHeader) {
             headers['Authorization'] = credentials.authHeader;
@@ -67,6 +72,7 @@ export class CsvUrlProvider implements DataSourceProvider {
                 headers,
                 responseType: isCsv ? 'text' : 'json',
                 timeout: 30000,
+                maxRedirects: 0,
             }),
         );
 

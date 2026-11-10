@@ -17,8 +17,11 @@ import {
 } from './dto/assistant.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ExecutionService } from '../execution/execution.service';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { Permission } from '../auth/permission.enum';
 
 @Controller('assistants')
+@RequirePermissions(Permission.ASK)
 export class AssistantController {
   constructor(
     private readonly service: AssistantService,
@@ -38,6 +41,7 @@ export class AssistantController {
   }
 
   @Patch(':id/working-folder')
+  @RequirePermissions(Permission.WRITE)
   async updateWorkingFolder(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateAssistantWorkingFolderDto,

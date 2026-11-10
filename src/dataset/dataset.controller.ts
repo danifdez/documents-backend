@@ -39,6 +39,7 @@ import { ImportDatasetDto, ImportConfirmDto } from './dto/import-dataset.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 import { DatasetAnalysisService } from './dataset-analysis.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('datasets')
 export class DatasetController {
@@ -199,12 +200,15 @@ export class DatasetController {
   }
 
   @Get('propose-columns/:executionId')
+  @RequirePermissions(Permission.DATASETS)
   async getProposeColumnsResult(
     @Param('executionId', ParseUUIDPipe) executionId: string,
+    @CurrentUser() user: unknown,
   ) {
-    const execution = await this.executionService.findOne(executionId);
-    if (!execution)
-      throw new HttpException('Execution not found', HttpStatus.NOT_FOUND);
+    const execution = await this.executionService.readOwnedResult(
+      executionId,
+      this.executionService.resolveAccessScope(user),
+    );
     return { status: execution.status, result: execution.result };
   }
 
@@ -358,14 +362,16 @@ export class DatasetController {
   }
 
   @Get(':id/stats/:executionId')
+  @RequirePermissions(Permission.DATASETS)
   async getStatsResult(
     @Param('id', ParseIntPipe) _id: number,
     @Param('executionId', ParseUUIDPipe) executionId: string,
+    @CurrentUser() user: unknown,
   ) {
-    const execution = await this.executionService.findOne(executionId);
-    if (!execution) {
-      throw new HttpException('Execution not found', HttpStatus.NOT_FOUND);
-    }
+    const execution = await this.executionService.readOwnedResult(
+      executionId,
+      this.executionService.resolveAccessScope(user),
+    );
     return {
       status: execution.status,
       result: execution.result,

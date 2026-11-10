@@ -1,6 +1,6 @@
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan, ObjectLiteral } from 'typeorm';
+import { DataSource, Repository, MoreThan, ObjectLiteral } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ResourceEntity } from '../resource/resource.entity';
 import { DocEntity } from '../doc/doc.entity';
@@ -20,6 +20,61 @@ export class OfflineService {
   private readonly fileSizeLimit: number;
   private readonly repoByEntityType: Map<string, Repository<any> | null>;
 
+  private static readonly CREATE_FIELDS: Record<string, string[]> = {
+    doc: ['name', 'content', 'citationFormat', 'status'],
+    comment: ['content', 'quote', 'prefix', 'suffix', 'position'],
+    mark: ['content', 'prefix', 'suffix', 'position', 'type'],
+    'reading-point': ['kind', 'label', 'fragmentId', 'exact', 'prefix', 'suffix', 'position', 'ratio'],
+    note: ['title', 'content', 'status'],
+    resource: [
+      'name',
+      'title',
+      'url',
+      'content',
+      'status',
+      'language',
+      'summary',
+      'keyPoints',
+      'keywords',
+      'type',
+      'license',
+      'publicationDate',
+      'pages',
+    ],
+  };
+
+  private static readonly UPDATE_FIELDS: Record<string, string[]> = {
+    doc: ['name', 'content', 'citationFormat', 'status'],
+    comment: ['content', 'quote', 'prefix', 'suffix', 'position'],
+    mark: ['content', 'prefix', 'suffix', 'position', 'type'],
+    'reading-point': ['kind', 'label', 'fragmentId', 'exact', 'prefix', 'suffix', 'position', 'ratio'],
+    note: ['title', 'content', 'status'],
+    resource: [
+      'name',
+      'title',
+      'url',
+      'content',
+      'status',
+      'language',
+      'summary',
+      'keyPoints',
+      'keywords',
+      'type',
+      'license',
+      'publicationDate',
+      'pages',
+    ],
+  };
+
+  private static readonly RELATION_FIELDS: Record<string, Record<string, string>> = {
+    doc: { projectId: 'project', threadId: 'thread', resourceId: 'resource' },
+    comment: { docId: 'doc', resourceId: 'resource' },
+    mark: { docId: 'doc', resourceId: 'resource' },
+    'reading-point': { docId: 'doc', resourceId: 'resource' },
+    note: { projectId: 'project', threadId: 'thread' },
+    resource: { projectId: 'project' },
+  };
+
   constructor(
     @InjectRepository(ResourceEntity) private readonly resourceRepo: Repository<ResourceEntity>,
     @InjectRepository(DocEntity) private readonly docRepo: Repository<DocEntity>,
@@ -31,6 +86,7 @@ export class OfflineService {
     @InjectRepository(ProjectEntity) private readonly projectRepo: Repository<ProjectEntity>,
     private readonly fileStorage: FileStorageService,
     private readonly configService: ConfigService,
+    private readonly dataSource: DataSource,
   ) {
     this.fileSizeLimit = parseInt(
       this.configService.get('OFFLINE_FILE_SIZE_LIMIT', '10485760'),
@@ -216,52 +272,152 @@ export class OfflineService {
   }
 
   async applySync(changes: SyncChangeDto[]) {
-    const results: Array<{ entityType: string; entityId: number; status: string; serverData?: any }> = [];
+    return this.dataSource.transaction(async (manager) => {
+      const results: Array<{
+        entityType: string;
+        entityId: number;
+        status: string;
+        serverData?: any;
+      }> = [];
 
-    for (const change of changes) {
-      const repo = this.getRepo(change.entityType);
-      if (!repo) {
-        results.push({ entityType: change.entityType, entityId: change.entityId, status: 'error' });
-        continue;
+      for (const change of changes) {
+        const repo = this.getRepo(change.entityType);
+        if (!repo) {
+          results.push({
+            entityType: change.entityType,
+            entityId: change.entityId,
+            status: 'error',
+          });
+          continue;
+        }
+
+        const txRepo = manager.withRepository(repo);
+
+        if (change.method === 'DELETE') {
+          try {
+            await txRepo.delete(change.entityId);
+            results.push({
+              entityType: change.entityType,
+              entityId: change.entityId,
+              status: 'applied',
+            });
+          } catch {
+            results.push({
+              entityType: change.entityType,
+              entityId: change.entityId,
+              status: 'error',
+            });
+          }
+          continue;
+        }
+
+        if (change.method === 'PATCH') {
+          const entity = await txRepo.findOneBy({ id: change.entityId } as any);
+          if (!entity) {
+            results.push({
+              entityType: change.entityType,
+              entityId: change.entityId,
+              status: 'error',
+            });
+            continue;
+          }
+
+          const serverUpdated = new Date((entity as any).updatedAt).getTime();
+          const clientUpdated = new Date(change.updatedAt).getTime();
+
+          if (clientUpdated >= serverUpdated) {
+            Object.assign(
+              entity,
+              this.pickFields(
+                change.entityType,
+                change.payload,
+                OfflineService.UPDATE_FIELDS,
+              ),
+            );
+            const saved = await txRepo.save(entity);
+            results.push({
+              entityType: change.entityType,
+              entityId: change.entityId,
+              status: 'applied',
+              serverData: saved,
+            });
+          } else {
+            results.push({
+              entityType: change.entityType,
+              entityId: change.entityId,
+              status: 'conflict',
+              serverData: entity,
+            });
+          }
+          continue;
+        }
+
+        if (change.method === 'POST') {
+          const data = this.buildCreateData(change.entityType, change.payload);
+          const newEntity = txRepo.create(data);
+          const saved = await txRepo.save(newEntity);
+          results.push({
+            entityType: change.entityType,
+            entityId: (saved as any).id,
+            status: 'applied',
+            serverData: saved,
+          });
+          continue;
+        }
+
+        results.push({
+          entityType: change.entityType,
+          entityId: change.entityId,
+          status: 'error',
+        });
       }
 
-      if (change.method === 'DELETE') {
-        try {
-          await repo.delete(change.entityId);
-          results.push({ entityType: change.entityType, entityId: change.entityId, status: 'applied' });
-        } catch {
-          results.push({ entityType: change.entityType, entityId: change.entityId, status: 'error' });
-        }
-        continue;
-      }
+      return { results };
+    });
+  }
 
-      const entity = await repo.findOneBy({ id: change.entityId } as any);
-
-      if (change.method === 'PATCH' && entity) {
-        const serverUpdated = new Date((entity as any).updatedAt).getTime();
-        const clientUpdated = new Date(change.updatedAt).getTime();
-
-        if (clientUpdated >= serverUpdated) {
-          Object.assign(entity, change.payload);
-          const saved = await repo.save(entity);
-          results.push({ entityType: change.entityType, entityId: change.entityId, status: 'applied', serverData: saved });
-        } else {
-          results.push({ entityType: change.entityType, entityId: change.entityId, status: 'conflict', serverData: entity });
-        }
-      } else if (change.method === 'POST') {
-        const newEntity = repo.create(change.payload as any);
-        const saved = await repo.save(newEntity);
-        results.push({ entityType: change.entityType, entityId: (saved as any).id, status: 'applied', serverData: saved });
-      } else {
-        results.push({ entityType: change.entityType, entityId: change.entityId, status: 'error' });
+  private pickFields(
+    entityType: string,
+    payload: Record<string, any>,
+    fieldMap: Record<string, string[]>,
+  ): Record<string, any> {
+    const allowed = fieldMap[entityType] ?? [];
+    const picked: Record<string, any> = {};
+    for (const field of allowed) {
+      if (payload[field] !== undefined) {
+        picked[field] = payload[field];
       }
     }
+    return picked;
+  }
 
-    return { results };
+  private buildCreateData(
+    entityType: string,
+    payload: Record<string, any>,
+  ): Record<string, any> {
+    const data = this.pickFields(
+      entityType,
+      payload,
+      OfflineService.CREATE_FIELDS,
+    );
+    const relations = OfflineService.RELATION_FIELDS[entityType] ?? {};
+    for (const [sourceField, relation] of Object.entries(relations)) {
+      const value = payload[sourceField];
+      if (value !== undefined && value !== null) {
+        data[relation] = { id: value };
+      }
+    }
+    return data;
   }
 
   async getChangesSince(since: string, projectId: number) {
     const sinceDate = new Date(since);
+    if (Number.isNaN(sinceDate.getTime())) {
+      throw new BadRequestException('Invalid since date');
+    }
+    if (!Number.isInteger(projectId) || projectId <= 0) {
+      throw new BadRequestException('Invalid projectId');
+    }
 
     const resources = await this.resourceRepo.find({
       where: { project: { id: projectId }, updatedAt: MoreThan(sinceDate) },

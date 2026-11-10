@@ -25,6 +25,7 @@ describe('ExecutionOutboxService', () => {
             socket_event: 'askResponse',
             payload: { response: 'done' },
             attempts: 1,
+            owner_principal: 'user-7',
           },
         ],
         1,
@@ -35,7 +36,8 @@ describe('ExecutionOutboxService', () => {
     await expect(service.publishPending()).resolves.toBe(1);
     expect(manager.query.mock.calls[0][0]).toContain('FOR UPDATE SKIP LOCKED');
     expect(manager.query.mock.calls[0][0]).toContain(`"status" = 'publishing'`);
-    expect(gateway.publishExecution).toHaveBeenCalledWith({
+    expect(manager.query.mock.calls[0][0]).toContain('owner_principal');
+    expect(gateway.publishExecution).toHaveBeenCalledWith('user-7', {
       outboxId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
       socketEvent: 'askResponse',
       payload: { response: 'done' },

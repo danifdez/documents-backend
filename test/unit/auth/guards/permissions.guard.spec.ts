@@ -1,4 +1,4 @@
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { PermissionsGuard } from '../../../../src/auth/guards/permissions.guard';
 
 describe('PermissionsGuard', () => {
@@ -39,5 +39,11 @@ describe('PermissionsGuard', () => {
     configService.get.mockReturnValue('true');
     reflector.getAllAndOverride.mockReturnValue(['upload']);
     expect(() => guard.canActivate(mockContext({ permissions: {} }))).toThrow(ForbiddenException);
+  });
+
+  it('should fail closed when a permission-protected route has no user', () => {
+    configService.get.mockReturnValue('true');
+    reflector.getAllAndOverride.mockReturnValue(['upload']);
+    expect(() => guard.canActivate(mockContext())).toThrow(UnauthorizedException);
   });
 });
