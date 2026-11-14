@@ -93,14 +93,54 @@ describe('ResourceController', () => {
 
   describe('uploadFile', () => {
     it('should throw BAD_REQUEST if no file', async () => {
-      await expect(controller.uploadFile(null as any, {})).rejects.toThrow(HttpException);
+      await expect(
+        controller.uploadFile(null as any, {}, { userId: 7 }),
+      ).rejects.toThrow(HttpException);
+    });
+
+    it('should use the canonical standalone owner when authentication is disabled', async () => {
+      const file = {
+        buffer: Buffer.from('test'),
+        originalname: 'test.txt',
+        mimetype: 'text/plain',
+        size: 4,
+      } as Express.Multer.File;
+      resourceService.uploadAndProcess.mockResolvedValue({
+        success: true,
+        resourceId: 5,
+        executionId: 'execution-id',
+      });
+      await controller.uploadFile(file, {}, undefined);
+      expect(resourceService.uploadAndProcess).toHaveBeenCalledWith(
+        { ownerPrincipal: 'standalone' },
+        file,
+        {},
+      );
     });
 
     it('should delegate to resourceService.uploadAndProcess', async () => {
-      const file = { buffer: Buffer.from('test'), originalname: 'test.pdf', mimetype: 'application/pdf', size: 4 } as Express.Multer.File;
-      resourceService.uploadAndProcess.mockResolvedValue({ success: true });
-      const result = await controller.uploadFile(file, {});
-      expect(result).toEqual({ success: true });
+      const file = {
+        buffer: Buffer.from('test'),
+        originalname: 'test.pdf',
+        mimetype: 'application/pdf',
+        size: 4,
+      } as Express.Multer.File;
+      resourceService.uploadAndProcess.mockResolvedValue({
+        success: true,
+        resourceId: 5,
+        executionId: 'execution-id',
+      });
+      const result = await controller.uploadFile(file, {}, { userId: 7 });
+      expect(result).toEqual({
+        success: true,
+        resourceId: 5,
+        executionId: 'execution-id',
+      });
+      expect(resourceService.uploadAndProcess).toHaveBeenCalledWith(
+        { ownerPrincipal: '7' },
+        file,
+        {},
+      );
     });
   });
 

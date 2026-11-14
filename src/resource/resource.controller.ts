@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Req, Res, HttpException, HttpStatus, ParseIntPipe, Optional, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 import { ResourceService } from './resource.service';
 import { ResourceEntity } from './resource.entity';
 import { AuthorService } from '../author/author.service';
@@ -160,11 +162,16 @@ export class ResourceController {
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body() resourceData: UploadResourceDto,
+    @CurrentUser() user: unknown,
   ) {
     if (!file) {
       throw new HttpException('No file uploaded', HttpStatus.BAD_REQUEST);
     }
-    return await this.resourceService.uploadAndProcess(file, resourceData);
+    return await this.resourceService.uploadAndProcess(
+      { ownerPrincipal: ownerPrincipalFromUser(user) },
+      file,
+      resourceData,
+    );
   }
 
   @Get(':id/download')

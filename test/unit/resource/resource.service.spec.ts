@@ -10,6 +10,8 @@ import { createMockRepository, MockRepository } from '../../test-utils';
 import { buildResource } from '../../factories';
 
 describe('ResourceService', () => {
+  const scope = { ownerPrincipal: 'user-7' };
+  const extractionId = '01234567-89ab-4def-8123-456789abcdef';
   let service: ResourceService;
   let repo: MockRepository<ResourceEntity>;
   let fileStorage: Record<string, jest.Mock>;
@@ -158,7 +160,7 @@ describe('ResourceService', () => {
         .mockResolvedValueOnce(resource) // findOne in confirmExtraction
         .mockResolvedValueOnce({ content: '<p>Hello world</p>' }); // getContentById
 
-      executionService.create.mockResolvedValue({ id: 1 });
+      executionService.create.mockResolvedValue({ executionId: extractionId });
 
       const result = await service.confirmExtraction(1);
       expect(result.success).toBe(true);
@@ -201,15 +203,20 @@ describe('ResourceService', () => {
       const created = buildResource({ id: 5 });
       repo.create.mockReturnValue(created);
       repo.save.mockResolvedValue(created);
-      executionService.create.mockResolvedValue({ id: 1 });
+      executionService.create.mockResolvedValue({ executionId: extractionId });
 
-      const result = await service.uploadAndProcess(mockFile, {});
-      expect(result).toEqual({ success: true });
+      const result = await service.uploadAndProcess(scope, mockFile, {});
+      expect(result).toEqual({
+        success: true,
+        resourceId: 5,
+        executionId: extractionId,
+      });
       expect(executionService.create).toHaveBeenCalledWith(
         'document-extraction',
         expect.any(String),
         expect.objectContaining({ resourceId: 5 }),
         {
+          ownerPrincipal: scope.ownerPrincipal,
           inputArtifacts: [
             {
               role: 'document',
@@ -225,9 +232,9 @@ describe('ResourceService', () => {
     it('should throw AlreadyExistException if hash already exists', async () => {
       fileStorage.calculateHash.mockReturnValue('hash123');
       repo.findOne.mockResolvedValue(buildResource()); // findByHash returns existing
-      await expect(service.uploadAndProcess(mockFile, {})).rejects.toThrow(
-        'File with the same content already exists',
-      );
+      await expect(
+        service.uploadAndProcess(scope, mockFile, {}),
+      ).rejects.toThrow('File with the same content already exists');
     });
 
     it('should not create an extraction execution for images', async () => {
@@ -245,7 +252,11 @@ describe('ResourceService', () => {
       repo.create.mockReturnValue(buildResource());
       repo.save.mockResolvedValue(buildResource());
 
-      await service.uploadAndProcess(imageFile, {});
+      expect(await service.uploadAndProcess(scope, imageFile, {})).toEqual({
+        success: true,
+        resourceId: buildResource().id,
+        executionId: null,
+      });
       expect(executionService.create).not.toHaveBeenCalled();
     });
   });

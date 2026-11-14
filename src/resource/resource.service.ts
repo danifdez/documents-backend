@@ -11,6 +11,7 @@ import { EntityEntity } from '../entity/entity.entity';
 import { AuthorEntity } from '../author/author.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { ExecutionService } from '../execution/execution.service';
+import { ExecutionAccessScope } from '../execution/execution.types';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
 import { AlreadyExistException } from '../common/exceptions/already-exist.exception';
 import { RESOURCE_TYPE_WEBPAGE } from '../common/constants';
@@ -420,12 +421,17 @@ export class ResourceService {
   }
 
   async uploadAndProcess(
+    scope: ExecutionAccessScope,
     file: Express.Multer.File,
     resourceData: Partial<ResourceEntity> & {
       projectId?: string;
       threadId?: string;
     },
-  ): Promise<{ success: boolean }> {
+  ): Promise<{
+    success: boolean;
+    resourceId: number;
+    executionId: string | null;
+  }> {
     const hash = this.fileStorageService.calculateHash(file.buffer);
 
     const existingResource = await this.findByHash(hash);
@@ -471,8 +477,9 @@ export class ResourceService {
     }
 
     const resourceCreated = await this.create(resourceToCreate);
+    let executionId: string | null = null;
     if (!file.mimetype.startsWith('image/')) {
-      await this.executionService.create(
+      const execution = await this.executionService.create(
         'document-extraction',
         ExecutionPriority.NORMAL,
         {
@@ -481,6 +488,7 @@ export class ResourceService {
           resourceId: resourceCreated.id,
         },
         {
+          ownerPrincipal: scope.ownerPrincipal,
           inputArtifacts: [
             {
               role: 'document',
@@ -491,9 +499,10 @@ export class ResourceService {
           ],
         },
       );
+      executionId = execution.executionId;
     }
 
-    return { success: true };
+    return { success: true, resourceId: resourceCreated.id, executionId };
   }
 
   async getFileBuffer(
