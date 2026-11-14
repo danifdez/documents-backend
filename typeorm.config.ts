@@ -1,3 +1,4 @@
+import { ExecutionTelemetrySubscriber } from './src/telemetry/execution-telemetry.subscriber';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { DataSource } from 'typeorm';
@@ -14,4 +15,5 @@ export const AppDataSource = new DataSource({
   entities: [__dirname + '/src/**/*.entity{.ts,.js}'],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
+  subscribers: [ExecutionTelemetrySubscriber],
 });

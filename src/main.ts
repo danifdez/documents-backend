@@ -9,6 +9,7 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule.register());
   const configService = app.get(ConfigService);
+  app.enableShutdownHooks();
 
   // Security: warn if auth is disabled
   const authEnabled = configService.get('AUTH_ENABLED') === 'true';

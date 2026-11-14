@@ -46,6 +46,9 @@ export class ExecutionEntity {
   @Column({ name: 'task_type', type: 'varchar', length: 100 })
   taskType: ExecutionTaskType;
 
+  @Column({ name: 'trace_context', type: 'jsonb', nullable: true })
+  traceContext: { traceparent: string } | null;
+
   @Column({ type: 'jsonb', nullable: true })
   payload: AnyExecutionTaskPayload;
 

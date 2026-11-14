@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { tracedWork } from '../telemetry/telemetry';
 import { EntityManager, In, Repository } from 'typeorm';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
@@ -104,7 +105,7 @@ export async function createExecutionStep(
     status,
     version: 1,
     inputArtifactRefs: input.inputArtifactRefs ?? [],
-    work: input.work,
+    work: tracedWork(input.work, execution.traceContext),
     finalizeOnFailure: input.finalizeOnFailure ?? false,
     requiredCapabilities: [...new Set(input.requiredCapabilities ?? [])],
     resourceKeys: [...new Set(input.resourceKeys ?? [])],

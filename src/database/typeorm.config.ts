@@ -1,3 +1,4 @@
+import { ExecutionTelemetrySubscriber } from '../telemetry/execution-telemetry.subscriber';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { DATABASE_ENTITIES } from './database-entities';
@@ -14,6 +15,7 @@ export const getTypeOrmConfig = async (
     database: String(configService.get('POSTGRES_DB') ?? 'documents'),
     entities: [...DATABASE_ENTITIES],
     synchronize: false,
+    subscribers: [ExecutionTelemetrySubscriber],
     // Apply pending migrations on every boot so that updates ship their schema
     // automatically (a new release with a new migration runs it on first start).
     // Idempotent: TypeORM only runs migrations not yet recorded in the

@@ -8,6 +8,7 @@ import {
 import { FeatureFlagService } from '../common/feature-flags.service';
 import { ownerPrincipalFromUser } from '../auth/owner-principal';
 import { randomUUID } from 'crypto';
+import { executionTraceContext } from '../telemetry/telemetry';
 import {
   DataSource,
   EntityManager,
@@ -830,6 +831,7 @@ export class ExecutionService {
       schemaVersion: EXECUTION_SCHEMA,
       taskType: input.taskType,
       payload: input.payload,
+      traceContext: executionTraceContext(parent.traceContext),
       status: ExecutionStatus.QUEUED,
       phase: null,
       waitReason: null,
@@ -1155,6 +1157,7 @@ export class ExecutionService {
         taskType:
           executionKind === 'assistant_chat' ? 'assistant-chat' : 'agent-chat',
         payload: executionPayload,
+        traceContext: executionTraceContext(),
         status: ExecutionStatus.QUEUED,
         phase: null,
         cancellationRequestedAt: null,
@@ -1472,6 +1475,7 @@ export class ExecutionService {
         schemaVersion: EXECUTION_SCHEMA,
         taskType,
         payload: effectivePayload,
+        traceContext: executionTraceContext(eventRoot?.traceContext),
         status: ExecutionStatus.QUEUED,
         phase: null,
         cancellationRequestedAt: null,
