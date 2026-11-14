@@ -13,6 +13,10 @@ describe('ExecutionService queue state', () => {
   let manager: Record<string, jest.Mock>;
   let outboxRepo: Record<string, jest.Mock>;
   let skillActivationRepo: Record<string, jest.Mock>;
+  let conversations: {
+    finishConversationTurn: jest.Mock;
+    chatPublication: jest.Mock;
+  };
 
   beforeEach(() => {
     executionRepo = {
@@ -55,8 +59,13 @@ describe('ExecutionService queue state', () => {
       query: jest.fn(),
       save: jest.fn(async (value) => value),
     };
+    conversations = {
+      finishConversationTurn: jest.fn().mockResolvedValue(null),
+      chatPublication: jest.fn(),
+    };
     service = Object.create(ExecutionService.prototype);
     (service as any).executionRepo = executionRepo;
+    (service as any).conversations = conversations;
     (service as any).dataSource = {
       transaction: jest.fn(async (callback) => callback(manager)),
     };
@@ -227,9 +236,11 @@ describe('ExecutionService queue state', () => {
       executionId: EXECUTION_ID,
       createdAt: new Date('2026-09-18T16:31:55.000Z'),
     };
-    const finishConversationTurn = jest
-      .spyOn(service as any, 'finishConversationTurn')
-      .mockResolvedValue(reply);
+    conversations.finishConversationTurn.mockResolvedValue(reply);
+    conversations.chatPublication.mockReturnValue({
+      socketEvent: 'assistantResponse',
+      payload: { assistantId: 1 },
+    });
 
     await service.updateStatus(
       EXECUTION_ID,
@@ -238,11 +249,15 @@ describe('ExecutionService queue state', () => {
       { completionReason: 'worker_failed' },
     );
 
-    expect(finishConversationTurn).toHaveBeenCalledWith(
+    expect(conversations.finishConversationTurn).toHaveBeenCalledWith(
       expect.anything(),
       execution,
       expect.anything(),
       { reply: '', error: 'grammar exploded' },
+    );
+    expect(conversations.chatPublication).toHaveBeenCalledWith(
+      execution,
+      reply,
     );
     expect(outboxRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({

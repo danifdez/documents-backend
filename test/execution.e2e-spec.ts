@@ -30,6 +30,7 @@ import { CreateConversationSessions1757668140730 } from '../migrations/175766814
 import { CreateMemoryEntries1757668140740 } from '../migrations/1757668140740-CreateMemoryEntries';
 import { CreateSkillActivations1757668140750 } from '../migrations/1757668140750-CreateSkillActivations';
 import { CreateExecutionEffectJournal1757668140760 } from '../migrations/1757668140760-CreateExecutionEffectJournal';
+import { AddExecutionTraceContext1794650000000 } from '../migrations/1794650000000-AddExecutionTraceContext';
 import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
 import { ExecutionCompletionValidator } from '../src/execution/execution-completion-validator';
@@ -51,6 +52,7 @@ import {
   contentHash,
   ExecutionService,
 } from '../src/execution/execution.service';
+import { ExecutionConversationService } from '../src/execution/execution-conversation.service';
 import { WorkerEntity } from '../src/worker/worker.entity';
 import { WorkerService } from '../src/worker/worker.service';
 import { WorkerKind } from '../src/worker/worker-kind.enum';
@@ -204,6 +206,7 @@ describe('execution PostgreSQL integration', () => {
     await new CreateMemoryEntries1757668140740().up(runner);
     await new CreateSkillActivations1757668140750().up(runner);
     await new CreateExecutionEffectJournal1757668140760().up(runner);
+    await new AddExecutionTraceContext1794650000000().up(runner);
     await runner.query(`
       INSERT INTO "assistants" ("id", "name", "icon", "sub", "owner_principal")
       VALUES (1, 'Assistant', '◇', 'Personal assistant', 'standalone')
@@ -217,10 +220,10 @@ describe('execution PostgreSQL integration', () => {
     const config = {
       get: (key: string, fallback?: unknown) =>
         key === 'EXECUTION_ARTIFACT_STORAGE_DIR'
-            ? artifactDirectory
-            : key === 'EXECUTION_ARTIFACT_INLINE_MAX_BYTES'
-              ? String(8 * 1024 * 1024)
-              : fallback,
+          ? artifactDirectory
+          : key === 'EXECUTION_ARTIFACT_INLINE_MAX_BYTES'
+            ? String(8 * 1024 * 1024)
+            : fallback,
     } as any;
     const artifactStorage = new ExecutionArtifactStorageService(config);
     const artifactService = new ExecutionArtifactService(
@@ -239,7 +242,9 @@ describe('execution PostgreSQL integration', () => {
       artifactStorage,
       artifactService,
       new ExecutionCompletionValidator(),
-      { isEnabled: (flag: string) => flag === 'browser_federation' } as any,
+      new ExecutionConversationService(dataSource, artifactStorage, {
+        isEnabled: (flag: string) => flag === 'browser_federation',
+      } as any),
     );
     attemptService = new ExecutionAttemptService(
       dataSource,

@@ -253,6 +253,29 @@ describe('ExecutionService primitives', () => {
     });
   });
 
+  it('keeps chat creation available through the execution facade', async () => {
+    const service = Object.create(ExecutionService.prototype) as any;
+    const acceptance = {
+      execution: { executionId: 'execution-1' },
+      userMessage: { id: 11 },
+    };
+    service.conversations = {
+      createForChat: jest.fn().mockResolvedValue(acceptance),
+    };
+    const scope = { ownerPrincipal: 'user-1' };
+    const payload = { ownerId: 7, folderScope: null };
+
+    await expect(
+      service.createForChat('assistant_chat', 'Hello', scope, payload),
+    ).resolves.toBe(acceptance);
+    expect(service.conversations.createForChat).toHaveBeenCalledWith(
+      'assistant_chat',
+      'Hello',
+      scope,
+      payload,
+    );
+  });
+
   it('canonicalizes object keys recursively', () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe(
       '{"a":{"b":3,"y":2},"z":1}',

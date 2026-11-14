@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { ExecutionController } from './execution.controller';
 import { ExecutionService } from './execution.service';
+import { ExecutionConversationService } from './execution-conversation.service';
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { ExecutionAttemptService } from './execution-attempt.service';
 import { ExecutionProtocolController } from './execution-protocol.controller';
@@ -27,6 +28,7 @@ import { ExecutionCompletionValidator } from './execution-completion-validator';
   ],
   providers: [
     ExecutionService,
+    ExecutionConversationService,
     ExecutionContractValidator,
     ExecutionAttemptService,
     ExecutionToolPlanService,
