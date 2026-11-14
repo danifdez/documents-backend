@@ -61,7 +61,9 @@ describe('ExecutionService bundle completeness', () => {
       'environment.modelFingerprints',
       'environment.promptPackages',
       'environment.runtimeFingerprints',
+      'environment.servedInferenceIdentity',
       'environment.toolVersions',
+      'operation.inference-1.inferenceExchange',
       'operation.inference-1.metrics.timeToFirstTokenMs',
       'operation.tool-1.finish',
     ]);

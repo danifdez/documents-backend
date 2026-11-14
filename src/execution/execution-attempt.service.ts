@@ -1,4 +1,8 @@
 import {
+  assertInferenceExchange,
+  INFERENCE_EXCHANGE_KIND,
+} from './inference-capture';
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -448,6 +452,9 @@ export class ExecutionAttemptService {
         .getRepository(ExecutionEntity)
         .findOneBy({ executionId: attempt.executionId });
       if (!execution) return ack('stale_attempt');
+      if (artifact.kind === INFERENCE_EXCHANGE_KIND) {
+        assertInferenceExchange(body, execution, step, attemptId);
+      }
 
       const artifactRepo = manager.getRepository(ExecutionArtifactEntity);
       const existing = await artifactRepo.findOneBy({
@@ -498,7 +505,7 @@ export class ExecutionAttemptService {
         mediaType: artifact.mediaType,
         encoding: 'identity',
         dataClassification: mostRestrictedClassification([
-          'workspace',
+          artifact.kind === INFERENCE_EXCHANGE_KIND ? 'sensitive' : 'workspace',
           ...inputArtifacts.map((input) => input.dataClassification),
         ]),
         redaction: { applied: false },

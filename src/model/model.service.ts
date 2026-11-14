@@ -81,6 +81,7 @@ export class ModelService {
     text?: string,
     sourceLanguage?: string,
     type?: string,
+    captureInference = false,
   ): Promise<{ executionId: string }> {
     let content: string | null = null;
     if (resourceId) {
@@ -115,7 +116,11 @@ export class ModelService {
         targetDocId: targetDocId,
         type: type || 'resource',
       },
-      { steps, ownerPrincipal: scope.ownerPrincipal },
+      {
+        steps,
+        ownerPrincipal: scope.ownerPrincipal,
+        ...(captureInference ? { captureInference: true } : {}),
+      },
     );
     return { executionId: execution.executionId };
   }

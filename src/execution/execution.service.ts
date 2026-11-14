@@ -1,4 +1,8 @@
 import {
+  INFERENCE_EXCHANGE_KIND,
+  inferenceCaptureAuthorization,
+} from './inference-capture';
+import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -126,6 +130,7 @@ function withFinalizerIdentity<TPayload extends object>(
 }
 
 export interface CreateExecutionOptions {
+  captureInference?: boolean;
   rootExecutionId?: string;
   parentExecutionId?: string;
   childIdempotencyKey?: string;
@@ -675,6 +680,9 @@ export class ExecutionService {
     payload: ExecutionTaskPayload<TTaskType>,
     options?: CreateExecutionOptions,
   ): Promise<ExecutionEntity> {
+    const captureAuthorization = options?.captureInference
+      ? inferenceCaptureAuthorization(options.ownerPrincipal)
+      : undefined;
     const executionId = randomUUID();
     const rootExecutionId = options?.rootExecutionId ?? executionId;
     return this.dataSource.transaction(async (manager) => {
@@ -852,6 +860,11 @@ export class ExecutionService {
       for (const [index, step] of steps.entries()) {
         await createExecutionStep(manager, {
           ...step,
+          work:
+            captureAuthorization &&
+            step.stepKind === ExecutionStepKind.INFERENCE
+              ? { ...step.work, inferenceCapture: captureAuthorization }
+              : step.work,
           inputArtifactRefs: [
             ...(index === 0 ? inputArtifactRefs : []),
             ...(step.inputArtifactRefs ?? []),
@@ -2368,6 +2381,40 @@ export class ExecutionService {
       }
     }
     if (hasInference) {
+      for (const event of starts.values()) {
+        if (
+          (event.payload as Record<string, unknown>)?.operationKind !==
+          'inference'
+        )
+          continue;
+        const exchanges = artifacts.filter(
+          (artifact) =>
+            artifact.kind === INFERENCE_EXCHANGE_KIND &&
+            artifact.producedByAttemptId === event.attemptId,
+        );
+        const complete =
+          exchanges.length > 0 &&
+          exchanges.every((artifact) => {
+            if (!artifact.body) return false;
+            try {
+              const value = JSON.parse(artifact.body.toString('utf8'));
+              return (
+                value.status === 'completed' &&
+                typeof value.request?.bodyBase64 === 'string' &&
+                typeof value.response?.bodyBase64 === 'string'
+              );
+            } catch {
+              return false;
+            }
+          });
+        if (!complete)
+          missing.add(
+            `operation.${String(event.operationId)}.inferenceExchange`,
+          );
+      }
+      // Request/response capture alone does not establish the identity of the
+      // served model, engine and template needed to replay an inference.
+      missing.add('environment.servedInferenceIdentity');
       if (!inferenceIdentities.codeIdentityKnown) {
         missing.add('environment.codeFingerprints');
       }

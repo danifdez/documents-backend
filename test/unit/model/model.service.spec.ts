@@ -265,6 +265,29 @@ describe('ModelService execution identities', () => {
     );
   });
 
+  it('requests capture through the common execution options', async () => {
+    await service.summarize(
+      scope,
+      'en',
+      undefined,
+      undefined,
+      'Hola',
+      'es',
+      'workspace-selection',
+      true,
+    );
+    const [, , payload, options] = executionService.create.mock.calls[0];
+    expect(payload).not.toHaveProperty('captureInference');
+    expect(options).toEqual(
+      expect.objectContaining({
+        captureInference: true,
+        ownerPrincipal: scope.ownerPrincipal,
+      }),
+    );
+    for (const step of options.steps)
+      expect(step.work).not.toHaveProperty('inferenceCapture');
+  });
+
   it('fans long summaries out without splitting paragraphs', () => {
     const firstParagraph = Array.from(
       { length: 600 },

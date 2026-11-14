@@ -393,6 +393,95 @@ describe('ExecutionAttemptService', () => {
     );
   });
 
+  it('stores an authorized exchange as sensitive regardless of worker labels', async () => {
+    attemptRepo.findOne.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      stepKind: ExecutionStepKind.INFERENCE,
+      currentAttemptId: ATTEMPT_ID,
+      work: {
+        taskType: 'summarize-map',
+        inferenceCapture: {
+          schemaVersion: 'inference-capture/1',
+          purpose: 'evaluation',
+          authorizedBy: '7',
+        },
+      },
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      rootExecutionId: EXECUTION_ID,
+      taskType: 'summarize',
+      ownerPrincipal: '7',
+      payload: {},
+    });
+    const body = Buffer.from(
+      JSON.stringify({
+        schemaVersion: 'inference-exchange/1',
+        executionId: EXECUTION_ID,
+        stepId: STEP_ID,
+        operationId: OPERATION_ID,
+        attemptId: ATTEMPT_ID,
+        callIndex: 1,
+        status: 'completed',
+        request: {
+          method: 'POST',
+          path: '/v1/chat/completions',
+          bodyBase64: 'e30=',
+        },
+        response: { status: 200, bodyBase64: 'e30=' },
+      }),
+    );
+    const ack = await service.uploadOutputArtifact(ATTEMPT_ID, WORKER_ID, {
+      artifactId: ARTIFACT_ID,
+      kind: 'inference_exchange',
+      contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
+      size: body.length,
+      mediaType: 'application/json',
+      bodyBase64: body.toString('base64'),
+      dataClassification: 'public',
+    });
+    expect(ack.code).toBe('received');
+    expect(artifactStorage.save).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        body,
+        dataClassification: 'sensitive',
+        retentionClass: 'operational',
+        producedByAttemptId: ATTEMPT_ID,
+        expiresAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('rejects an exchange when the execution never authorized capture', async () => {
+    attemptRepo.findOne.mockResolvedValue(runningAttempt());
+    stepRepo.findOneBy.mockResolvedValue({
+      ...readyStep(),
+      currentAttemptId: ATTEMPT_ID,
+    });
+    executionRepo.findOneBy.mockResolvedValue({
+      executionId: EXECUTION_ID,
+      rootExecutionId: EXECUTION_ID,
+      taskType: 'summarize',
+      payload: {},
+      ownerPrincipal: '7',
+    });
+    const body = Buffer.from('{}');
+    await expect(
+      service.uploadOutputArtifact(ATTEMPT_ID, WORKER_ID, {
+        artifactId: ARTIFACT_ID,
+        kind: 'inference_exchange',
+        contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
+        size: body.length,
+        mediaType: 'application/json',
+        bodyBase64: body.toString('base64'),
+        dataClassification: 'workspace',
+      }),
+    ).rejects.toThrow('invalid_inference_exchange');
+    expect(artifactStorage.save).not.toHaveBeenCalled();
+  });
+
   it('fences an output artifact after the attempt is superseded', async () => {
     const body = Buffer.from('{"points":[]}');
     attemptRepo.findOne.mockResolvedValue(runningAttempt());
