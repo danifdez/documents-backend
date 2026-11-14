@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { renderHtmlToDocx } from '../common/html-to-docx';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const HTMLtoDOCX = require('html-to-docx');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const puppeteer = require('puppeteer');
 
@@ -13,12 +12,7 @@ export class DocExportService {
   private readonly waiters: Array<() => void> = [];
 
   async renderDocx(html: string): Promise<Buffer> {
-    const wrappedHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
-    return HTMLtoDOCX(wrappedHtml, null, {
-      table: { row: { cantSplit: true } },
-      footer: false,
-      header: false,
-    });
+    return renderHtmlToDocx(html);
   }
 
   async renderPdf(html: string): Promise<Buffer> {

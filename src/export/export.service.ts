@@ -5,10 +5,9 @@ import { ResourceEntity } from '../resource/resource.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { DocEntity } from '../doc/doc.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
+import { renderHtmlToDocx } from '../common/html-to-docx';
 import * as archiver from 'archiver';
 import { PassThrough } from 'stream';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const HTMLtoDOCX = require('html-to-docx');
 
 @Injectable()
 export class ExportService {
@@ -110,30 +109,22 @@ export class ExportService {
 
         // Add extracted content
         if (resource.content) {
-          if (convertToDocx) {
-            const docxBuffer = await this.htmlToDocx(resource.content);
-            archive.append(docxBuffer, {
-              name: `${sanitizedProjectName}/content/${resourceBaseName}.docx`,
-            });
-          } else {
-            archive.append(resource.content, {
-              name: `${sanitizedProjectName}/content/${resourceBaseName}.html`,
-            });
-          }
+          await this.appendHtmlContent(
+            archive,
+            resource.content,
+            `${sanitizedProjectName}/content/${resourceBaseName}`,
+            convertToDocx,
+          );
         }
 
         // Add translated content if available
         if (resource.translatedContent) {
-          if (convertToDocx) {
-            const docxBuffer = await this.htmlToDocx(resource.translatedContent);
-            archive.append(docxBuffer, {
-              name: `${sanitizedProjectName}/translated/${resourceBaseName}.docx`,
-            });
-          } else {
-            archive.append(resource.translatedContent, {
-              name: `${sanitizedProjectName}/translated/${resourceBaseName}.html`,
-            });
-          }
+          await this.appendHtmlContent(
+            archive,
+            resource.translatedContent,
+            `${sanitizedProjectName}/translated/${resourceBaseName}`,
+            convertToDocx,
+          );
         }
 
         // Add individual metadata file for this resource
@@ -164,16 +155,12 @@ export class ExportService {
 
         // Add doc content
         if (doc.content) {
-          if (convertToDocx) {
-            const docxBuffer = await this.htmlToDocx(doc.content);
-            archive.append(docxBuffer, {
-              name: `${sanitizedProjectName}/docs/${docFileName}.docx`,
-            });
-          } else {
-            archive.append(doc.content, {
-              name: `${sanitizedProjectName}/docs/${docFileName}.html`,
-            });
-          }
+          await this.appendHtmlContent(
+            archive,
+            doc.content,
+            `${sanitizedProjectName}/docs/${docFileName}`,
+            convertToDocx,
+          );
         }
 
         // Add individual metadata file for this doc
@@ -229,16 +216,12 @@ export class ExportService {
         }
 
         if (resource.content) {
-          if (convertToDocx) {
-            const docxBuffer = await this.htmlToDocx(resource.content);
-            archive.append(docxBuffer, {
-              name: `_sin_proyecto/content/${resourceBaseName}.docx`,
-            });
-          } else {
-            archive.append(resource.content, {
-              name: `_sin_proyecto/content/${resourceBaseName}.html`,
-            });
-          }
+          await this.appendHtmlContent(
+            archive,
+            resource.content,
+            `_sin_proyecto/content/${resourceBaseName}`,
+            convertToDocx,
+          );
         }
 
         archive.append(JSON.stringify(resourceMeta, null, 2), {
@@ -266,16 +249,12 @@ export class ExportService {
         };
 
         if (doc.content) {
-          if (convertToDocx) {
-            const docxBuffer = await this.htmlToDocx(doc.content);
-            archive.append(docxBuffer, {
-              name: `_sin_proyecto/docs/${docFileName}.docx`,
-            });
-          } else {
-            archive.append(doc.content, {
-              name: `_sin_proyecto/docs/${docFileName}.html`,
-            });
-          }
+          await this.appendHtmlContent(
+            archive,
+            doc.content,
+            `_sin_proyecto/docs/${docFileName}`,
+            convertToDocx,
+          );
         }
 
         archive.append(JSON.stringify(docMeta, null, 2), {
@@ -318,12 +297,17 @@ export class ExportService {
     return filename.substring(0, lastDot);
   }
 
-  private async htmlToDocx(html: string): Promise<Buffer> {
-    const wrappedHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
-    return await HTMLtoDOCX(wrappedHtml, null, {
-      table: { row: { cantSplit: true } },
-      footer: false,
-      header: false,
-    });
+  private async appendHtmlContent(
+    archive: archiver.Archiver,
+    html: string,
+    basePath: string,
+    convertToDocx: boolean,
+  ): Promise<void> {
+    if (convertToDocx) {
+      const docxBuffer = await renderHtmlToDocx(html);
+      archive.append(docxBuffer, { name: `${basePath}.docx` });
+      return;
+    }
+    archive.append(html, { name: `${basePath}.html` });
   }
 }
