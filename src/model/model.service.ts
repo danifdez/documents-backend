@@ -42,6 +42,7 @@ export class ModelService {
   }
 
   async ask(
+    scope: ExecutionAccessScope,
     question: string,
     projectId?: number,
     requestId?: string,
@@ -65,6 +66,7 @@ export class ModelService {
         graphContext: graph.relationships,
       },
       {
+        ownerPrincipal: scope.ownerPrincipal,
         inputArtifacts: [this.vectorStore.vectorCandidatesArtifact(candidates)],
       },
     );
@@ -72,6 +74,7 @@ export class ModelService {
   }
 
   async summarize(
+    scope: ExecutionAccessScope,
     targetLanguage: string,
     resourceId?: number,
     targetDocId?: number,
@@ -112,12 +115,13 @@ export class ModelService {
         targetDocId: targetDocId,
         type: type || 'resource',
       },
-      { steps },
+      { steps, ownerPrincipal: scope.ownerPrincipal },
     );
     return { executionId: execution.executionId };
   }
 
   async translate(
+    scope: ExecutionAccessScope,
     resourceId: number,
     language: string,
   ): Promise<{ executionId: string }> {
@@ -150,12 +154,15 @@ export class ModelService {
         targetLanguage: language,
         sourceContentHash: contentHash(content),
       },
-      { steps },
+      { steps, ownerPrincipal: scope.ownerPrincipal },
     );
     return { executionId: execution.executionId };
   }
 
-  async extractEntities(resourceId: number): Promise<{ executionId: string }> {
+  async extractEntities(
+    scope: ExecutionAccessScope,
+    resourceId: number,
+  ): Promise<{ executionId: string }> {
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
       throw new Error(`Resource with ID ${resourceId} not found`);
@@ -177,12 +184,13 @@ export class ModelService {
         sourceContentHash: contentHash(content),
         sourceLanguage: resource.language || 'en',
       },
-      { steps },
+      { steps, ownerPrincipal: scope.ownerPrincipal },
     );
     return { executionId: execution.executionId };
   }
 
   async keyPoints(
+    scope: ExecutionAccessScope,
     resourceId: number,
     targetLanguage?: string,
   ): Promise<{ executionId: string }> {
@@ -214,12 +222,13 @@ export class ModelService {
         resourceId,
         targetLanguage: effectiveTargetLanguage,
       },
-      { steps },
+      { steps, ownerPrincipal: scope.ownerPrincipal },
     );
     return { executionId: execution.executionId };
   }
 
   async keywords(
+    scope: ExecutionAccessScope,
     resourceId: number,
     targetLanguage?: string,
   ): Promise<{ executionId: string }> {
@@ -251,12 +260,13 @@ export class ModelService {
         resourceId,
         targetLanguage: effectiveTargetLanguage,
       },
-      { steps },
+      { steps, ownerPrincipal: scope.ownerPrincipal },
     );
     return { executionId: execution.executionId };
   }
 
   async semanticSearch(
+    scope: ExecutionAccessScope,
     query: string,
     projectId?: number,
     requestId?: string,
@@ -273,6 +283,7 @@ export class ModelService {
         limit: limit || 10,
       },
       {
+        ownerPrincipal: scope.ownerPrincipal,
         inputArtifacts: [this.vectorStore.vectorCandidatesArtifact(candidates)],
       },
     );

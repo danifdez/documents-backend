@@ -6,6 +6,7 @@ import { buildKeyPointWorkflowSteps } from '../../../src/model/key-point-workflo
 import { contentHash } from '../../../src/execution/execution-canonical';
 
 describe('ModelService execution identities', () => {
+  const scope = { ownerPrincipal: 'user-7' };
   const executionIds = {
     summarize: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
     translate: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
@@ -81,7 +82,7 @@ describe('ModelService execution identities', () => {
   });
 
   it('creates key points as a durable inference map-reduce graph', async () => {
-    await expect(service.keyPoints(7, 'en')).resolves.toEqual({
+    await expect(service.keyPoints(scope, 7, 'en')).resolves.toEqual({
       executionId: executionIds['key-point'],
     });
     expect(executionService.create).toHaveBeenCalledWith(
@@ -89,6 +90,7 @@ describe('ModelService execution identities', () => {
       expect.any(String),
       { resourceId: 7, targetLanguage: 'en' },
       {
+        ownerPrincipal: scope.ownerPrincipal,
         steps: [
           expect.objectContaining({
             stepKind: 'inference',
@@ -105,7 +107,7 @@ describe('ModelService execution identities', () => {
 
   it('freezes vector and graph context before creating ask work', async () => {
     await expect(
-      service.ask('Who designed it?', 3, 'request-1'),
+      service.ask(scope, 'Who designed it?', 3, 'request-1'),
     ).resolves.toEqual({ executionId: executionIds.ask });
     expect(vectorStore.workspaceCandidates).toHaveBeenCalledWith(3);
     expect(graphService.queryNeighborhoodForText).toHaveBeenCalledWith(
@@ -120,25 +122,31 @@ describe('ModelService execution identities', () => {
         projectId: 3,
         graphContext: [],
       }),
-      expect.objectContaining({ inputArtifacts: [expect.any(Object)] }),
+      expect.objectContaining({
+        ownerPrincipal: scope.ownerPrincipal,
+        inputArtifacts: [expect.any(Object)],
+      }),
     );
   });
 
   it('freezes scoped vector candidates for semantic search', async () => {
     await expect(
-      service.semanticSearch('engine', 3, 'request-2', 4),
+      service.semanticSearch(scope, 'engine', 3, 'request-2', 4),
     ).resolves.toEqual({ executionId: executionIds.search });
     expect(vectorStore.workspaceCandidates).toHaveBeenCalledWith(3);
     expect(executionService.create).toHaveBeenCalledWith(
       'search',
       expect.any(String),
       { query: 'engine', projectId: 3, requestId: 'request-2', limit: 4 },
-      expect.objectContaining({ inputArtifacts: [expect.any(Object)] }),
+      expect.objectContaining({
+        ownerPrincipal: scope.ownerPrincipal,
+        inputArtifacts: [expect.any(Object)],
+      }),
     );
   });
 
   it('creates keywords as a durable map-reduce step graph', async () => {
-    await expect(service.keywords(7, 'en')).resolves.toEqual({
+    await expect(service.keywords(scope, 7, 'en')).resolves.toEqual({
       executionId: executionIds.keywords,
     });
     expect(executionService.create).toHaveBeenCalledWith(
@@ -146,6 +154,7 @@ describe('ModelService execution identities', () => {
       expect.any(String),
       { resourceId: 7, targetLanguage: 'en' },
       {
+        ownerPrincipal: scope.ownerPrincipal,
         steps: [
           expect.objectContaining({
             stepKind: 'inference',
@@ -163,7 +172,7 @@ describe('ModelService execution identities', () => {
   });
 
   it('creates entity extraction as a durable map-reduce step graph', async () => {
-    await expect(service.extractEntities(7)).resolves.toEqual({
+    await expect(service.extractEntities(scope, 7)).resolves.toEqual({
       executionId: executionIds['entity-extraction'],
     });
     expect(executionService.create).toHaveBeenCalledWith(
@@ -175,6 +184,7 @@ describe('ModelService execution identities', () => {
         sourceLanguage: 'es',
       },
       {
+        ownerPrincipal: scope.ownerPrincipal,
         steps: [
           expect.objectContaining({
             stepKind: 'inference',
@@ -192,7 +202,7 @@ describe('ModelService execution identities', () => {
   });
 
   it('creates translate as a durable map-reduce step graph', async () => {
-    await expect(service.translate(7, 'en')).resolves.toEqual({
+    await expect(service.translate(scope, 7, 'en')).resolves.toEqual({
       executionId: executionIds.translate,
     });
     expect(executionService.create).toHaveBeenCalledWith(
@@ -204,6 +214,7 @@ describe('ModelService execution identities', () => {
         sourceContentHash: contentHash('<p>Hola mundo</p>'),
       }),
       {
+        ownerPrincipal: scope.ownerPrincipal,
         steps: [
           expect.objectContaining({
             stepKind: 'inference',
@@ -221,6 +232,7 @@ describe('ModelService execution identities', () => {
   it('creates summarize as section summaries plus one global composition', async () => {
     await expect(
       service.summarize(
+        scope,
         'en',
         undefined,
         undefined,
@@ -238,6 +250,7 @@ describe('ModelService execution identities', () => {
         sourceLanguage: 'es',
       }),
       {
+        ownerPrincipal: scope.ownerPrincipal,
         steps: [
           expect.objectContaining({
             stepKind: 'inference',
