@@ -1,5 +1,7 @@
 import {
   assertInferenceExchange,
+  assertInferenceRuntimeCapture,
+  INFERENCE_RUNTIME_KIND,
   INFERENCE_EXCHANGE_KIND,
 } from './inference-capture';
 import {
@@ -458,6 +460,10 @@ export class ExecutionAttemptService {
       if (artifact.kind === INFERENCE_EXCHANGE_KIND) {
         assertInferenceExchange(body, execution, step, attemptId);
       }
+      const sensitiveCapture =
+        artifact.kind === INFERENCE_EXCHANGE_KIND ||
+        (artifact.kind === INFERENCE_RUNTIME_KIND &&
+          assertInferenceRuntimeCapture(body, execution, step, attemptId));
 
       const artifactRepo = manager.getRepository(ExecutionArtifactEntity);
       const existing = await artifactRepo.findOneBy({
@@ -508,7 +514,7 @@ export class ExecutionAttemptService {
         mediaType: artifact.mediaType,
         encoding: 'identity',
         dataClassification: mostRestrictedClassification([
-          artifact.kind === INFERENCE_EXCHANGE_KIND ? 'sensitive' : 'workspace',
+          sensitiveCapture ? 'sensitive' : 'workspace',
           ...inputArtifacts.map((input) => input.dataClassification),
         ]),
         redaction: { applied: false },

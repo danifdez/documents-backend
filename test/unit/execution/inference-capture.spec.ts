@@ -1,6 +1,10 @@
 import { ForbiddenException } from '@nestjs/common';
 import { ModelController } from '../../../src/model/model.controller';
-import { assertInferenceExchange } from '../../../src/execution/inference-capture';
+import { canonicalHash } from '../../../src/execution/execution-canonical';
+import {
+  assertInferenceRuntimeCapture,
+  assertInferenceExchange,
+} from '../../../src/execution/inference-capture';
 import { ExecutionService } from '../../../src/execution/execution.service';
 
 const ids = {
@@ -245,4 +249,71 @@ describe('Inference replay completeness', () => {
       expect(missing).toEqual(['environment.servedInferenceIdentity']);
     },
   );
+});
+
+describe('Authorized runtime template capture', () => {
+  const template = 'PRIVATE_TEMPLATE_Ω {{ messages[0].content }}';
+  const digest = canonicalHash(template);
+  const runtime = () => ({
+    schemaVersion: 'inference-runtime/1',
+    ...ids,
+    complete: true,
+    calls: [
+      {
+        callIndex: 1,
+        engine: { properties: { chatTemplateHash: digest } },
+        adapter: null,
+      },
+    ],
+    templates: { [digest]: template },
+  });
+  const validate = (
+    value: any = runtime(),
+    root: any = execution,
+    current: any = step,
+  ) =>
+    assertInferenceRuntimeCapture(
+      Buffer.from(JSON.stringify(value)),
+      root,
+      current,
+      ids.attemptId,
+    );
+
+  it('accepts matching authorized template text as sensitive content', () => {
+    expect(validate()).toBe(true);
+  });
+  it('allows body-free runtime metadata without a raw capture grant', () => {
+    const value: any = runtime();
+    delete value.templates;
+    expect(validate(value, execution, { ...step, work: {} })).toBe(false);
+  });
+  it('rejects an absent grant, another owner or a foreign attempt', () => {
+    expect(() => validate(runtime(), execution, { ...step, work: {} })).toThrow(
+      'invalid_inference_runtime',
+    );
+    expect(() =>
+      validate(runtime(), { ...execution, ownerPrincipal: '8' }),
+    ).toThrow('invalid_inference_runtime');
+    expect(() => validate({ ...runtime(), attemptId: ids.stepId })).toThrow(
+      'invalid_inference_runtime',
+    );
+  });
+  it('rejects changed text, unreferenced templates and oversized tables', () => {
+    const changed: any = runtime();
+    changed.templates[digest] = 'PRIVATE_CHANGED';
+    const orphan: any = runtime();
+    orphan.calls[0].engine.properties = {};
+    const large: any = runtime();
+    large.templates[digest] = 'X'.repeat(256 * 1024 + 1);
+    for (const value of [changed, orphan, large]) {
+      expect(() => validate(value)).toThrow('invalid_inference_runtime');
+    }
+  });
+  it('rejects invalid structures without echoing their text', () => {
+    for (const pool of [null, [], 'PRIVATE', { [digest]: '\ud800' }]) {
+      expect(() => validate({ ...runtime(), templates: pool })).toThrow(
+        'invalid_inference_runtime',
+      );
+    }
+  });
 });

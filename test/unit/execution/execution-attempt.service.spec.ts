@@ -454,6 +454,73 @@ describe('ExecutionAttemptService', () => {
     );
   });
 
+  it.each([true, false])(
+    'enforces the capture grant and sensitive classification for template runtime: %s',
+    async (authorized) => {
+      attemptRepo.findOne.mockResolvedValue(runningAttempt());
+      stepRepo.findOneBy.mockResolvedValue({
+        ...readyStep(),
+        stepKind: ExecutionStepKind.INFERENCE,
+        currentAttemptId: ATTEMPT_ID,
+        work: authorized
+          ? {
+              inferenceCapture: {
+                schemaVersion: 'inference-capture/1',
+                purpose: 'evaluation',
+                authorizedBy: '7',
+              },
+            }
+          : {},
+      });
+      executionRepo.findOneBy.mockResolvedValue({
+        executionId: EXECUTION_ID,
+        rootExecutionId: EXECUTION_ID,
+        ownerPrincipal: '7',
+      });
+      const template = 'PRIVATE_TEMPLATE_Ω';
+      const hash =
+        'sha256:' +
+        createHash('sha256').update(JSON.stringify(template)).digest('hex');
+      const body = Buffer.from(
+        JSON.stringify({
+          schemaVersion: 'inference-runtime/1',
+          executionId: EXECUTION_ID,
+          stepId: STEP_ID,
+          operationId: OPERATION_ID,
+          attemptId: ATTEMPT_ID,
+          complete: true,
+          calls: [
+            {
+              callIndex: 1,
+              engine: { properties: { chatTemplateHash: hash } },
+            },
+          ],
+          templates: { [hash]: template },
+        }),
+      );
+      const pending = service.uploadOutputArtifact(ATTEMPT_ID, WORKER_ID, {
+        artifactId: ARTIFACT_ID,
+        kind: 'inference_runtime',
+        mediaType: 'application/json',
+        dataClassification: 'public',
+        contentHash:
+          'sha256:' + createHash('sha256').update(body).digest('hex'),
+        size: body.length,
+        bodyBase64: body.toString('base64'),
+      });
+      if (!authorized) {
+        await expect(pending).rejects.toThrow('invalid_inference_runtime');
+        expect(artifactStorage.save).not.toHaveBeenCalled();
+      } else {
+        expect((await pending).code).toBe('received');
+        expect(artifactStorage.save).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({ dataClassification: 'sensitive', body }),
+        );
+      }
+    },
+  );
+
   it('rejects an exchange when the execution never authorized capture', async () => {
     attemptRepo.findOne.mockResolvedValue(runningAttempt());
     stepRepo.findOneBy.mockResolvedValue({
