@@ -2544,7 +2544,8 @@ export class ExecutionService {
       const metadata = inference as Record<string, unknown>;
       if (
         typeof metadata.effectiveModel === 'string' &&
-        metadata.effectiveModel
+        metadata.effectiveModel &&
+        !['unreported', 'not_executed'].includes(metadata.effectiveModel)
       ) {
         modelFingerprints.add(metadata.effectiveModel);
         modelOperations.add(receipt.operationId);

@@ -45,7 +45,10 @@ import { ExecutionOperationRecoveryClass } from './execution-operation-recovery-
 import { ExecutionOperationStatus } from './execution-operation-status.enum';
 import { ExecutionStatus } from './execution-status.enum';
 import { releaseExecutionStepDependents } from './execution-step.service';
-import { executionStepOutputValue } from './execution-step-result';
+import {
+  executionStepOutputValue,
+  inferenceResultMetadata,
+} from './execution-step-result';
 import { ExecutionStepKind } from './execution-step-kind.enum';
 import { ExecutionToolPlanEntity } from './execution-tool-plan.entity';
 import { ToolResultContract } from './execution-tool.types';
@@ -1877,6 +1880,7 @@ export class ExecutionAttemptService {
           ...(operationKind === ExecutionOperationKind.INFERENCE
             ? {
                 outcome: canonicalInferenceOutcome(outcome?.kind),
+                ...inferenceResultMetadata(stepResult),
                 ...(typeof outcome?.reason === 'string'
                   ? { reason: outcome.reason }
                   : {}),

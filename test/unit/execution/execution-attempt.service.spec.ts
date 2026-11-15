@@ -1749,6 +1749,12 @@ describe('ExecutionAttemptService', () => {
           kind: 'inference',
           outcome: { kind: 'failed' },
         },
+        usage: { promptTokens: 12, completionTokens: 8, totalTokens: 20 },
+        inference: {
+          effectiveModel: 'served',
+          finishReason: 'stop',
+          inferenceMs: 50,
+        },
         error: { code: 'MODEL_FAILED', message: 'Model failed' },
       },
     });
@@ -1772,6 +1778,13 @@ describe('ExecutionAttemptService', () => {
             operationKind: 'inference',
             status: 'failed',
             outcome: 'invalid',
+            metrics: { promptTokens: 12, generatedTokens: 8, durationMs: 50 },
+            inference: {
+              effectiveModel: 'served',
+              finishReason: 'stop',
+              inferenceMs: 50,
+              warnings: [],
+            },
             error: { code: 'MODEL_FAILED', message: 'Model failed' },
           }),
         }),

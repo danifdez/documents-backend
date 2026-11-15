@@ -131,6 +131,39 @@ describe('ExecutionService bundle completeness', () => {
     });
   });
 
+  it('does not treat unknown model markers as served identity', async () => {
+    for (const model of ['unreported', 'not_executed']) {
+      const identities = await readIdentities.call(
+        {
+          dataSource: {
+            getRepository: () => ({
+              find: async () => [
+                {
+                  operationId: 'inference-1',
+                  result: { inference: { effectiveModel: model } },
+                },
+              ],
+            }),
+          },
+        },
+        [
+          {
+            eventType: 'operation.started',
+            executionId: 'execution-1',
+            operationId: 'inference-1',
+            payload: { operationKind: 'inference' },
+          },
+        ],
+      );
+      expect(identities).toEqual(
+        expect.objectContaining({
+          modelFingerprints: [],
+          modelIdentityKnown: false,
+        }),
+      );
+    }
+  });
+
   it('collects descriptor versions from every persisted tool plan', async () => {
     const find = jest.fn().mockResolvedValue([
       {
