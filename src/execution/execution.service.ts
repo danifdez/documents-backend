@@ -21,6 +21,7 @@ import {
   Repository,
 } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ExecutionRequestEntity } from './execution-request.entity';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionEventEntity } from './execution-event.entity';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
@@ -65,6 +66,7 @@ import {
 import { ExecutionPublication } from '../execution-outbox/execution-publication';
 import {
   canonicalHash,
+  canonicalDomainHash,
   canonicalProfileValue,
   contentHash,
 } from './execution-canonical';
@@ -130,6 +132,7 @@ function withFinalizerIdentity<TPayload extends object>(
 }
 
 export interface CreateExecutionOptions {
+  requestId?: string;
   captureInference?: boolean;
   rootExecutionId?: string;
   parentExecutionId?: string;
@@ -245,158 +248,15 @@ export class ExecutionService {
   ): Promise<CancellationRequestView> {
     const rawReason = String(reason ?? '').trim() || 'Cancelled by user';
     const cancellationReason = redactExecutionText(rawReason).slice(0, 500);
-    const requested = await this.dataSource.transaction(async (manager) => {
-      const executionRepo = manager.getRepository(ExecutionEntity);
-      const root = await executionRepo.findOne({
-        where: {
-          executionId: rootExecutionId,
-          rootExecutionId,
-          ownerPrincipal: scope.ownerPrincipal,
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!root) throw new NotFoundException('Execution not found');
-      if (root.status === ExecutionStatus.CANCELLED) return root;
-      if (
-        [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED].includes(
-          root.status,
-        )
-      ) {
-        throw new ConflictException('execution_terminal');
-      }
-      if (root.cancellationRequestedAt) return root;
-
-      const executions = await executionRepo.find({
-        where: { rootExecutionId },
-        order: { createdAt: 'ASC' },
-        lock: { mode: 'pessimistic_write' },
-      });
-      const active = executions
-        .filter((execution) => !TERMINAL_STATES.has(execution.status))
-        .map((execution) =>
-          execution.executionId === root.executionId ? root : execution,
-        );
-      const now = new Date();
-      const eventRepo = manager.getRepository(ExecutionEventEntity);
-      const rows = await eventRepo.find({
-        where: { rootExecutionId },
-        order: { sequence: 'ASC' },
-      });
-      let producerSequence = nextBackendProducerSequence(rows);
-      let sequence = Number(root.lastSequence);
-      let lastEventId = root.lastEventId;
-
-      for (const execution of active) {
-        const previousPhase = execution.phase;
-        execution.cancellationRequestedAt = now;
-        execution.cancellationReason = cancellationReason;
-        execution.phase = 'cancellation_requested';
-        execution.waitReason = null;
-        execution.waitCondition = null;
-        execution.resumePhase = null;
-        execution.waitExpiresAt = null;
-        const event = await this.appendBackendEvent(
-          manager,
-          root,
-          producerSequence++,
-          {
-            eventType: 'execution.state_changed',
-            payloadSchema: 'execution.state_changed/1',
-            payload: {
-              from: execution.status,
-              to: execution.status,
-              phase: 'cancellation_requested',
-              reason: cancellationReason,
-              previousPhase,
-            },
-            actor: { type: 'user', principal: scope.ownerPrincipal },
-            executionId: execution.executionId,
-            turnId: execution.turnId,
-            causedByEventId: lastEventId,
-            artifactRefs: [],
-            redactionApplied: cancellationReason !== rawReason,
-          },
-          ++sequence,
-        );
-        execution.lastSequence = String(sequence);
-        execution.lastEventId = event.eventId;
-        lastEventId = event.eventId;
-      }
-
-      await manager.query(
-        `
-          UPDATE "execution_steps" step
-          SET "status" = 'cancelled',
-              "version" = "version" + 1,
-              "updated_at" = $2
-          FROM "executions" execution
-          WHERE step."execution_id" = execution."execution_id"
-            AND execution."root_execution_id" = $1
-            AND step."status" IN ('blocked', 'ready')
-        `,
-        [rootExecutionId, now],
-      );
-      await manager.query(
-        `
-          UPDATE "execution_operations" operation
-          SET "status" = 'cancelled',
-              "finished_at" = $2,
-              "updated_at" = $2
-          FROM "execution_steps" step, "executions" execution
-          WHERE operation."step_id" = step."step_id"
-            AND step."execution_id" = execution."execution_id"
-            AND execution."root_execution_id" = $1
-            AND step."status" = 'cancelled'
-            AND operation."status" IN ('planned', 'prepared')
-        `,
-        [rootExecutionId, now],
-      );
-      await manager.query(
-        `
-          UPDATE "execution_confirmations" confirmation
-          SET "status" = 'denied',
-              "decided_by" = $2,
-              "decided_at" = $3,
-              "updated_at" = $3
-          FROM "executions" execution
-          WHERE confirmation."execution_id" = execution."execution_id"
-            AND execution."root_execution_id" = $1
-            AND confirmation."status" = 'pending'
-        `,
-        [rootExecutionId, scope.ownerPrincipal, now],
-      );
-
-      root.lastSequence = String(sequence);
-      root.lastEventId = lastEventId;
-      await executionRepo.save(active);
-      const publicationEventId = lastEventId;
-      if (publicationEventId) {
-        const outboxRepo = manager.getRepository(ExecutionOutboxEntity);
-        await outboxRepo.save(
-          outboxRepo.create({
-            outboxId: randomUUID(),
-            executionId: rootExecutionId,
-            eventId: publicationEventId,
-            schemaVersion: 'execution-outbox/1',
-            socketEvent: 'executionCancellationRequested',
-            payload: {
-              rootExecutionId,
-              taskType: root.taskType,
-              ownerId: executionPayloadOwnerId(root.payload) ?? null,
-              cancellationReason,
-              cancellationRequestedAt: now.toISOString(),
-            },
-            status: ExecutionOutboxStatus.PENDING,
-            attempts: 0,
-            availableAt: now,
-            leaseExpiresAt: null,
-            publishedAt: null,
-            lastError: null,
-          }),
-        );
-      }
-      return root;
-    });
+    const requested = await this.dataSource.transaction((manager) =>
+      this.requestCancellationInTransaction(
+        manager,
+        rootExecutionId,
+        scope,
+        cancellationReason,
+        rawReason,
+      ),
+    );
 
     await this.reconcileRequestedCancellations(100);
     const current = await this.executionRepo.findOneByOrFail({
@@ -412,6 +272,163 @@ export class ExecutionService {
       ).toISOString(),
       cancellationReason: current.cancellationReason ?? cancellationReason,
     };
+  }
+
+  private async requestCancellationInTransaction(
+    manager: EntityManager,
+    rootExecutionId: string,
+    scope: ExecutionAccessScope,
+    cancellationReason: string,
+    rawReason: string,
+  ): Promise<ExecutionEntity> {
+    const executionRepo = manager.getRepository(ExecutionEntity);
+    const root = await executionRepo.findOne({
+      where: {
+        executionId: rootExecutionId,
+        rootExecutionId,
+        ownerPrincipal: scope.ownerPrincipal,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!root) throw new NotFoundException('Execution not found');
+    if (root.status === ExecutionStatus.CANCELLED) return root;
+    if (
+      [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED].includes(root.status)
+    ) {
+      throw new ConflictException('execution_terminal');
+    }
+    if (root.cancellationRequestedAt) return root;
+
+    const executions = await executionRepo.find({
+      where: { rootExecutionId },
+      order: { createdAt: 'ASC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const active = executions
+      .filter((execution) => !TERMINAL_STATES.has(execution.status))
+      .map((execution) =>
+        execution.executionId === root.executionId ? root : execution,
+      );
+    const now = new Date();
+    const eventRepo = manager.getRepository(ExecutionEventEntity);
+    const rows = await eventRepo.find({
+      where: { rootExecutionId },
+      order: { sequence: 'ASC' },
+    });
+    let producerSequence = nextBackendProducerSequence(rows);
+    let sequence = Number(root.lastSequence);
+    let lastEventId = root.lastEventId;
+
+    for (const execution of active) {
+      const previousPhase = execution.phase;
+      execution.cancellationRequestedAt = now;
+      execution.cancellationReason = cancellationReason;
+      execution.phase = 'cancellation_requested';
+      execution.waitReason = null;
+      execution.waitCondition = null;
+      execution.resumePhase = null;
+      execution.waitExpiresAt = null;
+      const event = await this.appendBackendEvent(
+        manager,
+        root,
+        producerSequence++,
+        {
+          eventType: 'execution.state_changed',
+          payloadSchema: 'execution.state_changed/1',
+          payload: {
+            from: execution.status,
+            to: execution.status,
+            phase: 'cancellation_requested',
+            reason: cancellationReason,
+            previousPhase,
+          },
+          actor: { type: 'user', principal: scope.ownerPrincipal },
+          executionId: execution.executionId,
+          turnId: execution.turnId,
+          causedByEventId: lastEventId,
+          artifactRefs: [],
+          redactionApplied: cancellationReason !== rawReason,
+        },
+        ++sequence,
+      );
+      execution.lastSequence = String(sequence);
+      execution.lastEventId = event.eventId;
+      lastEventId = event.eventId;
+    }
+
+    await manager.query(
+      `
+        UPDATE "execution_steps" step
+        SET "status" = 'cancelled',
+            "version" = "version" + 1,
+            "updated_at" = $2
+        FROM "executions" execution
+        WHERE step."execution_id" = execution."execution_id"
+          AND execution."root_execution_id" = $1
+          AND step."status" IN ('blocked', 'ready')
+      `,
+      [rootExecutionId, now],
+    );
+    await manager.query(
+      `
+        UPDATE "execution_operations" operation
+        SET "status" = 'cancelled',
+            "finished_at" = $2,
+            "updated_at" = $2
+        FROM "execution_steps" step, "executions" execution
+        WHERE operation."step_id" = step."step_id"
+          AND step."execution_id" = execution."execution_id"
+          AND execution."root_execution_id" = $1
+          AND step."status" = 'cancelled'
+          AND operation."status" IN ('planned', 'prepared')
+      `,
+      [rootExecutionId, now],
+    );
+    await manager.query(
+      `
+        UPDATE "execution_confirmations" confirmation
+        SET "status" = 'denied',
+            "decided_by" = $2,
+            "decided_at" = $3,
+            "updated_at" = $3
+        FROM "executions" execution
+        WHERE confirmation."execution_id" = execution."execution_id"
+          AND execution."root_execution_id" = $1
+          AND confirmation."status" = 'pending'
+      `,
+      [rootExecutionId, scope.ownerPrincipal, now],
+    );
+
+    root.lastSequence = String(sequence);
+    root.lastEventId = lastEventId;
+    await executionRepo.save(active);
+    const publicationEventId = lastEventId;
+    if (publicationEventId) {
+      const outboxRepo = manager.getRepository(ExecutionOutboxEntity);
+      await outboxRepo.save(
+        outboxRepo.create({
+          outboxId: randomUUID(),
+          executionId: rootExecutionId,
+          eventId: publicationEventId,
+          schemaVersion: 'execution-outbox/1',
+          socketEvent: 'executionCancellationRequested',
+          payload: {
+            rootExecutionId,
+            taskType: root.taskType,
+            ownerId: executionPayloadOwnerId(root.payload) ?? null,
+            cancellationReason,
+            cancellationRequestedAt: now.toISOString(),
+          },
+          status: ExecutionOutboxStatus.PENDING,
+          attempts: 0,
+          availableAt: now,
+          leaseExpiresAt: null,
+          publishedAt: null,
+          lastError: null,
+        }),
+      );
+    }
+    return root;
   }
 
   async reconcileRequestedCancellations(limit = 20): Promise<number> {
@@ -687,6 +704,44 @@ export class ExecutionService {
     const rootExecutionId = options?.rootExecutionId ?? executionId;
     return this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
+      let acceptance: ExecutionRequestEntity | null = null;
+      if (options?.requestId !== undefined) {
+        if (
+          options.parentExecutionId ||
+          options.rootExecutionId ||
+          !options.ownerPrincipal
+        ) {
+          throw new BadRequestException(
+            'Request identity requires an owned root execution',
+          );
+        }
+        acceptance = await this.lockRequest(manager, options.requestId, {
+          ownerPrincipal: options.ownerPrincipal,
+        });
+        const inputHash = canonicalDomainHash({
+          taskType,
+          priority,
+          payload,
+          options,
+        });
+        if (acceptance.inputHash && acceptance.inputHash !== inputHash) {
+          throw new ConflictException('execution_request_conflict');
+        }
+        if (acceptance.executionId) {
+          const existing = await executionRepo.findOneBy({
+            executionId: acceptance.executionId,
+            rootExecutionId: acceptance.executionId,
+            ownerPrincipal: options.ownerPrincipal,
+          });
+          if (!existing)
+            throw new ConflictException('execution_request_unavailable');
+          return existing;
+        }
+        if (acceptance.cancelRequested) {
+          throw new ConflictException('execution_request_cancelled');
+        }
+        acceptance.inputHash = inputHash;
+      }
       let eventRoot: ExecutionEntity | null = null;
       let parent: ExecutionEntity | null = null;
       if (rootExecutionId !== executionId) {
@@ -873,8 +928,97 @@ export class ExecutionService {
           causedByEventId: step.causedByEventId ?? executionEvent.eventId,
         });
       }
-      return executionRepo.save(execution);
+      const saved = await executionRepo.save(execution);
+      if (acceptance) {
+        acceptance.executionId = saved.executionId;
+        await manager.getRepository(ExecutionRequestEntity).save(acceptance);
+      }
+      return saved;
     });
+  }
+
+  private async lockRequest(
+    manager: EntityManager,
+    requestId: string,
+    scope: ExecutionAccessScope,
+  ): Promise<ExecutionRequestEntity> {
+    if (!EXECUTION_UUID_PATTERN.test(requestId) || !scope.ownerPrincipal) {
+      throw new BadRequestException('Invalid execution request identity');
+    }
+    const repo = manager.getRepository(ExecutionRequestEntity);
+    await repo
+      .createQueryBuilder()
+      .insert()
+      .values({
+        ownerPrincipal: scope.ownerPrincipal,
+        requestId,
+        inputHash: null,
+        executionId: null,
+        cancelRequested: false,
+      })
+      .orIgnore()
+      .execute();
+    return repo.findOneOrFail({
+      where: { ownerPrincipal: scope.ownerPrincipal, requestId },
+      lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  async readRequest(requestId: string, scope: ExecutionAccessScope) {
+    if (!EXECUTION_UUID_PATTERN.test(requestId))
+      throw new BadRequestException('Invalid execution request identity');
+    const acceptance = await this.dataSource
+      .getRepository(ExecutionRequestEntity)
+      .findOneBy({
+        ownerPrincipal: scope.ownerPrincipal,
+        requestId,
+      });
+    if (!acceptance) throw new NotFoundException('Execution request not found');
+    if (!acceptance.executionId) {
+      return {
+        requestId,
+        cancelRequested: acceptance.cancelRequested,
+        executionId: null,
+        status: 'cancelled',
+        result: null,
+        error: null,
+      };
+    }
+    return {
+      requestId,
+      cancelRequested: acceptance.cancelRequested,
+      ...(await this.readOwnedResult(acceptance.executionId, scope)),
+    };
+  }
+
+  async cancelRequest(requestId: string, scope: ExecutionAccessScope) {
+    await this.dataSource.transaction(async (manager) => {
+      const acceptance = await this.lockRequest(manager, requestId, scope);
+      acceptance.cancelRequested = true;
+      await manager.getRepository(ExecutionRequestEntity).save(acceptance);
+      if (acceptance.executionId) {
+        const execution = await manager.getRepository(ExecutionEntity).findOne({
+          where: {
+            executionId: acceptance.executionId,
+            rootExecutionId: acceptance.executionId,
+            ownerPrincipal: scope.ownerPrincipal,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!execution) throw new NotFoundException('Execution not found');
+        if (!TERMINAL_STATES.has(execution.status)) {
+          await this.requestCancellationInTransaction(
+            manager,
+            execution.executionId,
+            scope,
+            'IA Browser cancelled the inference request',
+            'IA Browser cancelled the inference request',
+          );
+        }
+      }
+    });
+    await this.reconcileRequestedCancellations(100);
+    return this.readRequest(requestId, scope);
   }
 
   async createInference<TTaskType extends ExecutionTaskType>(

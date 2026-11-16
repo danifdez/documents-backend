@@ -36,7 +36,11 @@ export class ModelService {
         label: request.label,
         detail: request.detail,
       },
-      { ownerPrincipal: scope.ownerPrincipal, finalizeOnFailure: true },
+      {
+        ownerPrincipal: scope.ownerPrincipal,
+        finalizeOnFailure: true,
+        requestId: request.requestId,
+      },
     );
     return { executionId: execution.executionId };
   }

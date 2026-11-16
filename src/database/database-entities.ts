@@ -39,6 +39,7 @@ import { IndexedFileEntity } from '../indexed-file/indexed-file.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentMessageEntity } from '../agent/agent-message.entity';
 import { AppStateEntity } from '../app-state/app-state.entity';
+import { ExecutionRequestEntity } from '../execution/execution-request.entity';
 import { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionEventEntity } from '../execution/execution-event.entity';
 import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
@@ -103,6 +104,7 @@ export const DATABASE_ENTITIES = [
   AgentMessageEntity,
   AppStateEntity,
   ExecutionEntity,
+  ExecutionRequestEntity,
   ExecutionEventEntity,
   ExecutionArtifactEntity,
   ExecutionStepEntity,

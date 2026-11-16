@@ -25,6 +25,30 @@ export class BrowserInferenceController {
     );
   }
 
+  @Get('requests/:requestId')
+  @RequirePermissions(Permission.ASK)
+  async request(
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.executions.readRequest(
+      requestId,
+      this.executions.resolveAccessScope(user),
+    );
+  }
+
+  @Post('requests/:requestId/cancel')
+  @RequirePermissions(Permission.ASK)
+  async cancelRequest(
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.executions.cancelRequest(
+      requestId,
+      this.executions.resolveAccessScope(user),
+    );
+  }
+
   @Get(':executionId')
   @RequirePermissions(Permission.ASK)
   async result(

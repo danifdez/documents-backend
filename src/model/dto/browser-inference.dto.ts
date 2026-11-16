@@ -1,6 +1,15 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsUUID,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class BrowserInferenceDto {
+  @IsUUID('4')
+  requestId: string;
+
   @IsString()
   @MinLength(2)
   @MaxLength(250_000)

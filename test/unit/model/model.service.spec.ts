@@ -69,7 +69,12 @@ describe('ModelService execution identities', () => {
     const requestJson = '{"messages":[{"role":"user","content":"Hi"}]}';
     await expect(
       service.browserInference(
-        { requestJson, label: 'chat', detail: 'page' },
+        {
+          requestId: '11111111-1111-4111-8111-111111111111',
+          requestJson,
+          label: 'chat',
+          detail: 'page',
+        },
         { ownerPrincipal: 'user-7' },
       ),
     ).resolves.toEqual({ executionId: executionIds['browser-inference'] });
@@ -77,7 +82,11 @@ describe('ModelService execution identities', () => {
       'browser-inference',
       expect.any(String),
       { requestJson, label: 'chat', detail: 'page' },
-      { ownerPrincipal: 'user-7', finalizeOnFailure: true },
+      {
+        ownerPrincipal: 'user-7',
+        finalizeOnFailure: true,
+        requestId: '11111111-1111-4111-8111-111111111111',
+      },
     );
   });
 
