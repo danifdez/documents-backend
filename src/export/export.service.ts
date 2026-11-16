@@ -75,7 +75,9 @@ export class ExportService {
       const sanitizedProjectName = this.sanitizeFolderName(project.name);
 
       for (const resource of resources) {
-        const resourceBaseName = this.getBaseName(resource.originalName || resource.name || `resource-${resource.id}`);
+        const resourceBaseName = this.getBaseName(
+          resource.originalName || resource.name || `resource-${resource.id}`,
+        );
         const resourceMeta: any = {
           id: resource.id,
           name: resource.name,
@@ -98,7 +100,9 @@ export class ExportService {
 
         // Add original file
         if (resource.path) {
-          const fileBuffer = await this.fileStorageService.getFile(resource.path);
+          const fileBuffer = await this.fileStorageService.getFile(
+            resource.path,
+          );
           if (fileBuffer) {
             const fileName = resource.originalName || `resource-${resource.id}`;
             archive.append(fileBuffer, {
@@ -135,7 +139,8 @@ export class ExportService {
 
       // Process docs
       for (const doc of docs) {
-        const docFileName = this.sanitizeFolderName(doc.name) || `doc-${doc.id}`;
+        const docFileName =
+          this.sanitizeFolderName(doc.name) || `doc-${doc.id}`;
         const docMeta: any = {
           id: doc.id,
           name: doc.name,
@@ -193,7 +198,9 @@ export class ExportService {
 
     if (orphanResources.length > 0 || orphanDocs.length > 0) {
       for (const resource of orphanResources) {
-        const resourceBaseName = this.getBaseName(resource.originalName || resource.name || `resource-${resource.id}`);
+        const resourceBaseName = this.getBaseName(
+          resource.originalName || resource.name || `resource-${resource.id}`,
+        );
         const resourceMeta: any = {
           id: resource.id,
           name: resource.name,
@@ -206,7 +213,9 @@ export class ExportService {
         };
 
         if (resource.path) {
-          const fileBuffer = await this.fileStorageService.getFile(resource.path);
+          const fileBuffer = await this.fileStorageService.getFile(
+            resource.path,
+          );
           if (fileBuffer) {
             const fileName = resource.originalName || `resource-${resource.id}`;
             archive.append(fileBuffer, {
@@ -230,7 +239,8 @@ export class ExportService {
       }
 
       for (const doc of orphanDocs) {
-        const docFileName = this.sanitizeFolderName(doc.name) || `doc-${doc.id}`;
+        const docFileName =
+          this.sanitizeFolderName(doc.name) || `doc-${doc.id}`;
         const docMeta: any = {
           id: doc.id,
           name: doc.name,
@@ -276,10 +286,14 @@ export class ExportService {
 
     archive.finalize();
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = projectIds.length === 0
-      ? `export-all-${timestamp}.zip`
-      : `export-projects-${timestamp}.zip`;
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-')
+      .slice(0, 19);
+    const filename =
+      projectIds.length === 0
+        ? `export-all-${timestamp}.zip`
+        : `export-projects-${timestamp}.zip`;
 
     return { stream: passThrough, filename };
   }

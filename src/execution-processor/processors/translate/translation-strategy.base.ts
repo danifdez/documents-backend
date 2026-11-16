@@ -56,7 +56,9 @@ export abstract class SingleEntityTranslationStrategyBase<
       !Array.isArray(results.response) ||
       results.response.length === 0
     ) {
-      const errorMessage = `Invalid translation result format. Expected response array but got: ${JSON.stringify(results)}`;
+      const errorMessage =
+        'Invalid translation result format. Expected response array but got: ' +
+        JSON.stringify(results);
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
     }

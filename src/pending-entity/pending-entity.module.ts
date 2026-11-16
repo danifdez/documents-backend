@@ -7,9 +7,9 @@ import { ResourceModule } from '../resource/resource.module';
 import { ExecutionModule } from '../execution/execution.module';
 
 @Module({
-    imports: [DatabaseModule, EntityModule, ResourceModule, ExecutionModule],
-    controllers: [PendingEntityController],
-    providers: [PendingEntityService],
-    exports: [PendingEntityService],
+  imports: [DatabaseModule, EntityModule, ResourceModule, ExecutionModule],
+  controllers: [PendingEntityController],
+  providers: [PendingEntityService],
+  exports: [PendingEntityService],
 })
-export class PendingEntityModule { }
+export class PendingEntityModule {}

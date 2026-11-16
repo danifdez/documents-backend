@@ -34,12 +34,18 @@ import { VoiceService } from '../src/voice/voice.service';
   ],
   providers: [VoiceService, VoiceGateway],
 })
-class SmokeAppModule { }
+class SmokeAppModule {}
 
 function wait<T>(socket: Socket, evt: string, timeoutMs = 5000): Promise<T> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for ${evt}`)), timeoutMs);
-    socket.once(evt, (payload: T) => { clearTimeout(t); resolve(payload); });
+    const t = setTimeout(
+      () => reject(new Error(`timeout waiting for ${evt}`)),
+      timeoutMs,
+    );
+    socket.once(evt, (payload: T) => {
+      clearTimeout(t);
+      resolve(payload);
+    });
   });
 }
 
@@ -62,7 +68,9 @@ async function main() {
     process.env.VOICE_WORKER_POOL_SIZE = '1';
   }
 
-  const app = await NestFactory.create(SmokeAppModule, { logger: ['warn', 'error'] });
+  const app = await NestFactory.create(SmokeAppModule, {
+    logger: ['warn', 'error'],
+  });
   app.useWebSocketAdapter(new IoAdapter(app));
   await app.listen(3099);
   console.log('NestJS up on :3099 (pool size from env)');
@@ -76,7 +84,11 @@ async function main() {
     await wait(c1, 'voice:ready');
     console.log('1) S1 ready');
     c1.emit('voice:stop');
-    const final = await wait<{ text: string; isFinal: boolean }>(c1, 'voice:partial', 5000);
+    const final = await wait<{ text: string; isFinal: boolean }>(
+      c1,
+      'voice:partial',
+      5000,
+    );
     if (!final.isFinal) throw new Error('expected isFinal=true');
     console.log('1) S1 final OK');
     c1.disconnect();
@@ -89,8 +101,13 @@ async function main() {
     await wait(a, 'voice:ready');
     console.log('2) A ready');
     b.emit('voice:start');
-    const queued = await wait<{ position: number; eta: number }>(b, 'voice:queued', 2000);
-    if (queued.position !== 1) throw new Error(`expected position=1, got ${queued.position}`);
+    const queued = await wait<{ position: number; eta: number }>(
+      b,
+      'voice:queued',
+      2000,
+    );
+    if (queued.position !== 1)
+      throw new Error(`expected position=1, got ${queued.position}`);
     console.log('2) B queued', queued);
     // A finishes → B is promoted
     a.emit('voice:stop');
@@ -118,7 +135,10 @@ async function main() {
     // y cancels → z should move to position 1
     y.emit('voice:cancel');
     const zq2 = await wait<{ position: number }>(z, 'voice:queued', 2000);
-    if (zq2.position !== 1) throw new Error(`after y cancel, expected z position=1, got ${zq2.position}`);
+    if (zq2.position !== 1)
+      throw new Error(
+        `after y cancel, expected z position=1, got ${zq2.position}`,
+      );
     console.log('3) z promoted to position 1 after y cancelled');
     // x finishes → z assigned
     x.emit('voice:stop');

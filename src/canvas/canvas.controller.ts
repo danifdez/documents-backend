@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { CanvasService } from './canvas.service';
 import { CanvasEntity } from './canvas.entity';
 import { CreateCanvasDto, UpdateCanvasDto } from './dto/canvas.dto';
@@ -7,10 +16,12 @@ import { Permission } from '../auth/permission.enum';
 
 @Controller('canvases')
 export class CanvasController {
-  constructor(private readonly canvasService: CanvasService) { }
+  constructor(private readonly canvasService: CanvasService) {}
 
   @Get(':id')
-  async getId(@Param('id', ParseIntPipe) id: number): Promise<CanvasEntity | null> {
+  async getId(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<CanvasEntity | null> {
     return await this.canvasService.findOne(id);
   }
 
@@ -37,7 +48,9 @@ export class CanvasController {
   @Patch(':id')
   @RequirePermissions(Permission.CANVAS)
   async update(
-    @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCanvasDto): Promise<CanvasEntity | null> {
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateCanvasDto,
+  ): Promise<CanvasEntity | null> {
     return await this.canvasService.update(id, dto);
   }
 

@@ -1,4 +1,13 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+} from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
 import { DataSourceEntity } from '../data-source/data-source.entity';
@@ -12,61 +21,79 @@ import { DataSourceEntity } from '../data-source/data-source.entity';
  * sources tends to drift. It remains optional for fields that are entered manually.
  */
 export interface DatasetField {
-    key: string;
-    name: string;
-    description?: string;
-    type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'time' | 'select';
-    required: boolean;
-    options?: string[];
-    linkedDatasetId?: number;
-    linkedLookupField?: string;
-    linkedDisplayField?: string;
+  key: string;
+  name: string;
+  description?: string;
+  type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'time' | 'select';
+  required: boolean;
+  options?: string[];
+  linkedDatasetId?: number;
+  linkedLookupField?: string;
+  linkedDisplayField?: string;
 }
 
-export type DatasetSourceMode = 'manual' | 'project_resources' | 'resource_selection';
+export type DatasetSourceMode =
+  'manual' | 'project_resources' | 'resource_selection';
 
 export interface DatasetExtractionConfig {
-    model: string;
-    promptVersion: string;
-    lastRunAt: string | null;
+  model: string;
+  promptVersion: string;
+  lastRunAt: string | null;
 }
 
 @Entity({ name: 'datasets' })
 export class DatasetEntity {
-    @PrimaryGeneratedColumn()
-    id: number;
+  @PrimaryGeneratedColumn()
+  id: number;
 
-    @Column()
-    name: string;
+  @Column()
+  name: string;
 
-    @Column({ type: 'text', nullable: true })
-    description: string | null;
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
 
-    @ManyToOne(() => ProjectEntity, (project) => project.datasets, { nullable: true, onDelete: 'SET NULL' })
-    @JoinColumn({ name: 'project_id' })
-    project: ProjectEntity | null;
+  @ManyToOne(() => ProjectEntity, (project) => project.datasets, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'project_id' })
+  project: ProjectEntity | null;
 
-    @Column({ type: 'jsonb', default: '[]' })
-    schema: DatasetField[];
+  @Column({ type: 'jsonb', default: '[]' })
+  schema: DatasetField[];
 
-    @Column({ name: 'source_mode', type: 'varchar', length: 32, default: 'manual' })
-    sourceMode: DatasetSourceMode;
+  @Column({
+    name: 'source_mode',
+    type: 'varchar',
+    length: 32,
+    default: 'manual',
+  })
+  sourceMode: DatasetSourceMode;
 
-    @Column({ name: 'source_config', type: 'jsonb', default: () => "'{}'::jsonb" })
-    sourceConfig: Record<string, any>;
+  @Column({
+    name: 'source_config',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  sourceConfig: Record<string, any>;
 
-    @Column({ name: 'extraction_config', type: 'jsonb', nullable: true, default: null })
-    extractionConfig: DatasetExtractionConfig | null;
+  @Column({
+    name: 'extraction_config',
+    type: 'jsonb',
+    nullable: true,
+    default: null,
+  })
+  extractionConfig: DatasetExtractionConfig | null;
 
-    @OneToMany(() => DatasetRecordEntity, (record) => record.dataset)
-    records: DatasetRecordEntity[];
+  @OneToMany(() => DatasetRecordEntity, (record) => record.dataset)
+  records: DatasetRecordEntity[];
 
-    @OneToMany(() => DataSourceEntity, (ds) => ds.dataset)
-    dataSources: DataSourceEntity[];
+  @OneToMany(() => DataSourceEntity, (ds) => ds.dataset)
+  dataSources: DataSourceEntity[];
 
-    @CreateDateColumn({ name: 'created_at' })
-    createdAt: Date;
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
 
-    @UpdateDateColumn({ name: 'updated_at' })
-    updatedAt: Date;
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
 }

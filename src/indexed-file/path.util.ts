@@ -13,12 +13,14 @@ const MIME_MAP: Record<string, string> = {
   '.tsv': 'text/tab-separated-values',
   '.log': 'text/plain',
   '.doc': 'application/msword',
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.odt': 'application/vnd.oasis.opendocument.text',
   '.xls': 'application/vnd.ms-excel',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.ppt': 'application/vnd.ms-powerpoint',
-  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.pptx':
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   // Data / config
   '.json': 'application/json',
   '.xml': 'application/xml',
@@ -90,7 +92,9 @@ const RESERVED_CHARS = /[<>:"|?*\x00-\x1f]/g;
 export function sanitizeFilename(name: string): string {
   if (!name) throw new ForbiddenException('invalid_filename');
   const normalized = name.replace(/\\/g, '/');
-  const segments = normalized.split('/').filter((s) => s.length > 0 && s !== '.');
+  const segments = normalized
+    .split('/')
+    .filter((s) => s.length > 0 && s !== '.');
   if (segments.length === 0) throw new ForbiddenException('invalid_filename');
   if (segments.some((s) => s === '..')) {
     throw new ForbiddenException('path_outside_scope');
@@ -152,7 +156,10 @@ export async function resolveSafePath(
   }
 }
 
-export function relativizeToScope(folderScope: string, absolute: string): string {
+export function relativizeToScope(
+  folderScope: string,
+  absolute: string,
+): string {
   const rel = path.relative(folderScope, absolute);
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new ForbiddenException('path_outside_scope');

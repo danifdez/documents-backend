@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+} from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
 
 export interface AlarmDescriptor {
@@ -38,7 +45,9 @@ export class CalendarEventEntity {
   @Column({ type: 'boolean', default: false, name: 'track_completion' })
   trackCompletion: boolean;
 
-  @ManyToOne(() => ProjectEntity, (project) => project.calendarEvents, { nullable: true })
+  @ManyToOne(() => ProjectEntity, (project) => project.calendarEvents, {
+    nullable: true,
+  })
   project: ProjectEntity | null;
 
   @CreateDateColumn({ name: 'created_at' })

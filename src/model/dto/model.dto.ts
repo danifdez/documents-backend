@@ -1,104 +1,112 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, MaxLength, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsNumber,
+  MaxLength,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class AskQuestionDto {
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(10000)
-    question: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(10000)
+  question: string;
 
-    @IsNumber()
-    @IsOptional()
-    projectId?: number;
+  @IsNumber()
+  @IsOptional()
+  projectId?: number;
 
-    @IsString()
-    @IsOptional()
-    requestId?: string;
+  @IsString()
+  @IsOptional()
+  requestId?: string;
 
-    @IsString()
-    @IsOptional()
-    @MaxLength(500000)
-    context?: string;
+  @IsString()
+  @IsOptional()
+  @MaxLength(500000)
+  context?: string;
 }
 
 export class SummarizeDto {
-    @IsString()
-    @IsNotEmpty()
-    targetLanguage: string;
+  @IsString()
+  @IsNotEmpty()
+  targetLanguage: string;
 
-    @IsNumber()
-    @IsOptional()
-    resourceId?: number;
+  @IsNumber()
+  @IsOptional()
+  resourceId?: number;
 
-    @IsString()
-    @IsOptional()
-    text?: string;
+  @IsString()
+  @IsOptional()
+  text?: string;
 
-    @IsNumber()
-    @IsOptional()
-    targetDocId?: number;
+  @IsNumber()
+  @IsOptional()
+  targetDocId?: number;
 
-    @IsString()
-    @IsOptional()
-    sourceLanguage?: string;
+  @IsString()
+  @IsOptional()
+  sourceLanguage?: string;
 
-    @IsString()
-    @IsOptional()
-    type?: string;
+  @IsString()
+  @IsOptional()
+  type?: string;
 }
 
 export class TranslateDto {
-    @IsString()
-    @IsNotEmpty()
-    targetLanguage: string;
+  @IsString()
+  @IsNotEmpty()
+  targetLanguage: string;
 
-    @IsNumber()
-    @IsNotEmpty()
-    resourceId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  resourceId: number;
 }
 
 export class ExtractEntitiesDto {
-    @IsNumber()
-    @IsNotEmpty()
-    resourceId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  resourceId: number;
 }
 
 export class KeyPointsDto {
-    @IsNumber()
-    @IsNotEmpty()
-    resourceId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  resourceId: number;
 
-    @IsString()
-    @IsOptional()
-    targetLanguage?: string;
+  @IsString()
+  @IsOptional()
+  targetLanguage?: string;
 }
 
 export class KeywordsDto {
-    @IsNumber()
-    @IsNotEmpty()
-    resourceId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  resourceId: number;
 
-    @IsString()
-    @IsOptional()
-    targetLanguage?: string;
+  @IsString()
+  @IsOptional()
+  targetLanguage?: string;
 }
 
 export class SemanticSearchDto {
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(10000)
-    query: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(10000)
+  query: string;
 
-    @IsNumber()
-    @IsOptional()
-    projectId?: number;
+  @IsNumber()
+  @IsOptional()
+  projectId?: number;
 
-    @IsString()
-    @IsOptional()
-    requestId?: string;
+  @IsString()
+  @IsOptional()
+  requestId?: string;
 
-    @IsNumber()
-    @IsOptional()
-    @Min(1)
-    @Max(20)
-    limit?: number;
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(20)
+  limit?: number;
 }

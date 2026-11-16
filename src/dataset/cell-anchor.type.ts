@@ -12,13 +12,14 @@
  *  - CSV export with `include_anchors=true` (auxiliary columns)
  */
 export interface CellAnchor {
-    sourceResourceId: number;
-    page: number | null;
-    quote: string;
-    extractedAt: string;
-    model: string;
-    promptVersion: string;
-    editedByUser: boolean;
+  sourceResourceId: number;
+  page: number | null;
+  quote: string;
+  extractedAt: string;
+  model: string;
+  promptVersion: string;
+  editedByUser: boolean;
 }
 
-export type ExtractionStatus = 'pending' | 'in_progress' | 'extracted' | 'failed';
+export type ExtractionStatus =
+  'pending' | 'in_progress' | 'extracted' | 'failed';

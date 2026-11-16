@@ -31,7 +31,8 @@ async function main(): Promise<void> {
   await new Promise<void>((resolve) =>
     receiver.listen(0, '127.0.0.1', resolve),
   );
-  process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = `http://127.0.0.1:${(receiver.address() as AddressInfo).port}/v1/traces`;
+  const port = (receiver.address() as AddressInfo).port;
+  process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = `http://127.0.0.1:${port}/v1/traces`;
   configureTelemetry();
   const source = new DataSource(
     (await getTypeOrmConfig(

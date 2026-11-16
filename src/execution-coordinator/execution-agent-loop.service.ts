@@ -531,9 +531,11 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
                     : 'tool_budget_exhausted',
               message:
                 action === 'terminate'
-                  ? 'The repeated tool operation was not executed because the loop guard terminated the loop'
+                  ? 'The repeated tool operation was not executed because ' +
+                    'the loop guard terminated the loop'
                   : action === 'block'
-                    ? 'The repeated tool operation was not executed because the loop guard blocked it'
+                    ? 'The repeated tool operation was not executed because ' +
+                      'the loop guard blocked it'
                     : 'The tool operation was not executed because the tool budget was exhausted',
             },
             continuation:

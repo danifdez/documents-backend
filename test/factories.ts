@@ -421,7 +421,6 @@ export function buildWorker(
   } as WorkerEntity;
 }
 
-
 export function buildResourceType(
   overrides: Partial<ResourceTypeEntity> = {},
 ): ResourceTypeEntity {

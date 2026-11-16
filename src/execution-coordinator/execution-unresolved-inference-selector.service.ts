@@ -92,7 +92,8 @@ export class ExecutionUnresolvedInferenceSelectorService implements ExecutionNex
           : 'unsupported_inference_continuation',
         message: invalid
           ? `Inference output for ${execution.taskType} did not satisfy its contract`
-          : `Inference task ${execution.taskType} cannot request tools without a registered continuation selector`,
+          : `Inference task ${execution.taskType} cannot request tools ` +
+            'without a registered continuation selector',
         ...(invalid && typeof outcome.reason === 'string'
           ? { reason: outcome.reason }
           : {}),

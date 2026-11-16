@@ -97,12 +97,12 @@ describe('AssistantService — personal assistant', () => {
     const second = await service.list('user-b');
 
     expect(first[0].id).not.toBe(second[0].id);
-    await expect(
-      service.findOne(second[0].id, 'user-a'),
-    ).rejects.toThrow(NotFoundException);
+    await expect(service.findOne(second[0].id, 'user-a')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
-  it('configures a working folder on the principal assistant and clears stale indexed rows', async () => {
+  it('configures a working folder and clears stale indexed rows', async () => {
     const scope = await fs.mkdtemp(path.join(os.tmpdir(), 'assistant-scope-'));
     try {
       assistantRepo.store.set(1, {
@@ -198,7 +198,9 @@ describe('AssistantService — getMessages() pagination', () => {
 
   it('returns the newest page in ascending order with hasMore=true when more remain', async () => {
     const { service, messageRepo } = await build(seed(60));
-    const { messages, hasMore } = await service.getMessages(1, 'standalone', { limit: 50 });
+    const { messages, hasMore } = await service.getMessages(1, 'standalone', {
+      limit: 50,
+    });
     expect(messageRepo.find).toHaveBeenCalledWith(
       expect.objectContaining({ order: { id: 'DESC' }, take: 51 }),
     );
@@ -210,7 +212,9 @@ describe('AssistantService — getMessages() pagination', () => {
 
   it('returns hasMore=false when the page is not full', async () => {
     const { service } = await build(seed(30));
-    const { messages, hasMore } = await service.getMessages(1, 'standalone', { limit: 50 });
+    const { messages, hasMore } = await service.getMessages(1, 'standalone', {
+      limit: 50,
+    });
     expect(messages).toHaveLength(30);
     expect(hasMore).toBe(false);
   });

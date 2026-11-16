@@ -1,12 +1,31 @@
-import { Injectable, NotFoundException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DatasetEntity, DatasetField, DatasetSourceMode } from './dataset.entity';
+import {
+  DatasetEntity,
+  DatasetField,
+  DatasetSourceMode,
+} from './dataset.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
 import { DatasetRelationEntity } from './dataset-relation.entity';
 import { DatasetRecordLinkEntity } from './dataset-record-link.entity';
 import { DatasetChartEntity } from './dataset-chart.entity';
-import { CreateDatasetDto, UpdateDatasetDto, CreateDatasetRecordDto, UpdateDatasetRecordDto, CreateDatasetRelationDto, LinkRecordsDto, CreateDatasetChartDto, UpdateDatasetChartDto } from './dto/dataset.dto';
+import {
+  CreateDatasetDto,
+  UpdateDatasetDto,
+  CreateDatasetRecordDto,
+  UpdateDatasetRecordDto,
+  CreateDatasetRelationDto,
+  LinkRecordsDto,
+  CreateDatasetChartDto,
+  UpdateDatasetChartDto,
+} from './dto/dataset.dto';
 import { CellAnchor } from './cell-anchor.type';
 import { DatasetCsvService } from './dataset-csv.service';
 import { ResourceService } from '../resource/resource.service';
@@ -14,756 +33,932 @@ import { globalSimilaritySearch } from '../common/global-search';
 
 @Injectable()
 export class DatasetService {
-    constructor(
-        @InjectRepository(DatasetEntity)
-        private readonly datasetRepository: Repository<DatasetEntity>,
-        @InjectRepository(DatasetRecordEntity)
-        private readonly recordRepository: Repository<DatasetRecordEntity>,
-        @InjectRepository(DatasetRelationEntity)
-        private readonly relationRepository: Repository<DatasetRelationEntity>,
-        @InjectRepository(DatasetRecordLinkEntity)
-        private readonly linkRepository: Repository<DatasetRecordLinkEntity>,
-        @InjectRepository(DatasetChartEntity)
-        private readonly chartRepository: Repository<DatasetChartEntity>,
-        private readonly csvService: DatasetCsvService,
-        private readonly resourceService: ResourceService,
-    ) { }
+  constructor(
+    @InjectRepository(DatasetEntity)
+    private readonly datasetRepository: Repository<DatasetEntity>,
+    @InjectRepository(DatasetRecordEntity)
+    private readonly recordRepository: Repository<DatasetRecordEntity>,
+    @InjectRepository(DatasetRelationEntity)
+    private readonly relationRepository: Repository<DatasetRelationEntity>,
+    @InjectRepository(DatasetRecordLinkEntity)
+    private readonly linkRepository: Repository<DatasetRecordLinkEntity>,
+    @InjectRepository(DatasetChartEntity)
+    private readonly chartRepository: Repository<DatasetChartEntity>,
+    private readonly csvService: DatasetCsvService,
+    private readonly resourceService: ResourceService,
+  ) {}
 
-    async findAllDatasets(projectId?: number): Promise<any[]> {
-        const qb = this.datasetRepository.createQueryBuilder('dataset')
-            .leftJoinAndSelect('dataset.project', 'project')
-            .leftJoinAndSelect('dataset.dataSources', 'dataSource')
-            .loadRelationCountAndMap('dataset.recordCount', 'dataset.records');
+  async findAllDatasets(projectId?: number): Promise<any[]> {
+    const qb = this.datasetRepository
+      .createQueryBuilder('dataset')
+      .leftJoinAndSelect('dataset.project', 'project')
+      .leftJoinAndSelect('dataset.dataSources', 'dataSource')
+      .loadRelationCountAndMap('dataset.recordCount', 'dataset.records');
 
-        if (projectId) {
-            qb.where('dataset.project.id = :projectId', { projectId });
-        }
-
-        qb.orderBy('dataset.name', 'ASC');
-        return await qb.getMany();
+    if (projectId) {
+      qb.where('dataset.project.id = :projectId', { projectId });
     }
 
-    async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
-        return await globalSimilaritySearch(this.datasetRepository, searchTerm, projectId, {
-            alias: 'd',
-            select: ['d.id', 'd.name', 'd.description'],
-            scoreColumn: 'd.name',
-            searchColumns: ['d.name', 'd.description'],
-            projectIdColumn: 'd.project_id',
+    qb.orderBy('dataset.name', 'ASC');
+    return await qb.getMany();
+  }
+
+  async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
+    return await globalSimilaritySearch(
+      this.datasetRepository,
+      searchTerm,
+      projectId,
+      {
+        alias: 'd',
+        select: ['d.id', 'd.name', 'd.description'],
+        scoreColumn: 'd.name',
+        searchColumns: ['d.name', 'd.description'],
+        projectIdColumn: 'd.project_id',
+      },
+    );
+  }
+
+  async findOneDataset(id: number): Promise<DatasetEntity | null> {
+    return await this.datasetRepository.findOne({
+      where: { id },
+      relations: ['project', 'dataSources'],
+    });
+  }
+
+  async createDataset(dto: CreateDatasetDto): Promise<DatasetEntity> {
+    const sourceMode: DatasetSourceMode = dto.sourceMode ?? 'manual';
+    const sourceConfig = this.normalizeSourceConfig(
+      sourceMode,
+      dto.sourceConfig,
+    );
+    this.validateSourceConfig(sourceMode, sourceConfig, dto.projectId);
+
+    const dataset = this.datasetRepository.create({
+      name: dto.name,
+      description: dto.description || null,
+      schema: dto.schema as DatasetField[],
+      sourceMode,
+      sourceConfig,
+    });
+
+    if (dto.projectId) {
+      dataset.project = { id: dto.projectId } as any;
+    }
+
+    return await this.datasetRepository.save(dataset);
+  }
+
+  async updateDataset(
+    id: number,
+    dto: UpdateDatasetDto,
+  ): Promise<DatasetEntity> {
+    const dataset = await this.datasetRepository.findOne({
+      where: { id },
+      relations: ['project'],
+    });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${id} not found`);
+    }
+
+    if (dto.name !== undefined) dataset.name = dto.name;
+    if (dto.description !== undefined)
+      dataset.description = dto.description || null;
+    if (dto.schema !== undefined) dataset.schema = dto.schema as DatasetField[];
+    if (dto.projectId !== undefined) {
+      dataset.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
+    }
+
+    if (dto.sourceMode !== undefined || dto.sourceConfig !== undefined) {
+      const nextMode: DatasetSourceMode = dto.sourceMode ?? dataset.sourceMode;
+      const rawConfig =
+        dto.sourceConfig !== undefined
+          ? dto.sourceConfig
+          : dataset.sourceConfig;
+      const nextConfig = this.normalizeSourceConfig(nextMode, rawConfig);
+      const projectIdForValidation =
+        dto.projectId !== undefined
+          ? dto.projectId
+          : (dataset.project?.id ?? null);
+      this.validateSourceConfig(nextMode, nextConfig, projectIdForValidation);
+      dataset.sourceMode = nextMode;
+      dataset.sourceConfig = nextConfig;
+    }
+
+    return await this.datasetRepository.save(dataset);
+  }
+
+  private normalizeSourceConfig(
+    mode: DatasetSourceMode,
+    raw: Record<string, any> | undefined,
+  ): Record<string, any> {
+    if (mode === 'manual') return {};
+    if (!raw || typeof raw !== 'object') return {};
+    return raw;
+  }
+
+  private validateSourceConfig(
+    mode: DatasetSourceMode,
+    config: Record<string, any>,
+    projectId: number | null | undefined,
+  ): void {
+    if (mode === 'project_resources') {
+      if (!projectId) {
+        throw new BadRequestException(
+          "sourceMode 'project_resources' requires the dataset to have a projectId",
+        );
+      }
+      if (config.resourceTypeFilter !== undefined) {
+        if (
+          !Array.isArray(config.resourceTypeFilter) ||
+          !config.resourceTypeFilter.every((t: any) => typeof t === 'string')
+        ) {
+          throw new BadRequestException(
+            'sourceConfig.resourceTypeFilter must be an array of strings',
+          );
+        }
+      }
+      return;
+    }
+
+    if (mode === 'resource_selection') {
+      const ids = config.resourceIds;
+      if (
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        !ids.every((n: any) => typeof n === 'number' && Number.isFinite(n))
+      ) {
+        throw new BadRequestException(
+          "sourceMode 'resource_selection' requires sourceConfig.resourceIds " +
+            'to be a non-empty number[]',
+        );
+      }
+    }
+  }
+
+  async analyzeSchemaChange(
+    id: number,
+    newSchema: DatasetField[],
+  ): Promise<{
+    removedFields: { key: string; name: string; affectedRecords: number }[];
+    typeChanges: {
+      key: string;
+      name: string;
+      oldType: string;
+      newType: string;
+      incompatibleRecords: number;
+    }[];
+    safe: boolean;
+  }> {
+    const dataset = await this.datasetRepository.findOne({ where: { id } });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${id} not found`);
+    }
+
+    const oldSchema = dataset.schema;
+    const newKeys = new Set(newSchema.map((f) => f.key));
+    const oldFieldMap = new Map(oldSchema.map((f) => [f.key, f]));
+
+    const removedFields: {
+      key: string;
+      name: string;
+      affectedRecords: number;
+    }[] = [];
+    const typeChanges: {
+      key: string;
+      name: string;
+      oldType: string;
+      newType: string;
+      incompatibleRecords: number;
+    }[] = [];
+
+    // Detect removed fields
+    for (const oldField of oldSchema) {
+      if (!newKeys.has(oldField.key)) {
+        const count = await this.recordRepository
+          .createQueryBuilder('record')
+          .where('record.dataset_id = :datasetId', { datasetId: id })
+          .andWhere(`record.data ? :key`, { key: oldField.key })
+          .andWhere(`record.data ->> :key IS NOT NULL`, { key: oldField.key })
+          .andWhere(`record.data ->> :key != ''`, { key: oldField.key })
+          .getCount();
+
+        if (count > 0) {
+          removedFields.push({
+            key: oldField.key,
+            name: oldField.name,
+            affectedRecords: count,
+          });
+        }
+      }
+    }
+
+    // Detect type changes
+    for (const newField of newSchema) {
+      const oldField = oldFieldMap.get(newField.key);
+      if (oldField && oldField.type !== newField.type) {
+        const incompatible = await this.countIncompatibleRecords(
+          id,
+          newField.key,
+          newField.type,
+        );
+        typeChanges.push({
+          key: newField.key,
+          name: newField.name,
+          oldType: oldField.type,
+          newType: newField.type,
+          incompatibleRecords: incompatible,
         });
+      }
     }
 
-    async findOneDataset(id: number): Promise<DatasetEntity | null> {
-        return await this.datasetRepository.findOne({
-            where: { id },
-            relations: ['project', 'dataSources'],
-        });
+    return {
+      removedFields,
+      typeChanges,
+      safe: removedFields.length === 0 && typeChanges.length === 0,
+    };
+  }
+
+  private async countIncompatibleRecords(
+    datasetId: number,
+    fieldKey: string,
+    newType: string,
+  ): Promise<number> {
+    const records = await this.recordRepository.find({
+      where: { dataset: { id: datasetId } },
+      select: ['id', 'data'],
+    });
+
+    let incompatible = 0;
+    for (const record of records) {
+      const value = record.data[fieldKey];
+      if (value === undefined || value === null || value === '') continue;
+
+      if (!this.isValueCompatible(value, newType)) {
+        incompatible++;
+      }
     }
+    return incompatible;
+  }
 
-    async createDataset(dto: CreateDatasetDto): Promise<DatasetEntity> {
-        const sourceMode: DatasetSourceMode = dto.sourceMode ?? 'manual';
-        const sourceConfig = this.normalizeSourceConfig(sourceMode, dto.sourceConfig);
-        this.validateSourceConfig(sourceMode, sourceConfig, dto.projectId);
-
-        const dataset = this.datasetRepository.create({
-            name: dto.name,
-            description: dto.description || null,
-            schema: dto.schema as DatasetField[],
-            sourceMode,
-            sourceConfig,
-        });
-
-        if (dto.projectId) {
-            dataset.project = { id: dto.projectId } as any;
-        }
-
-        return await this.datasetRepository.save(dataset);
+  private isValueCompatible(value: any, targetType: string): boolean {
+    const str = String(value);
+    switch (targetType) {
+      case 'number':
+        return !isNaN(Number(value));
+      case 'boolean':
+        return (
+          typeof value === 'boolean' || value === 'true' || value === 'false'
+        );
+      case 'date':
+      case 'datetime':
+        return !isNaN(Date.parse(str));
+      case 'time':
+        return /^\d{2}:\d{2}(:\d{2})?$/.test(str);
+      case 'text':
+        return true;
+      case 'select':
+        return true; // options validation happens separately
+      default:
+        return true;
     }
+  }
 
-    async updateDataset(id: number, dto: UpdateDatasetDto): Promise<DatasetEntity> {
-        const dataset = await this.datasetRepository.findOne({
-            where: { id },
-            relations: ['project'],
-        });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${id} not found`);
-        }
-
-        if (dto.name !== undefined) dataset.name = dto.name;
-        if (dto.description !== undefined) dataset.description = dto.description || null;
-        if (dto.schema !== undefined) dataset.schema = dto.schema as DatasetField[];
-        if (dto.projectId !== undefined) {
-            dataset.project = dto.projectId ? { id: dto.projectId } as any : null;
-        }
-
-        if (dto.sourceMode !== undefined || dto.sourceConfig !== undefined) {
-            const nextMode: DatasetSourceMode = dto.sourceMode ?? dataset.sourceMode;
-            const rawConfig = dto.sourceConfig !== undefined ? dto.sourceConfig : dataset.sourceConfig;
-            const nextConfig = this.normalizeSourceConfig(nextMode, rawConfig);
-            const projectIdForValidation = dto.projectId !== undefined ? dto.projectId : dataset.project?.id ?? null;
-            this.validateSourceConfig(nextMode, nextConfig, projectIdForValidation);
-            dataset.sourceMode = nextMode;
-            dataset.sourceConfig = nextConfig;
-        }
-
-        return await this.datasetRepository.save(dataset);
+  async removeDataset(id: number): Promise<void> {
+    const dataset = await this.datasetRepository.findOne({ where: { id } });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${id} not found`);
     }
+    await this.datasetRepository.delete({ id });
+  }
 
-    private normalizeSourceConfig(
-        mode: DatasetSourceMode,
-        raw: Record<string, any> | undefined,
-    ): Record<string, any> {
-        if (mode === 'manual') return {};
-        if (!raw || typeof raw !== 'object') return {};
-        return raw;
+  async createFromCsv(
+    name: string,
+    schema: DatasetField[],
+    records: Record<string, any>[],
+    projectId?: number,
+  ): Promise<{
+    dataset: DatasetEntity;
+    imported: number;
+    errors: { row: number; messages: string[] }[];
+  }> {
+    const dataset = this.datasetRepository.create({
+      name,
+      description: null,
+      schema,
+    });
+    if (projectId) {
+      dataset.project = { id: projectId } as any;
     }
+    const savedDataset = await this.datasetRepository.save(dataset);
 
-    private validateSourceConfig(
-        mode: DatasetSourceMode,
-        config: Record<string, any>,
-        projectId: number | null | undefined,
-    ): void {
-        if (mode === 'project_resources') {
-            if (!projectId) {
-                throw new BadRequestException(
-                    "sourceMode 'project_resources' requires the dataset to have a projectId",
-                );
-            }
-            if (config.resourceTypeFilter !== undefined) {
-                if (
-                    !Array.isArray(config.resourceTypeFilter) ||
-                    !config.resourceTypeFilter.every((t: any) => typeof t === 'string')
-                ) {
-                    throw new BadRequestException(
-                        "sourceConfig.resourceTypeFilter must be an array of strings",
-                    );
-                }
-            }
-            return;
-        }
+    const result = await this.importValidatedRecords(
+      savedDataset.id,
+      schema,
+      records,
+    );
+    return { dataset: savedDataset, ...result };
+  }
 
-        if (mode === 'resource_selection') {
-            const ids = config.resourceIds;
-            if (!Array.isArray(ids) || ids.length === 0 || !ids.every((n: any) => typeof n === 'number' && Number.isFinite(n))) {
-                throw new BadRequestException(
-                    "sourceMode 'resource_selection' requires sourceConfig.resourceIds to be a non-empty number[]",
-                );
-            }
-        }
+  prepareValidRecords(
+    schema: DatasetField[],
+    records: Record<string, any>[],
+  ): {
+    records: Record<string, any>[];
+    errors: { row: number; messages: string[] }[];
+  } {
+    const valid: Record<string, any>[] = [];
+    const errors: { row: number; messages: string[] }[] = [];
+    for (let index = 0; index < records.length; index++) {
+      const messages = this.validateRecordData(schema, records[index]);
+      if (messages.length) {
+        errors.push({ row: index + 1, messages });
+      } else {
+        valid.push(this.cleanRecordData(schema, records[index]));
+      }
     }
+    return { records: valid, errors };
+  }
 
-    async analyzeSchemaChange(id: number, newSchema: DatasetField[]): Promise<{
-        removedFields: { key: string; name: string; affectedRecords: number }[];
-        typeChanges: { key: string; name: string; oldType: string; newType: string; incompatibleRecords: number }[];
-        safe: boolean;
-    }> {
-        const dataset = await this.datasetRepository.findOne({ where: { id } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${id} not found`);
-        }
+  private async importValidatedRecords(
+    datasetId: number,
+    schema: DatasetField[],
+    records: Record<string, any>[],
+  ): Promise<{
+    imported: number;
+    errors: { row: number; messages: string[] }[];
+  }> {
+    const imported: DatasetRecordEntity[] = [];
+    const errors: { row: number; messages: string[] }[] = [];
 
-        const oldSchema = dataset.schema;
-        const newKeys = new Set(newSchema.map(f => f.key));
-        const oldFieldMap = new Map(oldSchema.map(f => [f.key, f]));
-
-        const removedFields: { key: string; name: string; affectedRecords: number }[] = [];
-        const typeChanges: { key: string; name: string; oldType: string; newType: string; incompatibleRecords: number }[] = [];
-
-        // Detect removed fields
-        for (const oldField of oldSchema) {
-            if (!newKeys.has(oldField.key)) {
-                const count = await this.recordRepository.createQueryBuilder('record')
-                    .where('record.dataset_id = :datasetId', { datasetId: id })
-                    .andWhere(`record.data ? :key`, { key: oldField.key })
-                    .andWhere(`record.data ->> :key IS NOT NULL`, { key: oldField.key })
-                    .andWhere(`record.data ->> :key != ''`, { key: oldField.key })
-                    .getCount();
-
-                if (count > 0) {
-                    removedFields.push({
-                        key: oldField.key,
-                        name: oldField.name,
-                        affectedRecords: count,
-                    });
-                }
-            }
-        }
-
-        // Detect type changes
-        for (const newField of newSchema) {
-            const oldField = oldFieldMap.get(newField.key);
-            if (oldField && oldField.type !== newField.type) {
-                const incompatible = await this.countIncompatibleRecords(id, newField.key, newField.type);
-                typeChanges.push({
-                    key: newField.key,
-                    name: newField.name,
-                    oldType: oldField.type,
-                    newType: newField.type,
-                    incompatibleRecords: incompatible,
-                });
-            }
-        }
-
-        return {
-            removedFields,
-            typeChanges,
-            safe: removedFields.length === 0 && typeChanges.length === 0,
-        };
-    }
-
-    private async countIncompatibleRecords(datasetId: number, fieldKey: string, newType: string): Promise<number> {
-        const records = await this.recordRepository.find({
-            where: { dataset: { id: datasetId } },
-            select: ['id', 'data'],
-        });
-
-        let incompatible = 0;
-        for (const record of records) {
-            const value = record.data[fieldKey];
-            if (value === undefined || value === null || value === '') continue;
-
-            if (!this.isValueCompatible(value, newType)) {
-                incompatible++;
-            }
-        }
-        return incompatible;
-    }
-
-    private isValueCompatible(value: any, targetType: string): boolean {
-        const str = String(value);
-        switch (targetType) {
-            case 'number':
-                return !isNaN(Number(value));
-            case 'boolean':
-                return typeof value === 'boolean' || value === 'true' || value === 'false';
-            case 'date':
-            case 'datetime':
-                return !isNaN(Date.parse(str));
-            case 'time':
-                return /^\d{2}:\d{2}(:\d{2})?$/.test(str);
-            case 'text':
-                return true;
-            case 'select':
-                return true; // options validation happens separately
-            default:
-                return true;
-        }
-    }
-
-    async removeDataset(id: number): Promise<void> {
-        const dataset = await this.datasetRepository.findOne({ where: { id } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${id} not found`);
-        }
-        await this.datasetRepository.delete({ id });
-    }
-
-    async createFromCsv(
-        name: string,
-        schema: DatasetField[],
-        records: Record<string, any>[],
-        projectId?: number,
-    ): Promise<{ dataset: DatasetEntity; imported: number; errors: { row: number; messages: string[] }[] }> {
-        const dataset = this.datasetRepository.create({
-            name,
-            description: null,
-            schema,
-        });
-        if (projectId) {
-            dataset.project = { id: projectId } as any;
-        }
-        const savedDataset = await this.datasetRepository.save(dataset);
-
-        const result = await this.importValidatedRecords(savedDataset.id, schema, records);
-        return { dataset: savedDataset, ...result };
-    }
-
-    prepareValidRecords(
-        schema: DatasetField[],
-        records: Record<string, any>[],
-    ): { records: Record<string, any>[]; errors: { row: number; messages: string[] }[] } {
-        const valid: Record<string, any>[] = [];
-        const errors: { row: number; messages: string[] }[] = [];
-        for (let index = 0; index < records.length; index++) {
-            const messages = this.validateRecordData(schema, records[index]);
-            if (messages.length) {
-                errors.push({ row: index + 1, messages });
-            } else {
-                valid.push(this.cleanRecordData(schema, records[index]));
-            }
-        }
-        return { records: valid, errors };
-    }
-
-    private async importValidatedRecords(
-        datasetId: number,
-        schema: DatasetField[],
-        records: Record<string, any>[],
-    ): Promise<{ imported: number; errors: { row: number; messages: string[] }[] }> {
-        const imported: DatasetRecordEntity[] = [];
-        const errors: { row: number; messages: string[] }[] = [];
-
-        for (let i = 0; i < records.length; i++) {
-            const validationErrors = this.validateRecordData(schema, records[i]);
-            if (validationErrors.length > 0) {
-                errors.push({ row: i + 1, messages: validationErrors });
-            } else {
-                imported.push(this.recordRepository.create({
-                    dataset: { id: datasetId } as any,
-                    data: this.cleanRecordData(schema, records[i]),
-                    cellMetadata: {},
-                    sourceResourceId: null,
-                    extractionStatus: 'extracted',
-                    extractionError: null,
-                }));
-            }
-        }
-
-        if (imported.length > 0) {
-            await this.recordRepository.save(imported, { chunk: 100 });
-        }
-
-        return { imported: imported.length, errors };
-    }
-
-    async resolveLinkedRecords(datasetId: number, values: (string | number)[], lookupField?: string): Promise<Record<string, Record<string, any>>> {
-        if (!values.length) return {};
-        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
-        if (!dataset) return {};
-
-        let records: DatasetRecordEntity[];
-
-        if (lookupField) {
-            // Lookup by a field inside the JSONB data column
-            const strValues = values.map(v => String(v));
-            records = await this.recordRepository
-                .createQueryBuilder('r')
-                .where('r.dataset_id = :datasetId', { datasetId })
-                .andWhere(`r.data ->> :field IN (:...vals)`, { field: lookupField, vals: strValues })
-                .getMany();
-
-            const map: Record<string, Record<string, any>> = {};
-            for (const r of records) {
-                const key = String(r.data[lookupField]);
-                map[key] = r.data;
-            }
-            return map;
-        } else {
-            // Lookup by record PK
-            const numIds = values.map(v => Number(v)).filter(n => !isNaN(n));
-            if (!numIds.length) return {};
-            records = await this.recordRepository
-                .createQueryBuilder('r')
-                .where('r.dataset_id = :datasetId', { datasetId })
-                .andWhere('r.id IN (:...ids)', { ids: numIds })
-                .getMany();
-
-            const map: Record<string, Record<string, any>> = {};
-            for (const r of records) {
-                map[String(r.id)] = r.data;
-            }
-            return map;
-        }
-    }
-
-    async findRecords(datasetId: number, page: number = 1, limit: number = 50): Promise<{ records: DatasetRecordEntity[]; total: number }> {
-        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
-        }
-
-        const [records, total] = await this.recordRepository.findAndCount({
-            where: { dataset: { id: datasetId } },
-            order: { createdAt: 'DESC' },
-            skip: (page - 1) * limit,
-            take: limit,
-        });
-
-        return { records, total };
-    }
-
-    async createRecord(datasetId: number, dto: CreateDatasetRecordDto): Promise<DatasetRecordEntity> {
-        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
-        }
-
-        const errors = this.validateRecordData(dataset.schema, dto.data);
-        if (errors.length > 0) {
-            throw new BadRequestException(errors);
-        }
-
-        const cleanData = this.cleanRecordData(dataset.schema, dto.data);
-        const record = this.recordRepository.create({
+    for (let i = 0; i < records.length; i++) {
+      const validationErrors = this.validateRecordData(schema, records[i]);
+      if (validationErrors.length > 0) {
+        errors.push({ row: i + 1, messages: validationErrors });
+      } else {
+        imported.push(
+          this.recordRepository.create({
             dataset: { id: datasetId } as any,
-            data: cleanData,
+            data: this.cleanRecordData(schema, records[i]),
             cellMetadata: {},
             sourceResourceId: null,
             extractionStatus: 'extracted',
             extractionError: null,
-        });
-
-        return await this.recordRepository.save(record);
+          }),
+        );
+      }
     }
 
-    async updateRecord(datasetId: number, recordId: number, dto: UpdateDatasetRecordDto): Promise<DatasetRecordEntity> {
-        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
-        }
-
-        const record = await this.recordRepository.findOne({
-            where: { id: recordId, dataset: { id: datasetId } },
-        });
-        if (!record) {
-            throw new NotFoundException(`Record with id ${recordId} not found`);
-        }
-
-        const errors = this.validateRecordData(dataset.schema, dto.data);
-        if (errors.length > 0) {
-            throw new BadRequestException(errors);
-        }
-
-        const previousData = record.data || {};
-        const newData = this.cleanRecordData(dataset.schema, dto.data);
-
-        // Per-cell `editedByUser`: if a cell value actually changes AND already had
-        // an anchor (came from extraction), mark the anchor as user-edited so a
-        // later re-extract preserves the manual correction. Cells without a prior
-        // anchor stay anchor-less — the flag is only meaningful with an anchor.
-        const cellMetadata = { ...(record.cellMetadata || {}) };
-        for (const field of dataset.schema) {
-            const key = field.key;
-            if (!(key in dto.data)) continue;
-            const oldValue = previousData[key];
-            const newValue = newData[key];
-            if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
-            const existingAnchor = cellMetadata[key];
-            if (!existingAnchor) continue;
-            cellMetadata[key] = { ...existingAnchor, editedByUser: true };
-        }
-
-        record.data = newData;
-        record.cellMetadata = cellMetadata;
-        return await this.recordRepository.save(record);
+    if (imported.length > 0) {
+      await this.recordRepository.save(imported, { chunk: 100 });
     }
 
-    async removeRecord(datasetId: number, recordId: number): Promise<void> {
-        const record = await this.recordRepository.findOne({
-            where: { id: recordId, dataset: { id: datasetId } },
-        });
-        if (!record) {
-            throw new NotFoundException(`Record with id ${recordId} not found`);
+    return { imported: imported.length, errors };
+  }
+
+  async resolveLinkedRecords(
+    datasetId: number,
+    values: (string | number)[],
+    lookupField?: string,
+  ): Promise<Record<string, Record<string, any>>> {
+    if (!values.length) return {};
+    const dataset = await this.datasetRepository.findOne({
+      where: { id: datasetId },
+    });
+    if (!dataset) return {};
+
+    let records: DatasetRecordEntity[];
+
+    if (lookupField) {
+      // Lookup by a field inside the JSONB data column
+      const strValues = values.map((v) => String(v));
+      records = await this.recordRepository
+        .createQueryBuilder('r')
+        .where('r.dataset_id = :datasetId', { datasetId })
+        .andWhere(`r.data ->> :field IN (:...vals)`, {
+          field: lookupField,
+          vals: strValues,
+        })
+        .getMany();
+
+      const map: Record<string, Record<string, any>> = {};
+      for (const r of records) {
+        const key = String(r.data[lookupField]);
+        map[key] = r.data;
+      }
+      return map;
+    } else {
+      // Lookup by record PK
+      const numIds = values.map((v) => Number(v)).filter((n) => !isNaN(n));
+      if (!numIds.length) return {};
+      records = await this.recordRepository
+        .createQueryBuilder('r')
+        .where('r.dataset_id = :datasetId', { datasetId })
+        .andWhere('r.id IN (:...ids)', { ids: numIds })
+        .getMany();
+
+      const map: Record<string, Record<string, any>> = {};
+      for (const r of records) {
+        map[String(r.id)] = r.data;
+      }
+      return map;
+    }
+  }
+
+  async findRecords(
+    datasetId: number,
+    page: number = 1,
+    limit: number = 50,
+  ): Promise<{ records: DatasetRecordEntity[]; total: number }> {
+    const dataset = await this.datasetRepository.findOne({
+      where: { id: datasetId },
+    });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${datasetId} not found`);
+    }
+
+    const [records, total] = await this.recordRepository.findAndCount({
+      where: { dataset: { id: datasetId } },
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return { records, total };
+  }
+
+  async createRecord(
+    datasetId: number,
+    dto: CreateDatasetRecordDto,
+  ): Promise<DatasetRecordEntity> {
+    const dataset = await this.datasetRepository.findOne({
+      where: { id: datasetId },
+    });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${datasetId} not found`);
+    }
+
+    const errors = this.validateRecordData(dataset.schema, dto.data);
+    if (errors.length > 0) {
+      throw new BadRequestException(errors);
+    }
+
+    const cleanData = this.cleanRecordData(dataset.schema, dto.data);
+    const record = this.recordRepository.create({
+      dataset: { id: datasetId } as any,
+      data: cleanData,
+      cellMetadata: {},
+      sourceResourceId: null,
+      extractionStatus: 'extracted',
+      extractionError: null,
+    });
+
+    return await this.recordRepository.save(record);
+  }
+
+  async updateRecord(
+    datasetId: number,
+    recordId: number,
+    dto: UpdateDatasetRecordDto,
+  ): Promise<DatasetRecordEntity> {
+    const dataset = await this.datasetRepository.findOne({
+      where: { id: datasetId },
+    });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${datasetId} not found`);
+    }
+
+    const record = await this.recordRepository.findOne({
+      where: { id: recordId, dataset: { id: datasetId } },
+    });
+    if (!record) {
+      throw new NotFoundException(`Record with id ${recordId} not found`);
+    }
+
+    const errors = this.validateRecordData(dataset.schema, dto.data);
+    if (errors.length > 0) {
+      throw new BadRequestException(errors);
+    }
+
+    const previousData = record.data || {};
+    const newData = this.cleanRecordData(dataset.schema, dto.data);
+
+    // Per-cell `editedByUser`: if a cell value actually changes AND already had
+    // an anchor (came from extraction), mark the anchor as user-edited so a
+    // later re-extract preserves the manual correction. Cells without a prior
+    // anchor stay anchor-less — the flag is only meaningful with an anchor.
+    const cellMetadata = { ...(record.cellMetadata || {}) };
+    for (const field of dataset.schema) {
+      const key = field.key;
+      if (!(key in dto.data)) continue;
+      const oldValue = previousData[key];
+      const newValue = newData[key];
+      if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
+      const existingAnchor = cellMetadata[key];
+      if (!existingAnchor) continue;
+      cellMetadata[key] = { ...existingAnchor, editedByUser: true };
+    }
+
+    record.data = newData;
+    record.cellMetadata = cellMetadata;
+    return await this.recordRepository.save(record);
+  }
+
+  async removeRecord(datasetId: number, recordId: number): Promise<void> {
+    const record = await this.recordRepository.findOne({
+      where: { id: recordId, dataset: { id: datasetId } },
+    });
+    if (!record) {
+      throw new NotFoundException(`Record with id ${recordId} not found`);
+    }
+    await this.recordRepository.delete({ id: recordId });
+  }
+
+  async findRelations(datasetId: number): Promise<DatasetRelationEntity[]> {
+    return await this.relationRepository.find({
+      where: [
+        { sourceDataset: { id: datasetId } },
+        { targetDataset: { id: datasetId } },
+      ],
+      relations: ['sourceDataset', 'targetDataset'],
+    });
+  }
+
+  async createRelation(
+    dto: CreateDatasetRelationDto,
+  ): Promise<DatasetRelationEntity> {
+    const source = await this.datasetRepository.findOne({
+      where: { id: dto.sourceDatasetId },
+    });
+    if (!source) {
+      throw new NotFoundException(
+        `Source dataset with id ${dto.sourceDatasetId} not found`,
+      );
+    }
+
+    const target = await this.datasetRepository.findOne({
+      where: { id: dto.targetDatasetId },
+    });
+    if (!target) {
+      throw new NotFoundException(
+        `Target dataset with id ${dto.targetDatasetId} not found`,
+      );
+    }
+
+    const relation = this.relationRepository.create({
+      name: dto.name || null,
+      sourceDataset: { id: dto.sourceDatasetId } as any,
+      targetDataset: { id: dto.targetDatasetId } as any,
+      relationType: dto.relationType,
+    });
+
+    return await this.relationRepository.save(relation);
+  }
+
+  async removeRelation(relationId: number): Promise<void> {
+    const relation = await this.relationRepository.findOne({
+      where: { id: relationId },
+    });
+    if (!relation) {
+      throw new NotFoundException(`Relation with id ${relationId} not found`);
+    }
+    await this.relationRepository.delete({ id: relationId });
+  }
+
+  async linkRecords(
+    relationId: number,
+    dto: LinkRecordsDto,
+  ): Promise<DatasetRecordLinkEntity> {
+    const relation = await this.relationRepository.findOne({
+      where: { id: relationId },
+      relations: ['sourceDataset', 'targetDataset'],
+    });
+    if (!relation) {
+      throw new NotFoundException(`Relation with id ${relationId} not found`);
+    }
+
+    const sourceRecord = await this.recordRepository.findOne({
+      where: { id: dto.sourceRecordId },
+      relations: ['dataset'],
+    });
+    if (
+      !sourceRecord ||
+      sourceRecord.dataset.id !== relation.sourceDataset.id
+    ) {
+      throw new BadRequestException(
+        'Source record does not belong to the source dataset of this relation',
+      );
+    }
+
+    const targetRecord = await this.recordRepository.findOne({
+      where: { id: dto.targetRecordId },
+      relations: ['dataset'],
+    });
+    if (
+      !targetRecord ||
+      targetRecord.dataset.id !== relation.targetDataset.id
+    ) {
+      throw new BadRequestException(
+        'Target record does not belong to the target dataset of this relation',
+      );
+    }
+
+    const link = this.linkRepository.create({
+      relation: { id: relationId } as any,
+      sourceRecord: { id: dto.sourceRecordId } as any,
+      targetRecord: { id: dto.targetRecordId } as any,
+    });
+
+    return await this.linkRepository.save(link);
+  }
+
+  async unlinkRecords(relationId: number, linkId: number): Promise<void> {
+    const link = await this.linkRepository.findOne({
+      where: { id: linkId, relation: { id: relationId } },
+    });
+    if (!link) {
+      throw new NotFoundException(`Link with id ${linkId} not found`);
+    }
+    await this.linkRepository.delete({ id: linkId });
+  }
+
+  async getLinkedRecords(recordId: number): Promise<any[]> {
+    const links = await this.linkRepository
+      .createQueryBuilder('link')
+      .leftJoinAndSelect('link.relation', 'relation')
+      .leftJoinAndSelect('relation.sourceDataset', 'sourceDataset')
+      .leftJoinAndSelect('relation.targetDataset', 'targetDataset')
+      .leftJoinAndSelect('link.sourceRecord', 'sourceRecord')
+      .leftJoinAndSelect('link.targetRecord', 'targetRecord')
+      .where('link.sourceRecord.id = :recordId', { recordId })
+      .orWhere('link.targetRecord.id = :recordId', { recordId })
+      .getMany();
+
+    return links.map((link) => {
+      const isSource = link.sourceRecord.id === recordId;
+      return {
+        linkId: link.id,
+        relation: {
+          id: link.relation.id,
+          name: link.relation.name,
+          relationType: link.relation.relationType,
+        },
+        linkedRecord: isSource ? link.targetRecord : link.sourceRecord,
+        linkedDataset: isSource
+          ? link.relation.targetDataset
+          : link.relation.sourceDataset,
+        direction: isSource ? 'outgoing' : 'incoming',
+      };
+    });
+  }
+
+  validateRecordData(
+    schema: DatasetField[],
+    data: Record<string, any>,
+  ): string[] {
+    const errors: string[] = [];
+
+    for (const field of schema) {
+      const value = data[field.key];
+
+      if (
+        field.required &&
+        (value === undefined || value === null || value === '')
+      ) {
+        errors.push(`Field "${field.name}" is required`);
+        continue;
+      }
+
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+
+      switch (field.type) {
+        case 'number':
+          if (isNaN(Number(value))) {
+            errors.push(`Field "${field.name}" must be a valid number`);
+          }
+          break;
+        case 'boolean':
+          if (
+            typeof value !== 'boolean' &&
+            value !== 'true' &&
+            value !== 'false'
+          ) {
+            errors.push(`Field "${field.name}" must be a boolean`);
+          }
+          break;
+        case 'date':
+          if (isNaN(Date.parse(String(value)))) {
+            errors.push(`Field "${field.name}" must be a valid date`);
+          }
+          break;
+        case 'datetime':
+          if (isNaN(Date.parse(String(value)))) {
+            errors.push(`Field "${field.name}" must be a valid datetime`);
+          }
+          break;
+        case 'time':
+          if (!/^\d{2}:\d{2}(:\d{2})?$/.test(String(value))) {
+            errors.push(
+              `Field "${field.name}" must be a valid time (HH:mm or HH:mm:ss)`,
+            );
+          }
+          break;
+        case 'select':
+          if (field.options && !field.options.includes(String(value))) {
+            errors.push(
+              `Field "${field.name}" must be one of: ${field.options.join(', ')}`,
+            );
+          }
+          break;
+      }
+    }
+
+    return errors;
+  }
+
+  private cleanRecordData(
+    schema: DatasetField[],
+    data: Record<string, any>,
+  ): Record<string, any> {
+    const clean: Record<string, any> = {};
+    const validKeys = new Set(schema.map((f) => f.key));
+
+    for (const [key, value] of Object.entries(data)) {
+      if (!validKeys.has(key)) continue;
+
+      const field = schema.find((f) => f.key === key);
+      if (!field || value === undefined || value === null || value === '') {
+        if (value === '' || value === null) clean[key] = null;
+        continue;
+      }
+
+      switch (field.type) {
+        case 'number':
+          clean[key] = Number(value);
+          break;
+        case 'boolean':
+          clean[key] = value === true || value === 'true';
+          break;
+        default:
+          clean[key] = value;
+      }
+    }
+
+    return clean;
+  }
+
+  async bulkDeleteRecords(
+    datasetId: number,
+    recordIds: number[],
+  ): Promise<{ deleted: number }> {
+    const dataset = await this.datasetRepository.findOne({
+      where: { id: datasetId },
+    });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${datasetId} not found`);
+    }
+
+    if (!recordIds.length) return { deleted: 0 };
+
+    const result = await this.recordRepository
+      .createQueryBuilder()
+      .delete()
+      .where('dataset_id = :datasetId', { datasetId })
+      .andWhere('id IN (:...ids)', { ids: recordIds })
+      .execute();
+
+    return { deleted: result.affected || 0 };
+  }
+
+  async findAllRecords(datasetId: number): Promise<DatasetRecordEntity[]> {
+    return await this.recordRepository.find({
+      where: { dataset: { id: datasetId } },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // ── Export CSV ──
+
+  async exportCsv(
+    id: number,
+    options: { includeAnchors: boolean },
+  ): Promise<{ filename: string; csv: string }> {
+    const dataset = await this.findOneDataset(id);
+    if (!dataset) {
+      throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
+    }
+
+    const records = await this.findAllRecords(id);
+    const resourceTitleResolver = options.includeAnchors
+      ? await this.buildResourceTitleResolver(records)
+      : undefined;
+
+    const csv = this.csvService.exportRecordsCsv(dataset.schema, records, {
+      includeAnchors: options.includeAnchors,
+      resourceTitleResolver,
+    });
+
+    return {
+      filename: dataset.name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.csv',
+      csv,
+    };
+  }
+
+  private async buildResourceTitleResolver(
+    records: DatasetRecordEntity[],
+  ): Promise<(resourceId: number) => string> {
+    const ids = new Set<number>();
+    for (const record of records) {
+      const anchors: CellAnchor[] = Object.values(record.cellMetadata || {});
+      for (const anchor of anchors) {
+        if (typeof anchor?.sourceResourceId === 'number') {
+          ids.add(anchor.sourceResourceId);
         }
-        await this.recordRepository.delete({ id: recordId });
+      }
     }
 
-    async findRelations(datasetId: number): Promise<DatasetRelationEntity[]> {
-        return await this.relationRepository.find({
-            where: [
-                { sourceDataset: { id: datasetId } },
-                { targetDataset: { id: datasetId } },
-            ],
-            relations: ['sourceDataset', 'targetDataset'],
-        });
+    const resources = await this.resourceService.findByIds([...ids]);
+    const titles = new Map(
+      resources.map((r) => [r.id, r.title || r.name || `Resource ${r.id}`]),
+    );
+    return (resourceId: number) => titles.get(resourceId) || '';
+  }
+
+  // ── Chart CRUD ──
+
+  async findCharts(datasetId: number): Promise<DatasetChartEntity[]> {
+    return await this.chartRepository.find({
+      where: { dataset: { id: datasetId } },
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  async createChart(
+    datasetId: number,
+    dto: CreateDatasetChartDto,
+  ): Promise<DatasetChartEntity> {
+    const dataset = await this.datasetRepository.findOne({
+      where: { id: datasetId },
+    });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${datasetId} not found`);
     }
 
-    async createRelation(dto: CreateDatasetRelationDto): Promise<DatasetRelationEntity> {
-        const source = await this.datasetRepository.findOne({ where: { id: dto.sourceDatasetId } });
-        if (!source) {
-            throw new NotFoundException(`Source dataset with id ${dto.sourceDatasetId} not found`);
-        }
+    const chart = this.chartRepository.create({
+      dataset: { id: datasetId } as any,
+      name: dto.name,
+      config: dto.config,
+    });
 
-        const target = await this.datasetRepository.findOne({ where: { id: dto.targetDatasetId } });
-        if (!target) {
-            throw new NotFoundException(`Target dataset with id ${dto.targetDatasetId} not found`);
-        }
+    return await this.chartRepository.save(chart);
+  }
 
-        const relation = this.relationRepository.create({
-            name: dto.name || null,
-            sourceDataset: { id: dto.sourceDatasetId } as any,
-            targetDataset: { id: dto.targetDatasetId } as any,
-            relationType: dto.relationType,
-        });
-
-        return await this.relationRepository.save(relation);
+  async updateChart(
+    chartId: number,
+    dto: UpdateDatasetChartDto,
+  ): Promise<DatasetChartEntity> {
+    const chart = await this.chartRepository.findOne({
+      where: { id: chartId },
+    });
+    if (!chart) {
+      throw new NotFoundException(`Chart with id ${chartId} not found`);
     }
 
-    async removeRelation(relationId: number): Promise<void> {
-        const relation = await this.relationRepository.findOne({ where: { id: relationId } });
-        if (!relation) {
-            throw new NotFoundException(`Relation with id ${relationId} not found`);
-        }
-        await this.relationRepository.delete({ id: relationId });
+    if (dto.name !== undefined) chart.name = dto.name;
+    if (dto.config !== undefined) chart.config = dto.config;
+
+    return await this.chartRepository.save(chart);
+  }
+
+  async removeChart(chartId: number): Promise<void> {
+    const chart = await this.chartRepository.findOne({
+      where: { id: chartId },
+    });
+    if (!chart) {
+      throw new NotFoundException(`Chart with id ${chartId} not found`);
+    }
+    await this.chartRepository.delete({ id: chartId });
+  }
+
+  async bulkCreateRecords(
+    datasetId: number,
+    records: Record<string, any>[],
+  ): Promise<{
+    imported: number;
+    errors: { row: number; messages: string[] }[];
+  }> {
+    const dataset = await this.datasetRepository.findOne({
+      where: { id: datasetId },
+    });
+    if (!dataset) {
+      throw new NotFoundException(`Dataset with id ${datasetId} not found`);
     }
 
-    async linkRecords(relationId: number, dto: LinkRecordsDto): Promise<DatasetRecordLinkEntity> {
-        const relation = await this.relationRepository.findOne({
-            where: { id: relationId },
-            relations: ['sourceDataset', 'targetDataset'],
-        });
-        if (!relation) {
-            throw new NotFoundException(`Relation with id ${relationId} not found`);
-        }
-
-        const sourceRecord = await this.recordRepository.findOne({
-            where: { id: dto.sourceRecordId },
-            relations: ['dataset'],
-        });
-        if (!sourceRecord || sourceRecord.dataset.id !== relation.sourceDataset.id) {
-            throw new BadRequestException('Source record does not belong to the source dataset of this relation');
-        }
-
-        const targetRecord = await this.recordRepository.findOne({
-            where: { id: dto.targetRecordId },
-            relations: ['dataset'],
-        });
-        if (!targetRecord || targetRecord.dataset.id !== relation.targetDataset.id) {
-            throw new BadRequestException('Target record does not belong to the target dataset of this relation');
-        }
-
-        const link = this.linkRepository.create({
-            relation: { id: relationId } as any,
-            sourceRecord: { id: dto.sourceRecordId } as any,
-            targetRecord: { id: dto.targetRecordId } as any,
-        });
-
-        return await this.linkRepository.save(link);
-    }
-
-    async unlinkRecords(relationId: number, linkId: number): Promise<void> {
-        const link = await this.linkRepository.findOne({
-            where: { id: linkId, relation: { id: relationId } },
-        });
-        if (!link) {
-            throw new NotFoundException(`Link with id ${linkId} not found`);
-        }
-        await this.linkRepository.delete({ id: linkId });
-    }
-
-    async getLinkedRecords(recordId: number): Promise<any[]> {
-        const links = await this.linkRepository.createQueryBuilder('link')
-            .leftJoinAndSelect('link.relation', 'relation')
-            .leftJoinAndSelect('relation.sourceDataset', 'sourceDataset')
-            .leftJoinAndSelect('relation.targetDataset', 'targetDataset')
-            .leftJoinAndSelect('link.sourceRecord', 'sourceRecord')
-            .leftJoinAndSelect('link.targetRecord', 'targetRecord')
-            .where('link.sourceRecord.id = :recordId', { recordId })
-            .orWhere('link.targetRecord.id = :recordId', { recordId })
-            .getMany();
-
-        return links.map(link => {
-            const isSource = link.sourceRecord.id === recordId;
-            return {
-                linkId: link.id,
-                relation: {
-                    id: link.relation.id,
-                    name: link.relation.name,
-                    relationType: link.relation.relationType,
-                },
-                linkedRecord: isSource ? link.targetRecord : link.sourceRecord,
-                linkedDataset: isSource ? link.relation.targetDataset : link.relation.sourceDataset,
-                direction: isSource ? 'outgoing' : 'incoming',
-            };
-        });
-    }
-
-    validateRecordData(schema: DatasetField[], data: Record<string, any>): string[] {
-        const errors: string[] = [];
-
-        for (const field of schema) {
-            const value = data[field.key];
-
-            if (field.required && (value === undefined || value === null || value === '')) {
-                errors.push(`Field "${field.name}" is required`);
-                continue;
-            }
-
-            if (value === undefined || value === null || value === '') {
-                continue;
-            }
-
-            switch (field.type) {
-                case 'number':
-                    if (isNaN(Number(value))) {
-                        errors.push(`Field "${field.name}" must be a valid number`);
-                    }
-                    break;
-                case 'boolean':
-                    if (typeof value !== 'boolean' && value !== 'true' && value !== 'false') {
-                        errors.push(`Field "${field.name}" must be a boolean`);
-                    }
-                    break;
-                case 'date':
-                    if (isNaN(Date.parse(String(value)))) {
-                        errors.push(`Field "${field.name}" must be a valid date`);
-                    }
-                    break;
-                case 'datetime':
-                    if (isNaN(Date.parse(String(value)))) {
-                        errors.push(`Field "${field.name}" must be a valid datetime`);
-                    }
-                    break;
-                case 'time':
-                    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(String(value))) {
-                        errors.push(`Field "${field.name}" must be a valid time (HH:mm or HH:mm:ss)`);
-                    }
-                    break;
-                case 'select':
-                    if (field.options && !field.options.includes(String(value))) {
-                        errors.push(`Field "${field.name}" must be one of: ${field.options.join(', ')}`);
-                    }
-                    break;
-            }
-        }
-
-        return errors;
-    }
-
-    private cleanRecordData(schema: DatasetField[], data: Record<string, any>): Record<string, any> {
-        const clean: Record<string, any> = {};
-        const validKeys = new Set(schema.map(f => f.key));
-
-        for (const [key, value] of Object.entries(data)) {
-            if (!validKeys.has(key)) continue;
-
-            const field = schema.find(f => f.key === key);
-            if (!field || value === undefined || value === null || value === '') {
-                if (value === '' || value === null) clean[key] = null;
-                continue;
-            }
-
-            switch (field.type) {
-                case 'number':
-                    clean[key] = Number(value);
-                    break;
-                case 'boolean':
-                    clean[key] = value === true || value === 'true';
-                    break;
-                default:
-                    clean[key] = value;
-            }
-        }
-
-        return clean;
-    }
-
-    async bulkDeleteRecords(datasetId: number, recordIds: number[]): Promise<{ deleted: number }> {
-        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
-        }
-
-        if (!recordIds.length) return { deleted: 0 };
-
-        const result = await this.recordRepository.createQueryBuilder()
-            .delete()
-            .where('dataset_id = :datasetId', { datasetId })
-            .andWhere('id IN (:...ids)', { ids: recordIds })
-            .execute();
-
-        return { deleted: result.affected || 0 };
-    }
-
-    async findAllRecords(datasetId: number): Promise<DatasetRecordEntity[]> {
-        return await this.recordRepository.find({
-            where: { dataset: { id: datasetId } },
-            order: { createdAt: 'DESC' },
-        });
-    }
-
-    // ── Export CSV ──
-
-    async exportCsv(
-        id: number,
-        options: { includeAnchors: boolean },
-    ): Promise<{ filename: string; csv: string }> {
-        const dataset = await this.findOneDataset(id);
-        if (!dataset) {
-            throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
-        }
-
-        const records = await this.findAllRecords(id);
-        const resourceTitleResolver = options.includeAnchors
-            ? await this.buildResourceTitleResolver(records)
-            : undefined;
-
-        const csv = this.csvService.exportRecordsCsv(dataset.schema, records, {
-            includeAnchors: options.includeAnchors,
-            resourceTitleResolver,
-        });
-
-        return { filename: dataset.name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.csv', csv };
-    }
-
-    private async buildResourceTitleResolver(
-        records: DatasetRecordEntity[],
-    ): Promise<(resourceId: number) => string> {
-        const ids = new Set<number>();
-        for (const record of records) {
-            const anchors: CellAnchor[] = Object.values(record.cellMetadata || {});
-            for (const anchor of anchors) {
-                if (typeof anchor?.sourceResourceId === 'number') {
-                    ids.add(anchor.sourceResourceId);
-                }
-            }
-        }
-
-        const resources = await this.resourceService.findByIds([...ids]);
-        const titles = new Map(resources.map(r => [r.id, r.title || r.name || `Resource ${r.id}`]));
-        return (resourceId: number) => titles.get(resourceId) || '';
-    }
-
-    // ── Chart CRUD ──
-
-    async findCharts(datasetId: number): Promise<DatasetChartEntity[]> {
-        return await this.chartRepository.find({
-            where: { dataset: { id: datasetId } },
-            order: { updatedAt: 'DESC' },
-        });
-    }
-
-    async createChart(datasetId: number, dto: CreateDatasetChartDto): Promise<DatasetChartEntity> {
-        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
-        }
-
-        const chart = this.chartRepository.create({
-            dataset: { id: datasetId } as any,
-            name: dto.name,
-            config: dto.config,
-        });
-
-        return await this.chartRepository.save(chart);
-    }
-
-    async updateChart(chartId: number, dto: UpdateDatasetChartDto): Promise<DatasetChartEntity> {
-        const chart = await this.chartRepository.findOne({ where: { id: chartId } });
-        if (!chart) {
-            throw new NotFoundException(`Chart with id ${chartId} not found`);
-        }
-
-        if (dto.name !== undefined) chart.name = dto.name;
-        if (dto.config !== undefined) chart.config = dto.config;
-
-        return await this.chartRepository.save(chart);
-    }
-
-    async removeChart(chartId: number): Promise<void> {
-        const chart = await this.chartRepository.findOne({ where: { id: chartId } });
-        if (!chart) {
-            throw new NotFoundException(`Chart with id ${chartId} not found`);
-        }
-        await this.chartRepository.delete({ id: chartId });
-    }
-
-    async bulkCreateRecords(datasetId: number, records: Record<string, any>[]): Promise<{ imported: number; errors: { row: number; messages: string[] }[] }> {
-        const dataset = await this.datasetRepository.findOne({ where: { id: datasetId } });
-        if (!dataset) {
-            throw new NotFoundException(`Dataset with id ${datasetId} not found`);
-        }
-
-        return await this.importValidatedRecords(datasetId, dataset.schema, records);
-    }
+    return await this.importValidatedRecords(
+      datasetId,
+      dataset.schema,
+      records,
+    );
+  }
 }

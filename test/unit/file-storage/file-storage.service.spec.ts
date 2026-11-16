@@ -4,7 +4,9 @@ describe('FileStorageService', () => {
   let service: FileStorageService;
 
   beforeEach(() => {
-    const mockConfigService = { get: jest.fn().mockReturnValue(undefined) } as any;
+    const mockConfigService = {
+      get: jest.fn().mockReturnValue(undefined),
+    } as any;
     service = new FileStorageService(mockConfigService);
   });
 

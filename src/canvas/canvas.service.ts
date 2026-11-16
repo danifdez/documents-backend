@@ -10,7 +10,7 @@ export class CanvasService {
   constructor(
     @InjectRepository(CanvasEntity)
     private readonly repository: Repository<CanvasEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<CanvasEntity | null> {
     return await this.repository.findOneBy({ id });
@@ -50,8 +50,10 @@ export class CanvasService {
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.canvasData !== undefined) data.canvasData = dto.canvasData;
     if (dto.content !== undefined) data.content = dto.content;
-    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
-    if (dto.threadId !== undefined) data.thread = dto.threadId ? { id: dto.threadId } as any : null;
+    if (dto.projectId !== undefined)
+      data.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
+    if (dto.threadId !== undefined)
+      data.thread = dto.threadId ? ({ id: dto.threadId } as any) : null;
     if (data.canvasData) {
       data.content = this.extractTextFromCanvas(data.canvasData);
     }
@@ -86,7 +88,9 @@ export class CanvasService {
   }
 
   private extractTextFromCanvas(canvasData: object): string {
-    const data = canvasData as { nodes?: Array<{ data?: Record<string, any> }> };
+    const data = canvasData as {
+      nodes?: Array<{ data?: Record<string, any> }>;
+    };
     if (!data.nodes || !Array.isArray(data.nodes)) return '';
 
     return data.nodes

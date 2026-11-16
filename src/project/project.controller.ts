@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, Query, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  Patch,
+  Query,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { ProjectService } from './project.service';
 import { ProjectEntity } from './project.entity';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
@@ -7,9 +17,7 @@ import { Permission } from '../auth/permission.enum';
 
 @Controller('projects')
 export class ProjectController {
-  constructor(
-    private readonly projectService: ProjectService,
-  ) { }
+  constructor(private readonly projectService: ProjectService) {}
 
   @Get('search')
   async search(
@@ -20,17 +28,23 @@ export class ProjectController {
   }
 
   @Get(':id/stats')
-  async getStats(@Param('id', ParseIntPipe) id: number): Promise<Record<string, any>> {
+  async getStats(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<Record<string, any>> {
     return await this.projectService.getStats(id);
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<ProjectEntity | null> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ProjectEntity | null> {
     return await this.projectService.findOne(id);
   }
 
   @Get()
-  async getAll(@Query('includeArchived') includeArchived?: string): Promise<ProjectEntity[]> {
+  async getAll(
+    @Query('includeArchived') includeArchived?: string,
+  ): Promise<ProjectEntity[]> {
     return await this.projectService.findAll(includeArchived === 'true');
   }
 

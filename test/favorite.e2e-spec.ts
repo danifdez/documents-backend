@@ -78,18 +78,19 @@ describe('FavoriteController (e2e)', () => {
     it('should upsert and return 201', async () => {
       favoriteService.upsert.mockResolvedValue(buildFavorite());
 
-      const res = await request(app.getHttpServer())
-        .post('/favorites')
-        .send({
-          projectId: 1,
-          url: 'https://ejemplo.com/pagina',
-          title: 'Página de ejemplo',
-        });
+      const res = await request(app.getHttpServer()).post('/favorites').send({
+        projectId: 1,
+        url: 'https://ejemplo.com/pagina',
+        title: 'Página de ejemplo',
+      });
 
       expect(res.status).toBe(201);
       expect(res.body.url).toBe('https://ejemplo.com/pagina');
       expect(favoriteService.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 1, url: 'https://ejemplo.com/pagina' }),
+        expect.objectContaining({
+          projectId: 1,
+          url: 'https://ejemplo.com/pagina',
+        }),
       );
     });
 

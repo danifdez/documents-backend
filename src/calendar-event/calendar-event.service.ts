@@ -3,8 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CalendarEventEntity } from './calendar-event.entity';
 import { EventOccurrenceCompletionEntity } from './event-occurrence-completion.entity';
-import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
-import { CalendarEventExpansionService, OccurrenceDescriptor } from './calendar-event-expansion.service';
+import {
+  CreateCalendarEventDto,
+  UpdateCalendarEventDto,
+} from './dto/calendar-event.dto';
+import {
+  CalendarEventExpansionService,
+  OccurrenceDescriptor,
+} from './calendar-event-expansion.service';
 import { globalSimilaritySearch } from '../common/global-search';
 
 export interface CalendarEventOccurrence {
@@ -32,7 +38,7 @@ export class CalendarEventService {
     @InjectRepository(EventOccurrenceCompletionEntity)
     private readonly completionRepo: Repository<EventOccurrenceCompletionEntity>,
     private readonly expansion: CalendarEventExpansionService,
-  ) { }
+  ) {}
 
   async findAll(): Promise<CalendarEventEntity[]> {
     return await this.repository.find({
@@ -67,7 +73,8 @@ export class CalendarEventService {
       .createQueryBuilder('e')
       .leftJoinAndSelect('e.project', 'project')
       .where(
-        '(e.recurrence_rule IS NULL AND e.start_date <= :end AND (e.end_date >= :start OR e.end_date IS NULL))' +
+        '(e.recurrence_rule IS NULL AND e.start_date <= :end AND ' +
+          '(e.end_date >= :start OR e.end_date IS NULL))' +
           ' OR (e.recurrence_rule IS NOT NULL AND e.start_date <= :end)',
         { start, end },
       );
@@ -80,7 +87,9 @@ export class CalendarEventService {
     const rangeStart = new Date(start);
     const rangeEnd = new Date(end);
 
-    const trackableEventIds = events.filter((e) => e.trackCompletion).map((e) => e.id);
+    const trackableEventIds = events
+      .filter((e) => e.trackCompletion)
+      .map((e) => e.id);
     const completionsByEvent = await this.loadCompletionsInRange(
       trackableEventIds,
       rangeStart,
@@ -90,12 +99,20 @@ export class CalendarEventService {
     const out: CalendarEventOccurrence[] = [];
     for (const event of events) {
       const set = completionsByEvent.get(event.id);
-      const occurrences = this.expansion.expand(event, rangeStart, rangeEnd, tz, set);
+      const occurrences = this.expansion.expand(
+        event,
+        rangeStart,
+        rangeEnd,
+        tz,
+        set,
+      );
       for (const o of occurrences) {
         out.push(this.toOccurrence(event, o));
       }
     }
-    out.sort((a, b) => a.occurrenceStart.getTime() - b.occurrenceStart.getTime());
+    out.sort(
+      (a, b) => a.occurrenceStart.getTime() - b.occurrenceStart.getTime(),
+    );
     return out;
   }
 
@@ -128,7 +145,10 @@ export class CalendarEventService {
     return map;
   }
 
-  private toOccurrence(event: CalendarEventEntity, o: OccurrenceDescriptor): CalendarEventOccurrence {
+  private toOccurrence(
+    event: CalendarEventEntity,
+    o: OccurrenceDescriptor,
+  ): CalendarEventOccurrence {
     return {
       id: event.id,
       title: event.title,
@@ -148,20 +168,28 @@ export class CalendarEventService {
   }
 
   async create(dto: CreateCalendarEventDto): Promise<CalendarEventEntity> {
-    const data: Partial<CalendarEventEntity> = { title: dto.title, startDate: dto.startDate };
+    const data: Partial<CalendarEventEntity> = {
+      title: dto.title,
+      startDate: dto.startDate,
+    };
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.endDate !== undefined) data.endDate = dto.endDate;
     if (dto.color !== undefined) data.color = dto.color;
     if (dto.allDay !== undefined) data.allDay = dto.allDay;
-    if (dto.recurrenceRule !== undefined) data.recurrenceRule = dto.recurrenceRule;
+    if (dto.recurrenceRule !== undefined)
+      data.recurrenceRule = dto.recurrenceRule;
     if (dto.alarm !== undefined) data.alarm = dto.alarm;
-    if (dto.trackCompletion !== undefined) data.trackCompletion = dto.trackCompletion;
+    if (dto.trackCompletion !== undefined)
+      data.trackCompletion = dto.trackCompletion;
     if (dto.projectId) data.project = { id: dto.projectId } as any;
     const created = this.repository.create(data);
     return await this.repository.save(created);
   }
 
-  async update(id: number, dto: UpdateCalendarEventDto): Promise<CalendarEventEntity | null> {
+  async update(
+    id: number,
+    dto: UpdateCalendarEventDto,
+  ): Promise<CalendarEventEntity | null> {
     const data: Partial<CalendarEventEntity> = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.description !== undefined) data.description = dto.description;
@@ -169,10 +197,13 @@ export class CalendarEventService {
     if (dto.endDate !== undefined) data.endDate = dto.endDate;
     if (dto.color !== undefined) data.color = dto.color;
     if (dto.allDay !== undefined) data.allDay = dto.allDay;
-    if (dto.recurrenceRule !== undefined) data.recurrenceRule = dto.recurrenceRule;
+    if (dto.recurrenceRule !== undefined)
+      data.recurrenceRule = dto.recurrenceRule;
     if (dto.alarm !== undefined) data.alarm = dto.alarm;
-    if (dto.trackCompletion !== undefined) data.trackCompletion = dto.trackCompletion;
-    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
+    if (dto.trackCompletion !== undefined)
+      data.trackCompletion = dto.trackCompletion;
+    if (dto.projectId !== undefined)
+      data.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
     const event = await this.repository.preload({ id, ...data });
     if (!event) return null;
     return await this.repository.save(event);

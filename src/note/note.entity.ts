@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+} from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
 import { ThreadEntity } from '../thread/thread.entity';
 
@@ -13,7 +20,9 @@ export class NoteEntity {
   @Column({ type: 'text', nullable: true })
   content: string | null;
 
-  @ManyToOne(() => ProjectEntity, (project) => project.notes, { nullable: true })
+  @ManyToOne(() => ProjectEntity, (project) => project.notes, {
+    nullable: true,
+  })
   project: ProjectEntity | null;
 
   @ManyToOne(() => ThreadEntity, { nullable: true })

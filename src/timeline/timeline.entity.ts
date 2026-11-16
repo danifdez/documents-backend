@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+} from 'typeorm';
 import { ProjectEntity } from '../project/project.entity';
 
 export type TimelineLayoutType = 'horizontal' | 'vertical';
@@ -51,7 +58,9 @@ export class TimelineEntity {
   @Column({ name: 'axis_breaks', default: false })
   axisBreaks: boolean;
 
-  @ManyToOne(() => ProjectEntity, (project) => project.timelines, { nullable: true })
+  @ManyToOne(() => ProjectEntity, (project) => project.timelines, {
+    nullable: true,
+  })
   project: ProjectEntity | null;
 
   @CreateDateColumn({ name: 'created_at' })

@@ -8,7 +8,7 @@ export class AppStateService {
   constructor(
     @InjectRepository(AppStateEntity)
     private readonly repository: Repository<AppStateEntity>,
-  ) { }
+  ) {}
 
   async get<T>(key: string, decode: (raw: string) => T): Promise<T | null> {
     const row = await this.repository.findOne({ where: { key } });
@@ -17,10 +17,7 @@ export class AppStateService {
   }
 
   async set<T>(key: string, value: T, encode: (v: T) => string): Promise<void> {
-    await this.repository.upsert(
-      { key, value: encode(value) },
-      ['key'],
-    );
+    await this.repository.upsert({ key, value: encode(value) }, ['key']);
   }
 
   async getTimestamp(key: string): Promise<Date | null> {

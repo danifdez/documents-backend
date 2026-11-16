@@ -12,7 +12,10 @@ describe('EntityTypeService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [EntityTypeService, { provide: getRepositoryToken(EntityTypeEntity), useValue: repo }],
+      providers: [
+        EntityTypeService,
+        { provide: getRepositoryToken(EntityTypeEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(EntityTypeService);
   });

@@ -20,7 +20,9 @@ describe('validateFolderScope', () => {
   });
 
   it('rejects non-existing paths', async () => {
-    const result = await validateFolderScope(path.join(tmpRoot, 'does-not-exist'));
+    const result = await validateFolderScope(
+      path.join(tmpRoot, 'does-not-exist'),
+    );
     expect(result).toEqual({ ok: false, reason: 'not_found' });
   });
 

@@ -12,7 +12,10 @@ describe('CommentService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CommentService, { provide: getRepositoryToken(CommentEntity), useValue: repo }],
+      providers: [
+        CommentService,
+        { provide: getRepositoryToken(CommentEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(CommentService);
   });

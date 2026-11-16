@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class FixExecutionEffectJournalSchema1789508622000
-  implements MigrationInterface
-{
+export class FixExecutionEffectJournalSchema1789508622000 implements MigrationInterface {
   name = 'FixExecutionEffectJournalSchema1789508622000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

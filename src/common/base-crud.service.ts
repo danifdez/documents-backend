@@ -1,4 +1,10 @@
-import { Repository, DeepPartial, FindOneOptions, FindManyOptions, ObjectLiteral } from 'typeorm';
+import {
+  Repository,
+  DeepPartial,
+  FindOneOptions,
+  FindManyOptions,
+  ObjectLiteral,
+} from 'typeorm';
 
 export abstract class BaseCrudService<T extends ObjectLiteral> {
   constructor(protected readonly repository: Repository<T>) {}

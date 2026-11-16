@@ -12,7 +12,10 @@ describe('UserTaskService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [UserTaskService, { provide: getRepositoryToken(UserTaskEntity), useValue: repo }],
+      providers: [
+        UserTaskService,
+        { provide: getRepositoryToken(UserTaskEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(UserTaskService);
   });

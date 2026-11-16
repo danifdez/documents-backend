@@ -1,14 +1,28 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Query, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { BibliographyService } from './bibliography.service';
 import { BibliographyEntryEntity } from './bibliography-entry.entity';
-import { CreateBibliographyEntryDto, UpdateBibliographyEntryDto } from './dto/bibliography-entry.dto';
+import {
+  CreateBibliographyEntryDto,
+  UpdateBibliographyEntryDto,
+} from './dto/bibliography-entry.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 
 @Controller('bibliography')
 export class BibliographyController {
-  constructor(private readonly bibliographyService: BibliographyService) { }
+  constructor(private readonly bibliographyService: BibliographyService) {}
 
   @Get()
   async findAll(): Promise<BibliographyEntryEntity[]> {
@@ -34,21 +48,33 @@ export class BibliographyController {
     @Res() res: Response,
   ): Promise<void> {
     const parsedProjectId = projectId ? parseInt(projectId, 10) : undefined;
-    const parsedIds = ids ? ids.split(',').map((id) => parseInt(id, 10)) : undefined;
-    const bibtex = await this.bibliographyService.exportBibTeX(parsedProjectId, parsedIds);
+    const parsedIds = ids
+      ? ids.split(',').map((id) => parseInt(id, 10))
+      : undefined;
+    const bibtex = await this.bibliographyService.exportBibTeX(
+      parsedProjectId,
+      parsedIds,
+    );
     res.setHeader('Content-Type', 'text/plain');
-    res.setHeader('Content-Disposition', 'attachment; filename="bibliography.bib"');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="bibliography.bib"',
+    );
     res.send(bibtex);
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<BibliographyEntryEntity | null> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<BibliographyEntryEntity | null> {
     return await this.bibliographyService.findOne(id);
   }
 
   @Post()
   @RequirePermissions(Permission.BIBLIOGRAPHY)
-  async create(@Body() dto: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
+  async create(
+    @Body() dto: CreateBibliographyEntryDto,
+  ): Promise<BibliographyEntryEntity> {
     return await this.bibliographyService.create(dto);
   }
 
@@ -58,7 +84,10 @@ export class BibliographyController {
     @Param('resourceId', ParseIntPipe) resourceId: number,
     @Body('projectId') projectId?: number,
   ): Promise<BibliographyEntryEntity> {
-    return await this.bibliographyService.importFromResource(resourceId, projectId);
+    return await this.bibliographyService.importFromResource(
+      resourceId,
+      projectId,
+    );
   }
 
   @Post('import/bibtex')
@@ -72,7 +101,9 @@ export class BibliographyController {
 
   @Patch(':id/make-global')
   @RequirePermissions(Permission.BIBLIOGRAPHY)
-  async makeGlobal(@Param('id', ParseIntPipe) id: number): Promise<BibliographyEntryEntity | null> {
+  async makeGlobal(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<BibliographyEntryEntity | null> {
     return await this.bibliographyService.makeGlobal(id);
   }
 

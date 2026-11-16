@@ -19,4 +19,4 @@ import { NotificationModule } from '../notification/notification.module';
   ],
   exports: [CalendarEventService, CalendarEventExpansionService],
 })
-export class CalendarEventModule { }
+export class CalendarEventModule {}

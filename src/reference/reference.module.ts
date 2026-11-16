@@ -19,4 +19,4 @@ import { BibliographyModule } from '../bibliography/bibliography.module';
   providers: [ReferenceService],
   exports: [ReferenceService, ReferenceModule],
 })
-export class ReferenceModule { }
+export class ReferenceModule {}

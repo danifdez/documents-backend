@@ -27,7 +27,8 @@ export class DataSourceScheduleService implements OnModuleInit {
         }
       }
       this.logger.log(
-        `Loaded ${sources.filter((s) => s.syncSchedule && s.enabled).length} scheduled data sources`,
+        `Loaded ${sources.filter((s) => s.syncSchedule && s.enabled).length} ` +
+          'scheduled data sources',
       );
     } catch (err) {
       this.logger.error(`Failed to load schedules: ${err.message}`);

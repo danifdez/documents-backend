@@ -8,13 +8,15 @@ export class ResourceTypeService {
   constructor(
     @InjectRepository(ResourceTypeEntity)
     private readonly repository?: Repository<ResourceTypeEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<ResourceTypeEntity | null> {
     return await this.repository.findOneBy({ id });
   }
 
-  async create(resource: Partial<ResourceTypeEntity>): Promise<ResourceTypeEntity> {
+  async create(
+    resource: Partial<ResourceTypeEntity>,
+  ): Promise<ResourceTypeEntity> {
     const created = this.repository.create(resource);
     return await this.repository.save(created);
   }

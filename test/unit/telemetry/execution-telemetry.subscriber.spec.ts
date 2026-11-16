@@ -61,7 +61,7 @@ describe('execution-event commit observer', () => {
     subscriber.afterTransactionCommit(tx());
     expect(publish).not.toHaveBeenCalled();
   });
-  it('keeps savepoint events private until the outer commit and drops nested rollbacks', async () => {
+  it('keeps savepoint events private and drops nested rollbacks', async () => {
     subscriber.afterTransactionStart(tx());
     await insert();
     subscriber.afterTransactionStart(tx());

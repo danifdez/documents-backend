@@ -30,9 +30,7 @@ describe('ProjectController (e2e)', () => {
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [ProjectController],
-      providers: [
-        { provide: ProjectService, useValue: projectService },
-      ],
+      providers: [{ provide: ProjectService, useValue: projectService }],
     }).compile();
 
     app = moduleFixture.createNestApplication();
@@ -52,7 +50,10 @@ describe('ProjectController (e2e)', () => {
 
   describe('GET /projects', () => {
     it('should return 200 with all projects', async () => {
-      const projects = [buildProject(), buildProject({ id: 2, name: 'Second' })];
+      const projects = [
+        buildProject(),
+        buildProject({ id: 2, name: 'Second' }),
+      ];
       projectService.findAll.mockResolvedValue(projects);
 
       const res = await request(app.getHttpServer()).get('/projects');
@@ -73,7 +74,9 @@ describe('ProjectController (e2e)', () => {
 
   describe('GET /projects/search', () => {
     it('should search with query parameter', async () => {
-      projectService.search.mockResolvedValue([buildProject({ name: 'Matching' })]);
+      projectService.search.mockResolvedValue([
+        buildProject({ name: 'Matching' }),
+      ]);
       const res = await request(app.getHttpServer())
         .get('/projects/search')
         .query({ q: 'Matching' });
@@ -184,7 +187,10 @@ describe('ProjectController (e2e)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.name).toBe('Updated');
-      expect(projectService.update).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'Updated' }));
+      expect(projectService.update).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ name: 'Updated' }),
+      );
     });
 
     it('should return 400 for non-numeric id', async () => {

@@ -1,4 +1,12 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { PermissionGroupEntity } from './permission-group.entity';
 
 @Entity({ name: 'users' })
@@ -24,7 +32,10 @@ export class UserEntity {
   @Column({ name: 'group_id', nullable: true })
   groupId: number | null;
 
-  @ManyToOne(() => PermissionGroupEntity, { nullable: true, onDelete: 'SET NULL' })
+  @ManyToOne(() => PermissionGroupEntity, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
   @JoinColumn({ name: 'group_id' })
   group: PermissionGroupEntity | null;
 

@@ -55,7 +55,9 @@ describe('path.util', () => {
     });
 
     it('rejects symlinks pointing outside scope', async () => {
-      const outsideTarget = await fs.mkdtemp(path.join(os.tmpdir(), 'outside-'));
+      const outsideTarget = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'outside-'),
+      );
       const link = path.join(tmpRoot, 'leak');
       await fs.symlink(outsideTarget, link, 'dir');
       try {
@@ -71,7 +73,9 @@ describe('path.util', () => {
 
   describe('relativizeToScope', () => {
     it('returns relative POSIX-style path', () => {
-      expect(relativizeToScope('/tmp/scope', '/tmp/scope/a/b.md')).toBe('a/b.md');
+      expect(relativizeToScope('/tmp/scope', '/tmp/scope/a/b.md')).toBe(
+        'a/b.md',
+      );
     });
 
     it('throws on paths outside scope', () => {

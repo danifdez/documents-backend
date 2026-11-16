@@ -30,8 +30,10 @@ export class CalendarEventExpansionService {
       eventId: event.id,
       title: event.title,
       occurrenceStart: start,
-      occurrenceEnd: durationMs !== null ? new Date(start.getTime() + durationMs) : null,
-      alarmTriggerAt: offsetMs !== null ? new Date(start.getTime() + offsetMs) : null,
+      occurrenceEnd:
+        durationMs !== null ? new Date(start.getTime() + durationMs) : null,
+      alarmTriggerAt:
+        offsetMs !== null ? new Date(start.getTime() + offsetMs) : null,
       completed: completedOccurrences?.has(start.toISOString()) ?? false,
     });
 
@@ -45,7 +47,11 @@ export class CalendarEventExpansionService {
 
     let rule: RRule;
     try {
-      rule = this.buildRule(event.recurrenceRule, new Date(event.startDate), tz);
+      rule = this.buildRule(
+        event.recurrenceRule,
+        new Date(event.startDate),
+        tz,
+      );
     } catch (err: any) {
       throw new BadRequestException(
         `InvalidRecurrenceRule: ${err?.message ?? 'failed to parse RRULE'}`,
@@ -53,11 +59,15 @@ export class CalendarEventExpansionService {
     }
 
     const occurrences = rule.between(rangeStart, rangeEnd, true);
-    return occurrences.map((d) => buildOccurrence(this.normalizeRRuleDate(d, tz)));
+    return occurrences.map((d) =>
+      buildOccurrence(this.normalizeRRuleDate(d, tz)),
+    );
   }
 
   private buildRule(rrule: string, dtstart: Date, tz?: string): RRule {
-    const cleaned = rrule.startsWith('RRULE:') ? rrule.slice('RRULE:'.length) : rrule;
+    const cleaned = rrule.startsWith('RRULE:')
+      ? rrule.slice('RRULE:'.length)
+      : rrule;
     const options = RRule.parseString(cleaned);
     if (tz) {
       // rrule.js with tzid expects dtstart's UTC components to encode the
@@ -74,7 +84,14 @@ export class CalendarEventExpansionService {
   private utcToZonedFloating(d: Date, tz: string): Date {
     const parts = this.formatParts(d, tz);
     return new Date(
-      Date.UTC(parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second),
+      Date.UTC(
+        parts.year,
+        parts.month,
+        parts.day,
+        parts.hour,
+        parts.minute,
+        parts.second,
+      ),
     );
   }
 
@@ -98,25 +115,55 @@ export class CalendarEventExpansionService {
   }
 
   private zonedTimeToUtcMs(
-    wc: { year: number; month: number; day: number; hour: number; minute: number; second: number; ms: number },
+    wc: {
+      year: number;
+      month: number;
+      day: number;
+      hour: number;
+      minute: number;
+      second: number;
+      ms: number;
+    },
     tz: string,
   ): number {
     // Build a UTC "guess" then correct by the offset that tz reports for that instant.
-    const guess = Date.UTC(wc.year, wc.month, wc.day, wc.hour, wc.minute, wc.second, wc.ms);
+    const guess = Date.UTC(
+      wc.year,
+      wc.month,
+      wc.day,
+      wc.hour,
+      wc.minute,
+      wc.second,
+      wc.ms,
+    );
     const offsetMin = this.tzOffsetMinutes(new Date(guess), tz);
     return guess - offsetMin * 60_000;
   }
 
   private tzOffsetMinutes(date: Date, tz: string): number {
     const parts = this.formatParts(date, tz);
-    const asUtc = Date.UTC(parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second);
+    const asUtc = Date.UTC(
+      parts.year,
+      parts.month,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
     return (asUtc - date.getTime()) / 60_000;
   }
 
   private formatParts(
     date: Date,
     tz: string,
-  ): { year: number; month: number; day: number; hour: number; minute: number; second: number } {
+  ): {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+    second: number;
+  } {
     const dtf = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,
       hour12: false,
@@ -127,10 +174,12 @@ export class CalendarEventExpansionService {
       minute: '2-digit',
       second: '2-digit',
     });
-    const map = dtf.formatToParts(date).reduce<Record<string, string>>((acc, p) => {
-      if (p.type !== 'literal') acc[p.type] = p.value;
-      return acc;
-    }, {});
+    const map = dtf
+      .formatToParts(date)
+      .reduce<Record<string, string>>((acc, p) => {
+        if (p.type !== 'literal') acc[p.type] = p.value;
+        return acc;
+      }, {});
     const hour = Number(map.hour) === 24 ? 0 : Number(map.hour);
     return {
       year: Number(map.year),

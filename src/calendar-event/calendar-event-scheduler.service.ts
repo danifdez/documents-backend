@@ -44,7 +44,7 @@ export class CalendarEventSchedulerService {
     private readonly expansion: CalendarEventExpansionService,
     private readonly appState: AppStateService,
     private readonly gateway: NotificationGateway,
-  ) { }
+  ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCron(): Promise<void> {
@@ -64,11 +64,16 @@ export class CalendarEventSchedulerService {
       await this.processTaskReminders(previousTick, now);
       await this.appState.setTimestamp(SCHEDULER_TICK_KEY, now);
     } catch (err: any) {
-      this.logger.error(`Scheduler tick failed; tick not advanced: ${err?.message ?? err}`);
+      this.logger.error(
+        `Scheduler tick failed; tick not advanced: ${err?.message ?? err}`,
+      );
     }
   }
 
-  private async processCalendarAlarms(previousTick: Date, now: Date): Promise<void> {
+  private async processCalendarAlarms(
+    previousTick: Date,
+    now: Date,
+  ): Promise<void> {
     const candidates = await this.repo.find({
       where: { alarm: Not(IsNull()) },
     });
@@ -85,7 +90,12 @@ export class CalendarEventSchedulerService {
       if (!event.alarm) continue;
       let occurrences;
       try {
-        occurrences = this.expansion.expand(event, expandFrom, expandTo, serverTz);
+        occurrences = this.expansion.expand(
+          event,
+          expandFrom,
+          expandTo,
+          serverTz,
+        );
       } catch (err: any) {
         this.logger.warn(
           `Skipping event ${event.id}: ${err?.message ?? 'expansion failed'}`,
@@ -111,10 +121,14 @@ export class CalendarEventSchedulerService {
 
     for (const item of recent) this.gateway.sendCalendarAlarm(item);
     const filteredLost = await this.filterAlreadyCompleted(lost);
-    if (filteredLost.length > 0) this.gateway.sendCalendarMissed({ items: filteredLost });
+    if (filteredLost.length > 0)
+      this.gateway.sendCalendarMissed({ items: filteredLost });
   }
 
-  private async processTaskReminders(previousTick: Date, now: Date): Promise<void> {
+  private async processTaskReminders(
+    previousTick: Date,
+    now: Date,
+  ): Promise<void> {
     // 30-day backlog window so tasks whose reminder fired during a long
     // downtime still emerge as `lost`. No forward slack: tasks with a future
     // reminder fire in their own tick.
@@ -161,7 +175,9 @@ export class CalendarEventSchedulerService {
     if (lost.length > 0) this.gateway.sendTaskMissed({ items: lost });
   }
 
-  private async filterAlreadyCompleted(items: AlarmItem[]): Promise<AlarmItem[]> {
+  private async filterAlreadyCompleted(
+    items: AlarmItem[],
+  ): Promise<AlarmItem[]> {
     const trackable = items.filter((i) => i.trackCompletion);
     if (trackable.length === 0) return items;
     const eventIds = Array.from(new Set(trackable.map((i) => i.eventId)));
@@ -172,7 +188,9 @@ export class CalendarEventSchedulerService {
       .where('c.event_id IN (:...eventIds)', { eventIds })
       .getRawMany<{ eventId: number; occurrenceDate: Date }>();
     const completed = new Set(
-      rows.map((r) => `${r.eventId}@${new Date(r.occurrenceDate).toISOString()}`),
+      rows.map(
+        (r) => `${r.eventId}@${new Date(r.occurrenceDate).toISOString()}`,
+      ),
     );
     return items.filter((i) => {
       if (!i.trackCompletion) return true;

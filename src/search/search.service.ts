@@ -80,8 +80,8 @@ const COLLECTION_MAPPERS: Record<string, CollectionMapperConfig> = {
     highlights: (r, highlight) => ({
       highlightedTitle: highlight(r.r_title, 50),
       highlightedName: highlight(r.r_name, 50),
-      highlightedContent: highlight(r.r_content, 100)
-        || highlight(r.r_translated_content, 100),
+      highlightedContent:
+        highlight(r.r_content, 100) || highlight(r.r_translated_content, 100),
     }),
   },
   canvases: {
@@ -162,12 +162,14 @@ export class SearchService {
     const docs: SearchCollection = {
       required: true,
       mapper: COLLECTION_MAPPERS.docs,
-      search: (term, projectId) => this.docService.globalSearch(term, projectId),
+      search: (term, projectId) =>
+        this.docService.globalSearch(term, projectId),
     };
     const resources: SearchCollection = {
       required: true,
       mapper: COLLECTION_MAPPERS.resources,
-      search: (term, projectId) => this.resourceService.globalSearch(term, projectId),
+      search: (term, projectId) =>
+        this.resourceService.globalSearch(term, projectId),
     };
     const projects: SearchCollection = this.projectService && {
       mapper: COLLECTION_MAPPERS.projects,
@@ -175,15 +177,18 @@ export class SearchService {
     };
     const canvases: SearchCollection = this.canvasService && {
       mapper: COLLECTION_MAPPERS.canvases,
-      search: (term, projectId) => this.canvasService.globalSearch(term, projectId),
+      search: (term, projectId) =>
+        this.canvasService.globalSearch(term, projectId),
     };
     const notes: SearchCollection = this.noteService && {
       mapper: COLLECTION_MAPPERS.notes,
-      search: (term, projectId) => this.noteService.globalSearch(term, projectId),
+      search: (term, projectId) =>
+        this.noteService.globalSearch(term, projectId),
     };
     const events: SearchCollection = this.calendarEventService && {
       mapper: COLLECTION_MAPPERS.events,
-      search: (term, projectId) => this.calendarEventService.globalSearch(term, projectId),
+      search: (term, projectId) =>
+        this.calendarEventService.globalSearch(term, projectId),
     };
     const knowledge: SearchCollection = this.knowledgeEntryService && {
       mapper: COLLECTION_MAPPERS.knowledge,
@@ -191,16 +196,36 @@ export class SearchService {
     };
     const entities: SearchCollection = this.entityService && {
       mapper: COLLECTION_MAPPERS.entities,
-      search: (term, projectId) => this.entityService.globalSearch(term, projectId),
+      search: (term, projectId) =>
+        this.entityService.globalSearch(term, projectId),
     };
     const datasets: SearchCollection = this.datasetService && {
       mapper: COLLECTION_MAPPERS.datasets,
-      search: (term, projectId) => this.datasetService.globalSearch(term, projectId),
+      search: (term, projectId) =>
+        this.datasetService.globalSearch(term, projectId),
     };
 
-    this.projectCollections = [docs, resources, canvases, notes, events, entities, datasets].filter(Boolean);
+    this.projectCollections = [
+      docs,
+      resources,
+      canvases,
+      notes,
+      events,
+      entities,
+      datasets,
+    ].filter(Boolean);
     // Global search includes every available collection used by the UI and assistant tool.
-    this.globalCollections = [docs, resources, projects, notes, canvases, events, knowledge, entities, datasets].filter(Boolean);
+    this.globalCollections = [
+      docs,
+      resources,
+      projects,
+      notes,
+      canvases,
+      events,
+      knowledge,
+      entities,
+      datasets,
+    ].filter(Boolean);
   }
 
   private highlightTextInHtml(
@@ -246,7 +271,10 @@ export class SearchService {
     return fragment;
   }
 
-  async globalSearch(searchTerm: string, projectId?: number): Promise<SearchResultDto[]> {
+  async globalSearch(
+    searchTerm: string,
+    projectId?: number,
+  ): Promise<SearchResultDto[]> {
     if (projectId) {
       return this.searchInProject(searchTerm, projectId);
     }
@@ -298,14 +326,24 @@ export class SearchService {
     limit: number,
   ): EvidenceSourceDto[] {
     return results
-      .filter((result) => result.collection === 'docs' || result.collection === 'resources')
+      .filter(
+        (result) =>
+          result.collection === 'docs' || result.collection === 'resources',
+      )
       .map((result) => this.toEvidenceSource(result, projectId))
       .filter((source): source is EvidenceSourceDto => source !== null)
       .slice(0, limit);
   }
 
-  private async searchInProject(searchTerm: string, projectId: number): Promise<SearchResultDto[]> {
-    return this.searchCollections(this.projectCollections, searchTerm, projectId);
+  private async searchInProject(
+    searchTerm: string,
+    projectId: number,
+  ): Promise<SearchResultDto[]> {
+    return this.searchCollections(
+      this.projectCollections,
+      searchTerm,
+      projectId,
+    );
   }
 
   private async searchGlobal(searchTerm: string): Promise<SearchResultDto[]> {
@@ -317,7 +355,9 @@ export class SearchService {
     searchTerm: string,
     projectId?: number,
   ): Promise<SearchResultDto[]> {
-    const resolved = await Promise.all(collections.map((c) => c.search(searchTerm, projectId)));
+    const resolved = await Promise.all(
+      collections.map((c) => c.search(searchTerm, projectId)),
+    );
 
     const results = collections.flatMap((c, i) => {
       const rows = resolved[i];
@@ -334,11 +374,20 @@ export class SearchService {
   private async searchProjects(searchTerm: string): Promise<any[]> {
     if (!this.projectService || !searchTerm?.trim()) return [];
     const projects = await this.projectService.search(searchTerm);
-    return projects.map((p) => ({ id: p.id, name: p.name, description: p.description }));
+    return projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+    }));
   }
 
-  private mapCollection(raw: any[], searchTerm: string, config: CollectionMapperConfig): SearchResultDto[] {
-    const highlight: Highlight = (text, chars) => this.highlightTextInHtml(text, searchTerm, chars);
+  private mapCollection(
+    raw: any[],
+    searchTerm: string,
+    config: CollectionMapperConfig,
+  ): SearchResultDto[] {
+    const highlight: Highlight = (text, chars) =>
+      this.highlightTextInHtml(text, searchTerm, chars);
     return raw.map((r) => ({
       id: config.id(r),
       name: config.name(r),
@@ -373,10 +422,10 @@ export class SearchService {
 
   private evidenceExcerpt(result: SearchResultDto): string {
     const highlighted =
-      result.highlightedContent
-      || result.highlightedTitle
-      || result.highlightedName
-      || result.name;
+      result.highlightedContent ||
+      result.highlightedTitle ||
+      result.highlightedName ||
+      result.name;
     const $ = cheerio.load(highlighted || '');
     const matched = this.plainText($('strong').first().text());
     if (matched.length >= 20) return this.shortenExcerpt(matched);
@@ -385,19 +434,22 @@ export class SearchService {
       ? text.toLocaleLowerCase().indexOf(matched.toLocaleLowerCase())
       : -1;
     if (matchIndex < 0) return '';
-    const sentenceStart = Math.max(
-      text.lastIndexOf('.', matchIndex - 1),
-      text.lastIndexOf('!', matchIndex - 1),
-      text.lastIndexOf('?', matchIndex - 1),
-    ) + 1;
+    const sentenceStart =
+      Math.max(
+        text.lastIndexOf('.', matchIndex - 1),
+        text.lastIndexOf('!', matchIndex - 1),
+        text.lastIndexOf('?', matchIndex - 1),
+      ) + 1;
     const remaining = text.slice(matchIndex + matched.length);
     const nextPunctuation = remaining.search(/[.!?]/);
-    if (nextPunctuation < 0 || (text.endsWith('...') &&
-        nextPunctuation >= remaining.length - 3)) return '';
-    let excerpt = text.slice(
-      sentenceStart,
-      matchIndex + matched.length + nextPunctuation + 1,
-    ).trim();
+    if (
+      nextPunctuation < 0 ||
+      (text.endsWith('...') && nextPunctuation >= remaining.length - 3)
+    )
+      return '';
+    let excerpt = text
+      .slice(sentenceStart, matchIndex + matched.length + nextPunctuation + 1)
+      .trim();
     const capital = excerpt.search(/[A-ZÁÉÍÓÚÜÑ]/);
     if (capital > 0) excerpt = excerpt.slice(capital);
     return excerpt.length >= 20 ? this.shortenExcerpt(excerpt) : '';
@@ -405,11 +457,20 @@ export class SearchService {
 
   private evidenceFallbackTerms(query: string): string[] {
     const generic = new Set([
-      'afirmacion', 'afirmación', 'documento', 'evidencia', 'fuente',
-      'reglamento', 'informacion', 'información', 'establece',
+      'afirmacion',
+      'afirmación',
+      'documento',
+      'evidencia',
+      'fuente',
+      'reglamento',
+      'informacion',
+      'información',
+      'establece',
     ]);
-    const terms = this.plainText(query).toLocaleLowerCase()
-      .match(/[a-záéíóúüñ0-9]{4,}/gi) || [];
+    const terms =
+      this.plainText(query)
+        .toLocaleLowerCase()
+        .match(/[a-záéíóúüñ0-9]{4,}/gi) || [];
     return [...new Set(terms)]
       .filter((term) => !generic.has(term))
       .sort((left, right) => right.length - left.length)
@@ -417,7 +478,8 @@ export class SearchService {
   }
 
   private plainText(value: string): string {
-    return cheerio.load(value || '')
+    return cheerio
+      .load(value || '')
       .text()
       .replace(/\s+/g, ' ')
       .trim();
@@ -431,7 +493,10 @@ export class SearchService {
     return `${value.slice(0, maxChars - 1).trimEnd()}…`;
   }
 
-  async matchEntitiesInText(text: string, projectId?: number): Promise<PageEntityMatch[]> {
+  async matchEntitiesInText(
+    text: string,
+    projectId?: number,
+  ): Promise<PageEntityMatch[]> {
     if (!text || text.trim().length === 0) {
       return [];
     }
@@ -506,7 +571,10 @@ export class SearchService {
 
     const matches: PageKnowledgeMatch[] = [];
     for (const entry of entries) {
-      const matchedTerms = matchTermsInText(normalized, knowledgeTermsOf(entry));
+      const matchedTerms = matchTermsInText(
+        normalized,
+        knowledgeTermsOf(entry),
+      );
       if (matchedTerms.length > 0) {
         matches.push({
           id: entry.id,
@@ -613,32 +681,161 @@ export class SearchService {
   private extractKeywords(text: string, maxKeywords = 5): string[] {
     const stopwords = new Set([
       // Spanish
-      'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'al',
-      'en', 'con', 'por', 'para', 'que', 'es', 'son', 'fue', 'ser', 'está',
-      'como', 'más', 'pero', 'sus', 'este', 'esta', 'estos', 'estas', 'ese',
-      'esa', 'esos', 'esas', 'hay', 'ya', 'también', 'muy', 'entre', 'sobre',
-      'sin', 'hasta', 'desde', 'donde', 'todo', 'todos', 'toda', 'todas',
-      'otro', 'otra', 'otros', 'otras', 'cada', 'según', 'han', 'tiene',
-      'puede', 'cuando', 'cual', 'será', 'sido', 'siendo', 'había', 'tiene',
-      'nos', 'les', 'así', 'quien', 'parte', 'después', 'bien', 'solo',
-      'hace', 'hoy', 'ahora', 'aquí', 'durante', 'siempre', 'mismo', 'misma',
+      'el',
+      'la',
+      'los',
+      'las',
+      'un',
+      'una',
+      'unos',
+      'unas',
+      'de',
+      'del',
+      'al',
+      'en',
+      'con',
+      'por',
+      'para',
+      'que',
+      'es',
+      'son',
+      'fue',
+      'ser',
+      'está',
+      'como',
+      'más',
+      'pero',
+      'sus',
+      'este',
+      'esta',
+      'estos',
+      'estas',
+      'ese',
+      'esa',
+      'esos',
+      'esas',
+      'hay',
+      'ya',
+      'también',
+      'muy',
+      'entre',
+      'sobre',
+      'sin',
+      'hasta',
+      'desde',
+      'donde',
+      'todo',
+      'todos',
+      'toda',
+      'todas',
+      'otro',
+      'otra',
+      'otros',
+      'otras',
+      'cada',
+      'según',
+      'han',
+      'tiene',
+      'puede',
+      'cuando',
+      'cual',
+      'será',
+      'sido',
+      'siendo',
+      'había',
+      'tiene',
+      'nos',
+      'les',
+      'así',
+      'quien',
+      'parte',
+      'después',
+      'bien',
+      'solo',
+      'hace',
+      'hoy',
+      'ahora',
+      'aquí',
+      'durante',
+      'siempre',
+      'mismo',
+      'misma',
       // English
-      'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
-      'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'will',
-      'with', 'this', 'that', 'from', 'they', 'were', 'what', 'when', 'your',
-      'said', 'each', 'which', 'their', 'time', 'will', 'way', 'about',
-      'many', 'then', 'them', 'some', 'would', 'make', 'like', 'into',
-      'could', 'other', 'than', 'its', 'also', 'after', 'new', 'just',
-      'more', 'these', 'two', 'may', 'first', 'being', 'any', 'through',
-      'most', 'how', 'where', 'between', 'does', 'did', 'get',
+      'the',
+      'and',
+      'for',
+      'are',
+      'but',
+      'not',
+      'you',
+      'all',
+      'can',
+      'had',
+      'her',
+      'was',
+      'one',
+      'our',
+      'out',
+      'has',
+      'have',
+      'been',
+      'will',
+      'with',
+      'this',
+      'that',
+      'from',
+      'they',
+      'were',
+      'what',
+      'when',
+      'your',
+      'said',
+      'each',
+      'which',
+      'their',
+      'time',
+      'will',
+      'way',
+      'about',
+      'many',
+      'then',
+      'them',
+      'some',
+      'would',
+      'make',
+      'like',
+      'into',
+      'could',
+      'other',
+      'than',
+      'its',
+      'also',
+      'after',
+      'new',
+      'just',
+      'more',
+      'these',
+      'two',
+      'may',
+      'first',
+      'being',
+      'any',
+      'through',
+      'most',
+      'how',
+      'where',
+      'between',
+      'does',
+      'did',
+      'get',
     ]);
 
     // Split text into words, filter and score them
     const words = text
       .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
       .split(/\s+/)
-      .filter(w => w.length >= 3 && !stopwords.has(w.toLowerCase()))
-      .map(w => w.replace(/^['-]+|['-]+$/g, ''));
+      .filter((w) => w.length >= 3 && !stopwords.has(w.toLowerCase()))
+      .map((w) => w.replace(/^['-]+|['-]+$/g, ''));
 
     // Count frequency - more frequent = more important
     const freq = new Map<string, number>();
@@ -654,18 +851,25 @@ export class SearchService {
       if (word.length >= 6) score += 2;
       if (word.length >= 10) score += 2;
       // Check if any occurrence was capitalized (proper noun)
-      const original = words.find(w => w.toLowerCase() === word);
-      if (original && original[0] === original[0].toUpperCase() && original[0] !== original[0].toLowerCase()) {
+      const original = words.find((w) => w.toLowerCase() === word);
+      if (
+        original &&
+        original[0] === original[0].toUpperCase() &&
+        original[0] !== original[0].toLowerCase()
+      ) {
         score += 3;
       }
       return { word, score };
     });
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, maxKeywords).map(s => s.word);
+    return scored.slice(0, maxKeywords).map((s) => s.word);
   }
 
-  async searchBlocks(blocks: { blockId: string; text: string }[], projectId?: number): Promise<PageBlockResult[]> {
+  async searchBlocks(
+    blocks: { blockId: string; text: string }[],
+    projectId?: number,
+  ): Promise<PageBlockResult[]> {
     if (!blocks || blocks.length === 0) return [];
 
     // Limit to 20 blocks to avoid overloading
@@ -711,10 +915,10 @@ export class SearchService {
           blockId: block.blockId,
           results: allResults.slice(0, 3),
         };
-      })
+      }),
     );
 
     // Filter out blocks with no results
-    return results.filter(r => r.results.length > 0);
+    return results.filter((r) => r.results.length > 0);
   }
 }

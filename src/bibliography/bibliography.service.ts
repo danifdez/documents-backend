@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
-import { BibliographyEntryEntity, BibliographyCreator } from './bibliography-entry.entity';
+import {
+  BibliographyEntryEntity,
+  BibliographyCreator,
+} from './bibliography-entry.entity';
 import { ResourceEntity } from '../resource/resource.entity';
-import { CreateBibliographyEntryDto, UpdateBibliographyEntryDto } from './dto/bibliography-entry.dto';
+import {
+  CreateBibliographyEntryDto,
+  UpdateBibliographyEntryDto,
+} from './dto/bibliography-entry.dto';
 
 // Maps item types ↔ BibTeX entry types
 const ITEM_TYPE_TO_BIBTEX: Record<string, string> = {
@@ -49,7 +55,7 @@ export class BibliographyService {
     private readonly repository: Repository<BibliographyEntryEntity>,
     @InjectRepository(ResourceEntity)
     private readonly resourceRepository: Repository<ResourceEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<BibliographyEntryEntity | null> {
     return await this.repository.findOne({
@@ -92,32 +98,47 @@ export class BibliographyService {
     const like = `%${query}%`;
     return await this.repository
       .createQueryBuilder('b')
-      .where('b.title ILIKE :q OR b.citeKey ILIKE :q OR b.creators::text ILIKE :q', { q: like })
+      .where(
+        'b.title ILIKE :q OR b.citeKey ILIKE :q OR b.creators::text ILIKE :q',
+        { q: like },
+      )
       .orderBy('b.updated_at', 'DESC')
       .limit(15)
       .getMany();
   }
 
-  async create(dto: CreateBibliographyEntryDto): Promise<BibliographyEntryEntity> {
+  async create(
+    dto: CreateBibliographyEntryDto,
+  ): Promise<BibliographyEntryEntity> {
     const { projectId, sourceResourceId, ...rest } = dto;
-    const data: Partial<BibliographyEntryEntity> = { ...rest as any };
+    const data: Partial<BibliographyEntryEntity> = { ...(rest as any) };
     if (projectId) data.project = { id: projectId } as any;
     if (sourceResourceId) data.sourceResource = { id: sourceResourceId } as any;
     const entry = this.repository.create(data);
     return await this.repository.save(entry);
   }
 
-  async update(id: number, dto: UpdateBibliographyEntryDto): Promise<BibliographyEntryEntity | null> {
+  async update(
+    id: number,
+    dto: UpdateBibliographyEntryDto,
+  ): Promise<BibliographyEntryEntity | null> {
     const { projectId, sourceResourceId, ...rest } = dto;
-    const data: Partial<BibliographyEntryEntity> = { ...rest as any };
-    if (projectId !== undefined) data.project = projectId ? { id: projectId } as any : null;
-    if (sourceResourceId !== undefined) data.sourceResource = sourceResourceId ? { id: sourceResourceId } as any : null;
+    const data: Partial<BibliographyEntryEntity> = { ...(rest as any) };
+    if (projectId !== undefined)
+      data.project = projectId ? ({ id: projectId } as any) : null;
+    if (sourceResourceId !== undefined)
+      data.sourceResource = sourceResourceId
+        ? ({ id: sourceResourceId } as any)
+        : null;
     const entry = await this.repository.preload({ id, ...data });
     if (!entry) return null;
     return await this.repository.save(entry);
   }
 
-  async assignProject(id: number, projectId: number): Promise<BibliographyEntryEntity | null> {
+  async assignProject(
+    id: number,
+    projectId: number,
+  ): Promise<BibliographyEntryEntity | null> {
     await this.repository
       .createQueryBuilder()
       .update()
@@ -144,7 +165,10 @@ export class BibliographyService {
     return { deleted: true };
   }
 
-  async importFromResource(resourceId: number, projectId?: number): Promise<BibliographyEntryEntity> {
+  async importFromResource(
+    resourceId: number,
+    projectId?: number,
+  ): Promise<BibliographyEntryEntity> {
     const existing = await this.repository.findOne({
       where: {
         sourceResource: { id: resourceId },
@@ -159,17 +183,27 @@ export class BibliographyService {
     });
     if (!resource) throw new Error(`Resource ${resourceId} not found`);
 
-    const creators: BibliographyCreator[] = (resource.authors ?? []).map((a) => {
-      const parts = a.name.split(',');
-      if (parts.length >= 2) {
-        return { creatorType: 'author', lastName: parts[0].trim(), firstName: parts[1].trim() };
-      }
-      const words = a.name.trim().split(' ');
-      if (words.length > 1) {
-        return { creatorType: 'author', lastName: words[words.length - 1], firstName: words.slice(0, -1).join(' ') };
-      }
-      return { creatorType: 'author', lastName: a.name, firstName: '' };
-    });
+    const creators: BibliographyCreator[] = (resource.authors ?? []).map(
+      (a) => {
+        const parts = a.name.split(',');
+        if (parts.length >= 2) {
+          return {
+            creatorType: 'author',
+            lastName: parts[0].trim(),
+            firstName: parts[1].trim(),
+          };
+        }
+        const words = a.name.trim().split(' ');
+        if (words.length > 1) {
+          return {
+            creatorType: 'author',
+            lastName: words[words.length - 1],
+            firstName: words.slice(0, -1).join(' '),
+          };
+        }
+        return { creatorType: 'author', lastName: a.name, firstName: '' };
+      },
+    );
 
     const year = resource.publicationDate
       ? String(resource.publicationDate).slice(0, 4)
@@ -202,10 +236,18 @@ export class BibliographyService {
           const trimmed = a.trim();
           const parts = trimmed.split(',');
           if (parts.length >= 2) {
-            creators.push({ creatorType: 'author', lastName: parts[0].trim(), firstName: parts[1].trim() });
+            creators.push({
+              creatorType: 'author',
+              lastName: parts[0].trim(),
+              firstName: parts[1].trim(),
+            });
           } else {
             const words = trimmed.split(' ');
-            creators.push({ creatorType: 'author', lastName: words[words.length - 1], firstName: words.slice(0, -1).join(' ') });
+            creators.push({
+              creatorType: 'author',
+              lastName: words[words.length - 1],
+              firstName: words.slice(0, -1).join(' '),
+            });
           }
         });
       }
@@ -214,10 +256,18 @@ export class BibliographyService {
           const trimmed = a.trim();
           const parts = trimmed.split(',');
           if (parts.length >= 2) {
-            creators.push({ creatorType: 'editor', lastName: parts[0].trim(), firstName: parts[1].trim() });
+            creators.push({
+              creatorType: 'editor',
+              lastName: parts[0].trim(),
+              firstName: parts[1].trim(),
+            });
           } else {
             const words = trimmed.split(' ');
-            creators.push({ creatorType: 'editor', lastName: words[words.length - 1], firstName: words.slice(0, -1).join(' ') });
+            creators.push({
+              creatorType: 'editor',
+              lastName: words[words.length - 1],
+              firstName: words.slice(0, -1).join(' '),
+            });
           }
         });
       }
@@ -235,10 +285,13 @@ export class BibliographyService {
         year: item.fields.year ?? null,
         abstract: item.fields.abstract ?? null,
         journal: item.fields.journal ?? null,
-        journalAbbreviation: item.fields.journalabbreviation ?? item.fields.journalabbrev ?? null,
+        journalAbbreviation:
+          item.fields.journalabbreviation ?? item.fields.journalabbrev ?? null,
         booktitle: item.fields.booktitle ?? null,
         // 'number' in BibTeX means issue for articles, report-number for techreports
-        number: (!isReport ? item.fields.number ?? item.fields.issue : null) ?? null,
+        number:
+          (!isReport ? (item.fields.number ?? item.fields.issue) : null) ??
+          null,
         volume: item.fields.volume ?? null,
         pages: item.fields.pages ?? null,
         publisher: item.fields.publisher ?? null,
@@ -254,7 +307,9 @@ export class BibliographyService {
         note: item.fields.note ?? null,
         // thesis: school → university; report: institution stays in institution
         institution: isReport ? (item.fields.institution ?? null) : null,
-        university: isThesis ? (item.fields.school ?? item.fields.institution ?? null) : null,
+        university: isThesis
+          ? (item.fields.school ?? item.fields.institution ?? null)
+          : null,
         thesisType: isThesis ? (item.fields.type ?? null) : null,
         reportNumber: isReport ? (item.fields.number ?? null) : null,
         reportType: isReport ? (item.fields.type ?? null) : null,
@@ -275,7 +330,9 @@ export class BibliographyService {
     if (ids && ids.length > 0) {
       query = query.where('b.id IN (:...ids)', { ids });
     } else if (projectId != null) {
-      query = query.where('b.projectId = :projectId OR b.projectId IS NULL', { projectId });
+      query = query.where('b.projectId = :projectId OR b.projectId IS NULL', {
+        projectId,
+      });
     }
 
     const entries = await query.orderBy('b.cite_key', 'ASC').getMany();
@@ -284,20 +341,28 @@ export class BibliographyService {
 
   // --- BibTeX parsing (simple, covers common cases) ---
 
-  private parseBibTeX(bibtex: string): Array<{ type: string; key: string; fields: Record<string, string> }> {
-    const results: Array<{ type: string; key: string; fields: Record<string, string> }> = [];
+  private parseBibTeX(
+    bibtex: string,
+  ): Array<{ type: string; key: string; fields: Record<string, string> }> {
+    const results: Array<{
+      type: string;
+      key: string;
+      fields: Record<string, string>;
+    }> = [];
     const entryRegex = /@(\w+)\s*\{([^,]+),([^@]*)\}/gs;
     let match: RegExpExecArray | null;
 
     while ((match = entryRegex.exec(bibtex)) !== null) {
       const type = match[1].toLowerCase();
-      if (type === 'comment' || type === 'string' || type === 'preamble') continue;
+      if (type === 'comment' || type === 'string' || type === 'preamble')
+        continue;
 
       const key = match[2].trim();
       const body = match[3];
       const fields: Record<string, string> = {};
 
-      const fieldRegex = /(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)"|(\d+))/g;
+      const fieldRegex =
+        /(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)"|(\d+))/g;
       let fm: RegExpExecArray | null;
       while ((fm = fieldRegex.exec(body)) !== null) {
         const fieldName = fm[1].toLowerCase();
@@ -323,24 +388,32 @@ export class BibliographyService {
     addField('title', entry.title);
 
     // Authors (creatorType = 'author')
-    const authors = (entry.creators ?? []).filter((c) => c.creatorType === 'author');
+    const authors = (entry.creators ?? []).filter(
+      (c) => c.creatorType === 'author',
+    );
     if (authors.length > 0) {
-      const authorStr = authors.map((c) => {
-        if (c.name) return c.name;
-        if (c.firstName) return `${c.lastName}, ${c.firstName}`;
-        return c.lastName ?? '';
-      }).join(' and ');
+      const authorStr = authors
+        .map((c) => {
+          if (c.name) return c.name;
+          if (c.firstName) return `${c.lastName}, ${c.firstName}`;
+          return c.lastName ?? '';
+        })
+        .join(' and ');
       addField('author', authorStr);
     }
 
     // Editors
-    const editors = (entry.creators ?? []).filter((c) => c.creatorType === 'editor');
+    const editors = (entry.creators ?? []).filter(
+      (c) => c.creatorType === 'editor',
+    );
     if (editors.length > 0) {
-      const editorStr = editors.map((c) => {
-        if (c.name) return c.name;
-        if (c.firstName) return `${c.lastName}, ${c.firstName}`;
-        return c.lastName ?? '';
-      }).join(' and ');
+      const editorStr = editors
+        .map((c) => {
+          if (c.name) return c.name;
+          if (c.firstName) return `${c.lastName}, ${c.firstName}`;
+          return c.lastName ?? '';
+        })
+        .join(' and ');
       addField('editor', editorStr);
     }
 
@@ -384,8 +457,12 @@ export class BibliographyService {
     return lines.join('\n');
   }
 
-  private generateCiteKey(creators: BibliographyCreator[], year: string | null): string {
-    const first = creators.find((c) => c.creatorType === 'author') ?? creators[0];
+  private generateCiteKey(
+    creators: BibliographyCreator[],
+    year: string | null,
+  ): string {
+    const first =
+      creators.find((c) => c.creatorType === 'author') ?? creators[0];
     const surname = first?.lastName ?? first?.name ?? 'unknown';
     const normalized = surname.toLowerCase().replace(/[^a-z]/g, '');
     return `${normalized}${year ?? 'nd'}`;

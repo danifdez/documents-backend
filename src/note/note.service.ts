@@ -10,7 +10,7 @@ export class NoteService {
   constructor(
     @InjectRepository(NoteEntity)
     private readonly repository: Repository<NoteEntity>,
-  ) { }
+  ) {}
 
   async findAll(): Promise<NoteEntity[]> {
     return await this.repository.find({
@@ -65,8 +65,10 @@ export class NoteService {
     const data: Partial<NoteEntity> = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.content !== undefined) data.content = dto.content;
-    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
-    if (dto.threadId !== undefined) data.thread = dto.threadId ? { id: dto.threadId } as any : null;
+    if (dto.projectId !== undefined)
+      data.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
+    if (dto.threadId !== undefined)
+      data.thread = dto.threadId ? ({ id: dto.threadId } as any) : null;
     const note = await this.repository.preload({ id, ...data });
     if (!note) return null;
     return await this.repository.save(note);

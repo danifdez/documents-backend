@@ -42,7 +42,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly voice: VoiceService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-  ) { }
+  ) {}
 
   handleConnection(client: Socket) {
     const authEnabled = this.config.get('AUTH_ENABLED') === 'true';
@@ -50,7 +50,10 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const token =
       client.handshake.auth?.token ||
-      (client.handshake.headers?.authorization as string | undefined)?.replace('Bearer ', '');
+      (client.handshake.headers?.authorization as string | undefined)?.replace(
+        'Bearer ',
+        '',
+      );
 
     if (!token) {
       this.logger.warn('Voice WS rejected: no token');
@@ -82,7 +85,9 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): void {
     // Socket.IO can deliver binary as either ArrayBuffer/Buffer directly or
     // wrapped in `{ type: 'Buffer', data: [...] }` depending on adapter.
-    const raw = (chunk as { data?: ArrayBuffer | Buffer })?.data ?? (chunk as ArrayBuffer | Buffer);
+    const raw =
+      (chunk as { data?: ArrayBuffer | Buffer })?.data ??
+      (chunk as ArrayBuffer | Buffer);
     this.voice.pushChunk(client, raw);
   }
 

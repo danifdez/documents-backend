@@ -5,4 +5,4 @@ import { FileStorageService } from './file-storage.service';
   providers: [FileStorageService],
   exports: [FileStorageService],
 })
-export class FileStorageModule { }
+export class FileStorageModule {}

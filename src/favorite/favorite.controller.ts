@@ -15,7 +15,7 @@ import { CreateFavoriteDto, UpdateFavoriteDto } from './dto/favorite.dto';
 
 @Controller('favorites')
 export class FavoriteController {
-  constructor(private readonly favoriteService: FavoriteService) { }
+  constructor(private readonly favoriteService: FavoriteService) {}
 
   @Get('project/:projectId')
   async getByProject(

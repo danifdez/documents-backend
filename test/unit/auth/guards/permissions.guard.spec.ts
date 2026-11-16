@@ -1,4 +1,8 @@
-import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PermissionsGuard } from '../../../../src/auth/guards/permissions.guard';
 
 describe('PermissionsGuard', () => {
@@ -6,11 +10,12 @@ describe('PermissionsGuard', () => {
   let reflector: { getAllAndOverride: jest.Mock };
   let configService: { get: jest.Mock };
 
-  const mockContext = (user?: any): ExecutionContext => ({
-    getHandler: jest.fn(),
-    getClass: jest.fn(),
-    switchToHttp: () => ({ getRequest: () => ({ user }) }),
-  } as any);
+  const mockContext = (user?: any): ExecutionContext =>
+    ({
+      getHandler: jest.fn(),
+      getClass: jest.fn(),
+      switchToHttp: () => ({ getRequest: () => ({ user }) }),
+    }) as any;
 
   beforeEach(() => {
     reflector = { getAllAndOverride: jest.fn() };
@@ -32,18 +37,24 @@ describe('PermissionsGuard', () => {
   it('should allow if user has required permissions', () => {
     configService.get.mockReturnValue('true');
     reflector.getAllAndOverride.mockReturnValue(['upload']);
-    expect(guard.canActivate(mockContext({ permissions: { upload: true } }))).toBe(true);
+    expect(
+      guard.canActivate(mockContext({ permissions: { upload: true } })),
+    ).toBe(true);
   });
 
   it('should throw ForbiddenException if user lacks permissions', () => {
     configService.get.mockReturnValue('true');
     reflector.getAllAndOverride.mockReturnValue(['upload']);
-    expect(() => guard.canActivate(mockContext({ permissions: {} }))).toThrow(ForbiddenException);
+    expect(() => guard.canActivate(mockContext({ permissions: {} }))).toThrow(
+      ForbiddenException,
+    );
   });
 
   it('should fail closed when a permission-protected route has no user', () => {
     configService.get.mockReturnValue('true');
     reflector.getAllAndOverride.mockReturnValue(['upload']);
-    expect(() => guard.canActivate(mockContext())).toThrow(UnauthorizedException);
+    expect(() => guard.canActivate(mockContext())).toThrow(
+      UnauthorizedException,
+    );
   });
 });

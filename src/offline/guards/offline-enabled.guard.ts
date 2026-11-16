@@ -7,7 +7,9 @@ export class OfflineEnabledGuard implements CanActivate {
 
   canActivate(): boolean {
     if (this.configService.get('OFFLINE_ENABLED') !== 'true') {
-      throw new ForbiddenException('Offline mode is not enabled on this server');
+      throw new ForbiddenException(
+        'Offline mode is not enabled on this server',
+      );
     }
     return true;
   }

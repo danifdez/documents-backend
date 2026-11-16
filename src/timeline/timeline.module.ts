@@ -9,4 +9,4 @@ import { DatabaseModule } from '../database/database.module';
   providers: [TimelineService],
   exports: [TimelineService],
 })
-export class TimelineModule { }
+export class TimelineModule {}

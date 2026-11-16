@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, Res, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+  Res,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { DocService } from './doc.service';
 import { DocIngestService } from './doc-ingest.service';
@@ -14,7 +26,7 @@ export class DocController {
     private readonly docService: DocService,
     private readonly docIngestService: DocIngestService,
     private readonly docExportService: DocExportService,
-  ) { }
+  ) {}
 
   @Get(':id/export/docx')
   @RequirePermissions(Permission.EXPORT)
@@ -30,19 +42,23 @@ export class DocController {
     const html = doc.content || '<p></p>';
     const docxBuffer = await this.docExportService.renderDocx(html);
 
-    const safeName = (doc.name || 'document').replace(/[^\w\s.-]/g, '_').trim() || 'document';
+    const safeName =
+      (doc.name || 'document').replace(/[^\w\s.-]/g, '_').trim() || 'document';
     const encodedName = encodeURIComponent(doc.name || 'document');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.docx"; filename*=UTF-8''${encodedName}.docx`);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeName}.docx"; filename*=UTF-8''${encodedName}.docx`,
+    );
     res.send(docxBuffer);
   }
 
   @Get(':id/export/pdf')
   @RequirePermissions(Permission.EXPORT)
-  async exportPdf(
-    @Param('id', ParseIntPipe) id: number,
-    @Res() res: Response,
-  ) {
+  async exportPdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
     const doc = await this.docService.findOne(id);
     if (!doc) {
       throw new HttpException('Document not found', HttpStatus.NOT_FOUND);
@@ -51,15 +67,21 @@ export class DocController {
     const html = doc.content || '<p></p>';
     const pdfBuffer = await this.docExportService.renderPdf(html);
 
-    const safeName = (doc.name || 'document').replace(/[^\w\s.-]/g, '_').trim() || 'document';
+    const safeName =
+      (doc.name || 'document').replace(/[^\w\s.-]/g, '_').trim() || 'document';
     const encodedName = encodeURIComponent(doc.name || 'document');
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"; filename*=UTF-8''${encodedName}.pdf`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeName}.pdf"; filename*=UTF-8''${encodedName}.pdf`,
+    );
     res.end(pdfBuffer);
   }
 
   @Get(':id')
-  async getId(@Param('id', ParseIntPipe) id: number): Promise<DocEntity | null> {
+  async getId(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<DocEntity | null> {
     return await this.docService.findOne(id);
   }
 
@@ -93,13 +115,19 @@ export class DocController {
   @Patch(':id')
   @RequirePermissions(Permission.DOCUMENTS)
   async update(
-    @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDocDto): Promise<DocEntity | null> {
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateDocDto,
+  ): Promise<DocEntity | null> {
     const updated = await this.docService.update(id, dto);
 
     if (updated && dto.content !== undefined) {
       const fullDoc = await this.docService.findOneWithProject(id);
       if (fullDoc) {
-        this.docIngestService.scheduleIngest(id, fullDoc.project?.id, dto.content);
+        this.docIngestService.scheduleIngest(
+          id,
+          fullDoc.project?.id,
+          dto.content,
+        );
       }
     }
 

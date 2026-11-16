@@ -4,9 +4,9 @@ import { EntityTypeController } from './entity-type.controller';
 import { EntityTypeService } from './entity-type.service';
 
 @Module({
-    imports: [DatabaseModule],
-    controllers: [EntityTypeController],
-    providers: [EntityTypeService],
-    exports: [EntityTypeService],
+  imports: [DatabaseModule],
+  controllers: [EntityTypeController],
+  providers: [EntityTypeService],
+  exports: [EntityTypeService],
 })
-export class EntityTypeModule { }
+export class EntityTypeModule {}

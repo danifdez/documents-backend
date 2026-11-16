@@ -61,7 +61,9 @@ describe('BibliographyController (e2e)', () => {
   describe('GET /bibliography/global', () => {
     it('should return global entries', async () => {
       bibService.findGlobal.mockResolvedValue([]);
-      const res = await request(app.getHttpServer()).get('/bibliography/global');
+      const res = await request(app.getHttpServer()).get(
+        '/bibliography/global',
+      );
       expect(res.status).toBe(200);
       expect(bibService.findGlobal).toHaveBeenCalled();
     });
@@ -74,13 +76,17 @@ describe('BibliographyController (e2e)', () => {
       const entries = [buildBibliographyEntry()];
       bibService.findByProject.mockResolvedValue(entries);
 
-      const res = await request(app.getHttpServer()).get('/bibliography/project/1');
+      const res = await request(app.getHttpServer()).get(
+        '/bibliography/project/1',
+      );
       expect(res.status).toBe(200);
       expect(bibService.findByProject).toHaveBeenCalledWith(1);
     });
 
     it('should return 400 for non-numeric projectId', async () => {
-      const res = await request(app.getHttpServer()).get('/bibliography/project/abc');
+      const res = await request(app.getHttpServer()).get(
+        '/bibliography/project/abc',
+      );
       expect(res.status).toBe(400);
     });
   });
@@ -158,7 +164,9 @@ describe('BibliographyController (e2e)', () => {
 
   describe('GET /bibliography/export/bibtex', () => {
     it('should export BibTeX with correct headers', async () => {
-      bibService.exportBibTeX.mockResolvedValue('@article{doe2025, title={Test}}');
+      bibService.exportBibTeX.mockResolvedValue(
+        '@article{doe2025, title={Test}}',
+      );
 
       const res = await request(app.getHttpServer())
         .get('/bibliography/export/bibtex')
@@ -176,7 +184,10 @@ describe('BibliographyController (e2e)', () => {
         .get('/bibliography/export/bibtex')
         .query({ ids: '1,2,3' });
 
-      expect(bibService.exportBibTeX).toHaveBeenCalledWith(undefined, [1, 2, 3]);
+      expect(bibService.exportBibTeX).toHaveBeenCalledWith(
+        undefined,
+        [1, 2, 3],
+      );
     });
   });
 
@@ -192,7 +203,10 @@ describe('BibliographyController (e2e)', () => {
         .send({ title: 'Updated' });
 
       expect(res.status).toBe(200);
-      expect(bibService.update).toHaveBeenCalledWith(1, expect.objectContaining({ title: 'Updated' }));
+      expect(bibService.update).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ title: 'Updated' }),
+      );
     });
   });
 
@@ -203,7 +217,9 @@ describe('BibliographyController (e2e)', () => {
       const entry = buildBibliographyEntry();
       bibService.makeGlobal.mockResolvedValue(entry);
 
-      const res = await request(app.getHttpServer()).patch('/bibliography/1/make-global');
+      const res = await request(app.getHttpServer()).patch(
+        '/bibliography/1/make-global',
+      );
       expect(res.status).toBe(200);
       expect(bibService.makeGlobal).toHaveBeenCalledWith(1);
     });

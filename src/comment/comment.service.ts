@@ -8,7 +8,7 @@ export class CommentService {
   constructor(
     @InjectRepository(CommentEntity)
     private readonly repository: Repository<CommentEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<CommentEntity | null> {
     return this.repository.findOneBy({ id });

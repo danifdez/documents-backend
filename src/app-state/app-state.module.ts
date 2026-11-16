@@ -7,4 +7,4 @@ import { DatabaseModule } from '../database/database.module';
   providers: [AppStateService],
   exports: [AppStateService],
 })
-export class AppStateModule { }
+export class AppStateModule {}

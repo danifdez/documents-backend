@@ -31,7 +31,10 @@ export class AuthService {
     return this.configService.get('OFFLINE_ENABLED') === 'true';
   }
 
-  async validateUser(username: string, password: string): Promise<UserEntity | null> {
+  async validateUser(
+    username: string,
+    password: string,
+  ): Promise<UserEntity | null> {
     const user = await this.userRepo.findOneBy({ username });
     if (!user || !user.active) return null;
 
@@ -53,7 +56,9 @@ export class AuthService {
 
     return {
       accessToken: this.jwtService.sign(payload, { expiresIn: accessExpiry }),
-      refreshToken: this.jwtService.sign(refreshPayload, { expiresIn: refreshExpiry }),
+      refreshToken: this.jwtService.sign(refreshPayload, {
+        expiresIn: refreshExpiry,
+      }),
       user: this.sanitizeUser(user),
     };
   }
@@ -155,7 +160,10 @@ export class AuthService {
       if (!dto.currentPassword) {
         throw new UnauthorizedException('Current password is required');
       }
-      const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+      const valid = await bcrypt.compare(
+        dto.currentPassword,
+        user.passwordHash,
+      );
       if (!valid) {
         throw new UnauthorizedException('Current password is incorrect');
       }
@@ -177,7 +185,10 @@ export class AuthService {
     return this.groupRepo.save(group);
   }
 
-  async updateGroup(id: number, dto: UpdateGroupDto): Promise<PermissionGroupEntity | null> {
+  async updateGroup(
+    id: number,
+    dto: UpdateGroupDto,
+  ): Promise<PermissionGroupEntity | null> {
     const group = await this.groupRepo.findOneBy({ id });
     if (!group) return null;
 

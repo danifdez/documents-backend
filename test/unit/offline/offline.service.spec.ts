@@ -45,7 +45,7 @@ describe('OfflineService applySync', () => {
     ...overrides,
   });
 
-  it('only applies update fields and never lets the client change the id or relations', async () => {
+  it('only applies update fields and protects id and relations', async () => {
     const existing = {
       id: 1,
       name: 'Old',

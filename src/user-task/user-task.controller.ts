@@ -1,11 +1,20 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { UserTaskService } from './user-task.service';
 import { UserTaskEntity } from './user-task.entity';
 import { CreateUserTaskDto, UpdateUserTaskDto } from './dto/user-task.dto';
 
 @Controller('user-tasks')
 export class UserTaskController {
-  constructor(private readonly userTaskService: UserTaskService) { }
+  constructor(private readonly userTaskService: UserTaskService) {}
 
   @Get()
   async findAll(): Promise<UserTaskEntity[]> {
@@ -18,12 +27,16 @@ export class UserTaskController {
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<UserTaskEntity | null> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<UserTaskEntity | null> {
     return await this.userTaskService.findOne(id);
   }
 
   @Get('project/:projectId')
-  async findByProject(@Param('projectId', ParseIntPipe) projectId: number): Promise<UserTaskEntity[]> {
+  async findByProject(
+    @Param('projectId', ParseIntPipe) projectId: number,
+  ): Promise<UserTaskEntity[]> {
     return await this.userTaskService.findByProject(projectId);
   }
 

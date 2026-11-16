@@ -10,7 +10,7 @@ export class DocService {
   constructor(
     @InjectRepository(DocEntity)
     private readonly repository: Repository<DocEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<DocEntity | null> {
     return await this.repository.findOneBy({ id });
@@ -26,7 +26,8 @@ export class DocService {
   async create(dto: CreateDocDto): Promise<DocEntity> {
     const data: Partial<DocEntity> = { name: dto.name };
     if (dto.content !== undefined) data.content = dto.content;
-    if (dto.citationFormat !== undefined) data.citationFormat = dto.citationFormat;
+    if (dto.citationFormat !== undefined)
+      data.citationFormat = dto.citationFormat;
     if (dto.projectId) data.project = { id: dto.projectId } as any;
     if (dto.threadId) data.thread = { id: dto.threadId } as any;
     if (dto.resourceId) data.resource = { id: dto.resourceId } as any;
@@ -40,7 +41,9 @@ export class DocService {
       .createQueryBuilder('d')
       .where('d.threadId = :threadId', { threadId })
       .andWhere('d."resourceId" IS NULL')
-      .andWhere('d.status <> :workspaceStatus', { workspaceStatus: 'workspace' })
+      .andWhere('d.status <> :workspaceStatus', {
+        workspaceStatus: 'workspace',
+      })
       .orderBy('d.created_at', 'DESC')
       .getMany();
   }
@@ -51,7 +54,9 @@ export class DocService {
       .createQueryBuilder('d')
       .where('d.projectId = :projectId', { projectId })
       .andWhere('d."resourceId" IS NULL')
-      .andWhere('d.status <> :workspaceStatus', { workspaceStatus: 'workspace' })
+      .andWhere('d.status <> :workspaceStatus', {
+        workspaceStatus: 'workspace',
+      })
       .orderBy('d.created_at', 'DESC')
       .getMany();
   }
@@ -66,10 +71,14 @@ export class DocService {
     const data: Partial<DocEntity> = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.content !== undefined) data.content = dto.content;
-    if (dto.citationFormat !== undefined) data.citationFormat = dto.citationFormat;
-    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
-    if (dto.threadId !== undefined) data.thread = dto.threadId ? { id: dto.threadId } as any : null;
-    if (dto.resourceId !== undefined) data.resource = dto.resourceId ? { id: dto.resourceId } as any : null;
+    if (dto.citationFormat !== undefined)
+      data.citationFormat = dto.citationFormat;
+    if (dto.projectId !== undefined)
+      data.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
+    if (dto.threadId !== undefined)
+      data.thread = dto.threadId ? ({ id: dto.threadId } as any) : null;
+    if (dto.resourceId !== undefined)
+      data.resource = dto.resourceId ? ({ id: dto.resourceId } as any) : null;
     const doc = await this.repository.preload({ id, ...data });
     if (!doc) return null;
     return await this.repository.save(doc);

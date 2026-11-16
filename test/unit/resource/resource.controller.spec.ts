@@ -71,7 +71,9 @@ describe('ResourceController', () => {
 
     it('should throw NOT_FOUND if resource not found', async () => {
       resourceService.assignToProject.mockResolvedValue(null);
-      await expect(controller.assignToProject(1, 1)).rejects.toThrow(HttpException);
+      await expect(controller.assignToProject(1, 1)).rejects.toThrow(
+        HttpException,
+      );
     });
   });
 
@@ -150,12 +152,17 @@ describe('ResourceController', () => {
       authorService.findOne.mockResolvedValue(author);
       resourceService.addAuthorToResource.mockResolvedValue(undefined);
       await controller.addAuthorToResource(1, 1);
-      expect(resourceService.addAuthorToResource).toHaveBeenCalledWith(1, author);
+      expect(resourceService.addAuthorToResource).toHaveBeenCalledWith(
+        1,
+        author,
+      );
     });
 
     it('should throw NOT_FOUND if author not found', async () => {
       authorService.findOne.mockResolvedValue(null);
-      await expect(controller.addAuthorToResource(1, 999)).rejects.toThrow(HttpException);
+      await expect(controller.addAuthorToResource(1, 999)).rejects.toThrow(
+        HttpException,
+      );
     });
   });
 

@@ -12,7 +12,10 @@ describe('NoteService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [NoteService, { provide: getRepositoryToken(NoteEntity), useValue: repo }],
+      providers: [
+        NoteService,
+        { provide: getRepositoryToken(NoteEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(NoteService);
   });

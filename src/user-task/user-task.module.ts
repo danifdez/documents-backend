@@ -9,4 +9,4 @@ import { DatabaseModule } from '../database/database.module';
   providers: [UserTaskService],
   exports: [UserTaskService],
 })
-export class UserTaskModule { }
+export class UserTaskModule {}

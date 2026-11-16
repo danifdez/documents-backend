@@ -5,7 +5,9 @@ import {
 import { CalendarEventExpansionService } from '../../../src/calendar-event/calendar-event-expansion.service';
 import { CalendarEventEntity } from '../../../src/calendar-event/calendar-event.entity';
 
-function makeEvent(overrides: Partial<CalendarEventEntity>): CalendarEventEntity {
+function makeEvent(
+  overrides: Partial<CalendarEventEntity>,
+): CalendarEventEntity {
   const base: any = {
     id: 1,
     title: 'evt',
@@ -33,7 +35,12 @@ function buildSvc({
   events?: CalendarEventEntity[];
   previousTick?: Date | null;
   completions?: Array<{ eventId: number; occurrenceDate: Date }>;
-  tasks?: Array<{ id: number; title: string; reminderAt: Date | null; status: 'pending' | 'completed' }>;
+  tasks?: Array<{
+    id: number;
+    title: string;
+    reminderAt: Date | null;
+    status: 'pending' | 'completed';
+  }>;
 } = {}) {
   const repo = { find: jest.fn().mockResolvedValue(events) };
   const completionRepo = {
@@ -92,11 +99,18 @@ describe('CalendarEventSchedulerService', () => {
     });
     const previousTick = new Date('2026-05-18T10:00:00Z');
     const now = new Date('2026-05-18T10:01:00Z');
-    const { svc, gateway, appState } = buildSvc({ events: [event], previousTick });
+    const { svc, gateway, appState } = buildSvc({
+      events: [event],
+      previousTick,
+    });
     await svc.tick(now);
     expect(gateway.sendCalendarAlarm).toHaveBeenCalledTimes(1);
     expect(gateway.sendCalendarAlarm).toHaveBeenCalledWith(
-      expect.objectContaining({ eventId: 7, title: 'pill', alarmLabel: 'remember' }),
+      expect.objectContaining({
+        eventId: 7,
+        title: 'pill',
+        alarmLabel: 'remember',
+      }),
     );
     expect(gateway.sendCalendarMissed).not.toHaveBeenCalled();
     expect(appState.setTimestamp).toHaveBeenCalledWith(SCHEDULER_TICK_KEY, now);
@@ -149,7 +163,10 @@ describe('CalendarEventSchedulerService', () => {
     });
     const previousTick = new Date('2026-05-18T10:00:00Z');
     const now = new Date('2026-05-18T10:01:00Z');
-    const { svc, gateway, appState } = buildSvc({ events: [event], previousTick });
+    const { svc, gateway, appState } = buildSvc({
+      events: [event],
+      previousTick,
+    });
     (gateway.sendCalendarAlarm as jest.Mock).mockImplementation(() => {
       throw new Error('socket boom');
     });

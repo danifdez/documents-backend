@@ -20,7 +20,15 @@ export class DocExportService {
 
     let browser: any = null;
     try {
-      const wrappedHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:40px;line-height:1.6;color:#222}img{max-width:100%}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px}</style></head><body>${html}</body></html>`;
+      const wrappedHtml =
+        '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+        '<style>body{font-family:sans-serif;padding:40px;line-height:1.6;' +
+        'color:#222}img{max-width:100%}' +
+        'table{border-collapse:collapse;width:100%}' +
+        'td,th{border:1px solid #ccc;padding:8px}' +
+        '</style></head><body>' +
+        html +
+        '</body></html>';
 
       browser = await puppeteer.launch({
         headless: true,

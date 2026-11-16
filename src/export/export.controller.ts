@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, Res, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Res,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { ExportService } from './export.service';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -7,7 +15,7 @@ import { ExportProjectsDto } from './dto/export.dto';
 
 @Controller('export')
 export class ExportController {
-  constructor(private readonly exportService: ExportService) { }
+  constructor(private readonly exportService: ExportService) {}
 
   @Get('projects')
   async getProjectsForExport() {
@@ -16,10 +24,7 @@ export class ExportController {
 
   @Post()
   @RequirePermissions(Permission.EXPORT)
-  async exportProjects(
-    @Body() body: ExportProjectsDto,
-    @Res() res: Response,
-  ) {
+  async exportProjects(@Body() body: ExportProjectsDto, @Res() res: Response) {
     try {
       const { projectIds = [], convertToDocx = false } = body;
 
@@ -29,7 +34,10 @@ export class ExportController {
       );
 
       res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"`,
+      );
 
       stream.pipe(res);
     } catch (error) {

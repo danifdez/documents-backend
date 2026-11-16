@@ -21,8 +21,7 @@ export function toIndexedFileDto(entity: IndexedFileEntity): IndexedFileDto {
     mtime: entity.mtime,
     createdAt: entity.createdAt,
     updatedAt: entity.updatedAt,
-    hasExtractedText: entity.extractedText === null
-      ? null
-      : entity.extractedText.length > 0,
+    hasExtractedText:
+      entity.extractedText === null ? null : entity.extractedText.length > 0,
   };
 }

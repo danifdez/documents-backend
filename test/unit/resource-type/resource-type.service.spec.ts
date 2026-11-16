@@ -24,7 +24,10 @@ describe('ResourceTypeService', () => {
 
   describe('findAll', () => {
     it('should return all resource types ordered by createdAt DESC', async () => {
-      const types = [buildResourceType(), buildResourceType({ id: 2, name: 'Book' })];
+      const types = [
+        buildResourceType(),
+        buildResourceType({ id: 2, name: 'Book' }),
+      ];
       repo.find.mockResolvedValue(types);
       expect(await service.findAll()).toEqual(types);
       expect(repo.find).toHaveBeenCalledWith({ order: { createdAt: 'DESC' } });
@@ -49,7 +52,10 @@ describe('ResourceTypeService', () => {
       const type = buildResourceType({ name: 'Report', abbreviation: 'RPT' });
       repo.create.mockReturnValue(type);
       repo.save.mockResolvedValue(type);
-      const result = await service.create({ name: 'Report', abbreviation: 'RPT' });
+      const result = await service.create({
+        name: 'Report',
+        abbreviation: 'RPT',
+      });
       expect(result).toEqual(type);
     });
   });

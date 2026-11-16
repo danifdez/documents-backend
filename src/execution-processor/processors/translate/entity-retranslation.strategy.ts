@@ -5,12 +5,12 @@ import { PendingEntityEntity } from '../../../pending-entity/pending-entity.enti
 import { ExecutionEffectJournalService } from '../../../execution/execution-effect-journal.service';
 import { canonicalHash } from '../../../execution/execution-canonical';
 import {
-  SingleEntityTranslationStrategyBase,
+  SingleEntityTranslationStrategyBase as Base,
   TranslationResults,
 } from './translation-strategy.base';
 
 @Injectable()
-export class EntityRetranslationStrategy extends SingleEntityTranslationStrategyBase<PendingEntityEntity> {
+export class EntityRetranslationStrategy extends Base<PendingEntityEntity> {
   constructor(
     private readonly pendingEntityService: PendingEntityService,
     private readonly effectJournal: ExecutionEffectJournalService,
@@ -21,7 +21,8 @@ export class EntityRetranslationStrategy extends SingleEntityTranslationStrategy
   protected logStart(execution: ExecutionEntity, entityId: number): void {
     const targetLanguages = execution.payload['targetLanguages'] as string[];
     this.logger.log(
-      `Processing entity retranslation for pending entity ${entityId}, target languages: ${targetLanguages.join(', ')}`,
+      `Processing entity retranslation for pending entity ${entityId}, ` +
+        `target languages: ${targetLanguages.join(', ')}`,
     );
   }
 
@@ -117,7 +118,9 @@ export class EntityRetranslationStrategy extends SingleEntityTranslationStrategy
     );
 
     this.logger.log(
-      `Successfully updated pending entity ${entityId} (${pendingEntity.name}) with translations for: ${Object.keys(translationsToMerge).join(', ')}`,
+      `Successfully updated pending entity ${entityId} ` +
+        `(${pendingEntity.name}) with translations for: ` +
+        `${Object.keys(translationsToMerge).join(', ')}`,
     );
 
     return {

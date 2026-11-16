@@ -1,4 +1,21 @@
-import { Controller, Get, Post, Body, Param, Delete, Patch, UseInterceptors, UploadedFile, Req, Res, HttpException, HttpStatus, ParseIntPipe, Optional, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  Patch,
+  UseInterceptors,
+  UploadedFile,
+  Req,
+  Res,
+  HttpException,
+  HttpStatus,
+  ParseIntPipe,
+  Optional,
+  Query,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -16,7 +33,7 @@ export class ResourceController {
   constructor(
     private readonly resourceService: ResourceService,
     @Optional() private readonly authorService?: AuthorService,
-  ) { }
+  ) {}
 
   @Get()
   async findAll(): Promise<ResourceEntity[]> {
@@ -132,7 +149,10 @@ export class ResourceController {
     @Param('authorId', ParseIntPipe) authorId: number,
   ): Promise<void> {
     if (!this.authorService) {
-      throw new HttpException('Authors feature is disabled', HttpStatus.NOT_FOUND);
+      throw new HttpException(
+        'Authors feature is disabled',
+        HttpStatus.NOT_FOUND,
+      );
     }
     const author = await this.authorService.findOne(authorId);
     if (!author) {
@@ -158,7 +178,9 @@ export class ResourceController {
 
   @Post('upload')
   @RequirePermissions(Permission.UPLOAD)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }),
+  )
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body() resourceData: UploadResourceDto,
@@ -182,7 +204,11 @@ export class ResourceController {
     const { buffer, resource } = await this.resourceService.getFileBuffer(id);
     const safeName = resource.originalName.replace(/[^\w.\-]/g, '_');
     res.setHeader('Content-Type', resource.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(resource.originalName)}`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeName}"; ` +
+        `filename*=UTF-8''${encodeURIComponent(resource.originalName)}`,
+    );
     res.send(buffer);
   }
 
@@ -229,7 +255,10 @@ export class ResourceController {
   async getTranslatedContent(@Param('id', ParseIntPipe) id: number) {
     const translated = await this.resourceService.getTranslatedContentById(id);
     if (!translated) {
-      throw new HttpException('Translated content not found', HttpStatus.NOT_FOUND);
+      throw new HttpException(
+        'Translated content not found',
+        HttpStatus.NOT_FOUND,
+      );
     }
     return { translatedContent: translated };
   }

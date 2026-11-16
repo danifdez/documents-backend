@@ -13,13 +13,33 @@ export interface DateSurfaceForm {
 }
 
 const MONTHS_ES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
-  'septiembre', 'octubre', 'noviembre', 'diciembre',
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
 ];
 
 const MONTHS_EN = [
-  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
-  'september', 'october', 'november', 'december',
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
 ];
 
 // `\b` does not work with accented characters (é, ñ…), so a term only counts
@@ -160,8 +180,7 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
         : authors.length === 2
           ? `${first} & ${second}`
           : `${first} et al.`;
-    const shortAnd =
-      authors.length === 2 ? `${first} y ${second}` : short;
+    const shortAnd = authors.length === 2 ? `${first} y ${second}` : short;
     const forms = [
       `${short} (${year})`,
       `(${short}, ${year})`,

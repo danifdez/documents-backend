@@ -12,7 +12,10 @@ describe('DatasetCsvService', () => {
       const csv = 'Name,Age\nAlice,30\nBob,25';
       const result = service.parseAll(Buffer.from(csv));
       expect(result.headers).toEqual(['Name', 'Age']);
-      expect(result.rows).toEqual([['Alice', '30'], ['Bob', '25']]);
+      expect(result.rows).toEqual([
+        ['Alice', '30'],
+        ['Bob', '25'],
+      ]);
     });
 
     it('should return empty if buffer is empty', () => {
@@ -40,7 +43,10 @@ describe('DatasetCsvService', () => {
     });
 
     it('should infer date type for ISO dates', () => {
-      const schema = service.inferSchema(['Date'], [['2025-01-01'], ['2025-06-15']]);
+      const schema = service.inferSchema(
+        ['Date'],
+        [['2025-01-01'], ['2025-06-15']],
+      );
       expect(schema[0].type).toBe('date');
     });
 

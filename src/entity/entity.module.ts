@@ -6,9 +6,9 @@ import { EntityTypeModule } from '../entity-type/entity-type.module';
 import { ResourceModule } from '../resource/resource.module';
 
 @Module({
-    imports: [DatabaseModule, EntityTypeModule, ResourceModule],
-    controllers: [EntityController],
-    providers: [EntityService],
-    exports: [EntityService],
+  imports: [DatabaseModule, EntityTypeModule, ResourceModule],
+  controllers: [EntityController],
+  providers: [EntityService],
+  exports: [EntityService],
 })
-export class EntityModule { }
+export class EntityModule {}

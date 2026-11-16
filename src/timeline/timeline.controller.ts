@@ -21,15 +21,19 @@ import { Permission } from '../auth/permission.enum';
 
 @Controller('timelines')
 export class TimelineController {
-  constructor(private readonly timelineService: TimelineService) { }
+  constructor(private readonly timelineService: TimelineService) {}
 
   @Get('project/:projectId')
-  async findByProject(@Param('projectId', ParseIntPipe) projectId: number): Promise<TimelineEntity[]> {
+  async findByProject(
+    @Param('projectId', ParseIntPipe) projectId: number,
+  ): Promise<TimelineEntity[]> {
     return await this.timelineService.findByProject(projectId);
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<TimelineEntity | null> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<TimelineEntity | null> {
     return await this.timelineService.findOne(id);
   }
 

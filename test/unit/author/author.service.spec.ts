@@ -59,7 +59,10 @@ describe('AuthorService', () => {
 
   describe('findAll', () => {
     it('should return all authors', async () => {
-      const authors = [buildAuthor({ id: 1 }), buildAuthor({ id: 2, name: 'Author 2' })];
+      const authors = [
+        buildAuthor({ id: 1 }),
+        buildAuthor({ id: 2, name: 'Author 2' }),
+      ];
       repo.find.mockResolvedValue(authors);
 
       const result = await service.findAll();
@@ -103,7 +106,9 @@ describe('AuthorService', () => {
     });
 
     it('should throw BadRequestException if name is empty', async () => {
-      await expect(service.findOrCreate('   ')).rejects.toThrow('Author name cannot be empty');
+      await expect(service.findOrCreate('   ')).rejects.toThrow(
+        'Author name cannot be empty',
+      );
     });
   });
 

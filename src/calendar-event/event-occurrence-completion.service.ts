@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EventOccurrenceCompletionEntity } from './event-occurrence-completion.entity';
@@ -11,7 +15,7 @@ export class EventOccurrenceCompletionService {
     private readonly repo: Repository<EventOccurrenceCompletionEntity>,
     @InjectRepository(CalendarEventEntity)
     private readonly events: Repository<CalendarEventEntity>,
-  ) { }
+  ) {}
 
   async markDone(eventId: number, occurrenceDate: Date): Promise<void> {
     const event = await this.events.findOneBy({ id: eventId });

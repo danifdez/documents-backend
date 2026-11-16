@@ -2321,7 +2321,7 @@ describe('execution PostgreSQL integration', () => {
     }
   });
 
-  it('repairs invalid chat output once, forces closing, then fails without confirmed value', async () => {
+  it('repairs invalid chat output and fails without a confirmed value', async () => {
     const created = await createChat(
       'assistant_chat',
       'Produce a valid final answer',
@@ -3627,7 +3627,8 @@ describe('execution PostgreSQL integration', () => {
 
       await expect(
         dataSource.query(
-          `UPDATE "${schema}"."execution_events" SET "event_type" = 'changed' WHERE "event_id" = $1`,
+          `UPDATE "${schema}"."execution_events" SET "event_type" = 'changed' ` +
+            'WHERE "event_id" = $1',
           [first.eventId],
         ),
       ).rejects.toThrow('append-only');

@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { SharpConstructor } from 'sharp';
@@ -9,7 +13,12 @@ const sharp = require('sharp') as SharpConstructor;
 
 const AVATAR_SIZE = 256;
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ALLOWED_MIME = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
 
 @Injectable()
 export class AvatarService {
@@ -19,9 +28,13 @@ export class AvatarService {
     private readonly storage: FileStorageService,
   ) {}
 
-  async uploadAvatar(userId: number, file: Express.Multer.File): Promise<{ avatarPath: string }> {
+  async uploadAvatar(
+    userId: number,
+    file: Express.Multer.File,
+  ): Promise<{ avatarPath: string }> {
     if (!file) throw new BadRequestException('No file uploaded');
-    if (file.size > MAX_UPLOAD_BYTES) throw new BadRequestException('File too large (max 5MB)');
+    if (file.size > MAX_UPLOAD_BYTES)
+      throw new BadRequestException('File too large (max 5MB)');
     if (!ALLOWED_MIME.has(file.mimetype)) {
       throw new BadRequestException('Unsupported image type');
     }
@@ -45,7 +58,11 @@ export class AvatarService {
     }
 
     const hash = this.storage.calculateHash(resized);
-    const { relativePath } = await this.storage.storeFile(hash, resized, `avatar-${userId}.webp`);
+    const { relativePath } = await this.storage.storeFile(
+      hash,
+      resized,
+      `avatar-${userId}.webp`,
+    );
 
     user.avatarPath = relativePath;
     await this.userRepo.save(user);
@@ -63,7 +80,9 @@ export class AvatarService {
     await this.userRepo.save(user);
   }
 
-  async getAvatarBuffer(userId: number): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  async getAvatarBuffer(
+    userId: number,
+  ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const user = await this.userRepo.findOneBy({ id: userId });
     if (!user || !user.avatarPath) return null;
     const buffer = await this.storage.getFile(user.avatarPath);

@@ -12,7 +12,10 @@ describe('CanvasService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CanvasService, { provide: getRepositoryToken(CanvasEntity), useValue: repo }],
+      providers: [
+        CanvasService,
+        { provide: getRepositoryToken(CanvasEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(CanvasService);
   });

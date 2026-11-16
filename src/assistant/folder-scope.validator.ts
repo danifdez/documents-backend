@@ -2,10 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 export type FolderScopeValidationReason =
-  | 'not_absolute'
-  | 'not_found'
-  | 'not_a_directory'
-  | 'forbidden_path';
+  'not_absolute' | 'not_found' | 'not_a_directory' | 'forbidden_path';
 
 export type FolderScopeValidationResult =
   | { ok: true; absolutePath: string }

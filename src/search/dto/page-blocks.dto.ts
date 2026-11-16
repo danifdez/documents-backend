@@ -1,4 +1,10 @@
-import { IsArray, IsOptional, IsNumber, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsOptional,
+  IsNumber,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { SearchResultDto } from './search-result.dto';
 

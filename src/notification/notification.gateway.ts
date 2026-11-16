@@ -71,17 +71,13 @@ export class NotificationGateway implements OnGatewayConnection {
     if (!this.server) return false;
 
     const room = this.executionRoom(ownerPrincipal || 'standalone');
-    const roomSize =
-      this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    const roomSize = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
     if (roomSize === 0) return false;
 
     try {
       const responses = await (
         this.server.to(room).timeout(5_000) as unknown as {
-          emitWithAck: (
-            event: string,
-            payload: unknown,
-          ) => Promise<unknown>;
+          emitWithAck: (event: string, payload: unknown) => Promise<unknown>;
         }
       ).emitWithAck('execution:publication', message);
       const deliveries = Array.isArray(responses) ? responses : [responses];

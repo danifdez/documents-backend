@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, ParseIntPipe, NotFoundException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  ParseIntPipe,
+  NotFoundException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -28,7 +38,10 @@ export class GroupsController {
   }
 
   @Patch(':id')
-  async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateGroupDto) {
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateGroupDto,
+  ) {
     const group = await this.authService.updateGroup(id, dto);
     if (!group) throw new NotFoundException('Group not found');
     return group;

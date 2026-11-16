@@ -5,9 +5,9 @@ import { AuthorService } from './author.service';
 import { AuthorController } from './author.controller';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([AuthorEntity])],
-    controllers: [AuthorController],
-    providers: [AuthorService],
-    exports: [AuthorService],
+  imports: [TypeOrmModule.forFeature([AuthorEntity])],
+  controllers: [AuthorController],
+  providers: [AuthorService],
+  exports: [AuthorService],
 })
-export class AuthorModule { }
+export class AuthorModule {}

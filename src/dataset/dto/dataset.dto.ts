@@ -1,179 +1,191 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsBoolean, IsIn, IsObject, ValidateNested, MaxLength, Matches } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsArray,
+  IsNumber,
+  IsBoolean,
+  IsIn,
+  IsObject,
+  ValidateNested,
+  MaxLength,
+  Matches,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class DatasetFieldDto {
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(64)
-    @Matches(/^[a-z0-9_]+$/, {
-        message: 'key must contain only lowercase letters, digits and underscores',
-    })
-    key: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  @Matches(/^[a-z0-9_]+$/, {
+    message: 'key must contain only lowercase letters, digits and underscores',
+  })
+  key: string;
 
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(200)
-    name: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name: string;
 
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @IsString()
-    @IsIn(['text', 'number', 'boolean', 'date', 'datetime', 'time', 'select'])
-    type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'time' | 'select';
+  @IsString()
+  @IsIn(['text', 'number', 'boolean', 'date', 'datetime', 'time', 'select'])
+  type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'time' | 'select';
 
-    @IsBoolean()
-    required: boolean;
+  @IsBoolean()
+  required: boolean;
 
-    @IsArray()
-    @IsOptional()
-    @IsString({ each: true })
-    options?: string[];
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  options?: string[];
 
-    @IsNumber()
-    @IsOptional()
-    linkedDatasetId?: number;
+  @IsNumber()
+  @IsOptional()
+  linkedDatasetId?: number;
 
-    @IsString()
-    @IsOptional()
-    linkedLookupField?: string;
+  @IsString()
+  @IsOptional()
+  linkedLookupField?: string;
 
-    @IsString()
-    @IsOptional()
-    linkedDisplayField?: string;
+  @IsString()
+  @IsOptional()
+  linkedDisplayField?: string;
 }
 
 export class CreateDatasetDto {
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(200)
-    name: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name: string;
 
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @IsNumber()
-    @IsOptional()
-    projectId?: number;
+  @IsNumber()
+  @IsOptional()
+  projectId?: number;
 
-    @IsArray()
-    @ValidateNested({ each: true })
-    @Type(() => DatasetFieldDto)
-    schema: DatasetFieldDto[];
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DatasetFieldDto)
+  schema: DatasetFieldDto[];
 
-    @IsOptional()
-    @IsIn(['manual', 'project_resources', 'resource_selection'])
-    sourceMode?: 'manual' | 'project_resources' | 'resource_selection';
+  @IsOptional()
+  @IsIn(['manual', 'project_resources', 'resource_selection'])
+  sourceMode?: 'manual' | 'project_resources' | 'resource_selection';
 
-    @IsOptional()
-    @IsObject()
-    sourceConfig?: Record<string, any>;
+  @IsOptional()
+  @IsObject()
+  sourceConfig?: Record<string, any>;
 }
 
 export class UpdateDatasetDto {
-    @IsString()
-    @IsOptional()
-    @MaxLength(200)
-    name?: string;
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  name?: string;
 
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @IsNumber()
-    @IsOptional()
-    projectId?: number;
+  @IsNumber()
+  @IsOptional()
+  projectId?: number;
 
-    @IsArray()
-    @IsOptional()
-    @ValidateNested({ each: true })
-    @Type(() => DatasetFieldDto)
-    schema?: DatasetFieldDto[];
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => DatasetFieldDto)
+  schema?: DatasetFieldDto[];
 
-    @IsOptional()
-    @IsIn(['manual', 'project_resources', 'resource_selection'])
-    sourceMode?: 'manual' | 'project_resources' | 'resource_selection';
+  @IsOptional()
+  @IsIn(['manual', 'project_resources', 'resource_selection'])
+  sourceMode?: 'manual' | 'project_resources' | 'resource_selection';
 
-    @IsOptional()
-    @IsObject()
-    sourceConfig?: Record<string, any>;
+  @IsOptional()
+  @IsObject()
+  sourceConfig?: Record<string, any>;
 }
 
 export class CreateDatasetRecordDto {
-    @IsNotEmpty()
-    data: Record<string, any>;
+  @IsNotEmpty()
+  data: Record<string, any>;
 }
 
 export class UpdateDatasetRecordDto {
-    @IsNotEmpty()
-    data: Record<string, any>;
+  @IsNotEmpty()
+  data: Record<string, any>;
 }
 
 export class CreateDatasetRelationDto {
-    @IsString()
-    @IsOptional()
-    name?: string;
+  @IsString()
+  @IsOptional()
+  name?: string;
 
-    @IsNumber()
-    @IsNotEmpty()
-    sourceDatasetId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  sourceDatasetId: number;
 
-    @IsNumber()
-    @IsNotEmpty()
-    targetDatasetId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  targetDatasetId: number;
 
-    @IsString()
-    @IsIn(['one-to-many', 'many-to-many'])
-    relationType: string;
+  @IsString()
+  @IsIn(['one-to-many', 'many-to-many'])
+  relationType: string;
 }
 
 export class LinkRecordsDto {
-    @IsNumber()
-    @IsNotEmpty()
-    sourceRecordId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  sourceRecordId: number;
 
-    @IsNumber()
-    @IsNotEmpty()
-    targetRecordId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  targetRecordId: number;
 }
 
 export class BulkDeleteRecordsDto {
-    @IsArray()
-    @IsNumber({}, { each: true })
-    recordIds: number[];
+  @IsArray()
+  @IsNumber({}, { each: true })
+  recordIds: number[];
 }
 
 export class ReExtractRowDto {
-    @IsArray()
-    @IsOptional()
-    @IsString({ each: true })
-    columnsToExtract?: string[];
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  columnsToExtract?: string[];
 }
 
 export class ReExtractCellDto {
-    @IsOptional()
-    @IsBoolean()
-    force?: boolean;
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
 }
 
 export class CreateDatasetChartDto {
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(200)
-    name: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name: string;
 
-    @IsNotEmpty()
-    config: Record<string, any>;
+  @IsNotEmpty()
+  config: Record<string, any>;
 }
 
 export class UpdateDatasetChartDto {
-    @IsString()
-    @IsOptional()
-    @MaxLength(200)
-    name?: string;
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  name?: string;
 
-    @IsOptional()
-    config?: Record<string, any>;
+  @IsOptional()
+  config?: Record<string, any>;
 }

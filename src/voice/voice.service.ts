@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as http from 'http';
 import WebSocket = require('ws');
@@ -42,7 +47,10 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     const probes = await Promise.all(
-      this.workers.map(async (w) => ({ w, healthy: await this.checkHealth(w.port) })),
+      this.workers.map(async (w) => ({
+        w,
+        healthy: await this.checkHealth(w.port),
+      })),
     );
     for (const { w, healthy } of probes) {
       w.status = healthy ? 'free' : 'down';
@@ -87,7 +95,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   pushChunk(client: Socket, chunk: ArrayBuffer | Buffer): void {
     const worker = this.findWorkerByClient(client.id);
     if (!worker?.ws || worker.ws.readyState !== WebSocket.OPEN) return;
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as ArrayBuffer);
+    const buf = Buffer.isBuffer(chunk)
+      ? chunk
+      : Buffer.from(chunk as ArrayBuffer);
     worker.ws.send(buf, { binary: true });
   }
 
@@ -108,7 +118,11 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     const worker = this.findWorkerByClient(client.id);
     if (!worker) return;
     if (worker.ws?.readyState === WebSocket.OPEN) {
-      try { worker.ws.send(JSON.stringify({ type: 'cancel' })); } catch { /* ignore */ }
+      try {
+        worker.ws.send(JSON.stringify({ type: 'cancel' }));
+      } catch {
+        /* ignore */
+      }
     }
     this.releaseWorker(worker, 'client-cancel');
   }
@@ -135,20 +149,36 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
         .map((p) => Number(p.trim()))
         .filter((n) => Number.isFinite(n) && n > 0);
     } else {
-      const base = Number(this.config.get<string>('VOICE_WORKER_BASE_PORT') || 9100);
-      const size = Math.max(1, Number(this.config.get<string>('VOICE_WORKER_POOL_SIZE') || 1));
+      const base = Number(
+        this.config.get<string>('VOICE_WORKER_BASE_PORT') || 9100,
+      );
+      const size = Math.max(
+        1,
+        Number(this.config.get<string>('VOICE_WORKER_POOL_SIZE') || 1),
+      );
       ports = Array.from({ length: size }, (_, i) => base + i);
     }
-    return ports.map((port) => ({ port, status: 'down' as WorkerStatus, ws: null, clientId: null }));
+    return ports.map((port) => ({
+      port,
+      status: 'down' as WorkerStatus,
+      ws: null,
+      clientId: null,
+    }));
   }
 
-  private async assignWorker(worker: WorkerSlot, client: Socket): Promise<void> {
+  private async assignWorker(
+    worker: WorkerSlot,
+    client: Socket,
+  ): Promise<void> {
     let ws: WebSocket;
     try {
       ws = await this.openWorkerWs(worker.port);
     } catch (err) {
       worker.status = 'down';
-      this.emitError(client, `could not contact worker: ${(err as Error).message}`);
+      this.emitError(
+        client,
+        `could not contact worker: ${(err as Error).message}`,
+      );
       // Try to promote another client from the queue to another worker.
       this.processQueue();
       return;
@@ -157,9 +187,12 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     worker.ws = ws;
     worker.clientId = client.id;
 
-    ws.on('message', (data, isBinary) => this.onWorkerMessage(worker, client, data, isBinary));
+    ws.on('message', (data, isBinary) =>
+      this.onWorkerMessage(worker, client, data, isBinary),
+    );
     ws.on('close', () => {
-      if (worker.clientId === client.id) this.releaseWorker(worker, 'worker-closed');
+      if (worker.clientId === client.id)
+        this.releaseWorker(worker, 'worker-closed');
     });
     ws.on('error', (err) => {
       if (worker.clientId === client.id) {
@@ -171,12 +204,16 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
 
     client.emit('voice:ready');
     client.emit('voice:assigned');
-    this.logger.log(`assigned port=${worker.port} client=${client.id} queue=${this.queue.length}`);
+    this.logger.log(
+      `assigned port=${worker.port} client=${client.id} queue=${this.queue.length}`,
+    );
   }
 
   private enqueue(client: Socket): void {
     this.queue.push({ client, enqueuedAt: Date.now() });
-    this.logger.log(`queued client=${client.id} queueDepth=${this.queue.length}`);
+    this.logger.log(
+      `queued client=${client.id} queueDepth=${this.queue.length}`,
+    );
     this.notifyQueuePositions();
   }
 
@@ -185,7 +222,11 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       // position 1-based
       const position = idx + 1;
       const eta = position * this.avgSessionSec;
-      try { entry.client.emit('voice:queued', { position, eta }); } catch { /* ignore */ }
+      try {
+        entry.client.emit('voice:queued', { position, eta });
+      } catch {
+        /* ignore */
+      }
     });
   }
 
@@ -207,7 +248,12 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     isBinary: boolean,
   ) {
     if (isBinary) return;
-    let payload: { type?: string; text?: string; isFinal?: boolean; message?: string };
+    let payload: {
+      type?: string;
+      text?: string;
+      isFinal?: boolean;
+      message?: string;
+    };
     try {
       payload = JSON.parse(data.toString());
     } catch {
@@ -215,7 +261,10 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (payload.type === 'partial') {
-      client.emit('voice:partial', { text: payload.text ?? '', isFinal: !!payload.isFinal });
+      client.emit('voice:partial', {
+        text: payload.text ?? '',
+        isFinal: !!payload.isFinal,
+      });
       if (payload.isFinal) {
         this.releaseWorker(worker, 'final');
       }
@@ -230,9 +279,18 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   private openWorkerWs(port: number): Promise<WebSocket> {
     const url = `ws://127.0.0.1:${port}/voice`;
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url, { handshakeTimeout: 3000, maxPayload: 2 * 1024 * 1024 });
-      const onOpen = () => { ws.off('error', onError); resolve(ws); };
-      const onError = (err: Error) => { ws.off('open', onOpen); reject(err); };
+      const ws = new WebSocket(url, {
+        handshakeTimeout: 3000,
+        maxPayload: 2 * 1024 * 1024,
+      });
+      const onOpen = () => {
+        ws.off('error', onError);
+        resolve(ws);
+      };
+      const onError = (err: Error) => {
+        ws.off('open', onOpen);
+        reject(err);
+      };
       ws.once('open', onOpen);
       ws.once('error', onError);
     });
@@ -244,7 +302,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     if (worker.ws) this.closeWorkerWs(worker, reason);
     if (worker.status !== 'down') worker.status = 'free';
     worker.clientId = null;
-    this.logger.log(`released port=${port} client=${clientId} reason=${reason} queue=${this.queue.length}`);
+    this.logger.log(
+      `released port=${port} client=${clientId} reason=${reason} queue=${this.queue.length}`,
+    );
     this.processQueue();
   }
 
@@ -255,7 +315,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     try {
       if (ws.readyState === WebSocket.OPEN) ws.close(1000, reason);
       else ws.terminate();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     ws.removeAllListeners();
   }
 
@@ -268,17 +330,27 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private emitError(client: Socket, message: string) {
-    try { client.emit('voice:error', { message }); } catch { /* ignore */ }
+    try {
+      client.emit('voice:error', { message });
+    } catch {
+      /* ignore */
+    }
   }
 
   private checkHealth(port: number): Promise<boolean> {
     return new Promise((resolve) => {
       const req = http.get(
         { host: '127.0.0.1', port, path: '/health', timeout: 1500 },
-        (res) => { res.resume(); resolve((res.statusCode || 0) === 200); },
+        (res) => {
+          res.resume();
+          resolve((res.statusCode || 0) === 200);
+        },
       );
       req.on('error', () => resolve(false));
-      req.on('timeout', () => { req.destroy(); resolve(false); });
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
     });
   }
 }

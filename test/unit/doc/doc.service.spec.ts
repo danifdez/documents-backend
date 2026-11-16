@@ -12,7 +12,10 @@ describe('DocService', () => {
   beforeEach(async () => {
     repo = createMockRepository();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [DocService, { provide: getRepositoryToken(DocEntity), useValue: repo }],
+      providers: [
+        DocService,
+        { provide: getRepositoryToken(DocEntity), useValue: repo },
+      ],
     }).compile();
     service = module.get(DocService);
   });
@@ -33,14 +36,18 @@ describe('DocService', () => {
     const qb = repo.createQueryBuilder();
     qb.getMany.mockResolvedValue([buildDoc()]);
     expect(await service.findByThread(1)).toHaveLength(1);
-    expect(qb.andWhere).toHaveBeenCalledWith('d.status <> :workspaceStatus', { workspaceStatus: 'workspace' });
+    expect(qb.andWhere).toHaveBeenCalledWith('d.status <> :workspaceStatus', {
+      workspaceStatus: 'workspace',
+    });
   });
 
   it('should find by project', async () => {
     const qb = repo.createQueryBuilder();
     qb.getMany.mockResolvedValue([buildDoc()]);
     expect(await service.findByProject(1)).toHaveLength(1);
-    expect(qb.andWhere).toHaveBeenCalledWith('d.status <> :workspaceStatus', { workspaceStatus: 'workspace' });
+    expect(qb.andWhere).toHaveBeenCalledWith('d.status <> :workspaceStatus', {
+      workspaceStatus: 'workspace',
+    });
   });
 
   it('should update doc', async () => {

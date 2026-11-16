@@ -9,4 +9,4 @@ import { VoiceService } from './voice.service';
   providers: [VoiceService, VoiceGateway],
   exports: [VoiceService],
 })
-export class VoiceModule { }
+export class VoiceModule {}

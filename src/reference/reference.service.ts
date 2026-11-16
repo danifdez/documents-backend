@@ -13,7 +13,7 @@ export class ReferenceService {
     private readonly docService: DocService,
     private readonly knowledgeEntryService: KnowledgeEntryService,
     private readonly bibliographyService: BibliographyService,
-  ) { }
+  ) {}
 
   async search(query: string, types?: string[]): Promise<any[]> {
     if (!query || !query.trim()) return [];
@@ -58,7 +58,7 @@ export class ReferenceService {
         name: m.content?.slice(0, 60) || 'Mark',
         content: m.content,
       })),
-    ].filter(item => item.id != null);
+    ].filter((item) => item.id != null);
   }
 
   private async searchDocs(query: string): Promise<any[]> {

@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { MarkService } from './mark.service';
 import { MarkEntity } from './mark.entity';
 import { CreateMarkDto, UpdateMarkDto } from './dto/mark.dto';
@@ -7,10 +16,12 @@ import { Permission } from '../auth/permission.enum';
 
 @Controller('marks')
 export class MarkController {
-  constructor(private readonly markService: MarkService) { }
+  constructor(private readonly markService: MarkService) {}
 
   @Get(':id')
-  async getId(@Param('id', ParseIntPipe) id: number): Promise<MarkEntity | null> {
+  async getId(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<MarkEntity | null> {
     return await this.markService.findOne(id);
   }
 

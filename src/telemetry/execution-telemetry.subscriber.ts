@@ -22,8 +22,10 @@ import {
 const framesKey = 'documents.telemetry.events';
 type Frames = ExecutionEventSnapshot[][];
 
+type ExecutionEventSubscriber = EntitySubscriberInterface<ExecutionEventEntity>;
+
 @EventSubscriber()
-export class ExecutionTelemetrySubscriber implements EntitySubscriberInterface<ExecutionEventEntity> {
+export class ExecutionTelemetrySubscriber implements ExecutionEventSubscriber {
   listenTo() {
     return ExecutionEventEntity;
   }

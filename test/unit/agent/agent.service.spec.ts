@@ -132,7 +132,10 @@ describe('AgentService', () => {
     });
 
     it('leaves expiresAt null when pinned', async () => {
-      const a = await service.create({ name: 'Pinned', pinned: true }, 'standalone');
+      const a = await service.create(
+        { name: 'Pinned', pinned: true },
+        'standalone',
+      );
       expect(a.pinned).toBe(true);
       expect(a.expiresAt).toBeNull();
     });
@@ -151,7 +154,11 @@ describe('AgentService', () => {
   describe('update', () => {
     it('pinned false → true clears expiresAt', async () => {
       const a = await service.create({ name: 'A' }, 'standalone');
-      const updated = await service.update(a.id, { pinned: true }, 'standalone');
+      const updated = await service.update(
+        a.id,
+        { pinned: true },
+        'standalone',
+      );
       expect(updated.pinned).toBe(true);
       expect(updated.expiresAt).toBeNull();
     });
@@ -159,7 +166,11 @@ describe('AgentService', () => {
     it('pinned true → false sets expiresAt to now + 1 day (grace)', async () => {
       const a = await service.create({ name: 'A', pinned: true }, 'standalone');
       const before = Date.now();
-      const updated = await service.update(a.id, { pinned: false }, 'standalone');
+      const updated = await service.update(
+        a.id,
+        { pinned: false },
+        'standalone',
+      );
       const after = Date.now();
       expect(updated.pinned).toBe(false);
       expect(updated.expiresAt).not.toBeNull();
@@ -176,7 +187,11 @@ describe('AgentService', () => {
       const a = await service.create({ name: 'A' }, 'standalone');
       const originalExpiresAt = (a.expiresAt as Date).getTime();
       await new Promise((r) => setTimeout(r, 10));
-      const updated = await service.update(a.id, { name: 'A-renamed' }, 'standalone');
+      const updated = await service.update(
+        a.id,
+        { name: 'A-renamed' },
+        'standalone',
+      );
       expect((updated.expiresAt as Date).getTime()).toBe(originalExpiresAt);
       expect(updated.name).toBe('A-renamed');
     });
@@ -286,7 +301,9 @@ describe('AgentService', () => {
     });
 
     it('throws when the agent does not exist', async () => {
-      await expect(service.remove(999, 'standalone')).rejects.toThrow(NotFoundException);
+      await expect(service.remove(999, 'standalone')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('does not touch the filesystem (no fs.unlink involved)', async () => {
@@ -308,7 +325,9 @@ describe('AgentService', () => {
 
   describe('findOne', () => {
     it('throws NotFoundException when missing', async () => {
-      await expect(service.findOne(123, 'standalone')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne(123, 'standalone')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('does not expose another principal agent', async () => {

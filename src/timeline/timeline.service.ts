@@ -14,7 +14,7 @@ export class TimelineService {
   constructor(
     @InjectRepository(TimelineEntity)
     private readonly repository: Repository<TimelineEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<TimelineEntity | null> {
     return await this.repository.findOne({
@@ -46,7 +46,10 @@ export class TimelineService {
     return await this.repository.save(created);
   }
 
-  async update(id: number, dto: UpdateTimelineDto): Promise<TimelineEntity | null> {
+  async update(
+    id: number,
+    dto: UpdateTimelineDto,
+  ): Promise<TimelineEntity | null> {
     const data: Partial<TimelineEntity> = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.timelineData !== undefined) data.timelineData = dto.timelineData;
@@ -56,7 +59,8 @@ export class TimelineService {
     if (dto.syncMapping !== undefined) data.syncMapping = dto.syncMapping;
     if (dto.layoutType !== undefined) data.layoutType = dto.layoutType;
     if (dto.axisBreaks !== undefined) data.axisBreaks = dto.axisBreaks;
-    if (dto.projectId !== undefined) data.project = dto.projectId ? { id: dto.projectId } as any : null;
+    if (dto.projectId !== undefined)
+      data.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
     const timeline = await this.repository.preload({ id, ...data });
     if (!timeline) return null;
     return await this.repository.save(timeline);

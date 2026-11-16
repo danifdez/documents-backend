@@ -1,4 +1,12 @@
-import { Controller, Get, Delete, Param, ParseIntPipe, Res, NotFoundException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Delete,
+  Param,
+  ParseIntPipe,
+  Res,
+  NotFoundException,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { AvatarService } from './avatar.service';
 import { RequirePermissions } from './decorators/permissions.decorator';

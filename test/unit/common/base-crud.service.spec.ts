@@ -36,7 +36,10 @@ describe('BaseCrudService', () => {
 
   describe('findAll', () => {
     it('should return all entities', async () => {
-      const entities = [{ id: 1, name: 'A' }, { id: 2, name: 'B' }];
+      const entities = [
+        { id: 1, name: 'A' },
+        { id: 2, name: 'B' },
+      ];
       repo.find.mockResolvedValue(entities);
       expect(await service.findAll()).toEqual(entities);
     });
@@ -56,7 +59,9 @@ describe('BaseCrudService', () => {
       const entity = { id: 1, name: 'Updated' };
       repo.preload.mockResolvedValue(entity);
       repo.save.mockResolvedValue(entity);
-      expect(await service.update(1, { name: 'Updated' } as any)).toEqual(entity);
+      expect(await service.update(1, { name: 'Updated' } as any)).toEqual(
+        entity,
+      );
     });
 
     it('should return null if not found', async () => {

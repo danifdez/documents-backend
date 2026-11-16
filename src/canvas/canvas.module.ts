@@ -9,4 +9,4 @@ import { DatabaseModule } from '../database/database.module';
   providers: [CanvasService],
   exports: [CanvasService],
 })
-export class CanvasModule { }
+export class CanvasModule {}

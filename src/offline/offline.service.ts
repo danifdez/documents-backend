@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+  Inject,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, MoreThan, ObjectLiteral } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -24,7 +30,16 @@ export class OfflineService {
     doc: ['name', 'content', 'citationFormat', 'status'],
     comment: ['content', 'quote', 'prefix', 'suffix', 'position'],
     mark: ['content', 'prefix', 'suffix', 'position', 'type'],
-    'reading-point': ['kind', 'label', 'fragmentId', 'exact', 'prefix', 'suffix', 'position', 'ratio'],
+    'reading-point': [
+      'kind',
+      'label',
+      'fragmentId',
+      'exact',
+      'prefix',
+      'suffix',
+      'position',
+      'ratio',
+    ],
     note: ['title', 'content', 'status'],
     resource: [
       'name',
@@ -47,7 +62,16 @@ export class OfflineService {
     doc: ['name', 'content', 'citationFormat', 'status'],
     comment: ['content', 'quote', 'prefix', 'suffix', 'position'],
     mark: ['content', 'prefix', 'suffix', 'position', 'type'],
-    'reading-point': ['kind', 'label', 'fragmentId', 'exact', 'prefix', 'suffix', 'position', 'ratio'],
+    'reading-point': [
+      'kind',
+      'label',
+      'fragmentId',
+      'exact',
+      'prefix',
+      'suffix',
+      'position',
+      'ratio',
+    ],
     note: ['title', 'content', 'status'],
     resource: [
       'name',
@@ -66,7 +90,10 @@ export class OfflineService {
     ],
   };
 
-  private static readonly RELATION_FIELDS: Record<string, Record<string, string>> = {
+  private static readonly RELATION_FIELDS: Record<
+    string,
+    Record<string, string>
+  > = {
     doc: { projectId: 'project', threadId: 'thread', resourceId: 'resource' },
     comment: { docId: 'doc', resourceId: 'resource' },
     mark: { docId: 'doc', resourceId: 'resource' },
@@ -76,14 +103,23 @@ export class OfflineService {
   };
 
   constructor(
-    @InjectRepository(ResourceEntity) private readonly resourceRepo: Repository<ResourceEntity>,
-    @InjectRepository(DocEntity) private readonly docRepo: Repository<DocEntity>,
-    @InjectRepository(ThreadEntity) private readonly threadRepo: Repository<ThreadEntity>,
-    @InjectRepository(CommentEntity) private readonly commentRepo: Repository<CommentEntity>,
-    @InjectRepository(MarkEntity) private readonly markRepo: Repository<MarkEntity>,
-    @InjectRepository(ReadingPointEntity) private readonly readingPointRepo: Repository<ReadingPointEntity>,
-    @Optional() @Inject(getRepositoryToken(NoteEntity)) private readonly noteRepo: Repository<NoteEntity> | null,
-    @InjectRepository(ProjectEntity) private readonly projectRepo: Repository<ProjectEntity>,
+    @InjectRepository(ResourceEntity)
+    private readonly resourceRepo: Repository<ResourceEntity>,
+    @InjectRepository(DocEntity)
+    private readonly docRepo: Repository<DocEntity>,
+    @InjectRepository(ThreadEntity)
+    private readonly threadRepo: Repository<ThreadEntity>,
+    @InjectRepository(CommentEntity)
+    private readonly commentRepo: Repository<CommentEntity>,
+    @InjectRepository(MarkEntity)
+    private readonly markRepo: Repository<MarkEntity>,
+    @InjectRepository(ReadingPointEntity)
+    private readonly readingPointRepo: Repository<ReadingPointEntity>,
+    @Optional()
+    @Inject(getRepositoryToken(NoteEntity))
+    private readonly noteRepo: Repository<NoteEntity> | null,
+    @InjectRepository(ProjectEntity)
+    private readonly projectRepo: Repository<ProjectEntity>,
     private readonly fileStorage: FileStorageService,
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
@@ -109,11 +145,20 @@ export class OfflineService {
     });
     if (!resource) return null;
 
-    const comments = await this.commentRepo.find({ where: { resource: { id } } });
+    const comments = await this.commentRepo.find({
+      where: { resource: { id } },
+    });
     const marks = await this.markRepo.find({ where: { resource: { id } } });
-    const readingPoints = await this.readingPointRepo.find({ where: { resource: { id } } });
+    const readingPoints = await this.readingPointRepo.find({
+      where: { resource: { id } },
+    });
 
-    const excludedFiles: Array<{ resourceId: number; name: string; fileSize: number; reason: string }> = [];
+    const excludedFiles: Array<{
+      resourceId: number;
+      name: string;
+      fileSize: number;
+      reason: string;
+    }> = [];
     let fileBase64: string | null = null;
 
     if (resource.path && resource.fileSize) {
@@ -122,7 +167,9 @@ export class OfflineService {
           const buffer = await this.fileStorage.getFile(resource.path);
           fileBase64 = buffer.toString('base64');
         } catch (e) {
-          this.logger.warn(`Could not read file for resource ${id}: ${e.message}`);
+          this.logger.warn(
+            `Could not read file for resource ${id}: ${e.message}`,
+          );
         }
       } else {
         excludedFiles.push({
@@ -143,7 +190,15 @@ export class OfflineService {
       marks,
       readingPoints,
       notes: [],
-      files: fileBase64 ? [{ resourceId: resource.id, mimeType: resource.mimeType, base64: fileBase64 }] : [],
+      files: fileBase64
+        ? [
+            {
+              resourceId: resource.id,
+              mimeType: resource.mimeType,
+              base64: fileBase64,
+            },
+          ]
+        : [],
       excludedFiles,
     };
   }
@@ -161,24 +216,40 @@ export class OfflineService {
     });
 
     const docIds = docs.map((d) => d.id);
-    const comments = docIds.length > 0
-      ? await this.commentRepo.createQueryBuilder('c').where('c.docId IN (:...ids)', { ids: docIds }).getMany()
-      : [];
-    const marks = docIds.length > 0
-      ? await this.markRepo.createQueryBuilder('m').where('m.docId IN (:...ids)', { ids: docIds }).getMany()
-      : [];
-    const readingPoints = docIds.length > 0
-      ? await this.readingPointRepo.createQueryBuilder('rp').where('rp.docId IN (:...ids)', { ids: docIds }).getMany()
-      : [];
+    const comments =
+      docIds.length > 0
+        ? await this.commentRepo
+            .createQueryBuilder('c')
+            .where('c.docId IN (:...ids)', { ids: docIds })
+            .getMany()
+        : [];
+    const marks =
+      docIds.length > 0
+        ? await this.markRepo
+            .createQueryBuilder('m')
+            .where('m.docId IN (:...ids)', { ids: docIds })
+            .getMany()
+        : [];
+    const readingPoints =
+      docIds.length > 0
+        ? await this.readingPointRepo
+            .createQueryBuilder('rp')
+            .where('rp.docId IN (:...ids)', { ids: docIds })
+            .getMany()
+        : [];
 
     // Collect linked resources from docs
-    const resourceIds = docs.filter((d) => d.resource).map((d) => d.resource.id);
-    const resources = resourceIds.length > 0
-      ? await this.resourceRepo.createQueryBuilder('r')
-          .leftJoinAndSelect('r.project', 'project')
-          .whereInIds(resourceIds)
-          .getMany()
-      : [];
+    const resourceIds = docs
+      .filter((d) => d.resource)
+      .map((d) => d.resource.id);
+    const resources =
+      resourceIds.length > 0
+        ? await this.resourceRepo
+            .createQueryBuilder('r')
+            .leftJoinAndSelect('r.project', 'project')
+            .whereInIds(resourceIds)
+            .getMany()
+        : [];
 
     const { files, excludedFiles } = await this.collectFiles(resources);
 
@@ -201,9 +272,17 @@ export class OfflineService {
     if (!project) return null;
 
     const threads = await this.threadRepo.find({ where: { project: { id } } });
-    const docs = await this.docRepo.find({ where: { project: { id } }, relations: ['resource'] });
-    const resources = await this.resourceRepo.find({ where: { project: { id } }, relations: ['authors'] });
-    const notes = this.noteRepo ? await this.noteRepo.find({ where: { project: { id } } }) : [];
+    const docs = await this.docRepo.find({
+      where: { project: { id } },
+      relations: ['resource'],
+    });
+    const resources = await this.resourceRepo.find({
+      where: { project: { id } },
+      relations: ['authors'],
+    });
+    const notes = this.noteRepo
+      ? await this.noteRepo.find({ where: { project: { id } } })
+      : [];
 
     const docIds = docs.map((d) => d.id);
     const resourceIds = resources.map((r) => r.id);
@@ -213,17 +292,35 @@ export class OfflineService {
     const readingPoints: ReadingPointEntity[] = [];
 
     if (docIds.length > 0) {
-      const docComments = await this.commentRepo.createQueryBuilder('c').where('c.docId IN (:...ids)', { ids: docIds }).getMany();
-      const docMarks = await this.markRepo.createQueryBuilder('m').where('m.docId IN (:...ids)', { ids: docIds }).getMany();
-      const docReadingPoints = await this.readingPointRepo.createQueryBuilder('rp').where('rp.docId IN (:...ids)', { ids: docIds }).getMany();
+      const docComments = await this.commentRepo
+        .createQueryBuilder('c')
+        .where('c.docId IN (:...ids)', { ids: docIds })
+        .getMany();
+      const docMarks = await this.markRepo
+        .createQueryBuilder('m')
+        .where('m.docId IN (:...ids)', { ids: docIds })
+        .getMany();
+      const docReadingPoints = await this.readingPointRepo
+        .createQueryBuilder('rp')
+        .where('rp.docId IN (:...ids)', { ids: docIds })
+        .getMany();
       comments.push(...docComments);
       marks.push(...docMarks);
       readingPoints.push(...docReadingPoints);
     }
     if (resourceIds.length > 0) {
-      const resComments = await this.commentRepo.createQueryBuilder('c').where('c.resourceId IN (:...ids)', { ids: resourceIds }).getMany();
-      const resMarks = await this.markRepo.createQueryBuilder('m').where('m.resourceId IN (:...ids)', { ids: resourceIds }).getMany();
-      const resReadingPoints = await this.readingPointRepo.createQueryBuilder('rp').where('rp.resourceId IN (:...ids)', { ids: resourceIds }).getMany();
+      const resComments = await this.commentRepo
+        .createQueryBuilder('c')
+        .where('c.resourceId IN (:...ids)', { ids: resourceIds })
+        .getMany();
+      const resMarks = await this.markRepo
+        .createQueryBuilder('m')
+        .where('m.resourceId IN (:...ids)', { ids: resourceIds })
+        .getMany();
+      const resReadingPoints = await this.readingPointRepo
+        .createQueryBuilder('rp')
+        .where('rp.resourceId IN (:...ids)', { ids: resourceIds })
+        .getMany();
       comments.push(...resComments);
       marks.push(...resMarks);
       readingPoints.push(...resReadingPoints);
@@ -246,8 +343,17 @@ export class OfflineService {
   }
 
   private async collectFiles(resources: ResourceEntity[]) {
-    const files: Array<{ resourceId: number; mimeType: string; base64: string }> = [];
-    const excludedFiles: Array<{ resourceId: number; name: string; fileSize: number; reason: string }> = [];
+    const files: Array<{
+      resourceId: number;
+      mimeType: string;
+      base64: string;
+    }> = [];
+    const excludedFiles: Array<{
+      resourceId: number;
+      name: string;
+      fileSize: number;
+      reason: string;
+    }> = [];
 
     for (const r of resources) {
       if (!r.path || !r.fileSize) continue;
@@ -262,9 +368,15 @@ export class OfflineService {
       }
       try {
         const buffer = await this.fileStorage.getFile(r.path);
-        files.push({ resourceId: r.id, mimeType: r.mimeType, base64: buffer.toString('base64') });
+        files.push({
+          resourceId: r.id,
+          mimeType: r.mimeType,
+          base64: buffer.toString('base64'),
+        });
       } catch (e) {
-        this.logger.warn(`Could not read file for resource ${r.id}: ${e.message}`);
+        this.logger.warn(
+          `Could not read file for resource ${r.id}: ${e.message}`,
+        );
       }
     }
 
@@ -428,9 +540,11 @@ export class OfflineService {
     const threads = await this.threadRepo.find({
       where: { project: { id: projectId }, updatedAt: MoreThan(sinceDate) },
     });
-    const notes = this.noteRepo ? await this.noteRepo.find({
-      where: { project: { id: projectId }, updatedAt: MoreThan(sinceDate) },
-    }) : [];
+    const notes = this.noteRepo
+      ? await this.noteRepo.find({
+          where: { project: { id: projectId }, updatedAt: MoreThan(sinceDate) },
+        })
+      : [];
 
     // Comments, marks and reading points don't have direct project relation,
     // query via docs/resources
@@ -442,15 +556,63 @@ export class OfflineService {
     const resourceIds = resources.map((r) => r.id);
 
     if (docIds.length > 0) {
-      comments.push(...(await this.findChangedSince(this.commentRepo, 'c', 'docId', docIds, sinceDate)));
-      marks.push(...(await this.findChangedSince(this.markRepo, 'm', 'docId', docIds, sinceDate)));
-      readingPoints.push(...(await this.findChangedSince(this.readingPointRepo, 'rp', 'docId', docIds, sinceDate)));
+      comments.push(
+        ...(await this.findChangedSince(
+          this.commentRepo,
+          'c',
+          'docId',
+          docIds,
+          sinceDate,
+        )),
+      );
+      marks.push(
+        ...(await this.findChangedSince(
+          this.markRepo,
+          'm',
+          'docId',
+          docIds,
+          sinceDate,
+        )),
+      );
+      readingPoints.push(
+        ...(await this.findChangedSince(
+          this.readingPointRepo,
+          'rp',
+          'docId',
+          docIds,
+          sinceDate,
+        )),
+      );
     }
 
     if (resourceIds.length > 0) {
-      comments.push(...(await this.findChangedSince(this.commentRepo, 'c', 'resourceId', resourceIds, sinceDate)));
-      marks.push(...(await this.findChangedSince(this.markRepo, 'm', 'resourceId', resourceIds, sinceDate)));
-      readingPoints.push(...(await this.findChangedSince(this.readingPointRepo, 'rp', 'resourceId', resourceIds, sinceDate)));
+      comments.push(
+        ...(await this.findChangedSince(
+          this.commentRepo,
+          'c',
+          'resourceId',
+          resourceIds,
+          sinceDate,
+        )),
+      );
+      marks.push(
+        ...(await this.findChangedSince(
+          this.markRepo,
+          'm',
+          'resourceId',
+          resourceIds,
+          sinceDate,
+        )),
+      );
+      readingPoints.push(
+        ...(await this.findChangedSince(
+          this.readingPointRepo,
+          'rp',
+          'resourceId',
+          resourceIds,
+          sinceDate,
+        )),
+      );
     }
 
     return { resources, docs, threads, comments, marks, readingPoints, notes };
@@ -463,7 +625,8 @@ export class OfflineService {
     ids: number[],
     since: Date,
   ): Promise<T[]> {
-    return repo.createQueryBuilder(alias)
+    return repo
+      .createQueryBuilder(alias)
       .where(`${alias}.${fkColumn} IN (:...ids)`, { ids })
       .andWhere(`${alias}.updatedAt > :since`, { since })
       .getMany();

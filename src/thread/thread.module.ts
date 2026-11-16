@@ -9,4 +9,4 @@ import { DatabaseModule } from '../database/database.module';
   providers: [ThreadService],
   exports: [ThreadService],
 })
-export class ThreadModule { }
+export class ThreadModule {}

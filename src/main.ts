@@ -16,22 +16,24 @@ async function bootstrap() {
   if (!authEnabled) {
     logger.warn(
       'Authentication is DISABLED. All endpoints are publicly accessible. ' +
-      'Set AUTH_ENABLED=true for production deployments.',
+        'Set AUTH_ENABLED=true for production deployments.',
     );
   }
 
   const corsOrigin = configService.get('CORS_ORIGIN', 'http://localhost:5173');
 
   // Security headers
-  app.use(helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    contentSecurityPolicy: {
-      useDefaults: true,
-      directives: {
-        'frame-ancestors': ["'self'", corsOrigin],
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          'frame-ancestors': ["'self'", corsOrigin],
+        },
       },
-    },
-  }));
+    }),
+  );
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
@@ -45,6 +47,9 @@ async function bootstrap() {
   app.use(bodyParser.json({ limit: bodyLimit }));
   app.use(bodyParser.urlencoded({ limit: bodyLimit, extended: true }));
 
-  await app.listen(configService.get('PORT', 3000), configService.get<string | undefined>('HOST'));
+  await app.listen(
+    configService.get('PORT', 3000),
+    configService.get<string | undefined>('HOST'),
+  );
 }
 bootstrap();

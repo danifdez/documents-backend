@@ -1,4 +1,11 @@
-import { IsString, IsNotEmpty, IsOptional, IsBoolean, MaxLength, ValidateIf } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsBoolean,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class WriteIndexedFileDto {
   @IsString()

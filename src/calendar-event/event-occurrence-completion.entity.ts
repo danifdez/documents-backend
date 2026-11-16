@@ -15,7 +15,10 @@ export class EventOccurrenceCompletionEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => CalendarEventEntity, { onDelete: 'CASCADE', nullable: false })
+  @ManyToOne(() => CalendarEventEntity, {
+    onDelete: 'CASCADE',
+    nullable: false,
+  })
   @JoinColumn({ name: 'event_id' })
   event: CalendarEventEntity;
 

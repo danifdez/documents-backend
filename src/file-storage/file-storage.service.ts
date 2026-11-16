@@ -11,10 +11,12 @@ export class FileStorageService {
 
   constructor(private readonly configService: ConfigService) {
     this.baseStoragePath = path.resolve(
-      this.configService.get('DOCUMENTS_STORAGE_DIR') || path.join(__dirname, '..', '..', '..', 'documents'),
+      this.configService.get('DOCUMENTS_STORAGE_DIR') ||
+        path.join(__dirname, '..', '..', '..', 'documents'),
     );
     this.archiveStoragePath = path.resolve(
-      this.configService.get('DOCUMENTS_ARCHIVE_DIR') || path.join(this.baseStoragePath, '..', 'documents-archive'),
+      this.configService.get('DOCUMENTS_ARCHIVE_DIR') ||
+        path.join(this.baseStoragePath, '..', 'documents-archive'),
     );
     this.ensureDirectoryExists(this.baseStoragePath);
     this.ensureDirectoryExists(this.archiveStoragePath);

@@ -9,7 +9,7 @@ export class ThreadService {
   constructor(
     @InjectRepository(ThreadEntity)
     private readonly repository: Repository<ThreadEntity>,
-  ) { }
+  ) {}
 
   async findOne(id: number): Promise<ThreadEntity | null> {
     return await this.repository.findOne({
@@ -27,7 +27,10 @@ export class ThreadService {
     return await this.repository.save(created);
   }
 
-  async findByProject(projectId: number, includeArchived = false): Promise<ThreadEntity[]> {
+  async findByProject(
+    projectId: number,
+    includeArchived = false,
+  ): Promise<ThreadEntity[]> {
     const where: any = { project: { id: projectId } };
     if (!includeArchived) where.status = 'active';
     return await this.repository.find({
@@ -37,7 +40,10 @@ export class ThreadService {
     });
   }
 
-  async findByParent(parentId: number, includeArchived = false): Promise<ThreadEntity[]> {
+  async findByParent(
+    parentId: number,
+    includeArchived = false,
+  ): Promise<ThreadEntity[]> {
     const where: any = { parent: { id: parentId } };
     if (!includeArchived) where.status = 'active';
     return await this.repository.find({

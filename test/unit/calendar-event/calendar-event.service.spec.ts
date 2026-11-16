@@ -18,8 +18,14 @@ describe('CalendarEventService', () => {
       providers: [
         CalendarEventService,
         { provide: getRepositoryToken(CalendarEventEntity), useValue: repo },
-        { provide: getRepositoryToken(EventOccurrenceCompletionEntity), useValue: completionRepo },
-        { provide: CalendarEventExpansionService, useValue: { expand: () => [] } },
+        {
+          provide: getRepositoryToken(EventOccurrenceCompletionEntity),
+          useValue: completionRepo,
+        },
+        {
+          provide: CalendarEventExpansionService,
+          useValue: { expand: () => [] },
+        },
       ],
     }).compile();
     service = module.get(CalendarEventService);
@@ -45,7 +51,9 @@ describe('CalendarEventService', () => {
     const e = buildCalendarEvent();
     repo.create.mockReturnValue(e);
     repo.save.mockResolvedValue(e);
-    expect(await service.create({ title: 'Test', startDate: new Date() })).toEqual(e);
+    expect(
+      await service.create({ title: 'Test', startDate: new Date() }),
+    ).toEqual(e);
   });
 
   it('should remove event', async () => {

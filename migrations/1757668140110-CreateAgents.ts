@@ -1,10 +1,10 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateAgents1757668140110 implements MigrationInterface {
-    name = 'CreateAgents1757668140110'
+  name = 'CreateAgents1757668140110';
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
             CREATE TABLE "agents" (
                 "id" SERIAL PRIMARY KEY,
                 "name" character varying(100) NOT NULL,
@@ -19,13 +19,17 @@ export class CreateAgents1757668140110 implements MigrationInterface {
                 "updated_at" TIMESTAMP NOT NULL DEFAULT now()
             )
         `);
-        await queryRunner.query(`CREATE INDEX "IDX_agents_pinned_last_seen_at" ON "agents" ("pinned", "last_seen_at")`);
-        await queryRunner.query(`CREATE INDEX "IDX_agents_expires_at" ON "agents" ("expires_at")`);
-    }
+    await queryRunner.query(
+      `CREATE INDEX "IDX_agents_pinned_last_seen_at" ON "agents" ("pinned", "last_seen_at")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_agents_expires_at" ON "agents" ("expires_at")`,
+    );
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DROP INDEX "IDX_agents_expires_at"`);
-        await queryRunner.query(`DROP INDEX "IDX_agents_pinned_last_seen_at"`);
-        await queryRunner.query(`DROP TABLE "agents"`);
-    }
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`DROP INDEX "IDX_agents_expires_at"`);
+    await queryRunner.query(`DROP INDEX "IDX_agents_pinned_last_seen_at"`);
+    await queryRunner.query(`DROP TABLE "agents"`);
+  }
 }

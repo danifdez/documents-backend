@@ -29,8 +29,13 @@ import { FileStorageModule } from '../file-storage/file-storage.module';
       }),
     }),
   ],
-  controllers: [AuthController, UsersController, UserAvatarController, GroupsController],
+  controllers: [
+    AuthController,
+    UsersController,
+    UserAvatarController,
+    GroupsController,
+  ],
   providers: [AuthService, AvatarService, JwtStrategy],
   exports: [AuthService, JwtModule],
 })
-export class AuthModule { }
+export class AuthModule {}

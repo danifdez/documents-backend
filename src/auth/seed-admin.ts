@@ -7,24 +7,24 @@ import * as bcrypt from 'bcrypt';
 config({ path: resolve(__dirname, '..', '..', '..', '.env') });
 
 const ALL_PERMISSIONS: Record<string, boolean> = {
-  'ask': true,
-  'summarize': true,
-  'translate': true,
+  ask: true,
+  summarize: true,
+  translate: true,
   'entity-extraction': true,
   'key-points': true,
-  'keywords': true,
-  'projects': true,
-  'documents': true,
-  'upload': true,
-  'export': true,
-  'write': true,
-  'delete': true,
-  'canvas': true,
-  'datasets': true,
-  'timelines': true,
+  keywords: true,
+  projects: true,
+  documents: true,
+  upload: true,
+  export: true,
+  write: true,
+  delete: true,
+  canvas: true,
+  datasets: true,
+  timelines: true,
   'knowledge-base': true,
-  'bibliography': true,
-  'relationships': true,
+  bibliography: true,
+  relationships: true,
   'user-management': true,
 };
 
@@ -48,7 +48,8 @@ async function seedAdmin() {
   let groupId: number;
   if (adminGroup.length === 0) {
     const result = await dataSource.query(
-      `INSERT INTO permission_groups (name, description, permissions) VALUES ($1, $2, $3) RETURNING id`,
+      'INSERT INTO permission_groups (name, description, permissions) ' +
+        'VALUES ($1, $2, $3) RETURNING id',
       ['Admin', 'Full access to all features', JSON.stringify(ALL_PERMISSIONS)],
     );
     groupId = result[0].id;
@@ -60,7 +61,9 @@ async function seedAdmin() {
       `UPDATE permission_groups SET permissions = $1 WHERE id = $2`,
       [JSON.stringify(ALL_PERMISSIONS), groupId],
     );
-    console.log(`Admin group already exists (id: ${groupId}), permissions updated`);
+    console.log(
+      `Admin group already exists (id: ${groupId}), permissions updated`,
+    );
   }
 
   const username = process.env.ADMIN_USERNAME ?? 'admin';
@@ -84,7 +87,9 @@ async function seedAdmin() {
       `UPDATE users SET group_id = $1, permissions = $2 WHERE id = $3`,
       [groupId, JSON.stringify(ALL_PERMISSIONS), existing[0].id],
     );
-    console.log(`Admin user "${username}" already exists (id: ${existing[0].id}), assigned to Admin group`);
+    console.log(
+      `Admin user "${username}" already exists (id: ${existing[0].id}), assigned to Admin group`,
+    );
     await dataSource.destroy();
     return;
   }
@@ -100,7 +105,9 @@ async function seedAdmin() {
   console.log(`Admin user "${username}" created successfully`);
   if (generated) {
     console.log(`Generated password: ${password}`);
-    console.log('Set ADMIN_PASSWORD env var to use a fixed password next time.');
+    console.log(
+      'Set ADMIN_PASSWORD env var to use a fixed password next time.',
+    );
   }
   await dataSource.destroy();
 }

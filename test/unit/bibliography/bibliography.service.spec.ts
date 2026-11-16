@@ -4,7 +4,11 @@ import { BibliographyService } from '../../../src/bibliography/bibliography.serv
 import { BibliographyEntryEntity } from '../../../src/bibliography/bibliography-entry.entity';
 import { ResourceEntity } from '../../../src/resource/resource.entity';
 import { createMockRepository, MockRepository } from '../../test-utils';
-import { buildBibliographyEntry, buildResource, buildAuthor } from '../../factories';
+import {
+  buildBibliographyEntry,
+  buildResource,
+  buildAuthor,
+} from '../../factories';
 
 describe('BibliographyService', () => {
   let service: BibliographyService;
@@ -18,7 +22,10 @@ describe('BibliographyService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BibliographyService,
-        { provide: getRepositoryToken(BibliographyEntryEntity), useValue: repo },
+        {
+          provide: getRepositoryToken(BibliographyEntryEntity),
+          useValue: repo,
+        },
         { provide: getRepositoryToken(ResourceEntity), useValue: resourceRepo },
       ],
     }).compile();
@@ -169,7 +176,9 @@ describe('BibliographyService', () => {
     it('should throw when resource not found', async () => {
       repo.findOne.mockResolvedValue(null);
       resourceRepo.findOne.mockResolvedValue(null);
-      await expect(service.importFromResource(999)).rejects.toThrow('Resource 999 not found');
+      await expect(service.importFromResource(999)).rejects.toThrow(
+        'Resource 999 not found',
+      );
     });
 
     it('should parse "LastName, FirstName" format for authors', async () => {
@@ -254,7 +263,9 @@ describe('BibliographyService', () => {
         citeKey: 'doe2025',
         title: 'Test Article',
         year: '2025',
-        creators: [{ creatorType: 'author', lastName: 'Doe', firstName: 'John' }],
+        creators: [
+          { creatorType: 'author', lastName: 'Doe', firstName: 'John' },
+        ],
       });
       const qb = repo.createQueryBuilder();
       qb.getMany.mockResolvedValue([entry]);
@@ -271,7 +282,9 @@ describe('BibliographyService', () => {
       qb.getMany.mockResolvedValue([]);
 
       await service.exportBibTeX(undefined, [1, 2, 3]);
-      expect(qb.where).toHaveBeenCalledWith('b.id IN (:...ids)', { ids: [1, 2, 3] });
+      expect(qb.where).toHaveBeenCalledWith('b.id IN (:...ids)', {
+        ids: [1, 2, 3],
+      });
     });
   });
 });

@@ -13,11 +13,14 @@ import {
 
 @Controller('search')
 export class SearchController {
-  constructor(private readonly searchService: SearchService) { }
+  constructor(private readonly searchService: SearchService) {}
 
   @Post('page-entities')
   async pageEntities(@Body() dto: PageEntitiesDto): Promise<PageEntityMatch[]> {
-    return await this.searchService.matchEntitiesInText(dto.text, dto.projectId);
+    return await this.searchService.matchEntitiesInText(
+      dto.text,
+      dto.projectId,
+    );
   }
 
   @Post('page-blocks')
@@ -49,7 +52,10 @@ export class SearchController {
   }
 
   @Post('')
-  async search(@Body('term') term: string, @Body('projectId') projectId?: number): Promise<SearchResultDto[]> {
+  async search(
+    @Body('term') term: string,
+    @Body('projectId') projectId?: number,
+  ): Promise<SearchResultDto[]> {
     return await this.searchService.globalSearch(term, projectId);
   }
 }

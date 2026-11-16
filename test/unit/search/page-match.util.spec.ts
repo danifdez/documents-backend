@@ -27,10 +27,9 @@ describe('page-match.util', () => {
   describe('matchTermsInText', () => {
     it('returns the matched terms in the order given', () => {
       const text = 'La OMS y el Banco de España publicaron el informe.';
-      expect(matchTermsInText(text, ['Banco de España', 'OMS', 'PIB'])).toEqual([
-        'Banco de España',
-        'OMS',
-      ]);
+      expect(matchTermsInText(text, ['Banco de España', 'OMS', 'PIB'])).toEqual(
+        ['Banco de España', 'OMS'],
+      );
     });
 
     it('ignores partial appearances', () => {
@@ -68,7 +67,10 @@ describe('page-match.util', () => {
 
   describe('knowledgeTermsOf', () => {
     it('uses the title and the tags', () => {
-      const terms = knowledgeTermsOf({ title: 'Sistema inmune', tags: ['biología', ''] });
+      const terms = knowledgeTermsOf({
+        title: 'Sistema inmune',
+        tags: ['biología', ''],
+      });
       expect(terms).toEqual(['Sistema inmune', 'biología']);
     });
   });
@@ -78,7 +80,9 @@ describe('page-match.util', () => {
       citeKey: 'garcia2024',
       title: 'Una historia de la ciencia moderna en España',
       shortTitle: 'Historia de la ciencia',
-      creators: [{ creatorType: 'author', lastName: 'García', firstName: 'Ana' }],
+      creators: [
+        { creatorType: 'author', lastName: 'García', firstName: 'Ana' },
+      ],
       year: '2024',
       doi: '10.1000/xyz123',
       isbn: '9783161484100',
@@ -177,8 +181,14 @@ describe('page-match.util', () => {
 
   describe('matchDateInText', () => {
     it('prefers the full date over the bare year', () => {
-      const found = matchDateInText('La toma fue el 12 de octubre de 1492.', '1492-10-12');
-      expect(found).toEqual({ term: '12 de octubre de 1492', precision: 'day' });
+      const found = matchDateInText(
+        'La toma fue el 12 de octubre de 1492.',
+        '1492-10-12',
+      );
+      expect(found).toEqual({
+        term: '12 de octubre de 1492',
+        precision: 'day',
+      });
     });
 
     it('falls back to the year when only the year appears', () => {

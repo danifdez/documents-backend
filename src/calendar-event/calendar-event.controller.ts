@@ -11,9 +11,15 @@ import {
   HttpCode,
   BadRequestException,
 } from '@nestjs/common';
-import { CalendarEventService, CalendarEventOccurrence } from './calendar-event.service';
+import {
+  CalendarEventService,
+  CalendarEventOccurrence,
+} from './calendar-event.service';
 import { CalendarEventEntity } from './calendar-event.entity';
-import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
+import {
+  CreateCalendarEventDto,
+  UpdateCalendarEventDto,
+} from './dto/calendar-event.dto';
 import { EventOccurrenceCompletionService } from './event-occurrence-completion.service';
 
 @Controller('calendar-events')
@@ -21,7 +27,7 @@ export class CalendarEventController {
   constructor(
     private readonly calendarEventService: CalendarEventService,
     private readonly completion: EventOccurrenceCompletionService,
-  ) { }
+  ) {}
 
   @Get()
   async findAll(): Promise<CalendarEventEntity[]> {
@@ -44,17 +50,23 @@ export class CalendarEventController {
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<CalendarEventEntity | null> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<CalendarEventEntity | null> {
     return await this.calendarEventService.findOne(id);
   }
 
   @Get('project/:projectId')
-  async findByProject(@Param('projectId', ParseIntPipe) projectId: number): Promise<CalendarEventEntity[]> {
+  async findByProject(
+    @Param('projectId', ParseIntPipe) projectId: number,
+  ): Promise<CalendarEventEntity[]> {
     return await this.calendarEventService.findByProject(projectId);
   }
 
   @Post()
-  async create(@Body() dto: CreateCalendarEventDto): Promise<CalendarEventEntity> {
+  async create(
+    @Body() dto: CreateCalendarEventDto,
+  ): Promise<CalendarEventEntity> {
     return await this.calendarEventService.create(dto);
   }
 

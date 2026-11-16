@@ -1,85 +1,95 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, MaxLength, ValidateNested, IsObject, IsBoolean } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsArray,
+  IsNumber,
+  MaxLength,
+  ValidateNested,
+  IsObject,
+  IsBoolean,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export interface EntityTranslation {
-    [locale: string]: string;
+  [locale: string]: string;
 }
 
 export class EntityAliasDto {
-    @IsString()
-    @IsNotEmpty()
-    locale: string;
+  @IsString()
+  @IsNotEmpty()
+  locale: string;
 
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(200)
-    value: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  value: string;
 }
 
 export class CreateEntityDto {
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(200)
-    name: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name: string;
 
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @IsObject()
-    @IsOptional()
-    translations?: EntityTranslation;
+  @IsObject()
+  @IsOptional()
+  translations?: EntityTranslation;
 
-    @IsArray()
-    @IsOptional()
-    @ValidateNested({ each: true })
-    @Type(() => EntityAliasDto)
-    aliases?: EntityAliasDto[];
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => EntityAliasDto)
+  aliases?: EntityAliasDto[];
 
-    @IsNumber()
-    @IsNotEmpty()
-    entityTypeId: number;
+  @IsNumber()
+  @IsNotEmpty()
+  entityTypeId: number;
 
-    @IsBoolean()
-    @IsOptional()
-    global?: boolean;
+  @IsBoolean()
+  @IsOptional()
+  global?: boolean;
 
-    @IsArray()
-    @IsOptional()
-    @IsNumber({}, { each: true })
-    projectIds?: number[];
+  @IsArray()
+  @IsOptional()
+  @IsNumber({}, { each: true })
+  projectIds?: number[];
 }
 
 export class UpdateEntityDto {
-    @IsString()
-    @IsOptional()
-    @MaxLength(200)
-    name?: string;
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  name?: string;
 
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @IsObject()
-    @IsOptional()
-    translations?: EntityTranslation;
+  @IsObject()
+  @IsOptional()
+  translations?: EntityTranslation;
 
-    @IsArray()
-    @IsOptional()
-    @ValidateNested({ each: true })
-    @Type(() => EntityAliasDto)
-    aliases?: EntityAliasDto[];
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => EntityAliasDto)
+  aliases?: EntityAliasDto[];
 
-    @IsNumber()
-    @IsOptional()
-    entityTypeId?: number;
+  @IsNumber()
+  @IsOptional()
+  entityTypeId?: number;
 
-    @IsBoolean()
-    @IsOptional()
-    global?: boolean;
+  @IsBoolean()
+  @IsOptional()
+  global?: boolean;
 
-    @IsArray()
-    @IsOptional()
-    @IsNumber({}, { each: true })
-    projectIds?: number[];
+  @IsArray()
+  @IsOptional()
+  @IsNumber({}, { each: true })
+  projectIds?: number[];
 }
