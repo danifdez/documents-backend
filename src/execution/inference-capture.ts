@@ -174,7 +174,7 @@ export function assertInferenceRuntimeCapture(
     if (!call || call.callIndex !== index + 1) reject();
     const properties = call.engine?.properties ?? {};
     for (const name of ['chatTemplateHash', 'toolTemplateHash']) {
-      if (Object.prototype.hasOwnProperty.call(properties, name)) {
+      if (Object.hasOwn(properties, name)) {
         const hash = properties[name];
         if (typeof hash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(hash))
           reject();
