@@ -1,10 +1,5 @@
-import {
-  Controller,
-  Post,
-  Body,
-  Headers,
-  ForbiddenException,
-} from '@nestjs/common';
+import { authorizeInferenceCapture } from '../execution/inference-capture';
+import { Controller, Post, Body, Headers } from '@nestjs/common';
 import { ModelService } from './model.service';
 import { ExecutionService } from '../execution/execution.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -49,18 +44,7 @@ export class ModelController {
     @CurrentUser() user: unknown,
     @Headers('x-evaluation-consent') consent?: string,
   ): Promise<{ executionId: string }> {
-    const captureInference = consent === 'granted';
-    const authenticated = user as
-      { userId?: unknown; permissions?: Record<string, boolean> } | undefined;
-    if (
-      captureInference &&
-      (!authenticated?.userId ||
-        authenticated.permissions?.[Permission.EXPORT] !== true)
-    ) {
-      throw new ForbiddenException(
-        'Authenticated export permission is required to capture inference evidence',
-      );
-    }
+    const captureInference = authorizeInferenceCapture(user, consent);
     return this.modelService.summarize(
       this.executions.resolveAccessScope(user),
       summarizeData.targetLanguage,

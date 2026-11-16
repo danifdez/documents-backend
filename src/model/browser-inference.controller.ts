@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { authorizeInferenceCapture } from '../execution/inference-capture';
+import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
@@ -18,10 +19,13 @@ export class BrowserInferenceController {
   async create(
     @Body() body: BrowserInferenceDto,
     @CurrentUser() user: unknown,
+    @Headers('x-evaluation-consent') consent?: string,
   ): Promise<{ executionId: string }> {
+    const captureInference = authorizeInferenceCapture(user, consent);
     return this.models.browserInference(
       body,
       this.executions.resolveAccessScope(user),
+      captureInference,
     );
   }
 

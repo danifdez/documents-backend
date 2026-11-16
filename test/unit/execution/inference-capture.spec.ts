@@ -1,3 +1,4 @@
+import { BrowserInferenceController } from '../../../src/model/browser-inference.controller';
 import { ForbiddenException } from '@nestjs/common';
 import { ModelController } from '../../../src/model/model.controller';
 import { canonicalHash } from '../../../src/execution/execution-canonical';
@@ -315,5 +316,68 @@ describe('Authorized runtime template capture', () => {
         'invalid_inference_runtime',
       );
     }
+  });
+});
+
+describe('Browser inference uses the common capture authorization', () => {
+  const models = {
+    browserInference: jest
+      .fn()
+      .mockResolvedValue({ executionId: ids.executionId }),
+  };
+  const executions = {
+    resolveAccessScope: jest.fn().mockReturnValue({ ownerPrincipal: '7' }),
+  };
+  const controller = new BrowserInferenceController(
+    models as any,
+    executions as any,
+  );
+  const request = {
+    requestId: '11234567-89ab-4def-8123-456789abcdef',
+    requestJson: '{"messages":[]}',
+  };
+  beforeEach(() => jest.clearAllMocks());
+
+  it.each([undefined, 'true', 'false'])(
+    'does not infer consent from %s',
+    async (header) => {
+      await controller.create(
+        request,
+        { userId: 7, permissions: { export: true } },
+        header,
+      );
+      expect(models.browserInference).toHaveBeenCalledWith(
+        request,
+        { ownerPrincipal: '7' },
+        false,
+      );
+    },
+  );
+
+  it.each([
+    undefined,
+    { userId: 7, permissions: {} },
+    { userId: 7, permissions: { export: 'true' } },
+  ])(
+    'rejects a capture without authenticated export permission',
+    async (user) => {
+      await expect(controller.create(request, user, 'granted')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(models.browserInference).not.toHaveBeenCalled();
+    },
+  );
+
+  it('authorizes capture for the authenticated owner with explicit consent', async () => {
+    await controller.create(
+      request,
+      { userId: 7, permissions: { export: true } },
+      'granted',
+    );
+    expect(models.browserInference).toHaveBeenCalledWith(
+      request,
+      { ownerPrincipal: '7' },
+      true,
+    );
   });
 });

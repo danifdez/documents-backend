@@ -1,8 +1,28 @@
+import { Permission } from '../auth/permission.enum';
 import { canonicalHash } from './execution-canonical';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionStepEntity } from './execution-step.entity';
 import { ExecutionStepKind } from './execution-step-kind.enum';
+
+// Consent is an explicit header; neither permissions nor ownership come from a DTO.
+export function authorizeInferenceCapture(
+  user: unknown,
+  consent?: string,
+): boolean {
+  if (consent !== 'granted') return false;
+  const authenticated = user as
+    { userId?: unknown; permissions?: Record<string, boolean> } | undefined;
+  if (
+    !authenticated?.userId ||
+    authenticated.permissions?.[Permission.EXPORT] !== true
+  ) {
+    throw new ForbiddenException(
+      'Authenticated export permission is required to capture inference evidence',
+    );
+  }
+  return true;
+}
 
 export const INFERENCE_EXCHANGE_KIND = 'inference_exchange';
 export function inferenceCaptureAuthorization(ownerPrincipal?: string) {

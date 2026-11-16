@@ -90,6 +90,25 @@ describe('ModelService execution identities', () => {
     );
   });
 
+  it('passes an explicit capture grant to the existing inference mechanism', async () => {
+    const request = {
+      requestId: '11111111-1111-4111-8111-111111111111',
+      requestJson: '{"messages":[]}',
+    };
+    await service.browserInference(request, scope, true);
+    expect(executionService.createInference).toHaveBeenCalledWith(
+      'browser-inference',
+      expect.any(String),
+      expect.any(Object),
+      {
+        ownerPrincipal: scope.ownerPrincipal,
+        finalizeOnFailure: true,
+        requestId: request.requestId,
+        captureInference: true,
+      },
+    );
+  });
+
   it('creates key points as a durable inference map-reduce graph', async () => {
     await expect(service.keyPoints(scope, 7, 'en')).resolves.toEqual({
       executionId: executionIds['key-point'],

@@ -27,6 +27,7 @@ export class ModelService {
   async browserInference(
     request: BrowserInferenceDto,
     scope: ExecutionAccessScope,
+    captureInference = false,
   ): Promise<{ executionId: string }> {
     const execution = await this.executionService.createInference(
       'browser-inference',
@@ -40,6 +41,7 @@ export class ModelService {
         ownerPrincipal: scope.ownerPrincipal,
         finalizeOnFailure: true,
         requestId: request.requestId,
+        ...(captureInference ? { captureInference: true } : {}),
       },
     );
     return { executionId: execution.executionId };
