@@ -193,10 +193,12 @@ function chunkMessage(message: string): ContextChunk[] {
     if (end < message.length) {
       const searchStart = start + MIN_BOUNDARY_SEARCH_CHARS;
       const boundary = Math.max(
-        message.lastIndexOf('\n', end),
-        message.lastIndexOf(' ', end),
+        message.lastIndexOf('\n', end - 1),
+        message.lastIndexOf(' ', end - 1),
       );
       if (boundary >= searchStart) end = boundary + 1;
+      const next = message.charCodeAt(end);
+      if (next >= 0xdc00 && next <= 0xdfff) end -= 1;
     }
     const content = message.slice(start, end);
     chunks.push({

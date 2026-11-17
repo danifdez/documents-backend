@@ -106,6 +106,31 @@ describe('context input workflow', () => {
     ).rejects.toThrow('chat_message_too_large');
   });
 
+  it.each([
+    ['space after the limit', `${'x'.repeat(12000)} ${'y'.repeat(5000)}`, 12000],
+    ['surrogate pair at the limit', `${'x'.repeat(11999)}😀${'y'.repeat(5000)}`, 11999],
+  ])('keeps chunks valid with %s', async (_name, message, firstEnd) => {
+    const workflow = await buildContextInputWorkflow(
+      manager,
+      artifactStorage as any,
+      {
+        executionId: requestArtifact.rootExecutionId,
+        taskType: 'assistant-chat',
+        message,
+        requestArtifact,
+        effectivePayload: { ownerId: 1 },
+        causedByEventId: '10000000-0000-4000-8000-000000000004',
+      },
+    );
+    const plan = JSON.parse(workflow!.planArtifact.body!.toString('utf8'));
+    expect(plan.chunks[0].end).toBe(firstEnd);
+    expect(plan.chunks[1].start).toBe(firstEnd);
+    const chunks = workflow!.steps
+      .filter((step) => step.work.taskType === 'context-input-map')
+      .map((step) => (step.work.payload as { content: string }).content);
+    expect(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString()).toBe(message);
+  });
+
   it('builds bounded reduction levels for the largest supported plan', async () => {
     const workflow = await buildContextInputWorkflow(
       manager,
