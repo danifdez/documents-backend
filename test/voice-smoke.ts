@@ -21,9 +21,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 // socket.io-client is not in the backend; we take it from the frontend
 // to avoid adding a runtime dependency to the backend.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { io } = require('../../frontend/node_modules/socket.io-client');
+import { io } from '../../frontend/node_modules/socket.io-client';
 type Socket = any;
+import { AuthService } from '../src/auth/auth.service';
 import { VoiceGateway } from '../src/voice/voice.gateway';
 import { VoiceService } from '../src/voice/voice.service';
 
@@ -32,7 +32,11 @@ import { VoiceService } from '../src/voice/voice.service';
     ConfigModule.forRoot({ ignoreEnvFile: true, isGlobal: true }),
     JwtModule.register({ secret: 'smoke' }),
   ],
-  providers: [VoiceService, VoiceGateway],
+  providers: [
+    VoiceService,
+    VoiceGateway,
+    { provide: AuthService, useValue: { isAuthEnabled: () => false } },
+  ],
 })
 class SmokeAppModule {}
 

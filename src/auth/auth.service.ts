@@ -42,6 +42,37 @@ export class AuthService {
     return valid ? user : null;
   }
 
+  async authenticateAccessToken(token: unknown) {
+    try {
+      if (typeof token !== 'string' || !token || token.length > 8192) {
+        throw new Error();
+      }
+      const payload = this.jwtService.verify(token);
+      if (
+        !Number.isSafeInteger(payload.sub) ||
+        payload.sub <= 0 ||
+        typeof payload.username !== 'string' ||
+        !payload.username ||
+        !Number.isFinite(payload.exp) ||
+        payload.exp * 1000 <= Date.now() ||
+        (payload.type !== undefined && payload.type !== 'access')
+      ) {
+        throw new Error();
+      }
+      const user = await this.findUserById(payload.sub);
+      if (
+        !user?.active ||
+        user.id !== payload.sub ||
+        user.username !== payload.username ||
+        payload.exp * 1000 <= Date.now()
+      )
+        throw new Error();
+      return { user, expiresAt: payload.exp * 1000 };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired access token');
+    }
+  }
+
   async login(user: UserEntity) {
     const payload = {
       sub: user.id,

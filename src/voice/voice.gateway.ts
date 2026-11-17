@@ -4,14 +4,23 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { AuthService } from '../auth/auth.service';
+import { Permission } from '../auth/permission.enum';
 import { Server, Socket } from 'socket.io';
 import { VoiceService } from './voice.service';
+
+interface VoiceConnection {
+  principal: string;
+  expiresAt?: number;
+  expiryTimer?: ReturnType<typeof setTimeout>;
+  pending: Promise<void>;
+  queued: number;
+}
 
 /**
  * Socket.IO gateway for live dictation.
@@ -32,72 +41,129 @@ import { VoiceService } from './voice.service';
   // Browser audio chunks: ~10–20 KB per 500 ms. 256 KB is comfortable.
   maxHttpBufferSize: 256 * 1024,
 })
-export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class VoiceGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   private readonly logger = new Logger(VoiceGateway.name);
+  private readonly connections = new WeakMap<Socket, VoiceConnection>();
 
   @WebSocketServer()
   server!: Server;
 
   constructor(
     private readonly voice: VoiceService,
-    private readonly jwt: JwtService,
-    private readonly config: ConfigService,
+    private readonly auth: AuthService,
   ) {}
 
-  handleConnection(client: Socket) {
-    const authEnabled = this.config.get('AUTH_ENABLED') === 'true';
-    if (!authEnabled) return;
-
-    const token =
-      client.handshake.auth?.token ||
-      (client.handshake.headers?.authorization as string | undefined)?.replace(
-        'Bearer ',
-        '',
+  afterInit(server: Server) {
+    server.use((client, next) => {
+      void this.authorize(client).then(
+        (identity) => {
+          this.connections.set(client, {
+            ...identity,
+            pending: Promise.resolve(),
+            queued: 0,
+          });
+          next();
+        },
+        () => next(new Error('Voice authorization failed')),
       );
+    });
+  }
 
-    if (!token) {
-      this.logger.warn('Voice WS rejected: no token');
-      client.disconnect(true);
-      return;
-    }
+  private async authorize(client: Socket) {
+    if (!this.auth.isAuthEnabled()) return { principal: 'standalone' };
+    const token =
+      client.handshake.auth?.token ??
+      client.handshake.headers.authorization?.replace(/^Bearer /, '');
+    const { user, expiresAt } = await this.auth.authenticateAccessToken(token);
+    if (user.permissions?.[Permission.ASK] !== true) throw new Error();
+    return { principal: String(user.id), expiresAt };
+  }
 
-    try {
-      this.jwt.verify(token);
-    } catch {
-      this.logger.warn('Voice WS rejected: invalid token');
-      client.disconnect(true);
+  handleConnection(client: Socket) {
+    const connection = this.connections.get(client);
+    if (!connection) return this.reject(client);
+    if (connection.expiresAt !== undefined) {
+      connection.expiryTimer = setTimeout(
+        () => this.reject(client),
+        Math.min(Math.max(0, connection.expiresAt - Date.now()), 2147483647),
+      );
+      connection.expiryTimer.unref();
     }
   }
 
   handleDisconnect(client: Socket) {
+    const connection = this.connections.get(client);
+    if (connection?.expiryTimer) clearTimeout(connection.expiryTimer);
+    this.connections.delete(client);
     this.voice.releaseIfHolding(client);
+  }
+
+  private reject(client: Socket) {
+    this.logger.warn('Voice connection authorization failed');
+    this.handleDisconnect(client);
+    client.disconnect(true);
+  }
+
+  private authorized(client: Socket, action: () => void): Promise<void> {
+    const connection = this.connections.get(client);
+    if (!connection || !client.connected || connection.queued >= 32) {
+      this.reject(client);
+      return Promise.resolve();
+    }
+    // Preserve audio/control order across asynchronous permission lookups and
+    // bound the backlog while a lookup is pending. Never queue worker opening.
+    connection.queued++;
+    connection.pending = connection.pending
+      .then(async () => {
+        if (!client.connected || this.connections.get(client) !== connection)
+          return;
+        const identity = await this.authorize(client);
+        if (!client.connected || this.connections.get(client) !== connection)
+          return;
+        if (identity.principal !== connection.principal) throw new Error();
+        action();
+      })
+      .catch(() => this.reject(client))
+      .finally(() => {
+        connection.queued--;
+      });
+    return connection.pending;
   }
 
   @SubscribeMessage('voice:start')
   async onStart(@ConnectedSocket() client: Socket): Promise<void> {
-    await this.voice.startSession(client);
+    await this.authorized(client, () => this.voice.startSession(client));
   }
 
   @SubscribeMessage('voice:chunk')
   onChunk(
     @ConnectedSocket() client: Socket,
     @MessageBody() chunk: ArrayBuffer | Buffer | { data: ArrayBuffer | Buffer },
-  ): void {
+  ): Promise<void> {
     // Socket.IO can deliver binary as either ArrayBuffer/Buffer directly or
     // wrapped in `{ type: 'Buffer', data: [...] }` depending on adapter.
     const raw =
       (chunk as { data?: ArrayBuffer | Buffer })?.data ??
       (chunk as ArrayBuffer | Buffer);
-    this.voice.pushChunk(client, raw);
+    if (
+      !(Buffer.isBuffer(raw) || raw instanceof ArrayBuffer) ||
+      raw.byteLength > 256 * 1024
+    ) {
+      this.reject(client);
+      return Promise.resolve();
+    }
+    return this.authorized(client, () => this.voice.pushChunk(client, raw));
   }
 
   @SubscribeMessage('voice:stop')
-  onStop(@ConnectedSocket() client: Socket): void {
-    this.voice.stopSession(client);
+  onStop(@ConnectedSocket() client: Socket): Promise<void> {
+    return this.authorized(client, () => this.voice.stopSession(client));
   }
 
   @SubscribeMessage('voice:cancel')
-  onCancel(@ConnectedSocket() client: Socket): void {
-    this.voice.cancelSession(client);
+  onCancel(@ConnectedSocket() client: Socket): Promise<void> {
+    return this.authorized(client, () => this.voice.cancelSession(client));
   }
 }

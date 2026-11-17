@@ -6,10 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as http from 'http';
-import WebSocket = require('ws');
+import * as WebSocket from 'ws';
 import { Socket } from 'socket.io';
 
-type WorkerStatus = 'free' | 'busy' | 'down';
+type WorkerStatus = 'free' | 'connecting' | 'busy' | 'closing' | 'down';
 
 interface WorkerSlot {
   port: number;
@@ -38,6 +38,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
 
   private workers: WorkerSlot[] = [];
   private queue: QueueEntry[] = [];
+  private stopping = false;
   /** Initial heuristic for average session duration, in seconds. */
   private avgSessionSec = 60;
 
@@ -71,8 +72,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    this.stopping = true;
     for (const w of this.workers) {
-      if (w.ws) this.closeWorkerWs(w, 'shutdown');
+      if (w.ws) this.releaseWorker(w, 'shutdown');
     }
     for (const entry of this.queue) {
       this.emitError(entry.client, 'backend shutdown');
@@ -80,13 +82,14 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     this.queue = [];
   }
 
-  async startSession(client: Socket): Promise<void> {
+  startSession(client: Socket): void {
+    if (this.stopping || !client.connected) return;
     if (this.findWorkerByClient(client.id)) return;
     if (this.findQueueEntry(client.id)) return;
 
     const free = this.workers.find((w) => w.status === 'free');
     if (free) {
-      await this.assignWorker(free, client);
+      this.assignWorker(free, client);
       return;
     }
     this.enqueue(client);
@@ -166,47 +169,57 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
-  private async assignWorker(
-    worker: WorkerSlot,
-    client: Socket,
-  ): Promise<void> {
+  private assignWorker(worker: WorkerSlot, client: Socket): void {
+    // Reserve synchronously: another start/queue promotion cannot select it.
+    worker.status = 'connecting';
+    worker.clientId = client.id;
     let ws: WebSocket;
     try {
-      ws = await this.openWorkerWs(worker.port);
-    } catch (err) {
+      ws = this.openWorkerWs(worker.port);
+    } catch {
       worker.status = 'down';
-      this.emitError(
-        client,
-        `could not contact worker: ${(err as Error).message}`,
-      );
-      // Try to promote another client from the queue to another worker.
+      worker.clientId = null;
+      this.emitError(client, 'Could not contact voice worker');
       this.processQueue();
       return;
     }
-    worker.status = 'busy';
     worker.ws = ws;
-    worker.clientId = client.id;
-
-    ws.on('message', (data, isBinary) =>
-      this.onWorkerMessage(worker, client, data, isBinary),
-    );
-    ws.on('close', () => {
-      if (worker.clientId === client.id)
-        this.releaseWorker(worker, 'worker-closed');
+    const owns = () => worker.ws === ws && worker.clientId === client.id;
+    ws.on('open', () => {
+      if (!owns() || worker.status !== 'connecting') return;
+      if (!client.connected || this.stopping) {
+        this.releaseWorker(worker, 'client-disconnect');
+        return;
+      }
+      worker.status = 'busy';
+      client.emit('voice:ready');
+      client.emit('voice:assigned');
+      this.logger.log(
+        `assigned port=${worker.port} client=${client.id} queue=${this.queue.length}`,
+      );
     });
-    ws.on('error', (err) => {
-      if (worker.clientId === client.id) {
-        this.emitError(client, `worker error: ${err.message}`);
-        worker.status = 'down';
-        this.releaseWorker(worker, 'worker-error');
+    ws.on('message', (data, isBinary) => {
+      if (owns() && worker.status === 'busy' && client.connected) {
+        this.onWorkerMessage(worker, client, data, isBinary);
       }
     });
-
-    client.emit('voice:ready');
-    client.emit('voice:assigned');
-    this.logger.log(
-      `assigned port=${worker.port} client=${client.id} queue=${this.queue.length}`,
-    );
+    ws.on('error', () => {
+      if (!owns()) return;
+      worker.status = 'down';
+      this.emitError(client, 'Voice worker connection failed');
+      this.releaseWorker(worker, 'worker-error');
+    });
+    ws.on('close', () => {
+      if (worker.ws !== ws) return;
+      worker.ws = null;
+      worker.clientId = null;
+      if (worker.status !== 'down') worker.status = 'free';
+      ws.removeAllListeners();
+      this.logger.log(
+        `released port=${worker.port} client=${client.id} queue=${this.queue.length}`,
+      );
+      this.processQueue();
+    });
   }
 
   private enqueue(client: Socket): void {
@@ -231,12 +244,11 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private processQueue(): void {
-    while (this.queue.length > 0) {
+    while (!this.stopping && this.queue.length > 0) {
       const free = this.workers.find((w) => w.status === 'free');
       if (!free) break;
       const next = this.queue.shift()!;
-      // Fire-and-forget assignment; errors are handled by assign itself.
-      void this.assignWorker(free, next.client);
+      if (next.client.connected) this.assignWorker(free, next.client);
     }
     this.notifyQueuePositions();
   }
@@ -276,49 +288,22 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private openWorkerWs(port: number): Promise<WebSocket> {
-    const url = `ws://127.0.0.1:${port}/voice`;
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url, {
-        handshakeTimeout: 3000,
-        maxPayload: 2 * 1024 * 1024,
-      });
-      const onOpen = () => {
-        ws.off('error', onError);
-        resolve(ws);
-      };
-      const onError = (err: Error) => {
-        ws.off('open', onOpen);
-        reject(err);
-      };
-      ws.once('open', onOpen);
-      ws.once('error', onError);
+  private openWorkerWs(port: number): WebSocket {
+    return new WebSocket(`ws://127.0.0.1:${port}/voice`, {
+      handshakeTimeout: 3000,
+      maxPayload: 2 * 1024 * 1024,
     });
   }
 
   private releaseWorker(worker: WorkerSlot, reason: string): void {
-    const port = worker.port;
-    const clientId = worker.clientId;
-    if (worker.ws) this.closeWorkerWs(worker, reason);
-    if (worker.status !== 'down') worker.status = 'free';
-    worker.clientId = null;
-    this.logger.log(
-      `released port=${port} client=${clientId} reason=${reason} queue=${this.queue.length}`,
-    );
-    this.processQueue();
-  }
-
-  private closeWorkerWs(worker: WorkerSlot, reason: string): void {
     const ws = worker.ws;
-    worker.ws = null;
-    if (!ws) return;
-    try {
-      if (ws.readyState === WebSocket.OPEN) ws.close(1000, reason);
-      else ws.terminate();
-    } catch {
-      /* ignore */
-    }
-    ws.removeAllListeners();
+    if (!ws || worker.status === 'closing') return;
+    worker.clientId = null;
+    if (worker.status !== 'down') worker.status = 'closing';
+    // Keep the slot reserved until close, including a cancelled handshake.
+    // Its listeners remain installed to consume pending error/close events.
+    if (ws.readyState === WebSocket.OPEN) ws.close(1000, reason);
+    else if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
   }
 
   private findWorkerByClient(clientId: string): WorkerSlot | undefined {
