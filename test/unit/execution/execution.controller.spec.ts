@@ -9,7 +9,11 @@ describe('ExecutionController', () => {
     readProgress: jest.fn(),
     exportBundle: jest.fn(),
   };
-  const controller = new ExecutionController(service as any);
+  const auth = {
+    isAuthEnabled: jest.fn(() => false),
+    authenticateAccessToken: jest.fn(),
+  };
+  const controller = new ExecutionController(service as any, auth as any);
 
   beforeEach(() => jest.clearAllMocks());
 

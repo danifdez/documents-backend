@@ -1,3 +1,10 @@
+import { ExecutionController } from '../src/execution/execution.controller';
+import { stat } from 'fs/promises';
+import { join } from 'path';
+import { ExecutionArtifactEntity } from '../src/execution/execution-artifact.entity';
+import { ExecutionContractValidator } from '../src/execution/execution-contract-validator';
+import { contentHash } from '../src/execution/execution-canonical';
+import { ExecutionArtifactStorageService } from '../src/execution/execution-artifact-storage.service';
 import { ExecutionRequestEntity } from '../src/execution/execution-request.entity';
 import { CreateExecutionRequests1794800000000 } from '../migrations/1794800000000-CreateExecutionRequests';
 import { createExecutionFixture } from './execution/fixture';
@@ -31,9 +38,9 @@ import { VoiceService } from '../src/voice/voice.service';
 import { io } from '../../frontend/node_modules/socket.io-client';
 
 const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
-async function until(condition: () => boolean) {
+async function until(condition: () => boolean | Promise<boolean>) {
   const end = Date.now() + 3000;
-  while (!condition()) {
+  while (!(await condition())) {
     if (Date.now() > end) throw new Error('Voice condition timed out');
     await pause(5);
   }
@@ -59,6 +66,8 @@ describe('Voice authorization, reservations and durable recovery (simulated work
   let active: number;
   let maximum: number;
   let packets: string[];
+  let workerInput: Buffer[];
+  let simulatedTranscript: string | undefined;
   let sockets: any[];
   let users: Map<number, any>;
   let lookup: jest.Mock;
@@ -103,6 +112,8 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     hold = false;
     upgrades = active = maximum = 0;
     packets = [];
+    workerInput = [];
+    simulatedTranscript = undefined;
     sockets = [];
     users = new Map(
       [1, 2, 3].map((id) => [
@@ -137,8 +148,9 @@ describe('Voice authorization, reservations and durable recovery (simulated work
       ws.on('message', (data, binary) => {
         if (binary) {
           const value = data.toString();
-          text += value;
+          text = simulatedTranscript ?? text + value;
           packets.push(value);
+          workerInput.push(Buffer.from(data as Buffer));
           ws.send(JSON.stringify({ type: 'partial', text, isFinal: false }));
         } else if (JSON.parse(data.toString()).type === 'stop') {
           ws.send(JSON.stringify({ type: 'partial', text, isFinal: true }));
@@ -154,11 +166,22 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     };
     jwt = new JwtService({ secret: randomBytes(32).toString('hex') });
     const module = await Test.createTestingModule({
-      controllers: [VoiceController],
+      controllers: [VoiceController, ExecutionController],
       providers: [
         { provide: DataSource, useValue: fixture().dataSource },
         { provide: ExecutionService, useValue: fixture().service },
         ExecutionStreamService,
+        {
+          provide: ExecutionArtifactStorageService,
+          useValue: new ExecutionArtifactStorageService({
+            get: (key: string) =>
+              key === 'EXECUTION_ARTIFACT_STORAGE_DIR'
+                ? fixture().artifactDirectory
+                : key === 'EXECUTION_ARTIFACT_INLINE_MAX_BYTES'
+                  ? '0'
+                  : undefined,
+          } as ConfigService),
+        },
         VoiceGateway,
         VoiceService,
         AuthService,
@@ -518,7 +541,11 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     const ds = fixture().dataSource,
       events = ds.getRepository(ExecutionEventEntity);
     const before = await events.count();
-    const reader = new ExecutionStreamService(ds, fixture().service);
+    const reader = new ExecutionStreamService(
+      ds,
+      fixture().service,
+      app.get(ExecutionArtifactStorageService),
+    );
     for (let n = 0; n < 3; n++) {
       const state = await readRequest(id);
       expect(state.status).toBe(200);
@@ -851,5 +878,553 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     unblock();
     await pause();
     expect(packets).toEqual([]);
+  });
+
+  function captureSocket(id = 1) {
+    simulatedTranscript = 'Simulated dictation';
+    users.get(id).permissions.export = true;
+    return connect(token(id), {
+      extraHeaders: { 'X-Evaluation-Consent': 'granted' },
+    });
+  }
+
+  async function startCapture(
+    s: any,
+    id = randomUUID(),
+    mediaType = 'audio/wav',
+  ) {
+    await until(() => s.connected);
+    s.emit('voice:start', { requestId: id, mediaType });
+    await until(() => !!receipt(s) && count(s, 'voice:ready') === 1);
+    return { id, ...receipt(s) };
+  }
+
+  function silenceWav(audioBytes = 320) {
+    const body = Buffer.alloc(44 + audioBytes);
+    body.write('RIFF', 0);
+    body.writeUInt32LE(body.length - 8, 4);
+    body.write('WAVEfmt ', 8);
+    body.writeUInt32LE(16, 16);
+    body.writeUInt16LE(1, 20);
+    body.writeUInt16LE(1, 22);
+    body.writeUInt32LE(16000, 24);
+    body.writeUInt32LE(32000, 28);
+    body.writeUInt16LE(2, 32);
+    body.writeUInt16LE(16, 34);
+    body.write('data', 36);
+    body.writeUInt32LE(audioBytes, 40);
+    return body;
+  }
+
+  const inputRows = () =>
+    fixture()
+      .dataSource.getRepository(ExecutionArtifactEntity)
+      .find({ where: { kind: 'stream_input' }, order: { createdAt: 'ASC' } });
+
+  it.each([
+    'missing-export',
+    'stale-export',
+    'non-boolean-export',
+    'standalone',
+  ])('rejects capture with %s before opening a worker', async (kind) => {
+    if (kind === 'standalone') config.AUTH_ENABLED = 'false';
+    if (kind === 'non-boolean-export') users.get(1).permissions.export = 'true';
+    const s = connect(token(1, { permissions: { ask: true, export: true } }), {
+      extraHeaders: { 'X-Evaluation-Consent': 'granted' },
+    });
+    await until(() => count(s, 'connect_error') === 1);
+    expect(upgrades).toBe(0);
+    expect(await inputRows()).toHaveLength(0);
+  });
+
+  it('keeps capture disabled without consent despite export permission and format', async () => {
+    users.get(1).permissions.export = true;
+    const s = connect(token());
+    await until(() => s.connected);
+    s.emit('voice:start', { requestId: randomUUID(), mediaType: 'audio/wav' });
+    await until(() => count(s, 'voice:ready') === 1);
+    s.emit('voice:chunk', silenceWav());
+    await until(() => workerInput.length === 1);
+    expect(await inputRows()).toHaveLength(0);
+  });
+
+  it.each([undefined, 'text/html', 'audio/wav;filename=../../private'])(
+    'rejects a capture without a permitted media type: %s',
+    async (mediaType) => {
+      const s = captureSocket();
+      await until(() => s.connected);
+      s.emit('voice:start', { requestId: randomUUID(), mediaType });
+      await until(() => !s.connected);
+      expect(upgrades).toBe(0);
+      expect(await inputRows()).toHaveLength(0);
+    },
+  );
+
+  it('does not accept capture consent from the start body', async () => {
+    users.get(1).permissions.export = true;
+    const s = connect(token());
+    await until(() => s.connected);
+    s.emit('voice:start', {
+      requestId: randomUUID(),
+      captureInput: true,
+      mediaType: 'audio/wav',
+    });
+    await until(() => !s.connected);
+    expect(upgrades).toBe(0);
+  });
+
+  it('preserves ordered audio in the common bundle without replay', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    const wav = silenceWav(640);
+    const chunks = [
+      wav.subarray(0, 44),
+      wav.subarray(44, 364),
+      wav.subarray(364),
+    ];
+    for (const chunk of chunks) s.emit('voice:chunk', chunk);
+    s.emit('voice:stop');
+    await until(() =>
+      s.events.some((e: any) => e.event === 'voice:partial' && e.data.isFinal),
+    );
+    expect(workerInput).toEqual(chunks);
+    const rows = await inputRows();
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((row) => row.artifactId)).size).toBe(3);
+    expect(rows.map((row) => row.contentHash)).toEqual(chunks.map(contentHash));
+    const validator = new ExecutionContractValidator();
+    const first = await fixture().service.exportBundle(
+      accepted.executionId,
+      scope,
+      true,
+    );
+    validator.assertBundle(first);
+    const sources = (first.events as any[]).filter(
+      (event) => event.eventType === 'source.observed',
+    );
+    expect(sources).toHaveLength(3);
+    sources.forEach((event, index) => {
+      validator.assertEvent(event);
+      expect(event.payload.metadata).toMatchObject({
+        streamInputSequence: index + 1,
+        mediaType: 'audio/wav',
+        mediaTypeVerification: 'client_declared',
+        delivery: 'received_before_forwarding',
+      });
+      expect(event.artifactRefs).toEqual([event.payload.snapshotArtifactId]);
+    });
+    const embedded = first.embeddedArtifacts as Record<
+      string,
+      { data: string }
+    >;
+    const restored = sources.map((event) =>
+      Buffer.from(embedded[event.payload.snapshotArtifactId].data, 'base64'),
+    );
+    expect(restored).toEqual(workerInput);
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        dataClassification: 'sensitive',
+        retentionClass: 'evaluation',
+        redaction: { applied: false, authorizedCapture: true },
+      });
+      expect(row.expiresAt.getTime()).toBeGreaterThan(Date.now());
+      expect(row.storageRef).toMatch(/^file:v1\//);
+      const path = join(fixture().artifactDirectory, row.storageRef.slice(5));
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect((await stat(join(path, '..'))).mode & 0o777).toBe(0o700);
+    }
+    expect((first.bundleCompleteness as any).missing).not.toContain(
+      'stream.input_not_captured',
+    );
+    expect((first.bundleCompleteness as any).missing).toContain(
+      'stream.engine_not_reported',
+    );
+    expect((await readRequest(accepted.id)).body.result).toMatchObject({
+      chunks: 3,
+      audioBytes: Buffer.concat(chunks).length,
+    });
+    const eventsBefore = await fixture()
+      .dataSource.getRepository(ExecutionEventEntity)
+      .count();
+    const reader = new ExecutionStreamService(
+      fixture().dataSource,
+      fixture().service,
+      app.get(ExecutionArtifactStorageService),
+    );
+    for (let n = 0; n < 3; n++) {
+      expect(
+        (await reader.read(accepted.id, 'voice-dictation', scope)).status,
+      ).toBe('completed');
+      const again = await fixture().service.exportBundle(
+        accepted.executionId,
+        scope,
+        true,
+      );
+      expect(again.embeddedArtifacts).toEqual(first.embeddedArtifacts);
+      expect(again.events).toEqual(first.events);
+    }
+    const reconnect = captureSocket();
+    await until(() => reconnect.connected);
+    reconnect.emit('voice:start', {
+      requestId: accepted.id,
+      mediaType: 'audio/wav',
+    });
+    await until(() => !!receipt(reconnect));
+    expect(count(reconnect, 'voice:ready')).toBe(0);
+    expect(upgrades).toBe(1);
+    expect(await inputRows()).toHaveLength(3);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEventEntity).count(),
+    ).toBe(eventsBefore);
+  });
+
+  it('fixes capture consent and format to the accepted request', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    const changed = captureSocket();
+    await until(() => changed.connected);
+    changed.emit('voice:start', {
+      requestId: accepted.id,
+      mediaType: 'audio/webm',
+    });
+    await until(() => !changed.connected);
+    const noConsent = connect(token());
+    await until(() => noConsent.connected);
+    noConsent.emit('voice:start', { requestId: accepted.id });
+    await until(() => !noConsent.connected);
+    expect(upgrades).toBe(1);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEntity).count(),
+    ).toBe(1);
+    s.emit('voice:chunk', silenceWav());
+    await until(() => workerInput.length === 1);
+    expect(await inputRows()).toHaveLength(1);
+  });
+
+  it('closes capture on export revocation before accepting more audio', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    users.get(1).permissions.export = false;
+    s.emit('voice:chunk', silenceWav());
+    await until(() => !s.connected && active === 0);
+    expect(workerInput).toEqual([]);
+    expect(await inputRows()).toHaveLength(0);
+    await until(
+      async () => (await readRequest(accepted.id)).body.status === 'failed',
+    );
+  });
+
+  it('keeps captured input after cancellation and ignores later chunks and recovery', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    s.emit('voice:chunk', silenceWav());
+    await until(() => workerInput.length === 1);
+    s.emit('voice:cancel');
+    await until(() => active === 0);
+    s.emit('voice:chunk', Buffer.from('late'));
+    s.emit('voice:stop');
+    const reconnect = captureSocket();
+    await until(() => reconnect.connected);
+    reconnect.emit('voice:start', {
+      requestId: accepted.id,
+      mediaType: 'audio/wav',
+    });
+    await until(() => !!receipt(reconnect));
+    expect(receipt(reconnect).status).toBe('cancelled');
+    expect(workerInput).toHaveLength(1);
+    expect(await inputRows()).toHaveLength(1);
+    expect(upgrades).toBe(1);
+  });
+
+  it('does not capture after common execution cancellation', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    await fixture().service.requestCancellation(accepted.executionId, scope);
+    s.emit('voice:chunk', silenceWav());
+    await until(() => active === 0);
+    expect(workerInput).toEqual([]);
+    expect(await inputRows()).toHaveLength(0);
+    expect((await readRequest(accepted.id)).body.status).toBe('cancelled');
+  });
+
+  it('deduplicates captures and rejects conflicts, gaps, limits and other owners', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    const records = app.get(ExecutionStreamService),
+      body = silenceWav();
+    expect(
+      await records.captureInput(
+        accepted.executionId,
+        'voice-dictation',
+        scope,
+        1,
+        body,
+      ),
+    ).toBe(true);
+    for (let n = 0; n < 3; n++)
+      expect(
+        await records.captureInput(
+          accepted.executionId,
+          'voice-dictation',
+          scope,
+          1,
+          body,
+        ),
+      ).toBe(false);
+    await expect(
+      records.captureInput(
+        accepted.executionId,
+        'voice-dictation',
+        scope,
+        1,
+        Buffer.from('changed'),
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    for (const seq of [0, 3, 4097])
+      await expect(
+        records.captureInput(
+          accepted.executionId,
+          'voice-dictation',
+          scope,
+          seq,
+          body,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      records.captureInput(
+        accepted.executionId,
+        'voice-dictation',
+        scope,
+        2,
+        Buffer.alloc(256 * 1024 + 1),
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      records.captureInput(
+        accepted.executionId,
+        'voice-dictation',
+        { ownerPrincipal: '2' },
+        2,
+        body,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      fixture().service.exportBundle(
+        accepted.executionId,
+        { ownerPrincipal: '2' },
+        true,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fixture().service.exportBundle(accepted.executionId, scope, false),
+    ).rejects.toThrow();
+    expect(await inputRows()).toHaveLength(1);
+    expect(workerInput).toEqual([]);
+  });
+
+  it('rejects direct capture of a request accepted without consent', async () => {
+    const s = connect(token()),
+      accepted = await start(s, randomUUID());
+    await expect(
+      app
+        .get(ExecutionStreamService)
+        .captureInput(
+          accepted.executionId,
+          'voice-dictation',
+          scope,
+          1,
+          silenceWav(),
+        ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(await inputRows()).toHaveLength(0);
+  });
+
+  it('fails closed on storage failure without forwarding or exposing its diagnostic', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    const fault = jest
+      .spyOn(app.get(ExecutionArtifactStorageService), 'save')
+      .mockRejectedValueOnce(new Error('PRIVATE_CAPTURE_STORAGE_DETAILS'));
+    s.emit('voice:chunk', silenceWav());
+    await until(() => active === 0 && count(s, 'voice:error') > 0);
+    fault.mockRestore();
+    expect(workerInput).toEqual([]);
+    expect(await inputRows()).toHaveLength(0);
+    expect((await readRequest(accepted.id)).body.status).toBe('failed');
+    expect(JSON.stringify(s.events)).not.toContain(
+      'PRIVATE_CAPTURE_STORAGE_DETAILS',
+    );
+    const bundle = await fixture().service.exportBundle(
+      accepted.executionId,
+      scope,
+      true,
+    );
+    expect(
+      (bundle.events as any[]).filter(
+        (event) => event.eventType === 'source.observed',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('preserves an uncertain capture commit without forwarding it again', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    const records = app.get(ExecutionStreamService),
+      original = records.captureInput.bind(records);
+    const fault = jest
+      .spyOn(records, 'captureInput')
+      .mockImplementationOnce(async (...args) => {
+        await original(...args);
+        throw new Error('Simulated lost capture commit confirmation');
+      });
+    s.emit('voice:chunk', silenceWav());
+    await until(() => active === 0 && count(s, 'voice:error') > 0);
+    fault.mockRestore();
+    expect(workerInput).toEqual([]);
+    expect(await inputRows()).toHaveLength(1);
+    expect((await readRequest(accepted.id)).body.status).toBe('failed');
+    const reconnect = captureSocket();
+    await until(() => reconnect.connected);
+    reconnect.emit('voice:start', {
+      requestId: accepted.id,
+      mediaType: 'audio/wav',
+    });
+    await until(() => !!receipt(reconnect));
+    expect(receipt(reconnect).status).toBe('failed');
+    expect(upgrades).toBe(1);
+    expect(workerInput).toEqual([]);
+  });
+
+  async function readBundle(
+    executionId: string,
+    value = token(),
+    consent = 'granted',
+  ) {
+    return new Promise<{ status: number; body: any }>((resolve, reject) => {
+      const req = httpRequest(
+        url.replace(/\/voice$/, '') + '/executions/' + executionId + '/bundle',
+        {
+          headers: {
+            Authorization: 'Bearer ' + value,
+            'X-Evaluation-Consent': consent,
+          },
+        },
+        (res) => {
+          let raw = '';
+          res.on('data', (data) => (raw += data.toString()));
+          res.on('end', () =>
+            resolve({ status: res.statusCode, body: JSON.parse(raw) }),
+          );
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  it('protects the HTTP bundle using current permissions', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    s.emit('voice:chunk', silenceWav());
+    await until(() => workerInput.length === 1);
+    s.emit('voice:stop');
+    await until(() =>
+      s.events.some((e: any) => e.event === 'voice:partial' && e.data.isFinal),
+    );
+    const good = await readBundle(accepted.executionId);
+    expect(good.status).toBe(200);
+    const artifacts = good.body.artifacts.filter(
+      (row: any) => row.kind === 'stream_input',
+    );
+    expect(artifacts).toHaveLength(1);
+    expect(
+      Buffer.from(
+        good.body.embeddedArtifacts[artifacts[0].artifactId].data,
+        'base64',
+      ),
+    ).toEqual(silenceWav());
+    expect(JSON.stringify(good.body.events)).not.toContain(
+      silenceWav().toString('base64'),
+    );
+    expect(
+      (await readBundle(accepted.executionId, token(), 'absent')).status,
+    ).toBe(403);
+    expect((await readBundle(accepted.executionId, 'invalid')).status).toBe(
+      401,
+    );
+    expect(
+      (await readBundle(accepted.executionId, token(1, { type: 'refresh' })))
+        .status,
+    ).toBe(401);
+    users.get(2).permissions.export = true;
+    expect((await readBundle(accepted.executionId, token(2))).status).toBe(404);
+    const stale = token(1, { permissions: { export: true } });
+    users.get(1).permissions.export = false;
+    expect((await readBundle(accepted.executionId, stale)).status).toBe(403);
+    users.get(1).active = false;
+    expect((await readBundle(accepted.executionId, stale)).status).toBe(401);
+  });
+
+  it('bounds total persisted input without forwarding it or allocating more workers', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    const records = app.get(ExecutionStreamService),
+      body = Buffer.alloc(256 * 1024);
+    for (let sequence = 1; sequence <= 128; sequence++)
+      expect(
+        await records.captureInput(
+          accepted.executionId,
+          'voice-dictation',
+          scope,
+          sequence,
+          body,
+        ),
+      ).toBe(true);
+    await expect(
+      records.captureInput(
+        accepted.executionId,
+        'voice-dictation',
+        scope,
+        129,
+        body,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(await inputRows()).toHaveLength(128);
+    expect(workerInput).toEqual([]);
+    expect(upgrades).toBe(1);
+  });
+
+  it('preserves input withdrawal using the existing evidence lifecycle', async () => {
+    const s = captureSocket(),
+      accepted = await startCapture(s);
+    s.emit('voice:chunk', silenceWav());
+    await until(() => workerInput.length === 1);
+    s.emit('voice:stop');
+    await until(() =>
+      s.events.some((e: any) => e.event === 'voice:partial' && e.data.isFinal),
+    );
+    const [row] = await inputRows();
+    await fixture().service.withdrawArtifact(
+      accepted.executionId,
+      row.artifactId,
+      scope,
+      'Synthetic audio withdrawal check',
+    );
+    const bundle = await fixture().service.exportBundle(
+      accepted.executionId,
+      scope,
+      true,
+    );
+    expect(
+      (bundle.embeddedArtifacts as Record<string, unknown>)[row.artifactId],
+    ).toBeUndefined();
+    const stored = await fixture()
+      .dataSource.getRepository(ExecutionArtifactEntity)
+      .findOneByOrFail({ artifactId: row.artifactId });
+    expect(stored.contentState).toBe('withdrawn');
+    await expect(
+      stat(join(fixture().artifactDirectory, row.storageRef.slice(5))),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(workerInput).toHaveLength(1);
   });
 });

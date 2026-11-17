@@ -1,4 +1,5 @@
-import { ConflictException } from '@nestjs/common';
+import { inferenceCaptureAuthorization } from '../execution/inference-capture';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ExecutionStreamService } from '../execution/execution-stream.service';
 import { ExecutionStatus } from '../execution/execution-status.enum';
@@ -11,6 +12,8 @@ interface VoiceSession {
   ownerPrincipal: string;
   executionId?: string;
   terminal: boolean;
+  inputClosed: boolean;
+  mediaType?: string;
   chunks: number;
   audioBytes: number;
   pending: Promise<unknown>;
@@ -117,11 +120,18 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     client: Socket,
     ownerPrincipal: string,
     requestId?: string,
+    mediaType?: string,
+    captureInput = false,
   ): Promise<void> {
     if (this.stopping || !client.connected) return;
+    if (captureInput && !mediaType)
+      throw new BadRequestException('Audio media type is required for capture');
     const previous = this.sessions.get(client.id);
     if (previous) {
-      if (requestId && requestId !== previous.requestId)
+      if (
+        (requestId && requestId !== previous.requestId) ||
+        mediaType !== previous.mediaType
+      )
         throw new ConflictException('Voice connection already has a session');
       await previous.pending;
       client.emit(
@@ -137,6 +147,8 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       requestId: requestId ?? randomUUID(),
       ownerPrincipal,
       terminal: false,
+      inputClosed: false,
+      mediaType,
       chunks: 0,
       audioBytes: 0,
       pending: Promise.resolve(),
@@ -144,7 +156,17 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     this.sessions.set(client.id, session);
     session.pending = this.records.open(
       'voice-dictation',
-      { requestId: session.requestId },
+      {
+        requestId: session.requestId,
+        ...(captureInput
+          ? {
+              inputCapture: {
+                ...inferenceCaptureAuthorization(ownerPrincipal),
+                mediaType,
+              },
+            }
+          : {}),
+      },
       session.requestId,
       { ownerPrincipal },
       ['stream.input_not_captured', 'stream.engine_not_reported'],
@@ -207,6 +229,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     text?: string,
   ) {
     if (session.terminal) return;
+    session.inputClosed = true;
     await session.pending;
     if (!session.executionId) return;
     const sanitized =
@@ -226,7 +249,13 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
 
   async pushChunk(client: Socket, chunk: ArrayBuffer | Buffer): Promise<void> {
     const session = this.sessions.get(client.id);
-    if (!session || session.terminal || !session.executionId) return;
+    if (
+      !session ||
+      session.terminal ||
+      session.inputClosed ||
+      !session.executionId
+    )
+      return;
     const current = await this.records.read(
       session.requestId,
       'voice-dictation',
@@ -241,14 +270,49 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     const buf = Buffer.isBuffer(chunk)
       ? chunk
       : Buffer.from(chunk as ArrayBuffer);
-    session.chunks++;
-    session.audioBytes += buf.length;
-    worker.ws.send(buf, { binary: true });
+    const pending = session.pending.then(async () => {
+      if (
+        session.mediaType &&
+        !(await this.records.captureInput(
+          session.executionId,
+          'voice-dictation',
+          { ownerPrincipal: session.ownerPrincipal },
+          session.chunks + 1,
+          buf,
+        ))
+      ) {
+        this.releaseIfHolding(client);
+        return;
+      }
+      if (
+        !client.connected ||
+        worker.clientId !== client.id ||
+        worker.ws?.readyState !== WebSocket.OPEN
+      )
+        return;
+      session.chunks++;
+      session.audioBytes += buf.length;
+      worker.ws.send(buf, { binary: true });
+    });
+    // A failed write must not poison the chain used to persist terminal state.
+    session.pending = pending.catch(() => undefined);
+    try {
+      await pending;
+    } catch {
+      await this.finish(
+        session,
+        ExecutionStatus.FAILED,
+        'voice_input_unconfirmed',
+      ).catch(() => undefined);
+      this.releaseWorker(worker, 'input_unconfirmed');
+      this.emitError(client, 'Voice input could not be confirmed');
+    }
   }
 
   async stopSession(client: Socket): Promise<void> {
     const session = this.sessions.get(client.id);
-    if (!session || session.terminal) return;
+    if (!session || session.terminal || session.inputClosed) return;
+    session.inputClosed = true;
     const row = await this.persist(
       session,
       ExecutionStatus.RUNNING,

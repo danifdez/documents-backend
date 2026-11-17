@@ -1,3 +1,4 @@
+import type { inferenceCaptureAuthorization } from './inference-capture';
 import type { ActiveCapabilitySet } from '../conversation/active-capabilities';
 import type {
   ActiveConversationContext,
@@ -381,7 +382,12 @@ export interface ContextInputReducePayload extends FinalizerIdentity {
 }
 
 interface StaticExecutionPayloadByTaskType {
-  'voice-dictation': { requestId: string };
+  'voice-dictation': {
+    requestId: string;
+    inputCapture?: ReturnType<typeof inferenceCaptureAuthorization> & {
+      mediaType: string;
+    };
+  };
   ask: AskExecutionPayload;
   'browser-inference': BrowserInferenceExecutionPayload;
   summarize: SummarizeExecutionPayload;

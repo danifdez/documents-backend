@@ -1,3 +1,4 @@
+import { AuthModule } from '../auth/auth.module';
 import { ExecutionStreamService } from './execution-stream.service';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
@@ -20,7 +21,7 @@ import { ExecutionRetentionService } from './execution-retention.service';
 import { ExecutionCompletionValidator } from './execution-completion-validator';
 
 @Module({
-  imports: [DatabaseModule, WorkerModule],
+  imports: [DatabaseModule, WorkerModule, AuthModule],
   controllers: [
     ExecutionController,
     ExecutionProtocolController,

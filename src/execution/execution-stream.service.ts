@@ -1,9 +1,16 @@
 import {
+  BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { randomUUID } from 'crypto';
+import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
+import { ExecutionEventEntity } from './execution-event.entity';
+import { appendBackendExecutionEvent } from './execution-event.writer';
+import { inferenceCaptureAuthorization } from './inference-capture';
 import { ExecutionService } from './execution.service';
 import { ExecutionEntity } from './execution.entity';
 import { ExecutionPriority } from './execution-priority.enum';
@@ -13,6 +20,7 @@ import {
   ExecutionTaskPayload,
   ExecutionTaskType,
 } from './execution-task-payload.types';
+import { contentHash } from './execution-canonical';
 import { canonicalDomainHash } from './execution-canonical';
 import { redactExecutionText } from './execution-data-policy';
 
@@ -28,6 +36,7 @@ export class ExecutionStreamService {
   constructor(
     private readonly source: DataSource,
     private readonly executions: ExecutionService,
+    private readonly storage: ExecutionArtifactStorageService,
   ) {}
 
   async open<T extends ExecutionTaskType>(
@@ -85,6 +94,164 @@ export class ExecutionStreamService {
           accepted.status === ExecutionStatus.FAILED ? accepted.error : null,
         claimed,
       };
+    });
+  }
+
+  /** Persist each input boundary before forwarding; this is not a worker ACK. */
+  async captureInput(
+    executionId: string,
+    taskType: ExecutionTaskType,
+    scope: ExecutionAccessScope,
+    sequence: number,
+    body: Buffer,
+  ): Promise<boolean> {
+    if (
+      !Number.isSafeInteger(sequence) ||
+      sequence < 1 ||
+      !Buffer.isBuffer(body) ||
+      body.length === 0 ||
+      body.length > 256 * 1024
+    )
+      throw new BadRequestException('Invalid stream input');
+    return this.source.transaction(async (manager) => {
+      const repo = manager.getRepository(ExecutionEntity);
+      const current = await repo.findOne({
+        where: {
+          executionId,
+          rootExecutionId: executionId,
+          ownerPrincipal: scope.ownerPrincipal,
+          taskType,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!current) throw new NotFoundException('Stream execution not found');
+      const grant = (
+        current.payload as {
+          inputCapture?: {
+            schemaVersion: string;
+            purpose: string;
+            authorizedBy: string;
+            mediaType: string;
+          };
+        }
+      ).inputCapture;
+      const expected = inferenceCaptureAuthorization(scope.ownerPrincipal);
+      if (
+        !grant ||
+        grant.schemaVersion !== expected.schemaVersion ||
+        grant.purpose !== expected.purpose ||
+        grant.authorizedBy !== expected.authorizedBy ||
+        typeof grant.mediaType !== 'string' ||
+        grant.mediaType.length > 200 ||
+        !/^[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*$/i.test(
+          grant.mediaType,
+        )
+      )
+        throw new ForbiddenException('Stream capture is not authorized');
+      if (
+        current.status !== ExecutionStatus.RUNNING ||
+        current.cancellationRequestedAt
+      )
+        return false;
+      const sources = () =>
+        manager
+          .getRepository(ExecutionEventEntity)
+          .createQueryBuilder('event')
+          .where('event.root_execution_id = :executionId', { executionId })
+          .andWhere("event.event_type = 'source.observed'")
+          .andWhere(
+            "event.envelope->'payload'->'metadata'->>'streamInputSequence' IS NOT NULL",
+          );
+      const last = await sources().orderBy('event.sequence', 'DESC').getOne();
+      const metadata = (last?.envelope.payload as Record<string, any>)
+        ?.metadata;
+      const lastSequence = Number(metadata?.streamInputSequence ?? 0);
+      const hash = contentHash(body);
+      if (sequence <= lastSequence) {
+        const existing = await sources()
+          .andWhere(
+            "event.envelope->'payload'->'metadata'->>'streamInputSequence' = :sequence",
+            { sequence: String(sequence) },
+          )
+          .getOne();
+        if (
+          (existing?.envelope.payload as Record<string, unknown>)
+            ?.contentHash !== hash
+        )
+          throw new ConflictException('Stream input identity conflict');
+        return false;
+      }
+      const totalBytes = Number(metadata?.streamInputBytes ?? 0) + body.length;
+      if (
+        sequence !== lastSequence + 1 ||
+        sequence > 4096 ||
+        totalBytes > 32 * 1024 * 1024
+      )
+        throw new BadRequestException('Stream capture limit or order exceeded');
+      const artifactId = randomUUID();
+      const lastProducer = await manager
+        .getRepository(ExecutionEventEntity)
+        .findOne({
+          where: {
+            rootExecutionId: executionId,
+            producerComponent: 'documents-backend',
+          },
+          order: { producerSequence: 'DESC' },
+        });
+      const event = await appendBackendExecutionEvent(
+        manager,
+        current,
+        Number(lastProducer?.producerSequence ?? 0) + 1,
+        {
+          eventType: 'source.observed',
+          payloadSchema: 'source.observed/1',
+          executionId,
+          sourceId: artifactId,
+          artifactId,
+          artifactRefs: [artifactId],
+          causedByEventId: current.lastEventId,
+          actor: { type: 'user' },
+          payload: {
+            sourceId: artifactId,
+            kind: 'user_input',
+            originComponent: 'documents-backend',
+            observedAt: new Date().toISOString(),
+            contentHash: hash,
+            snapshotArtifactId: artifactId,
+            trustLevel: 'untrusted_data',
+            dataClassification: 'sensitive',
+            metadata: {
+              streamInputSequence: sequence,
+              streamInputBytes: totalBytes,
+              mediaType: grant.mediaType,
+              mediaTypeVerification: 'client_declared',
+              delivery: 'received_before_forwarding',
+            },
+          },
+        },
+      );
+      await this.storage.save(manager, {
+        artifactId,
+        rootExecutionId: executionId,
+        kind: 'stream_input',
+        contentHash: hash,
+        size: String(body.length),
+        mediaType: grant.mediaType,
+        encoding: 'identity',
+        dataClassification: 'sensitive',
+        redaction: { applied: false, authorizedCapture: true },
+        retentionClass: 'evaluation',
+        createdByEventId: event.eventId,
+        inputSourceIds: [artifactId],
+        body,
+      });
+      current.lastSequence = event.sequence;
+      current.lastEventId = event.eventId;
+      current.missingEvidence = current.missingEvidence.filter(
+        (value) => value !== 'stream.input_not_captured',
+      );
+      await repo.save(current);
+      return true;
     });
   }
 

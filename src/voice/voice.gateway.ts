@@ -1,3 +1,4 @@
+import { authorizeInferenceCapture } from '../execution/inference-capture';
 import { EXECUTION_UUID_PATTERN } from '../execution/execution.constants';
 import { Logger } from '@nestjs/common';
 import {
@@ -17,6 +18,7 @@ import { VoiceService } from './voice.service';
 
 interface VoiceConnection {
   principal: string;
+  captureInput: boolean;
   expiresAt?: number;
   expiryTimer?: ReturnType<typeof setTimeout>;
   pending: Promise<void>;
@@ -73,13 +75,26 @@ export class VoiceGateway
   }
 
   private async authorize(client: Socket) {
-    if (!this.auth.isAuthEnabled()) return { principal: 'standalone' };
+    const consent = client.handshake.headers['x-evaluation-consent'];
+    if (!this.auth.isAuthEnabled()) {
+      return {
+        principal: 'standalone',
+        captureInput: authorizeInferenceCapture(undefined, consent as string),
+      };
+    }
     const token =
       client.handshake.auth?.token ??
       client.handshake.headers.authorization?.replace(/^Bearer /, '');
     const { user, expiresAt } = await this.auth.authenticateAccessToken(token);
     if (user.permissions?.[Permission.ASK] !== true) throw new Error();
-    return { principal: String(user.id), expiresAt };
+    return {
+      principal: String(user.id),
+      expiresAt,
+      captureInput: authorizeInferenceCapture(
+        { userId: user.id, permissions: user.permissions },
+        consent as string,
+      ),
+    };
   }
 
   handleConnection(client: Socket) {
@@ -140,14 +155,24 @@ export class VoiceGateway
   @SubscribeMessage('voice:start')
   async onStart(
     @ConnectedSocket() client: Socket,
-    @MessageBody() input?: { requestId?: string },
+    @MessageBody() input?: { requestId?: string; mediaType?: string },
   ): Promise<void> {
     if (
       input !== undefined &&
       (!input ||
         typeof input !== 'object' ||
         Array.isArray(input) ||
-        Object.keys(input).some((key) => key !== 'requestId') ||
+        Object.keys(input).some(
+          (key) => !['requestId', 'mediaType'].includes(key),
+        ) ||
+        (input.mediaType !== undefined &&
+          ![
+            'audio/webm',
+            'audio/webm;codecs=opus',
+            'audio/ogg',
+            'audio/ogg;codecs=opus',
+            'audio/wav',
+          ].includes(input.mediaType)) ||
         (input.requestId !== undefined &&
           (typeof input.requestId !== 'string' ||
             !EXECUTION_UUID_PATTERN.test(input.requestId))))
@@ -160,6 +185,10 @@ export class VoiceGateway
         client,
         this.connections.get(client).principal,
         input?.requestId,
+        this.connections.get(client).captureInput
+          ? input?.mediaType
+          : undefined,
+        this.connections.get(client).captureInput,
       ),
     );
   }

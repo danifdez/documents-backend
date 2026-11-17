@@ -1,3 +1,5 @@
+import { AuthService } from '../auth/auth.service';
+import { authorizeInferenceCapture } from './inference-capture';
 import {
   Body,
   Controller,
@@ -16,7 +18,10 @@ import { WithdrawExecutionEvidenceDto } from './dto/withdraw-execution-evidence.
 
 @Controller('executions')
 export class ExecutionController {
-  constructor(private readonly service: ExecutionService) {}
+  constructor(
+    private readonly service: ExecutionService,
+    private readonly auth: AuthService,
+  ) {}
 
   @Post(':rootExecutionId/cancel')
   async cancel(
@@ -54,7 +59,15 @@ export class ExecutionController {
     @Param('rootExecutionId') rootExecutionId: string,
     @CurrentUser() user: unknown,
     @Headers('x-evaluation-consent') evaluationConsent: string | undefined,
+    @Headers('authorization') authorization?: string,
   ) {
+    if (this.auth.isAuthEnabled()) {
+      const current = await this.auth.authenticateAccessToken(
+        authorization?.replace(/^Bearer /, ''),
+      );
+      user = { userId: current.user.id, permissions: current.user.permissions };
+      authorizeInferenceCapture(user, evaluationConsent);
+    }
     const scope = this.service.resolveAccessScope(user);
     return this.service.exportBundle(
       rootExecutionId,
