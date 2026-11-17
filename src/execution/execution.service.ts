@@ -331,10 +331,14 @@ export class ExecutionService {
       execution.cancellationRequestedAt = now;
       execution.cancellationReason = cancellationReason;
       execution.phase = 'cancellation_requested';
-      execution.waitReason = null;
-      execution.waitCondition = null;
-      execution.resumePhase = null;
-      execution.waitExpiresAt = null;
+      // Until reconciliation changes the status, a waiting row must retain
+      // its wait metadata. The cancellation fence prevents resuming it.
+      if (execution.status !== ExecutionStatus.WAITING) {
+        execution.waitReason = null;
+        execution.waitCondition = null;
+        execution.resumePhase = null;
+        execution.waitExpiresAt = null;
+      }
       const event = await this.appendBackendEvent(
         manager,
         root,

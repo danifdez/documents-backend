@@ -494,9 +494,7 @@ export class ExecutionToolRuntimeService {
         contentHash: resource.contentHash,
       },
       artifactRefs: [],
-      sourceRefs: [
-        `product-skill:${resource.skillVersion}:${resource.resourceId}:${resource.contentHash}`,
-      ],
+      sourceRefs: [`product-skill:${resource.contentHash}`],
       effects: [],
       error: null,
     };

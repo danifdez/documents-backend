@@ -29,6 +29,17 @@ export class ExecutionConfirmationController {
     );
   }
 
+  @Get(':confirmationId')
+  read(
+    @Param('confirmationId', new ParseUUIDPipe()) confirmationId: string,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.confirmations.read(
+      confirmationId,
+      this.executions.resolveAccessScope(user),
+    );
+  }
+
   @Post(':confirmationId/decision')
   decide(
     @Param('confirmationId', new ParseUUIDPipe()) confirmationId: string,

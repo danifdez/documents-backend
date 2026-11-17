@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Injectable,
   Param,
   ParseIntPipe,
   ParseUUIDPipe,
@@ -22,6 +23,7 @@ import {
   AssistantOwnedGuard,
 } from '../auth/guards/owned-resource.guard';
 
+@Injectable()
 abstract class OwnerMemoryController {
   protected abstract readonly ownerType: MemoryOwnerType;
 
