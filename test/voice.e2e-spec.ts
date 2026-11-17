@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import { ExecutionController } from '../src/execution/execution.controller';
 import { stat } from 'fs/promises';
 import { join } from 'path';
@@ -62,6 +63,7 @@ describe('Voice authorization, reservations and durable recovery (simulated work
   let url: string;
   let held: Array<() => void>;
   let hold: boolean;
+  let workerAvailable: boolean;
   let upgrades: number;
   let active: number;
   let maximum: number;
@@ -110,6 +112,7 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     await fixture().dataSource.getRepository(ExecutionRequestEntity).clear();
     held = [];
     hold = false;
+    workerAvailable = true;
     upgrades = active = maximum = 0;
     packets = [];
     workerInput = [];
@@ -123,7 +126,9 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     );
     lookup = jest.fn(async ({ id }) => users.get(id) ?? null);
     worker = createServer((req, res) => {
-      res.writeHead(req.url === '/health' ? 200 : 404);
+      res.writeHead(
+        req.url === '/health' ? (workerAvailable ? 200 : 503) : 404,
+      );
       res.end();
     });
     wss = new WebSocket.Server({ noServer: true });
@@ -344,6 +349,7 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     await until(() => count(b, 'voice:queued') > 0);
     expect(upgrades).toBe(1);
     hold = false;
+    workerAvailable = true;
     held.splice(0).forEach((fn) => fn());
     await until(() => count(a, 'voice:ready') === 1);
     a.emit('voice:chunk', Buffer.from('A'));
@@ -380,6 +386,7 @@ describe('Voice authorization, reservations and durable recovery (simulated work
       b.emit('voice:start');
       await until(() => count(b, 'voice:queued') > 0);
       hold = false;
+      workerAvailable = true;
       if (action === 'cancel') a.emit('voice:cancel');
       else a.disconnect();
       await until(() => count(b, 'voice:ready') === 1);
@@ -426,6 +433,7 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     expect(upgrades).toBe(2);
     expect(count(c, 'voice:ready')).toBe(0);
     hold = false;
+    workerAvailable = true;
     held.splice(0).forEach((fn) => fn());
     await until(() => count(b, 'voice:ready') === 1);
     b.emit('voice:chunk', Buffer.from('B'));
@@ -1426,5 +1434,151 @@ describe('Voice authorization, reservations and durable recovery (simulated work
       stat(join(fixture().artifactDirectory, row.storageRef.slice(5))),
     ).rejects.toMatchObject({ code: 'ENOENT' });
     expect(workerInput).toHaveLength(1);
+  });
+
+  const engineFixture = JSON.parse(
+    readFileSync(join(__dirname, 'fixtures', 'voice-evidence.json'), 'utf8'),
+  );
+  const copyFrame = (index: number) =>
+    JSON.parse(JSON.stringify(engineFixture.frames[index]));
+  async function engineReady() {
+    const socket = captureSocket();
+    simulatedTranscript = 'Synthetic voice output';
+    const accepted = await startCapture(socket);
+    const raw = Buffer.from(engineFixture.audio_base64, 'base64');
+    let offset = 0;
+    for (const size of engineFixture.chunks) {
+      socket.emit('voice:chunk', raw.subarray(offset, offset + size));
+      offset += size;
+    }
+    await until(() => workerInput.length === 3);
+    return { socket, accepted, ws: [...wss.clients][0] };
+  }
+  const metadataRows = () =>
+    fixture()
+      .dataSource.getRepository(ExecutionArtifactEntity)
+      .createQueryBuilder('artifact')
+      .where("artifact.kind IN ('stream_runtime','stream_inference')")
+      .getMany();
+
+  it('stores owned engine and call evidence without duplicate artifacts or events', async () => {
+    const { socket, accepted, ws } = await engineReady();
+    for (const frame of engineFixture.frames) ws.send(JSON.stringify(frame));
+    await until(async () => (await metadataRows()).length === 3);
+    const before = await fixture()
+      .dataSource.getRepository(ExecutionEventEntity)
+      .count();
+    for (const frame of engineFixture.frames) ws.send(JSON.stringify(frame));
+    socket.emit('voice:stop');
+    await until(() =>
+      socket.events.some(
+        (e: any) => e.event === 'voice:partial' && e.data.isFinal,
+      ),
+    );
+    const rows = await metadataRows();
+    expect(rows).toHaveLength(3);
+    const bundle = await fixture().service.exportBundle(
+      accepted.executionId,
+      scope,
+      true,
+    );
+    const validator = new ExecutionContractValidator();
+    validator.assertBundle(bundle);
+    (bundle.events as any[]).forEach((event) => validator.assertEvent(event));
+    const recorded = (bundle.events as any[]).filter(
+      (e) => e.payload.visibleEvent?.streamEvidence,
+    );
+    expect(recorded).toHaveLength(3);
+    expect(
+      recorded.map((e) => e.payload.visibleEvent?.streamEvidence.sequence),
+    ).toEqual([1, 2, 3]);
+    expect((bundle.bundleCompleteness as any).missing).not.toContain(
+      'stream.engine_not_reported',
+    );
+    expect((bundle.bundleCompleteness as any).missing).toContain(
+      'stream.generation_defaults_not_captured',
+    );
+    expect((bundle.bundleCompleteness as any).missing).not.toContain(
+      'stream.call.1.finish',
+    );
+    for (let n = 0; n < 3; n++) {
+      const again = await fixture().service.exportBundle(
+        accepted.executionId,
+        scope,
+        true,
+      );
+      expect(again.embeddedArtifacts).toEqual(bundle.embeddedArtifacts);
+    }
+    expect(await metadataRows()).toHaveLength(3);
+    // Only stopping and terminal transitions follow the deduplicated metadata.
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEventEntity).count(),
+    ).toBe(before + 2);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionStepEntity).count(),
+    ).toBe(0);
+  });
+
+  it.each([
+    'extra-secret',
+    'wrong-runtime',
+    'out-of-order',
+    'changed-sequence',
+  ])(
+    'rejects %s worker evidence without leaking private fields',
+    async (kind) => {
+      const { socket, accepted, ws } = await engineReady();
+      const frame = copyFrame(0);
+      if (kind === 'extra-secret')
+        frame.value.password = 'PRIVATE_ENGINE_VALUE';
+      if (kind === 'out-of-order') frame.sequence = 2;
+      if (kind === 'wrong-runtime') {
+        ws.send(JSON.stringify(frame));
+        await until(async () => (await metadataRows()).length === 1);
+        Object.assign(frame, copyFrame(1));
+        frame.value.runtimeHash = 'sha256:' + 'b'.repeat(64);
+      }
+      if (kind === 'changed-sequence') {
+        ws.send(JSON.stringify(frame));
+        await until(async () => (await metadataRows()).length === 1);
+        frame.value.engine.computeType = 'float32';
+      }
+      ws.send(JSON.stringify(frame));
+      await until(() => active === 0);
+      expect((await readRequest(accepted.id)).body.status).toBe('failed');
+      expect((await metadataRows()).length).toBe(
+        kind === 'wrong-runtime' || kind === 'changed-sequence' ? 1 : 0,
+      );
+      expect(JSON.stringify(socket.events)).not.toContain(
+        'PRIVATE_ENGINE_VALUE',
+      );
+    },
+  );
+
+  it('revalidates export permission for metadata without another client message', async () => {
+    const { accepted, ws } = await engineReady();
+    users.get(1).permissions.export = false;
+    ws.send(JSON.stringify(copyFrame(0)));
+    await until(() => active === 0);
+    expect(await metadataRows()).toHaveLength(0);
+    expect((await readRequest(accepted.id)).body.status).toBe('failed');
+  });
+
+  it('does not release a draining worker until its health becomes available', async () => {
+    const first = connect(token());
+    await ready(first);
+    workerAvailable = false;
+    first.emit('voice:cancel');
+    await until(() => active === 0);
+    const second = connect(token(2));
+    await until(() => second.connected);
+    second.emit('voice:start');
+    await until(() => count(second, 'voice:queued') > 0);
+    expect(upgrades).toBe(1);
+    expect(count(second, 'voice:ready')).toBe(0);
+    workerAvailable = true;
+    await until(() => count(second, 'voice:ready') === 1);
+    expect(upgrades).toBe(2);
+    expect(maximum).toBe(1);
   });
 });

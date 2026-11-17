@@ -1,0 +1,133 @@
+{
+  "audio_base64": "UklGRqQCAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YYACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "chunks": [
+    256,
+    256,
+    172
+  ],
+  "frames": [
+    {
+      "kind": "stream_runtime",
+      "sequence": 1,
+      "type": "evidence",
+      "value": {
+        "codeFingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "decoder": {
+          "channels": 1,
+          "name": "ffmpeg",
+          "sampleRate": 16000,
+          "sampleWidth": 2,
+          "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "engine": {
+          "computeType": "int8",
+          "device": "cpu",
+          "deviceIndex": [
+            0
+          ],
+          "modules": [
+            {
+              "role": "wrapper",
+              "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 10
+            },
+            {
+              "role": "engine",
+              "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 10
+            }
+          ],
+          "name": "faster-whisper",
+          "packages": {
+            "av": "17.1.0",
+            "ctranslate2": "4.8.0",
+            "faster-whisper": "1.2.1"
+          }
+        },
+        "model": {
+          "files": [
+            {
+              "name": "config.json",
+              "sha256": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+              "size": 2
+            },
+            {
+              "name": "model.bin",
+              "sha256": "sha256:42d789bffbaaa76e74e39e1af2a177443669b21da1e0d0ebefded6534e25678c",
+              "size": 17
+            },
+            {
+              "name": "tokenizer.json",
+              "sha256": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+              "size": 2
+            }
+          ],
+          "sha256": "sha256:737b1f612f23633e294e142ef76d19d0433d7d0ef89c27871ee7a607fb4f3618"
+        },
+        "omissions": [
+          "engine.unreported_generation_defaults"
+        ],
+        "requested": {
+          "computeType": "int8",
+          "device": "cpu"
+        },
+        "runtimeFingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "schemaVersion": "voice-runtime/1"
+      }
+    },
+    {
+      "kind": "stream_inference",
+      "sequence": 2,
+      "type": "evidence",
+      "value": {
+        "final": true,
+        "index": 1,
+        "input": {
+          "bytes": 684,
+          "chunks": 3,
+          "sha256": "sha256:6d5a57285af5ab10fd11ee5fb4f564281eac95b3131bcadad5812952a39558e1"
+        },
+        "phase": "started",
+        "runtimeHash": "sha256:065571abd85a285edaeca00fc863878557c50cb1f5dedba9f583a4e0976c23ad",
+        "schemaVersion": "voice-call/1",
+        "startedAt": "2026-11-17T00:00:00.000000+00:00"
+      }
+    },
+    {
+      "kind": "stream_inference",
+      "sequence": 3,
+      "type": "evidence",
+      "value": {
+        "audioAfterVadUs": 20000,
+        "audioDurationUs": 20000,
+        "decodeUs": 100,
+        "decoded": {
+          "channels": 1,
+          "sampleRate": 16000,
+          "sampleWidth": 2,
+          "samples": 320,
+          "sha256": "sha256:6d5a57285af5ab10fd11ee5fb4f564281eac95b3131bcadad5812952a39558e1"
+        },
+        "final": true,
+        "finishedAt": "2026-11-17T00:00:00.000300+00:00",
+        "index": 1,
+        "inferenceUs": 200,
+        "input": {
+          "bytes": 684,
+          "chunks": 3,
+          "sha256": "sha256:6d5a57285af5ab10fd11ee5fb4f564281eac95b3131bcadad5812952a39558e1"
+        },
+        "parameters": {
+          "beamSize": 1,
+          "conditionOnPreviousText": false,
+          "vadFilter": true
+        },
+        "phase": "completed",
+        "runtimeHash": "sha256:065571abd85a285edaeca00fc863878557c50cb1f5dedba9f583a4e0976c23ad",
+        "schemaVersion": "voice-call/1",
+        "startedAt": "2026-11-17T00:00:00.000000+00:00",
+        "text": "Synthetic voice output"
+      }
+    }
+  ]
+}

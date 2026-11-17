@@ -5,10 +5,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 import { ExecutionEventEntity } from './execution-event.entity';
+import type { BackendExecutionEventData } from './execution-event.writer';
 import { appendBackendExecutionEvent } from './execution-event.writer';
 import { inferenceCaptureAuthorization } from './inference-capture';
 import { ExecutionService } from './execution.service';
@@ -188,29 +189,24 @@ export class ExecutionStreamService {
         totalBytes > 32 * 1024 * 1024
       )
         throw new BadRequestException('Stream capture limit or order exceeded');
-      const artifactId = randomUUID();
-      const lastProducer = await manager
-        .getRepository(ExecutionEventEntity)
-        .findOne({
-          where: {
-            rootExecutionId: executionId,
-            producerComponent: 'documents-backend',
-          },
-          order: { producerSequence: 'DESC' },
-        });
-      const event = await appendBackendExecutionEvent(
+      current.missingEvidence = current.missingEvidence.filter(
+        (value) => value !== 'stream.input_not_captured',
+      );
+      return this.saveCapture(
         manager,
         current,
-        Number(lastProducer?.producerSequence ?? 0) + 1,
-        {
+        'stream_input',
+        body,
+        grant.mediaType,
+        (artifactId) => ({
           eventType: 'source.observed',
           payloadSchema: 'source.observed/1',
           executionId,
           sourceId: artifactId,
           artifactId,
           artifactRefs: [artifactId],
-          causedByEventId: current.lastEventId,
           actor: { type: 'user' },
+          causedByEventId: current.lastEventId,
           payload: {
             sourceId: artifactId,
             kind: 'user_input',
@@ -228,31 +224,177 @@ export class ExecutionStreamService {
               delivery: 'received_before_forwarding',
             },
           },
-        },
+        }),
       );
-      await this.storage.save(manager, {
-        artifactId,
-        rootExecutionId: executionId,
-        kind: 'stream_input',
-        contentHash: hash,
-        size: String(body.length),
-        mediaType: grant.mediaType,
-        encoding: 'identity',
-        dataClassification: 'sensitive',
-        redaction: { applied: false, authorizedCapture: true },
-        retentionClass: 'evaluation',
-        createdByEventId: event.eventId,
-        inputSourceIds: [artifactId],
-        body,
-      });
-      current.lastSequence = event.sequence;
-      current.lastEventId = event.eventId;
-      current.missingEvidence = current.missingEvidence.filter(
-        (value) => value !== 'stream.input_not_captured',
-      );
-      await repo.save(current);
-      return true;
     });
+  }
+
+  /** Metadata shares the same owned artifact store and event sequencing as input. */
+  async captureEvidence(
+    executionId: string,
+    taskType: ExecutionTaskType,
+    scope: ExecutionAccessScope,
+    sequence: number,
+    kind: 'stream_runtime' | 'stream_inference',
+    body: Buffer,
+    missing: { add: string[]; resolve: string[] },
+  ): Promise<boolean> {
+    if (
+      !Number.isSafeInteger(sequence) ||
+      sequence < 1 ||
+      sequence > 257 ||
+      !['stream_runtime', 'stream_inference'].includes(kind) ||
+      !Buffer.isBuffer(body) ||
+      !body.length ||
+      body.length > 64 * 1024
+    )
+      throw new BadRequestException('Invalid stream evidence');
+    return this.source.transaction(async (manager) => {
+      const repo = manager.getRepository(ExecutionEntity);
+      const current = await repo.findOne({
+        where: {
+          executionId,
+          rootExecutionId: executionId,
+          ownerPrincipal: scope.ownerPrincipal,
+          taskType,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!current) throw new NotFoundException('Stream execution not found');
+      const grant = (
+        current.payload as {
+          inputCapture?: ReturnType<typeof inferenceCaptureAuthorization>;
+        }
+      ).inputCapture;
+      const expected = inferenceCaptureAuthorization(scope.ownerPrincipal);
+      if (
+        !grant ||
+        grant.schemaVersion !== expected.schemaVersion ||
+        grant.purpose !== expected.purpose ||
+        grant.authorizedBy !== expected.authorizedBy
+      )
+        throw new ForbiddenException('Stream capture is not authorized');
+      if (
+        current.status !== ExecutionStatus.RUNNING ||
+        current.cancellationRequestedAt
+      )
+        return false;
+      const query = () =>
+        manager
+          .getRepository(ExecutionEventEntity)
+          .createQueryBuilder('event')
+          .where('event.root_execution_id = :executionId', { executionId })
+          .andWhere("event.event_type = 'progress.reported'")
+          .andWhere("event.producer_component = 'documents-backend'")
+          .andWhere(
+            "event.envelope->'payload'->'visibleEvent'->'streamEvidence' IS NOT NULL",
+          );
+      const last = await query().orderBy('event.sequence', 'DESC').getOne();
+      const prior = (last?.envelope.payload as Record<string, any>)
+        ?.visibleEvent?.streamEvidence;
+      const hash = contentHash(body);
+      if (sequence <= Number(prior?.sequence ?? 0)) {
+        const old = await query()
+          .andWhere(
+            "event.envelope->'payload'->'visibleEvent'->'streamEvidence'->>'sequence' = :sequence",
+            { sequence: String(sequence) },
+          )
+          .getOne();
+        const value = (old?.envelope.payload as Record<string, any>)
+          ?.visibleEvent?.streamEvidence;
+        if (value?.contentHash !== hash || value?.kind !== kind)
+          throw new ConflictException('Stream evidence identity conflict');
+        return false;
+      }
+      const totalBytes = Number(prior?.totalBytes ?? 0) + body.length;
+      if (
+        sequence !== Number(prior?.sequence ?? 0) + 1 ||
+        totalBytes > 1024 * 1024
+      )
+        throw new BadRequestException(
+          'Stream evidence limit or order exceeded',
+        );
+      current.missingEvidence = [
+        ...new Set([
+          ...current.missingEvidence.filter(
+            (value) => !missing.resolve.includes(value),
+          ),
+          ...missing.add,
+        ]),
+      ];
+      return this.saveCapture(
+        manager,
+        current,
+        kind,
+        body,
+        'application/json',
+        (artifactId) => ({
+          eventType: 'progress.reported',
+          payloadSchema: 'progress.reported/1',
+          executionId,
+          artifactId,
+          artifactRefs: [artifactId],
+          actor: { type: 'worker' },
+          causedByEventId: current.lastEventId,
+          payload: {
+            message: 'Stream evidence recorded',
+            visibleEvent: {
+              streamEvidence: {
+                sequence,
+                kind,
+                contentHash: hash,
+                size: body.length,
+                totalBytes,
+              },
+            },
+          },
+        }),
+      );
+    });
+  }
+
+  private async saveCapture(
+    manager: EntityManager,
+    current: ExecutionEntity,
+    kind: string,
+    body: Buffer,
+    mediaType: string,
+    eventData: (artifactId: string) => BackendExecutionEventData,
+  ) {
+    const artifactId = randomUUID();
+    const prior = await manager.getRepository(ExecutionEventEntity).findOne({
+      where: {
+        rootExecutionId: current.rootExecutionId,
+        producerComponent: 'documents-backend',
+      },
+      order: { producerSequence: 'DESC' },
+    });
+    const data = eventData(artifactId);
+    const event = await appendBackendExecutionEvent(
+      manager,
+      current,
+      Number(prior?.producerSequence ?? 0) + 1,
+      data,
+    );
+    await this.storage.save(manager, {
+      artifactId,
+      rootExecutionId: current.rootExecutionId,
+      kind,
+      contentHash: contentHash(body),
+      size: String(body.length),
+      mediaType,
+      encoding: 'identity',
+      dataClassification: 'sensitive',
+      redaction: { applied: false, authorizedCapture: true },
+      retentionClass: 'evaluation',
+      createdByEventId: event.eventId,
+      inputSourceIds: data.sourceId ? [data.sourceId] : [],
+      body,
+    });
+    current.lastSequence = event.sequence;
+    current.lastEventId = event.eventId;
+    await manager.getRepository(ExecutionEntity).save(current);
+    return true;
   }
 
   async read(

@@ -1,3 +1,7 @@
+import { AuthService } from '../auth/auth.service';
+import { authorizeVoiceConnection } from './voice-authorization';
+import { assertVoiceEvidence } from './voice-evidence';
+import { canonicalHash, canonicalJson } from '../execution/execution-canonical';
 import { inferenceCaptureAuthorization } from '../execution/inference-capture';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
@@ -14,6 +18,10 @@ interface VoiceSession {
   terminal: boolean;
   inputClosed: boolean;
   mediaType?: string;
+  evidenceSequence: number;
+  runtimeHash?: string;
+  pendingCall?: Record<string, any>;
+  callIndex: number;
   chunks: number;
   audioBytes: number;
   pending: Promise<unknown>;
@@ -60,6 +68,8 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   private workers: WorkerSlot[] = [];
   private queue: QueueEntry[] = [];
   private stopping = false;
+  private healthTimer?: ReturnType<typeof setInterval>;
+  private refreshing = false;
   private readonly sessions = new Map<string, VoiceSession>();
   private readonly pendingRecords = new Set<Promise<unknown>>();
   /** Initial heuristic for average session duration, in seconds. */
@@ -68,6 +78,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly config: ConfigService,
     private readonly records: ExecutionStreamService,
+    private readonly auth: AuthService,
   ) {
     this.workers = this.discoverWorkers();
   }
@@ -82,6 +93,8 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     for (const { w, healthy } of probes) {
       w.status = healthy ? 'free' : 'down';
     }
+    this.healthTimer = setInterval(() => void this.refreshWorkers(), 1000);
+    this.healthTimer.unref();
     const usable = this.workers.filter((w) => w.status === 'free').length;
     if (usable === 0) {
       this.logger.warn(
@@ -99,6 +112,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy() {
     this.stopping = true;
+    clearInterval(this.healthTimer);
     for (const w of this.workers) {
       if (w.ws) this.releaseWorker(w, 'shutdown');
     }
@@ -148,6 +162,8 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       ownerPrincipal,
       terminal: false,
       inputClosed: false,
+      evidenceSequence: 0,
+      callIndex: 0,
       mediaType,
       chunks: 0,
       audioBytes: 0,
@@ -446,6 +462,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
           return;
         }
         worker.status = 'busy';
+        ws.send(
+          JSON.stringify({ type: 'start', capture: !!session.mediaType }),
+        );
         client.emit('voice:ready');
         client.emit('voice:assigned');
         this.logger.log(
@@ -502,7 +521,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
         ).catch(() => undefined);
         worker.ws = null;
         worker.clientId = null;
-        if (worker.status !== 'down') worker.status = 'free';
+        worker.status = 'down';
+        if (!this.stopping && (await this.checkHealth(worker.port)))
+          worker.status = 'free';
         ws.removeAllListeners();
         this.logger.log(
           `released port=${worker.port} client=${client.id} queue=${this.queue.length}`,
@@ -554,6 +575,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     if (!session || session.terminal) return;
     let payload: {
       type?: string;
+      sequence?: number;
+      kind?: string;
+      value?: any;
       text?: string;
       isFinal?: boolean;
       message?: string;
@@ -562,6 +586,10 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       payload = JSON.parse(data.toString());
     } catch {
       throw new Error('Invalid voice worker response');
+    }
+    if (payload?.type === 'evidence') {
+      await this.onEvidence(session, payload);
+      return;
     }
     if (payload?.type === 'partial') {
       if (
@@ -609,6 +637,119 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       await this.finish(session, ExecutionStatus.FAILED, 'voice_worker_error');
       this.emitError(client, 'Voice worker failed');
       this.releaseWorker(worker, 'worker-error');
+    }
+  }
+
+  private async onEvidence(
+    session: VoiceSession,
+    frame: {
+      sequence?: number;
+      kind?: string;
+      value?: any;
+    },
+  ) {
+    if (!session.mediaType)
+      throw new Error('Voice evidence consent is unavailable');
+    const authority = await authorizeVoiceConnection(this.auth, session.client);
+    if (
+      !session.client.connected ||
+      authority.principal !== session.ownerPrincipal ||
+      !authority.captureInput
+    )
+      throw new Error('Voice evidence authorization required');
+    const { sequence, kind, value } = frame;
+    assertVoiceEvidence(kind, value);
+    const duplicate =
+      Number.isSafeInteger(sequence) && sequence <= session.evidenceSequence;
+    if (!duplicate) {
+      if (kind === 'stream_runtime') {
+        if (sequence !== 1 || session.runtimeHash)
+          throw new Error('Voice runtime order differs');
+      } else {
+        if (
+          value.runtimeHash !== session.runtimeHash ||
+          value.input.chunks > session.chunks ||
+          value.input.bytes > session.audioBytes
+        )
+          throw new Error('Voice evidence binding differs');
+        if (value.phase === 'started') {
+          if (session.pendingCall || value.index !== session.callIndex + 1)
+            throw new Error('Voice call order differs');
+        } else if (
+          !session.pendingCall ||
+          canonicalHash({
+            ...value,
+            phase: 'started',
+            ...{
+              decoded: undefined,
+              decodeUs: undefined,
+              inferenceUs: undefined,
+              parameters: undefined,
+              audioDurationUs: undefined,
+              audioAfterVadUs: undefined,
+              text: undefined,
+              finishedAt: undefined,
+              errorCode: undefined,
+            },
+          }) !== canonicalHash(session.pendingCall)
+        )
+          throw new Error('Voice call identity differs');
+      }
+    }
+    const runtime = kind === 'stream_runtime';
+    const key = 'stream.call.' + String(value.index) + '.finish';
+    const stored = await this.records.captureEvidence(
+      session.executionId,
+      'voice-dictation',
+      { ownerPrincipal: session.ownerPrincipal },
+      sequence,
+      kind as 'stream_runtime' | 'stream_inference',
+      Buffer.from(canonicalJson(value)),
+      {
+        add: runtime
+          ? [
+              'stream.calls_unconfirmed',
+              'stream.generation_defaults_not_captured',
+            ]
+          : value.phase === 'started'
+            ? [key]
+            : [],
+        resolve: runtime
+          ? ['stream.engine_not_reported']
+          : [
+              'stream.calls_unconfirmed',
+              ...(value.phase === 'started' ? [] : [key]),
+            ],
+      },
+    );
+    if (!stored || duplicate) return;
+    session.evidenceSequence = sequence;
+    if (runtime) session.runtimeHash = canonicalHash(value);
+    else if (value.phase === 'started') {
+      session.pendingCall = value;
+      session.callIndex = value.index;
+    } else session.pendingCall = undefined;
+  }
+
+  private async refreshWorkers() {
+    if (this.stopping || this.refreshing) return;
+    this.refreshing = true;
+    let recovered = false;
+    try {
+      for (const worker of this.workers) {
+        if (
+          worker.status === 'down' &&
+          !worker.ws &&
+          (await this.checkHealth(worker.port)) &&
+          !this.stopping
+        ) {
+          worker.status = 'free';
+          recovered = true;
+        }
+      }
+      if (recovered && !this.stopping) this.processQueue();
+    } finally {
+      this.refreshing = false;
     }
   }
 
