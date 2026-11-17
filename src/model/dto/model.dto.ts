@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsNumber,
+  IsUUID,
   MaxLength,
   Min,
   Max,
@@ -18,7 +19,7 @@ export class AskQuestionDto {
   @IsOptional()
   projectId?: number;
 
-  @IsString()
+  @IsUUID('4')
   @IsOptional()
   requestId?: string;
 
@@ -100,7 +101,7 @@ export class SemanticSearchDto {
   @IsOptional()
   projectId?: number;
 
-  @IsString()
+  @IsUUID('4')
   @IsOptional()
   requestId?: string;
 

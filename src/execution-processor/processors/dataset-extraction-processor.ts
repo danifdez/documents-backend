@@ -94,6 +94,7 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
           const record = await repository.findOne({
             where: { id: recordId },
             relations: ['dataset'],
+            relationLoadStrategy: 'query',
             lock: { mode: 'pessimistic_write' },
           });
           if (!record) throw new DatasetExtractionRecordNotFoundError();

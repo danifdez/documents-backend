@@ -23,6 +23,28 @@ export class ExecutionController {
     private readonly auth: AuthService,
   ) {}
 
+  @Get('requests/:requestId')
+  async request(
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.service.readRequest(
+      requestId,
+      this.service.resolveAccessScope(user),
+    );
+  }
+
+  @Get(':rootExecutionId/result')
+  async result(
+    @Param('rootExecutionId') rootExecutionId: string,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.service.readOwnedResult(
+      rootExecutionId,
+      this.service.resolveAccessScope(user),
+    );
+  }
+
   @Post(':rootExecutionId/cancel')
   async cancel(
     @Param('rootExecutionId') rootExecutionId: string,

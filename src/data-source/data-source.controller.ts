@@ -8,6 +8,7 @@ import {
   Body,
   Query,
   ParseIntPipe,
+  ParseUUIDPipe,
   BadRequestException,
 } from '@nestjs/common';
 import { DataSourceService } from './data-source.service';
@@ -21,6 +22,8 @@ import {
 } from './dto/data-source.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 
 @Controller('data-sources')
 @RequirePermissions(Permission.DATASETS)
@@ -116,8 +119,16 @@ export class DataSourceController {
   }
 
   @Post(':id/sync')
-  async triggerSync(@Param('id', ParseIntPipe) id: number) {
-    return this.syncService.syncDataSource(id);
+  async triggerSync(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: unknown,
+    @Body('requestId', new ParseUUIDPipe({ version: '4', optional: true }))
+    requestId?: string,
+  ) {
+    return this.syncService.syncDataSource(id, {
+      ownerPrincipal: ownerPrincipalFromUser(user),
+      requestId,
+    });
   }
 
   @Get(':id/sync-logs')

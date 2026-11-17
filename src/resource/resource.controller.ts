@@ -123,10 +123,14 @@ export class ResourceController {
   }
 
   @Post(':id/confirm')
+  @RequirePermissions(Permission.UPLOAD)
   async confirmResource(
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<{ success: boolean; message: string }> {
-    return await this.resourceService.confirmExtraction(id);
+    @CurrentUser() user: unknown,
+  ) {
+    return this.resourceService.confirmExtraction(id, {
+      ownerPrincipal: ownerPrincipalFromUser(user),
+    });
   }
 
   @Delete(':id')

@@ -29,7 +29,10 @@ export class DatasetExtractionService {
     private readonly executionService: ExecutionService,
   ) {}
 
-  async extractAll(datasetId: number): Promise<{ rowsQueued: number }> {
+  async extractAll(
+    datasetId: number,
+    ownerPrincipal: string,
+  ): Promise<{ rowsQueued: number; executionIds: string[] }> {
     const dataset = await this.datasetRepository.findOne({
       where: { id: datasetId },
       relations: ['project'],
@@ -44,14 +47,14 @@ export class DatasetExtractionService {
     const projectId = dataset.project?.id ?? null;
     const resources = await this.resolveSources(dataset, projectId);
     if (!resources.length) {
-      return { rowsQueued: 0 };
+      return { rowsQueued: 0, executionIds: [] };
     }
 
     const columnsToExtract = dataset.schema
       .filter((f) => f.description && f.description.trim().length > 0)
       .map((f) => f.key);
 
-    let queued = 0;
+    const executionIds: string[] = [];
     for (const resource of resources) {
       const record = await this.upsertRow(datasetId, resource.id);
       const execution = await this.enqueueExtractionExecution(
@@ -60,8 +63,9 @@ export class DatasetExtractionService {
         resource,
         columnsToExtract,
         projectId,
+        ownerPrincipal,
       );
-      if (execution) queued += 1;
+      if (execution) executionIds.push(execution.executionId);
     }
 
     dataset.extractionConfig = {
@@ -71,12 +75,13 @@ export class DatasetExtractionService {
     };
     await this.datasetRepository.save(dataset);
 
-    return { rowsQueued: queued };
+    return { rowsQueued: executionIds.length, executionIds };
   }
 
   async extractRow(
     datasetId: number,
     recordId: number,
+    ownerPrincipal: string,
     columnsToExtract?: string[],
   ): Promise<{ executionId: string | null }> {
     const { dataset, record, resource } = await this.loadRowContext(
@@ -100,6 +105,7 @@ export class DatasetExtractionService {
       resource,
       columns,
       dataset.project?.id ?? null,
+      ownerPrincipal,
     );
     return { executionId: execution?.executionId ?? null };
   }
@@ -108,6 +114,7 @@ export class DatasetExtractionService {
     datasetId: number,
     recordId: number,
     fieldKey: string,
+    ownerPrincipal: string,
     options: { force?: boolean } = {},
   ): Promise<
     | { executionId: string | null }
@@ -136,12 +143,14 @@ export class DatasetExtractionService {
       resource,
       [fieldKey],
       dataset.project?.id ?? null,
+      ownerPrincipal,
     );
     return { executionId: execution?.executionId ?? null };
   }
 
   async proposeColumns(
     resourceIds: number[],
+    ownerPrincipal: string,
     projectId?: number,
   ): Promise<{ executionId: string | null }> {
     if (
@@ -186,6 +195,7 @@ export class DatasetExtractionService {
         projectId: projectId ?? null,
         resources: excerpts,
       },
+      { ownerPrincipal },
     );
     return { executionId: execution?.executionId ?? null };
   }
@@ -304,6 +314,7 @@ export class DatasetExtractionService {
     resource: ResourceEntity,
     columnsToExtract: string[],
     projectId: number | null,
+    ownerPrincipal: string,
   ) {
     const content = await this.resourceService.getContentById(resource.id);
     const isAudio = (resource.mimeType ?? '').startsWith('audio/');
@@ -329,7 +340,7 @@ export class DatasetExtractionService {
       'dataset.extract-row',
       ExecutionPriority.NORMAL,
       payload,
-      { steps },
+      { steps, ownerPrincipal },
     );
   }
 }

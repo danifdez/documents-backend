@@ -3,10 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
-import { ExecutionService } from '../execution/execution.service';
+import { CreateExecutionOptions, ExecutionService } from '../execution/execution.service';
+import { ExecutionAccessScope } from '../execution/execution.types';
 import { DatasetRecordEntity } from './dataset-record.entity';
 import { DatasetEntity, DatasetField } from './dataset.entity';
 import { parseDatasetAnalysisRequest } from './dataset-analysis-request';
@@ -24,10 +24,6 @@ interface DatasetAnalysisSnapshot {
 @Injectable()
 export class DatasetAnalysisService {
   constructor(
-    @InjectRepository(DatasetEntity)
-    private readonly datasetRepository: Repository<DatasetEntity>,
-    @InjectRepository(DatasetRecordEntity)
-    private readonly recordRepository: Repository<DatasetRecordEntity>,
     private readonly executionService: ExecutionService,
   ) {}
 
@@ -35,6 +31,8 @@ export class DatasetAnalysisService {
     operation: unknown,
     datasetIds: number[],
     params: unknown,
+    scope: ExecutionAccessScope,
+    requestId?: string,
   ) {
     const request = parseDatasetAnalysisRequest(operation, params, 'summary');
     const ids = [...new Set(datasetIds.map(Number))].filter(
@@ -48,9 +46,10 @@ export class DatasetAnalysisService {
         'Only dataset query supports multiple datasets',
       );
     }
-    const snapshots = await this.buildSnapshots(ids);
-    const options = {
-      inputArtifacts: [
+    const options: CreateExecutionOptions = {
+      ownerPrincipal: scope.ownerPrincipal,
+      requestId,
+      snapshotArtifacts: async (manager) => [
         {
           role: 'datasets',
           kind: 'dataset_snapshot',
@@ -58,7 +57,7 @@ export class DatasetAnalysisService {
           body: Buffer.from(
             JSON.stringify({
               schemaVersion: 'dataset-analysis-input/1',
-              datasets: snapshots,
+              datasets: await this.buildSnapshots(manager, ids),
             }),
           ),
         },
@@ -142,9 +141,10 @@ export class DatasetAnalysisService {
   }
 
   private async buildSnapshots(
+    manager: EntityManager,
     datasetIds: number[],
   ): Promise<DatasetAnalysisSnapshot[]> {
-    const datasets = await this.datasetRepository.find({
+    const datasets = await manager.getRepository(DatasetEntity).find({
       where: { id: In(datasetIds) },
     });
     const byId = new Map(datasets.map((dataset) => [dataset.id, dataset]));
@@ -157,7 +157,7 @@ export class DatasetAnalysisService {
       if (!records.has(datasetId)) {
         records.set(
           datasetId,
-          await this.recordRepository.find({
+          await manager.getRepository(DatasetRecordEntity).find({
             where: { dataset: { id: datasetId } },
             select: ['id', 'data'],
           }),

@@ -73,6 +73,7 @@ export class ModelService {
       },
       {
         ownerPrincipal: scope.ownerPrincipal,
+        requestId,
         inputArtifacts: [this.vectorStore.vectorCandidatesArtifact(candidates)],
       },
     );
@@ -295,6 +296,7 @@ export class ModelService {
       },
       {
         ownerPrincipal: scope.ownerPrincipal,
+        requestId,
         inputArtifacts: [this.vectorStore.vectorCandidatesArtifact(candidates)],
       },
     );

@@ -157,8 +157,8 @@ export class DatasetController {
 
   @Post(':id/extract')
   @RequirePermissions(Permission.DATASETS)
-  async extractAll(@Param('id', ParseIntPipe) id: number) {
-    return await this.extractionService.extractAll(id);
+  async extractAll(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: unknown) {
+    return this.extractionService.extractAll(id, this.executionService.resolveAccessScope(user).ownerPrincipal);
   }
 
   @Post(':id/records/:recordId/re-extract')
@@ -167,10 +167,12 @@ export class DatasetController {
     @Param('id', ParseIntPipe) id: number,
     @Param('recordId', ParseIntPipe) recordId: number,
     @Body() dto: ReExtractRowDto,
+    @CurrentUser() user: unknown,
   ) {
     return await this.extractionService.extractRow(
       id,
       recordId,
+      this.executionService.resolveAccessScope(user).ownerPrincipal,
       dto.columnsToExtract,
     );
   }
@@ -182,19 +184,23 @@ export class DatasetController {
     @Param('recordId', ParseIntPipe) recordId: number,
     @Param('fieldKey') fieldKey: string,
     @Body() dto: ReExtractCellDto,
+    @CurrentUser() user: unknown,
   ) {
-    return await this.extractionService.extractCell(id, recordId, fieldKey, {
-      force: dto.force,
-    });
+    return this.extractionService.extractCell(
+      id, recordId, fieldKey, this.executionService.resolveAccessScope(user).ownerPrincipal,
+      { force: dto.force },
+    );
   }
 
   @Post('propose-columns')
   @RequirePermissions(Permission.DATASETS)
   async proposeColumns(
     @Body() body: { resourceIds: number[]; projectId?: number },
+    @CurrentUser() user: unknown,
   ) {
     return await this.extractionService.proposeColumns(
       body?.resourceIds,
+      this.executionService.resolveAccessScope(user).ownerPrincipal,
       body?.projectId,
     );
   }
@@ -322,23 +328,26 @@ export class DatasetController {
   }
 
   @Post(':id/stats')
+  @RequirePermissions(Permission.DATASETS)
   async requestStats(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { operation?: unknown; params?: unknown },
+    @CurrentUser() user: unknown,
+    @Body('requestId', new ParseUUIDPipe({ version: '4', optional: true }))
+    requestId?: string,
   ) {
-    const dataset = await this.datasetService.findOneDataset(id);
-    if (!dataset) {
-      throw new HttpException('Dataset not found', HttpStatus.NOT_FOUND);
-    }
     const execution = await this.analysisService.createExecution(
       body.operation || 'summary',
       [id],
       body.params || {},
+      this.executionService.resolveAccessScope(user),
+      requestId,
     );
     return { executionId: execution.executionId, message: 'Analysis started' };
   }
 
   @Post('stats/query')
+  @RequirePermissions(Permission.DATASETS)
   async requestQueryStats(
     @Body()
     body: {
@@ -346,14 +355,19 @@ export class DatasetController {
       operation?: unknown;
       params?: unknown;
     },
+    @CurrentUser() user: unknown,
+    @Body('requestId', new ParseUUIDPipe({ version: '4', optional: true }))
+    requestId?: string,
   ) {
-    if (!body.datasetIds || body.datasetIds.length === 0) {
+    if (!Array.isArray(body.datasetIds) || body.datasetIds.length === 0) {
       throw new HttpException('datasetIds required', HttpStatus.BAD_REQUEST);
     }
     const execution = await this.analysisService.createExecution(
       body.operation || 'query',
       body.datasetIds,
       body.params || {},
+      this.executionService.resolveAccessScope(user),
+      requestId,
     );
     return {
       executionId: execution.executionId,

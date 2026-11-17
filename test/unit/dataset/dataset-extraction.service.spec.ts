@@ -20,7 +20,7 @@ describe('DatasetExtractionService', () => {
       executionService as any,
     );
 
-    await expect(service.proposeColumns([7], 3)).resolves.toEqual({
+    await expect(service.proposeColumns([7], '42', 3)).resolves.toEqual({
       executionId: 'execution-id',
     });
     expect(executionService.createInference).toHaveBeenCalledWith(
@@ -36,6 +36,7 @@ describe('DatasetExtractionService', () => {
           },
         ],
       },
+      { ownerPrincipal: '42' },
     );
   });
 
@@ -70,6 +71,7 @@ describe('DatasetExtractionService', () => {
         },
         ['name'],
         11,
+        '42',
       ),
     ).resolves.toEqual({ executionId: 'execution-id' });
     expect(executionService.create).toHaveBeenCalledWith(
@@ -82,6 +84,7 @@ describe('DatasetExtractionService', () => {
         documentText: 'Readable content',
       }),
       {
+        ownerPrincipal: '42',
         steps: expect.arrayContaining([
           expect.objectContaining({
             work: expect.objectContaining({

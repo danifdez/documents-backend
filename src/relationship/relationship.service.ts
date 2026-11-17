@@ -111,13 +111,14 @@ export class RelationshipService {
 
   async extractRelationshipsForProject(
     projectId: number,
+    ownerPrincipal: string,
   ): Promise<{ executionIds: string[] }> {
     const resources = await this.resourceService.findByProject(projectId);
     const executionIds: string[] = [];
 
     for (const resource of resources) {
       try {
-        const result = await this.extractRelationships(resource.id);
+        const result = await this.extractRelationships(resource.id, ownerPrincipal);
         executionIds.push(result.executionId);
       } catch {
         // Resources without usable content or two confirmed entities are skipped.
@@ -129,6 +130,7 @@ export class RelationshipService {
 
   async extractRelationships(
     resourceId: number,
+    ownerPrincipal: string,
   ): Promise<{ executionId: string }> {
     const resource = await this.resourceService.findOne(resourceId);
     if (!resource) {
@@ -162,7 +164,7 @@ export class RelationshipService {
         projectId,
         entities: workflowEntities,
       },
-      { steps },
+      { steps, ownerPrincipal },
     );
     return { executionId: execution.executionId };
   }

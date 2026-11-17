@@ -153,6 +153,11 @@ export interface CreateExecutionOptions {
     inputSourceIds?: string[];
     derivedFromArtifactIds?: string[];
   }>;
+  // Materialize server-derived evidence only for the first accepted request.
+  // The request is identified by its explicit input, not by a later snapshot.
+  snapshotArtifacts?: (
+    manager: EntityManager,
+  ) => Promise<NonNullable<CreateExecutionOptions['inputArtifacts']>>;
 }
 
 export interface CreateChildInferenceInput<
@@ -730,11 +735,12 @@ export class ExecutionService {
         acceptance = await lockExecutionRequest(manager, options.requestId, {
           ownerPrincipal: options.ownerPrincipal,
         });
+        const { snapshotArtifacts, ...requestOptions } = options;
         const inputHash = canonicalDomainHash({
           taskType,
           priority,
           payload,
-          options,
+          options: requestOptions,
         });
         if (acceptance.inputHash && acceptance.inputHash !== inputHash) {
           throw new ConflictException('execution_request_conflict');
@@ -857,8 +863,12 @@ export class ExecutionService {
         missingEvidence: [],
       });
       await executionRepo.save(execution);
+      const inputArtifacts = [
+        ...(options?.inputArtifacts ?? []),
+        ...((await options?.snapshotArtifacts?.(manager)) ?? []),
+      ];
       const inputArtifactRefs = await Promise.all(
-        (options?.inputArtifacts ?? []).map(async (input) => {
+        inputArtifacts.map(async (input) => {
           const artifactId = randomUUID();
           await this.artifactStorage.save(manager, {
             artifactId,

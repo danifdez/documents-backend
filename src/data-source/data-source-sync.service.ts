@@ -40,13 +40,15 @@ export class DataSourceSyncService {
     private readonly executionService: ExecutionService,
   ) {}
 
-  async syncDataSource(dataSourceId: number): Promise<{ executionId: string }> {
+  async syncDataSource(
+    dataSourceId: number,
+    request?: { ownerPrincipal: string; requestId?: string },
+  ): Promise<{ executionId: string }> {
     await this.dataSourceService.findOne(dataSourceId);
-    const execution = await this.executionService.create(
-      'data-source-sync',
-      ExecutionPriority.NORMAL,
-      { dataSourceId },
-    );
+    const payload = { dataSourceId };
+    const execution = request
+      ? await this.executionService.create('data-source-sync', ExecutionPriority.NORMAL, payload, request)
+      : await this.executionService.create('data-source-sync', ExecutionPriority.NORMAL, payload);
     return { executionId: execution.executionId };
   }
 
@@ -118,6 +120,7 @@ export class DataSourceSyncService {
     const source = await sources.findOne({
       where: { id: prepared.dataSourceId },
       relations: ['project', 'dataset'],
+      relationLoadStrategy: 'query',
       lock: { mode: 'pessimistic_write' },
     });
     if (!source) throw new Error('data_source_sync_source_not_found');

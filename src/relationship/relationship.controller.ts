@@ -18,6 +18,8 @@ import {
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
 import { RelationshipGraph } from '../graph/age-graph.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 
 @Controller('relationships')
 export class RelationshipController {
@@ -89,15 +91,17 @@ export class RelationshipController {
   @RequirePermissions(Permission.RELATIONSHIPS)
   async extractRelationships(
     @Param('resourceId', ParseIntPipe) resourceId: number,
+    @CurrentUser() user: unknown,
   ): Promise<{ executionId: string }> {
-    return this.service.extractRelationships(resourceId);
+    return this.service.extractRelationships(resourceId, ownerPrincipalFromUser(user));
   }
 
   @Post('project/:projectId/extract')
   @RequirePermissions(Permission.RELATIONSHIPS)
   async extractRelationshipsForProject(
     @Param('projectId', ParseIntPipe) projectId: number,
+    @CurrentUser() user: unknown,
   ): Promise<{ executionIds: string[] }> {
-    return this.service.extractRelationshipsForProject(projectId);
+    return this.service.extractRelationshipsForProject(projectId, ownerPrincipalFromUser(user));
   }
 }

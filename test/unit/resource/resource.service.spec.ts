@@ -162,25 +162,27 @@ describe('ResourceService', () => {
 
       executionService.create.mockResolvedValue({ executionId: extractionId });
 
-      const result = await service.confirmExtraction(1);
+      const result = await service.confirmExtraction(1, { ownerPrincipal: '42' });
       expect(result.success).toBe(true);
+      expect(result.executionId).toBe(extractionId);
       expect(executionService.create).toHaveBeenCalledWith(
         'detect-language',
         expect.any(String),
         expect.objectContaining({ resourceId: 1 }),
+        { ownerPrincipal: '42' },
       );
     });
 
     it('should throw NotFoundException if resource not found', async () => {
       repo.findOne.mockResolvedValue(null);
-      await expect(service.confirmExtraction(999)).rejects.toThrow(
+      await expect(service.confirmExtraction(999, { ownerPrincipal: '42' })).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it('should throw if resource is not in extracted state', async () => {
       repo.findOne.mockResolvedValue(buildResource({ status: 'extracting' }));
-      await expect(service.confirmExtraction(1)).rejects.toThrow(HttpException);
+      await expect(service.confirmExtraction(1, { ownerPrincipal: '42' })).rejects.toThrow(HttpException);
     });
   });
 

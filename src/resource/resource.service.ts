@@ -388,7 +388,8 @@ export class ResourceService {
 
   async confirmExtraction(
     id: number,
-  ): Promise<{ success: boolean; message: string }> {
+    scope: ExecutionAccessScope,
+  ): Promise<{ success: boolean; message: string; executionId: string }> {
     const resource = await this.findOne(id);
     if (!resource) {
       throw new NotFoundException('Resource not found');
@@ -404,17 +405,19 @@ export class ResourceService {
 
     const content = await this.getContentById(id);
     const samples = this.extractTextSamples(content);
-    await this.executionService.create(
+    const execution = await this.executionService.create(
       'detect-language',
       ExecutionPriority.NORMAL,
       {
         resourceId: id,
         samples,
       },
+      { ownerPrincipal: scope.ownerPrincipal },
     );
 
     return {
       success: true,
+      executionId: execution.executionId,
       message:
         'Resource extraction confirmed and language detection execution created',
     };

@@ -5,6 +5,8 @@ export class IndexedFileDto {
   filename: string;
   mimeType: string;
   size: number;
+  checksum: string;
+  isIndexed: boolean;
   mtime: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -18,6 +20,8 @@ export function toIndexedFileDto(entity: IndexedFileEntity): IndexedFileDto {
     filename: entity.filename,
     mimeType: entity.mimeType,
     size: typeof entity.size === 'string' ? Number(entity.size) : entity.size,
+    checksum: entity.checksum,
+    isIndexed: entity.embeddingId !== null,
     mtime: entity.mtime,
     createdAt: entity.createdAt,
     updatedAt: entity.updatedAt,
