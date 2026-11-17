@@ -1,3 +1,4 @@
+import { EXECUTION_UUID_PATTERN } from '../execution/execution.constants';
 import { Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
@@ -102,11 +103,15 @@ export class VoiceGateway
 
   private reject(client: Socket) {
     this.logger.warn('Voice connection authorization failed');
+    client.emit('voice:error', { message: 'Voice session is unavailable' });
     this.handleDisconnect(client);
     client.disconnect(true);
   }
 
-  private authorized(client: Socket, action: () => void): Promise<void> {
+  private authorized(
+    client: Socket,
+    action: () => void | Promise<void>,
+  ): Promise<void> {
     const connection = this.connections.get(client);
     if (!connection || !client.connected || connection.queued >= 32) {
       this.reject(client);
@@ -123,7 +128,7 @@ export class VoiceGateway
         if (!client.connected || this.connections.get(client) !== connection)
           return;
         if (identity.principal !== connection.principal) throw new Error();
-        action();
+        await action();
       })
       .catch(() => this.reject(client))
       .finally(() => {
@@ -133,8 +138,30 @@ export class VoiceGateway
   }
 
   @SubscribeMessage('voice:start')
-  async onStart(@ConnectedSocket() client: Socket): Promise<void> {
-    await this.authorized(client, () => this.voice.startSession(client));
+  async onStart(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() input?: { requestId?: string },
+  ): Promise<void> {
+    if (
+      input !== undefined &&
+      (!input ||
+        typeof input !== 'object' ||
+        Array.isArray(input) ||
+        Object.keys(input).some((key) => key !== 'requestId') ||
+        (input.requestId !== undefined &&
+          (typeof input.requestId !== 'string' ||
+            !EXECUTION_UUID_PATTERN.test(input.requestId))))
+    ) {
+      this.reject(client);
+      return;
+    }
+    await this.authorized(client, () =>
+      this.voice.startSession(
+        client,
+        this.connections.get(client).principal,
+        input?.requestId,
+      ),
+    );
   }
 
   @SubscribeMessage('voice:chunk')

@@ -381,6 +381,7 @@ export interface ContextInputReducePayload extends FinalizerIdentity {
 }
 
 interface StaticExecutionPayloadByTaskType {
+  'voice-dictation': { requestId: string };
   ask: AskExecutionPayload;
   'browser-inference': BrowserInferenceExecutionPayload;
   summarize: SummarizeExecutionPayload;

@@ -3,7 +3,7 @@ import { config as loadEnv } from 'dotenv';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { CreateProjects1757668140000 } from '../../migrations/1757668140000-CreateProjects';
 import { CreateExecutions1757668140001 } from '../../migrations/1757668140001-CreateExecutions';
 import { CreateWorkers1757668140002 } from '../../migrations/1757668140002-CreateWorkers';
@@ -78,7 +78,12 @@ loadEnv({ path: '.env' });
 export const TEST_RUNTIME_FINGERPRINT = `sha256:${'a'.repeat(64)}`;
 export const TEST_CODE_FINGERPRINT = `sha256:${'b'.repeat(64)}`;
 
-export function createExecutionFixture() {
+export function createExecutionFixture(
+  options: {
+    entities?: Array<new () => object>;
+    prepare?: (runner: QueryRunner) => Promise<void>;
+  } = {},
+) {
   const schema = `execution_test_${randomUUID().replaceAll('-', '_')}`;
 
   let dataSource: DataSource;
@@ -142,7 +147,8 @@ export function createExecutionFixture() {
         MemoryEntryEntity,
         SkillActivationEntity,
         ExecutionEffectJournalEntity,
-      ],
+        ...(options.entities ?? []),
+      ].filter((entity, index, all) => all.indexOf(entity) === index),
     });
     await dataSource.initialize();
     const runner = dataSource.createQueryRunner();
@@ -175,6 +181,7 @@ export function createExecutionFixture() {
     await new CreateSkillActivations1757668140750().up(runner);
     await new CreateExecutionEffectJournal1757668140760().up(runner);
     await new AddExecutionTraceContext1794650000000().up(runner);
+    await options.prepare?.(runner);
     await runner.query(`
       INSERT INTO "assistants" ("id", "name", "icon", "sub", "owner_principal")
       VALUES (1, 'Assistant', '◇', 'Personal assistant', 'standalone')

@@ -1,3 +1,21 @@
+import { ConflictException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { ExecutionStreamService } from '../execution/execution-stream.service';
+import { ExecutionStatus } from '../execution/execution-status.enum';
+import { ExecutionEntity } from '../execution/execution.entity';
+import { redactExecutionText } from '../execution/execution-data-policy';
+
+interface VoiceSession {
+  client: Socket;
+  requestId: string;
+  ownerPrincipal: string;
+  executionId?: string;
+  terminal: boolean;
+  chunks: number;
+  audioBytes: number;
+  pending: Promise<unknown>;
+}
+
 import {
   Injectable,
   Logger,
@@ -39,10 +57,15 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   private workers: WorkerSlot[] = [];
   private queue: QueueEntry[] = [];
   private stopping = false;
+  private readonly sessions = new Map<string, VoiceSession>();
+  private readonly pendingRecords = new Set<Promise<unknown>>();
   /** Initial heuristic for average session duration, in seconds. */
   private avgSessionSec = 60;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly records: ExecutionStreamService,
+  ) {
     this.workers = this.discoverWorkers();
   }
 
@@ -80,38 +103,171 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       this.emitError(entry.client, 'backend shutdown');
     }
     this.queue = [];
+    await Promise.all([...this.pendingRecords]);
+    await Promise.all(
+      [...this.sessions.values()].map((session) =>
+        this.finish(session, ExecutionStatus.FAILED, 'voice_shutdown').catch(
+          () => undefined,
+        ),
+      ),
+    );
   }
 
-  startSession(client: Socket): void {
+  async startSession(
+    client: Socket,
+    ownerPrincipal: string,
+    requestId?: string,
+  ): Promise<void> {
     if (this.stopping || !client.connected) return;
-    if (this.findWorkerByClient(client.id)) return;
-    if (this.findQueueEntry(client.id)) return;
-
-    const free = this.workers.find((w) => w.status === 'free');
-    if (free) {
-      this.assignWorker(free, client);
+    const previous = this.sessions.get(client.id);
+    if (previous) {
+      if (requestId && requestId !== previous.requestId)
+        throw new ConflictException('Voice connection already has a session');
+      await previous.pending;
+      client.emit(
+        'voice:accepted',
+        await this.records.read(previous.requestId, 'voice-dictation', {
+          ownerPrincipal,
+        }),
+      );
       return;
     }
-    this.enqueue(client);
+    const session: VoiceSession = {
+      client,
+      requestId: requestId ?? randomUUID(),
+      ownerPrincipal,
+      terminal: false,
+      chunks: 0,
+      audioBytes: 0,
+      pending: Promise.resolve(),
+    };
+    this.sessions.set(client.id, session);
+    session.pending = this.records.open(
+      'voice-dictation',
+      { requestId: session.requestId },
+      session.requestId,
+      { ownerPrincipal },
+      ['stream.input_not_captured', 'stream.engine_not_reported'],
+    );
+    const receipt = (await session.pending) as Awaited<
+      ReturnType<ExecutionStreamService['open']>
+    >;
+    session.executionId = receipt.executionId;
+    client.emit('voice:accepted', { requestId: session.requestId, ...receipt });
+    if (!receipt.claimed) {
+      session.terminal = true;
+      return;
+    }
+    if (!client.connected || this.stopping) {
+      await this.finish(session, ExecutionStatus.FAILED, 'voice_disconnected');
+      return;
+    }
+    const queued = await this.persist(
+      session,
+      ExecutionStatus.RUNNING,
+      'voice_queued',
+    );
+    if (
+      !client.connected ||
+      session.terminal ||
+      queued.status !== ExecutionStatus.RUNNING
+    ) {
+      await this.finish(session, ExecutionStatus.FAILED, 'voice_disconnected');
+      return;
+    }
+    const free = this.workers.find((w) => w.status === 'free');
+    if (free) this.assignWorker(free, client);
+    else this.enqueue(client);
   }
 
-  pushChunk(client: Socket, chunk: ArrayBuffer | Buffer): void {
+  private persist(
+    session: VoiceSession,
+    status: ExecutionStatus,
+    phase: string,
+    result?: Record<string, unknown>,
+  ): Promise<ExecutionEntity> {
+    const next = session.pending.then(() =>
+      this.records.record(
+        session.executionId,
+        'voice-dictation',
+        { ownerPrincipal: session.ownerPrincipal },
+        status,
+        phase,
+        result,
+      ),
+    );
+    session.pending = next;
+    return next;
+  }
+
+  private async finish(
+    session: VoiceSession,
+    status: ExecutionStatus,
+    reason: string,
+    text?: string,
+  ) {
+    if (session.terminal) return;
+    await session.pending;
+    if (!session.executionId) return;
+    const sanitized =
+      text === undefined ? undefined : redactExecutionText(text);
+    const row = await this.persist(session, status, reason, {
+      chunks: session.chunks,
+      audioBytes: session.audioBytes,
+      ...(text === undefined
+        ? {}
+        : { text: sanitized, redactionApplied: sanitized !== text }),
+    });
+    session.terminal = ['completed', 'failed', 'cancelled'].includes(
+      row.status,
+    );
+    return row;
+  }
+
+  async pushChunk(client: Socket, chunk: ArrayBuffer | Buffer): Promise<void> {
+    const session = this.sessions.get(client.id);
+    if (!session || session.terminal || !session.executionId) return;
+    const current = await this.records.read(
+      session.requestId,
+      'voice-dictation',
+      { ownerPrincipal: session.ownerPrincipal },
+    );
+    if (current.status !== ExecutionStatus.RUNNING) {
+      this.releaseIfHolding(client);
+      return;
+    }
     const worker = this.findWorkerByClient(client.id);
     if (!worker?.ws || worker.ws.readyState !== WebSocket.OPEN) return;
     const buf = Buffer.isBuffer(chunk)
       ? chunk
       : Buffer.from(chunk as ArrayBuffer);
+    session.chunks++;
+    session.audioBytes += buf.length;
     worker.ws.send(buf, { binary: true });
   }
 
-  stopSession(client: Socket): void {
+  async stopSession(client: Socket): Promise<void> {
+    const session = this.sessions.get(client.id);
+    if (!session || session.terminal) return;
+    const row = await this.persist(
+      session,
+      ExecutionStatus.RUNNING,
+      'voice_stopping',
+    );
+    if (row.status !== ExecutionStatus.RUNNING) {
+      this.releaseIfHolding(client);
+      return;
+    }
     const worker = this.findWorkerByClient(client.id);
     if (!worker?.ws || worker.ws.readyState !== WebSocket.OPEN) return;
     worker.ws.send(JSON.stringify({ type: 'stop' }));
     // The partial with isFinal: true closes the cycle and releases the slot.
   }
 
-  cancelSession(client: Socket): void {
+  async cancelSession(client: Socket): Promise<void> {
+    const session = this.sessions.get(client.id);
+    if (session)
+      await this.finish(session, ExecutionStatus.CANCELLED, 'voice_cancelled');
     const entryIdx = this.queue.findIndex((e) => e.client.id === client.id);
     if (entryIdx >= 0) {
       this.queue.splice(entryIdx, 1);
@@ -131,6 +287,19 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   }
 
   releaseIfHolding(client: Socket): void {
+    const session = this.sessions.get(client.id);
+    this.sessions.delete(client.id);
+    if (session) {
+      const closing = this.finish(
+        session,
+        ExecutionStatus.FAILED,
+        'voice_disconnected',
+      ).catch(() =>
+        this.emitError(client, 'Voice state could not be confirmed'),
+      );
+      this.pendingRecords.add(closing);
+      void closing.finally(() => this.pendingRecords.delete(closing));
+    }
     const entryIdx = this.queue.findIndex((e) => e.client.id === client.id);
     if (entryIdx >= 0) {
       this.queue.splice(entryIdx, 1);
@@ -173,12 +342,18 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     // Reserve synchronously: another start/queue promotion cannot select it.
     worker.status = 'connecting';
     worker.clientId = client.id;
+    const session = this.sessions.get(client.id);
     let ws: WebSocket;
     try {
       ws = this.openWorkerWs(worker.port);
     } catch {
       worker.status = 'down';
       worker.clientId = null;
+      void this.finish(
+        session,
+        ExecutionStatus.FAILED,
+        'voice_worker_unavailable',
+      ).catch(() => undefined);
       this.emitError(client, 'Could not contact voice worker');
       this.processQueue();
       return;
@@ -186,39 +361,90 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     worker.ws = ws;
     const owns = () => worker.ws === ws && worker.clientId === client.id;
     ws.on('open', () => {
-      if (!owns() || worker.status !== 'connecting') return;
-      if (!client.connected || this.stopping) {
-        this.releaseWorker(worker, 'client-disconnect');
+      void (async () => {
+        if (!owns() || worker.status !== 'connecting') return;
+        if (!client.connected || this.stopping) {
+          this.releaseWorker(worker, 'client-disconnect');
+          return;
+        }
+        const state = await this.persist(
+          session,
+          ExecutionStatus.RUNNING,
+          'voice_assigned',
+        );
+        if (
+          !owns() ||
+          !client.connected ||
+          session.terminal ||
+          state.status !== ExecutionStatus.RUNNING
+        ) {
+          this.releaseWorker(worker, 'voice_inactive');
+          return;
+        }
+        worker.status = 'busy';
+        client.emit('voice:ready');
+        client.emit('voice:assigned');
+        this.logger.log(
+          `assigned port=${worker.port} client=${client.id} queue=${this.queue.length}`,
+        );
+      })().catch(() => {
+        this.releaseWorker(worker, 'persistence_failed');
+        this.emitError(client, 'Voice state could not be confirmed');
+      });
+    });
+    let output = Promise.resolve();
+    let pendingOutput = 0;
+    ws.on('message', (data, isBinary) => {
+      if (!owns() || worker.status !== 'busy' || !client.connected) return;
+      if (++pendingOutput > 32) {
+        this.releaseWorker(worker, 'worker_output_limit');
         return;
       }
-      worker.status = 'busy';
-      client.emit('voice:ready');
-      client.emit('voice:assigned');
-      this.logger.log(
-        `assigned port=${worker.port} client=${client.id} queue=${this.queue.length}`,
-      );
-    });
-    ws.on('message', (data, isBinary) => {
-      if (owns() && worker.status === 'busy' && client.connected) {
-        this.onWorkerMessage(worker, client, data, isBinary);
-      }
+      output = output
+        .then(() => this.onWorkerMessage(worker, client, data, isBinary))
+        .catch(async () => {
+          await this.finish(
+            session,
+            ExecutionStatus.FAILED,
+            'voice_result_unconfirmed',
+          ).catch(() => undefined);
+          this.releaseWorker(worker, 'result_unconfirmed');
+          this.emitError(client, 'Voice result could not be confirmed');
+        })
+        .finally(() => {
+          pendingOutput--;
+        });
     });
     ws.on('error', () => {
       if (!owns()) return;
       worker.status = 'down';
+      void this.finish(
+        session,
+        ExecutionStatus.FAILED,
+        'voice_worker_error',
+      ).catch(() => undefined);
       this.emitError(client, 'Voice worker connection failed');
       this.releaseWorker(worker, 'worker-error');
     });
     ws.on('close', () => {
-      if (worker.ws !== ws) return;
-      worker.ws = null;
-      worker.clientId = null;
-      if (worker.status !== 'down') worker.status = 'free';
-      ws.removeAllListeners();
-      this.logger.log(
-        `released port=${worker.port} client=${client.id} queue=${this.queue.length}`,
-      );
-      this.processQueue();
+      // The peer may close immediately after its final frame. Persist already
+      // received output in order before deciding that the stream was lost.
+      void output.then(async () => {
+        if (worker.ws !== ws) return;
+        await this.finish(
+          session,
+          ExecutionStatus.FAILED,
+          'voice_worker_closed',
+        ).catch(() => undefined);
+        worker.ws = null;
+        worker.clientId = null;
+        if (worker.status !== 'down') worker.status = 'free';
+        ws.removeAllListeners();
+        this.logger.log(
+          `released port=${worker.port} client=${client.id} queue=${this.queue.length}`,
+        );
+        this.processQueue();
+      });
     });
   }
 
@@ -253,13 +479,15 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     this.notifyQueuePositions();
   }
 
-  private onWorkerMessage(
+  private async onWorkerMessage(
     worker: WorkerSlot,
     client: Socket,
     data: WebSocket.RawData,
     isBinary: boolean,
   ) {
     if (isBinary) return;
+    const session = this.sessions.get(client.id);
+    if (!session || session.terminal) return;
     let payload: {
       type?: string;
       text?: string;
@@ -269,10 +497,41 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     try {
       payload = JSON.parse(data.toString());
     } catch {
-      this.logger.warn(`Worker port=${worker.port} sent non-JSON text frame`);
-      return;
+      throw new Error('Invalid voice worker response');
     }
-    if (payload.type === 'partial') {
+    if (payload?.type === 'partial') {
+      if (
+        typeof payload.text !== 'string' ||
+        typeof payload.isFinal !== 'boolean' ||
+        Buffer.byteLength(payload.text) > 1024 * 1024
+      )
+        throw new Error('Invalid voice result');
+      if (payload.isFinal) {
+        const row = await this.finish(
+          session,
+          ExecutionStatus.COMPLETED,
+          'voice_final',
+          payload.text,
+        );
+        if (
+          !row ||
+          row.status !== ExecutionStatus.COMPLETED ||
+          !client.connected
+        ) {
+          this.releaseWorker(worker, 'voice_inactive');
+          return;
+        }
+      } else {
+        const state = await this.records.read(
+          session.requestId,
+          'voice-dictation',
+          { ownerPrincipal: session.ownerPrincipal },
+        );
+        if (state.status !== ExecutionStatus.RUNNING || !client.connected) {
+          this.releaseIfHolding(client);
+          return;
+        }
+      }
       client.emit('voice:partial', {
         text: payload.text ?? '',
         isFinal: !!payload.isFinal,
@@ -282,8 +541,9 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       }
       return;
     }
-    if (payload.type === 'error') {
-      this.emitError(client, payload.message || 'unknown worker error');
+    if (payload?.type === 'error') {
+      await this.finish(session, ExecutionStatus.FAILED, 'voice_worker_error');
+      this.emitError(client, 'Voice worker failed');
       this.releaseWorker(worker, 'worker-error');
     }
   }

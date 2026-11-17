@@ -1,3 +1,4 @@
+import { ExecutionStreamService } from './execution-stream.service';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { ExecutionController } from './execution.controller';
@@ -28,6 +29,7 @@ import { ExecutionCompletionValidator } from './execution-completion-validator';
   ],
   providers: [
     ExecutionService,
+    ExecutionStreamService,
     ExecutionConversationService,
     ExecutionContractValidator,
     ExecutionAttemptService,
@@ -42,6 +44,7 @@ import { ExecutionCompletionValidator } from './execution-completion-validator';
   ],
   exports: [
     ExecutionService,
+    ExecutionStreamService,
     ExecutionContractValidator,
     ExecutionAttemptService,
     ExecutionToolPlanService,

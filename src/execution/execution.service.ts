@@ -138,7 +138,8 @@ export interface CreateExecutionOptions {
   parentExecutionId?: string;
   childIdempotencyKey?: string;
   ownerPrincipal?: string;
-  initialStep?: Omit<CreateExecutionStepInput, 'executionId'>;
+  // A null initial step records an externally driven execution without queue work.
+  initialStep?: Omit<CreateExecutionStepInput, 'executionId'> | null;
   steps?: Array<Omit<CreateExecutionStepInput, 'executionId'>>;
   inputArtifacts?: Array<{
     role: string;
@@ -903,15 +904,19 @@ export class ExecutionService {
         eventRoot.lastEventId = executionEvent.eventId;
         await executionRepo.save(eventRoot);
       }
-      const steps = options?.steps ?? [
-        {
-          stepKind: ExecutionStepKind.SERVICE,
-          work: executionTaskWork(taskType, effectivePayload),
-          requiredCapabilities: [taskType],
-          priority: EXECUTION_STEP_PRIORITY[priority],
-          ...options?.initialStep,
-        },
-      ];
+      const steps =
+        options?.steps ??
+        (options?.initialStep === null
+          ? []
+          : [
+              {
+                stepKind: ExecutionStepKind.SERVICE,
+                work: executionTaskWork(taskType, effectivePayload),
+                requiredCapabilities: [taskType],
+                priority: EXECUTION_STEP_PRIORITY[priority],
+                ...options?.initialStep,
+              },
+            ]);
       for (const [index, step] of steps.entries()) {
         await createExecutionStep(manager, {
           ...step,
@@ -1172,9 +1177,11 @@ export class ExecutionService {
       completionReason?: string;
       cancellationReason?: string;
       publication?: ExecutionPublication;
+      phase?: string;
     },
+    manager?: EntityManager,
   ): Promise<ExecutionEntity | null> {
-    return this.dataSource.transaction(async (manager) => {
+    const transition = async (manager: EntityManager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
       const eventRepo = manager.getRepository(ExecutionEventEntity);
       const execution = await executionRepo.findOne({
@@ -1182,7 +1189,11 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) return null;
-      if (execution.status === status) return execution;
+      if (
+        execution.status === status &&
+        (options?.phase === undefined || options.phase === execution.phase)
+      )
+        return execution;
 
       const root =
         execution.rootExecutionId === execution.executionId
@@ -1208,6 +1219,7 @@ export class ExecutionService {
       if (status === ExecutionStatus.QUEUED) {
         execution.phase = null;
       }
+      if (options?.phase !== undefined) execution.phase = options.phase;
       if (TERMINAL_STATES.has(status)) {
         execution.completedAt = new Date();
         execution.phase = null;
@@ -1293,6 +1305,7 @@ export class ExecutionService {
           payload: {
             from: previousStatus,
             to: status,
+            phase: execution.phase ?? undefined,
             completionKind: TERMINAL_STATES.has(status)
               ? execution.completionKind
               : undefined,
@@ -1329,7 +1342,10 @@ export class ExecutionService {
         );
       }
       return execution;
-    });
+    };
+    return manager
+      ? transition(manager)
+      : this.dataSource.transaction(transition);
   }
 
   async markAsCompleted(

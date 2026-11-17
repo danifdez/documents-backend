@@ -1,3 +1,5 @@
+import { ExecutionModule } from '../execution/execution.module';
+import { VoiceController } from './voice.controller';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from '../auth/auth.module';
@@ -5,7 +7,8 @@ import { VoiceGateway } from './voice.gateway';
 import { VoiceService } from './voice.service';
 
 @Module({
-  imports: [ConfigModule, AuthModule],
+  imports: [ConfigModule, AuthModule, ExecutionModule],
+  controllers: [VoiceController],
   providers: [VoiceService, VoiceGateway],
   exports: [VoiceService],
 })

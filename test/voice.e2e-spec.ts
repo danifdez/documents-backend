@@ -1,3 +1,15 @@
+import { ExecutionRequestEntity } from '../src/execution/execution-request.entity';
+import { CreateExecutionRequests1794800000000 } from '../migrations/1794800000000-CreateExecutionRequests';
+import { createExecutionFixture } from './execution/fixture';
+import { ExecutionStreamService } from '../src/execution/execution-stream.service';
+import { ExecutionService } from '../src/execution/execution.service';
+import { VoiceController } from '../src/voice/voice.controller';
+import { ExecutionEntity } from '../src/execution/execution.entity';
+import { ExecutionEventEntity } from '../src/execution/execution-event.entity';
+import { ExecutionStepEntity } from '../src/execution/execution-step.entity';
+import { ExecutionStatus } from '../src/execution/execution-status.enum';
+import { DataSource } from 'typeorm';
+import { request as httpRequest } from 'http';
 import { Test } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -5,7 +17,7 @@ import { JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { createServer, Server as HttpServer } from 'http';
 import { AddressInfo } from 'net';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import * as WebSocket from 'ws';
 import { AuthService } from '../src/auth/auth.service';
 import { UserEntity } from '../src/auth/user.entity';
@@ -14,7 +26,8 @@ import { VoiceGateway } from '../src/voice/voice.gateway';
 import { VoiceService } from '../src/voice/voice.service';
 
 // Reuse the installed frontend client, like the existing voice smoke test.
-// No production dependency, database, model or real credentials are needed.
+// No production dependency, model or real credentials are needed.
+// Durable records use the existing fixture in an isolated PostgreSQL schema.
 import { io } from '../../frontend/node_modules/socket.io-client';
 
 const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +39,15 @@ async function until(condition: () => boolean) {
   }
 }
 
-describe('Voice authorization and exclusive reservations (simulated worker)', () => {
+describe('Voice authorization, reservations and durable recovery (simulated worker)', () => {
+  const fixture = createExecutionFixture({
+    entities: [ExecutionRequestEntity],
+    prepare: async (runner) => {
+      if (!(await runner.hasTable('execution_requests'))) {
+        await new CreateExecutionRequests1794800000000().up(runner);
+      }
+    },
+  });
   let app: INestApplication;
   let worker: HttpServer;
   let wss: WebSocket.Server;
@@ -77,6 +98,7 @@ describe('Voice authorization and exclusive reservations (simulated worker)', ()
   }
 
   beforeEach(async () => {
+    await fixture().dataSource.getRepository(ExecutionRequestEntity).clear();
     held = [];
     hold = false;
     upgrades = active = maximum = 0;
@@ -132,7 +154,11 @@ describe('Voice authorization and exclusive reservations (simulated worker)', ()
     };
     jwt = new JwtService({ secret: randomBytes(32).toString('hex') });
     const module = await Test.createTestingModule({
+      controllers: [VoiceController],
       providers: [
+        { provide: DataSource, useValue: fixture().dataSource },
+        { provide: ExecutionService, useValue: fixture().service },
+        ExecutionStreamService,
         VoiceGateway,
         VoiceService,
         AuthService,
@@ -290,8 +316,9 @@ describe('Voice authorization and exclusive reservations (simulated worker)', ()
     await until(() => a.connected && b.connected);
     a.emit('voice:start');
     a.emit('voice:start');
+    await until(() => held.length === 1);
     b.emit('voice:start');
-    await until(() => held.length === 1 && count(b, 'voice:queued') > 0);
+    await until(() => count(b, 'voice:queued') > 0);
     expect(upgrades).toBe(1);
     hold = false;
     held.splice(0).forEach((fn) => fn());
@@ -415,6 +442,396 @@ describe('Voice authorization and exclusive reservations (simulated worker)', ()
     await pause();
     expect(upgrades).toBe(1);
     expect(count(b, 'voice:ready')).toBe(0);
+  });
+
+  const receipt = (s: any) =>
+    s.events.find((e: any) => e.event === 'voice:accepted')?.data;
+  const scope = { ownerPrincipal: '1' };
+  async function start(s: any, id: string) {
+    await until(() => s.connected);
+    s.emit('voice:start', { requestId: id });
+    await until(() => !!receipt(s));
+    return receipt(s);
+  }
+  async function readRequest(id: string, idToken = token()) {
+    return new Promise<{ status: number; body: any }>((resolve, reject) => {
+      const req = httpRequest(
+        url.replace(/\/voice$/, '') + '/voice/requests/' + id,
+        { headers: { Authorization: 'Bearer ' + idToken } },
+        (res) => {
+          let raw = '';
+          res.on('data', (b) => (raw += b.toString()));
+          res.on('end', () =>
+            resolve({ status: res.statusCode, body: JSON.parse(raw) }),
+          );
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  it('recovers a lost acceptance without a second worker', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    const first = receipt(s);
+    s.events = s.events.filter((e: any) => e.event !== 'voice:accepted');
+    s.emit('voice:start', { requestId: id });
+    await until(() => !!receipt(s));
+    expect(receipt(s).executionId).toBe(first.executionId);
+    expect(upgrades).toBe(1);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEntity).count(),
+    ).toBe(1);
+  });
+
+  it('deduplicates sockets sharing one request', async () => {
+    const id = randomUUID(),
+      a = connect(token()),
+      b = connect(token());
+    await until(() => a.connected && b.connected);
+    a.emit('voice:start', { requestId: id });
+    b.emit('voice:start', { requestId: id });
+    await until(() => !!receipt(a) && !!receipt(b));
+    await until(() => count(a, 'voice:ready') + count(b, 'voice:ready') === 1);
+    expect(receipt(a).executionId).toBe(receipt(b).executionId);
+    expect(upgrades).toBe(1);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEntity).count(),
+    ).toBe(1);
+  });
+
+  it('recovers a lost final through HTTP without duplicate work', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    const accepted = await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    s.emit('voice:chunk', Buffer.from('preserved'));
+    s.emit('voice:stop');
+    await until(() =>
+      s.events.some((e: any) => e.event === 'voice:partial' && e.data.isFinal),
+    );
+    s.disconnect();
+    await until(() => active === 0);
+    const ds = fixture().dataSource,
+      events = ds.getRepository(ExecutionEventEntity);
+    const before = await events.count();
+    const reader = new ExecutionStreamService(ds, fixture().service);
+    for (let n = 0; n < 3; n++) {
+      const state = await readRequest(id);
+      expect(state.status).toBe(200);
+      expect(state.body.executionId).toBe(accepted.executionId);
+      expect(state.body.result).toMatchObject({
+        text: 'preserved',
+        chunks: 1,
+        audioBytes: 9,
+      });
+      expect((await reader.read(id, 'voice-dictation', scope)).status).toBe(
+        'completed',
+      );
+    }
+    const reconnect = connect(token());
+    await start(reconnect, id);
+    await pause();
+    expect(count(reconnect, 'voice:ready')).toBe(0);
+    expect(upgrades).toBe(1);
+    expect(await events.count()).toBe(before);
+    expect(await ds.getRepository(ExecutionEntity).count()).toBe(1);
+    expect(await ds.getRepository(ExecutionStepEntity).count()).toBe(0);
+    const bundle = await fixture().service.exportBundle(
+      accepted.executionId,
+      scope,
+      true,
+    );
+    expect(
+      (bundle.bundleCompleteness as { missing: string[] }).missing,
+    ).toEqual(
+      expect.arrayContaining([
+        'stream.input_not_captured',
+        'stream.engine_not_reported',
+      ]),
+    );
+    expect(
+      await fixture().service.readEvents(accepted.executionId, scope),
+    ).toMatchObject({ hasMore: false });
+  });
+
+  it('enforces HTTP ownership, authentication and export consent', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    const accepted = await start(s, id);
+    expect((await readRequest(id, token(2))).status).toBe(404);
+    expect((await readRequest(id, 'invalid')).status).toBe(401);
+    users.get(1).permissions.ask = false;
+    expect((await readRequest(id)).status).toBe(401);
+    await expect(
+      fixture().service.exportBundle(
+        accepted.executionId,
+        { ownerPrincipal: '2' },
+        true,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fixture().service.exportBundle(accepted.executionId, scope, false),
+    ).rejects.toThrow();
+  });
+
+  it('keeps separate owned executions when two users choose the same UUID', async () => {
+    const id = randomUUID(),
+      a = connect(token()),
+      b = connect(token(2));
+    const first = await start(a, id),
+      second = await start(b, id);
+    expect(first.executionId).not.toBe(second.executionId);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEntity).count(),
+    ).toBe(2);
+    expect((await readRequest(id, token(2))).body.executionId).toBe(
+      second.executionId,
+    );
+  });
+
+  it('records disconnect without replay on reconnect', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    s.disconnect();
+    await until(() => active === 0);
+    await until(() => !s.connected);
+    const records = app.get(ExecutionStreamService);
+    for (let n = 0; n < 30; n++) {
+      if (
+        (await records.read(id, 'voice-dictation', scope)).status === 'failed'
+      )
+        break;
+      await pause();
+    }
+    expect((await records.read(id, 'voice-dictation', scope)).status).toBe(
+      'failed',
+    );
+    const s2 = connect(token());
+    await start(s2, id);
+    await pause();
+    expect(count(s2, 'voice:ready')).toBe(0);
+    expect(upgrades).toBe(1);
+  });
+
+  it('keeps cancellation terminal despite a late final', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    const accepted = await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    s.emit('voice:cancel');
+    await until(() => active === 0);
+    const records = app.get(ExecutionStreamService);
+    const state = await records.read(id, 'voice-dictation', scope);
+    expect(state.status).toBe('cancelled');
+    const before = await fixture()
+      .dataSource.getRepository(ExecutionEventEntity)
+      .count();
+    await records.record(
+      accepted.executionId,
+      'voice-dictation',
+      scope,
+      ExecutionStatus.COMPLETED,
+      'voice_final',
+      { text: 'late' },
+    );
+    expect((await records.read(id, 'voice-dictation', scope)).status).toBe(
+      'cancelled',
+    );
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEventEntity).count(),
+    ).toBe(before);
+  });
+
+  it('honors common execution cancellation before forwarding more audio', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    const accepted = await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    await fixture().service.requestCancellation(accepted.executionId, scope);
+    s.emit('voice:chunk', Buffer.from('must-not-run'));
+    await until(() => active === 0);
+    expect(packets).toEqual([]);
+    expect((await readRequest(id)).body.status).toBe('cancelled');
+  });
+
+  it('does not allow another task to reuse a voice request identity', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    await start(s, id);
+    const records = app.get(ExecutionStreamService);
+    await expect(
+      records.open('voice-dictation', { requestId: randomUUID() }, id, scope),
+    ).rejects.toThrow();
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEntity).count(),
+    ).toBe(1);
+  });
+
+  it('keeps a persisted final when its database confirmation is lost', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    const accepted = await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    const records = app.get(ExecutionStreamService),
+      original = records.record.bind(records);
+    let lost = false;
+    const fault = jest
+      .spyOn(records, 'record')
+      .mockImplementation(
+        async (...args: Parameters<ExecutionStreamService['record']>) => {
+          const row = await original(...args);
+          if (args[3] === ExecutionStatus.COMPLETED && !lost) {
+            lost = true;
+            throw new Error('Simulated lost commit confirmation');
+          }
+          return row;
+        },
+      );
+    s.emit('voice:chunk', Buffer.from('confirmed'));
+    s.emit('voice:stop');
+    await until(() => lost && active === 0);
+    expect(
+      s.events.some((e: any) => e.event === 'voice:partial' && e.data.isFinal),
+    ).toBe(false);
+    const state = await readRequest(id);
+    expect(state.body).toMatchObject({
+      executionId: accepted.executionId,
+      status: 'completed',
+      result: { text: 'confirmed' },
+    });
+    const before = await fixture()
+      .dataSource.getRepository(ExecutionEventEntity)
+      .count();
+    for (let n = 0; n < 3; n++)
+      expect((await readRequest(id)).body.status).toBe('completed');
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEventEntity).count(),
+    ).toBe(before);
+    expect(upgrades).toBe(1);
+    fault.mockRestore();
+  });
+
+  it('persists the final before handling the immediate worker close', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    const ws = [...wss.clients][0];
+    ws.send(
+      JSON.stringify({
+        type: 'partial',
+        text: 'final-before-close',
+        isFinal: true,
+      }),
+    );
+    ws.close();
+    await until(() =>
+      s.events.some((e: any) => e.event === 'voice:partial' && e.data.isFinal),
+    );
+    expect((await readRequest(id)).body).toMatchObject({
+      status: 'completed',
+      result: { text: 'final-before-close' },
+    });
+    expect(upgrades).toBe(1);
+  });
+
+  it('does not create new events when the same terminal publication is repeated', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    const accepted = await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    s.emit('voice:stop');
+    await until(() =>
+      s.events.some((e: any) => e.event === 'voice:partial' && e.data.isFinal),
+    );
+    const records = app.get(ExecutionStreamService),
+      state = await records.read(id, 'voice-dictation', scope);
+    const before = await fixture()
+      .dataSource.getRepository(ExecutionEventEntity)
+      .count();
+    for (let n = 0; n < 3; n++)
+      await records.record(
+        accepted.executionId,
+        'voice-dictation',
+        scope,
+        ExecutionStatus.COMPLETED,
+        'voice_final',
+        state.result as Record<string, unknown>,
+      );
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEventEntity).count(),
+    ).toBe(before);
+    await expect(
+      records.record(
+        accepted.executionId,
+        'voice-dictation',
+        scope,
+        ExecutionStatus.COMPLETED,
+        'voice_final',
+        { text: 'different' },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('records worker failure without exposing its private diagnostic', async () => {
+    const id = randomUUID(),
+      s = connect(token());
+    await start(s, id);
+    await until(() => count(s, 'voice:ready') === 1);
+    [...wss.clients][0].send(
+      JSON.stringify({ type: 'error', message: 'PRIVATE_WORKER_DETAILS' }),
+    );
+    await until(() => active === 0);
+    const state = await readRequest(id);
+    expect(state.body.status).toBe('failed');
+    expect(JSON.stringify(state.body)).not.toContain('PRIVATE_WORKER_DETAILS');
+    expect(
+      s.events.some(
+        (e: any) =>
+          e.event === 'voice:error' && e.data.message === 'Voice worker failed',
+      ),
+    ).toBe(true);
+    expect(upgrades).toBe(1);
+  });
+
+  it('reports a safe start error before disconnecting if persistence fails', async () => {
+    const s = connect(token());
+    await until(() => s.connected);
+    const records = app.get(ExecutionStreamService);
+    const fault = jest
+      .spyOn(records, 'open')
+      .mockRejectedValueOnce(new Error('PRIVATE_STORAGE_DIAGNOSTIC'));
+    s.emit('voice:start', { requestId: randomUUID() });
+    await until(() => !s.connected);
+    expect(
+      s.events.some(
+        (e: any) =>
+          e.event === 'voice:error' &&
+          e.data.message === 'Voice session is unavailable',
+      ),
+    ).toBe(true);
+    expect(upgrades).toBe(0);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEntity).count(),
+    ).toBe(0);
+    fault.mockRestore();
+  });
+
+  it('rejects extra fields in voice start requests', async () => {
+    const s = connect(token());
+    await until(() => s.connected);
+    s.emit('voice:start', { requestId: randomUUID(), ownerPrincipal: 'other' });
+    await until(() => !s.connected);
+    expect(upgrades).toBe(0);
+    expect(
+      await fixture().dataSource.getRepository(ExecutionEntity).count(),
+    ).toBe(0);
   });
 
   it('bounds pending authorization work without accepting excess audio', async () => {
