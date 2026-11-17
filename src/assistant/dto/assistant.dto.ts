@@ -1,5 +1,6 @@
 import {
   IsDefined,
+  IsUUID,
   IsNotEmpty,
   IsString,
   MaxLength,
@@ -16,6 +17,10 @@ export class UpdateAssistantWorkingFolderDto {
 }
 
 export class SendMessageDto {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsUUID()
+  requestId?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(MAX_CHAT_MESSAGE_CHARS)

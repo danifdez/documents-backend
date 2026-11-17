@@ -125,6 +125,7 @@ export class AssistantService implements OnApplicationBootstrap {
     accessScope: ExecutionAccessScope = {
       ownerPrincipal: 'standalone',
     },
+    requestId?: string,
   ): Promise<{
     userMessage: AssistantMessageEntity;
     executionId: string;
@@ -147,11 +148,29 @@ export class AssistantService implements OnApplicationBootstrap {
           ownerId: assistantId,
           folderScope: assistant.folderScope,
         },
+        requestId,
       );
 
     return {
       userMessage: userMessage as AssistantMessageEntity,
       executionId: execution.executionId,
+    };
+  }
+
+  async readMessageRequest(
+    assistantId: number,
+    requestId: string,
+    ownerPrincipal: string,
+  ) {
+    await this.findOne(assistantId, ownerPrincipal);
+    const accepted = await this.executionService.readChatRequest(
+      requestId,
+      { ownerPrincipal },
+      assistantId,
+    );
+    return {
+      userMessage: accepted.userMessage,
+      executionId: accepted.execution.executionId,
     };
   }
 

@@ -7,6 +7,7 @@ import {
   Param,
   Query,
   ParseIntPipe,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AssistantService } from './assistant.service';
 import { AssistantEntity } from './assistant.entity';
@@ -69,6 +70,19 @@ export class AssistantController {
     });
   }
 
+  @Get(':id/messages/requests/:requestId')
+  readMessageRequest(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('requestId', new ParseUUIDPipe()) requestId: string,
+    @CurrentUser() user: unknown,
+  ) {
+    return this.service.readMessageRequest(
+      id,
+      requestId,
+      ownerPrincipalFromUser(user),
+    );
+  }
+
   @Post(':id/messages')
   async sendMessage(
     @Param('id', ParseIntPipe) id: number,
@@ -79,6 +93,6 @@ export class AssistantController {
     executionId: string;
   }> {
     const scope = this.executionService.resolveAccessScope(user);
-    return this.service.sendMessage(id, dto.content, scope);
+    return this.service.sendMessage(id, dto.content, scope, dto.requestId);
   }
 }

@@ -1,3 +1,6 @@
+import { lockExecutionRequest } from './execution-request';
+import { ExecutionRequestEntity } from './execution-request.entity';
+import { EXECUTION_UUID_PATTERN } from './execution.constants';
 import {
   BadRequestException,
   ConflictException,
@@ -392,6 +395,7 @@ export class ExecutionConversationService {
     message: string,
     scope: ExecutionAccessScope,
     payload: ChatCreationPayloadByKind[TExecutionKind],
+    requestId?: string,
   ): Promise<ChatExecutionAcceptance> {
     const executionId = randomUUID();
     const rootExecutionId = executionId;
@@ -410,6 +414,33 @@ export class ExecutionConversationService {
     }
 
     return this.dataSource.transaction(async (manager) => {
+      const acceptance =
+        requestId === undefined
+          ? null
+          : await lockExecutionRequest(manager, requestId, scope);
+      if (acceptance) {
+        const inputHash = canonicalHash({
+          operation: 'conversation-message',
+          executionKind,
+          ownerId,
+          message,
+        });
+        if (acceptance.inputHash && acceptance.inputHash !== inputHash) {
+          throw new ConflictException('execution_request_conflict');
+        }
+        if (acceptance.executionId) {
+          return this.acceptedChat(
+            manager,
+            acceptance.executionId,
+            scope,
+            executionKind,
+            ownerId,
+          );
+        }
+        if (acceptance.cancelRequested)
+          throw new ConflictException('execution_request_cancelled');
+        acceptance.inputHash = inputHash;
+      }
       const ownerConfig = await this.conversationOwnerConfig(
         manager,
         ownerType,
@@ -669,8 +700,72 @@ export class ExecutionConversationService {
           sourceEvent.eventId,
         );
       }
-      return { execution: await manager.save(execution), userMessage };
+      const saved = await manager.save(execution);
+      if (acceptance) {
+        acceptance.executionId = saved.executionId;
+        await manager.getRepository(ExecutionRequestEntity).save(acceptance);
+      }
+      return { execution: saved, userMessage };
     });
+  }
+
+  async readChatRequest(
+    requestId: string,
+    scope: ExecutionAccessScope,
+    assistantId: number,
+  ): Promise<ChatExecutionAcceptance> {
+    if (!EXECUTION_UUID_PATTERN.test(requestId))
+      throw new BadRequestException('Invalid execution request identity');
+    const receipt = await this.dataSource
+      .getRepository(ExecutionRequestEntity)
+      .findOneBy({ ownerPrincipal: scope.ownerPrincipal, requestId });
+    if (!receipt?.executionId)
+      throw new NotFoundException('Message request not found');
+    return this.acceptedChat(
+      this.dataSource.manager,
+      receipt.executionId,
+      scope,
+      'assistant_chat',
+      assistantId,
+    );
+  }
+
+  private async acceptedChat(
+    manager: EntityManager,
+    executionId: string,
+    scope: ExecutionAccessScope,
+    kind: keyof ChatCreationPayloadByKind,
+    ownerId: number,
+  ): Promise<ChatExecutionAcceptance> {
+    const execution = await manager.getRepository(ExecutionEntity).findOneBy({
+      executionId,
+      rootExecutionId: executionId,
+      ownerPrincipal: scope.ownerPrincipal,
+    });
+    const expectedType =
+      kind === 'assistant_chat' ? 'assistant-chat' : 'agent-chat';
+    if (
+      !execution ||
+      !execution.turnId ||
+      execution.taskType !== expectedType ||
+      Number(executionPayloadOwnerId(execution.payload)) !== ownerId
+    ) {
+      throw new NotFoundException('Message request not found');
+    }
+    const userMessage = await manager
+      .getRepository(
+        kind === 'assistant_chat' ? AssistantMessageEntity : AgentMessageEntity,
+      )
+      .findOneBy({
+        turnId: execution.turnId,
+        role: 'user',
+        ...(kind === 'assistant_chat'
+          ? { assistantId: ownerId }
+          : { agentId: ownerId }),
+      });
+    if (!userMessage)
+      throw new ConflictException('execution_request_unavailable');
+    return { execution, userMessage };
   }
 
   private async conversationOwnerConfig(

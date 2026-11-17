@@ -1,3 +1,5 @@
+import { ExecutionRequestEntity } from '../../src/execution/execution-request.entity';
+import { CreateExecutionRequests1794800000000 } from '../../migrations/1794800000000-CreateExecutionRequests';
 import { randomUUID } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import { mkdtemp, rm } from 'fs/promises';
@@ -124,6 +126,7 @@ export function createExecutionFixture(
       synchronize: false,
       entities: [
         ExecutionEntity,
+        ExecutionRequestEntity,
         ExecutionEventEntity,
         ExecutionArtifactEntity,
         ExecutionStepEntity,
@@ -181,6 +184,7 @@ export function createExecutionFixture(
     await new CreateSkillActivations1757668140750().up(runner);
     await new CreateExecutionEffectJournal1757668140760().up(runner);
     await new AddExecutionTraceContext1794650000000().up(runner);
+    await new CreateExecutionRequests1794800000000().up(runner);
     await options.prepare?.(runner);
     await runner.query(`
       INSERT INTO "assistants" ("id", "name", "icon", "sub", "owner_principal")
@@ -270,6 +274,7 @@ export function createExecutionFixture(
   beforeEach(async () => {
     await dataSource.query(`
       TRUNCATE TABLE
+        "execution_requests",
         "conversation_sessions",
         "executions",
         "assistant_messages",

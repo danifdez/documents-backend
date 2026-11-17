@@ -1,3 +1,4 @@
+import { lockExecutionRequest } from './execution-request';
 import {
   INFERENCE_EXCHANGE_KIND,
   inferenceCaptureAuthorization,
@@ -683,13 +684,23 @@ export class ExecutionService {
     message: string,
     scope: ExecutionAccessScope,
     payload: ChatCreationPayloadByKind[TExecutionKind],
+    requestId?: string,
   ): Promise<ChatExecutionAcceptance> {
     return this.conversations.createForChat(
       executionKind,
       message,
       scope,
       payload,
+      requestId,
     );
+  }
+
+  readChatRequest(
+    requestId: string,
+    scope: ExecutionAccessScope,
+    assistantId: number,
+  ) {
+    return this.conversations.readChatRequest(requestId, scope, assistantId);
   }
 
   async create<TTaskType extends ExecutionTaskType>(
@@ -716,7 +727,7 @@ export class ExecutionService {
             'Request identity requires an owned root execution',
           );
         }
-        acceptance = await this.lockRequest(manager, options.requestId, {
+        acceptance = await lockExecutionRequest(manager, options.requestId, {
           ownerPrincipal: options.ownerPrincipal,
         });
         const inputHash = canonicalDomainHash({
@@ -942,33 +953,6 @@ export class ExecutionService {
     });
   }
 
-  private async lockRequest(
-    manager: EntityManager,
-    requestId: string,
-    scope: ExecutionAccessScope,
-  ): Promise<ExecutionRequestEntity> {
-    if (!EXECUTION_UUID_PATTERN.test(requestId) || !scope.ownerPrincipal) {
-      throw new BadRequestException('Invalid execution request identity');
-    }
-    const repo = manager.getRepository(ExecutionRequestEntity);
-    await repo
-      .createQueryBuilder()
-      .insert()
-      .values({
-        ownerPrincipal: scope.ownerPrincipal,
-        requestId,
-        inputHash: null,
-        executionId: null,
-        cancelRequested: false,
-      })
-      .orIgnore()
-      .execute();
-    return repo.findOneOrFail({
-      where: { ownerPrincipal: scope.ownerPrincipal, requestId },
-      lock: { mode: 'pessimistic_write' },
-    });
-  }
-
   async readRequest(requestId: string, scope: ExecutionAccessScope) {
     if (!EXECUTION_UUID_PATTERN.test(requestId))
       throw new BadRequestException('Invalid execution request identity');
@@ -998,7 +982,7 @@ export class ExecutionService {
 
   async cancelRequest(requestId: string, scope: ExecutionAccessScope) {
     await this.dataSource.transaction(async (manager) => {
-      const acceptance = await this.lockRequest(manager, requestId, scope);
+      const acceptance = await lockExecutionRequest(manager, requestId, scope);
       acceptance.cancelRequested = true;
       await manager.getRepository(ExecutionRequestEntity).save(acceptance);
       if (acceptance.executionId) {

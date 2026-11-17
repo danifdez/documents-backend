@@ -273,6 +273,7 @@ describe('ExecutionService primitives', () => {
       'Hello',
       scope,
       payload,
+      undefined,
     );
   });
 
