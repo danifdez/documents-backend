@@ -3,6 +3,8 @@ import {
   Get,
   Post,
   Body,
+  Headers,
+  BadRequestException,
   Param,
   Delete,
   Patch,
@@ -21,6 +23,7 @@ import { DatasetService } from './dataset.service';
 import { DatasetQueryService, RecordFilter } from './dataset-query.service';
 import { DatasetCsvService } from './dataset-csv.service';
 import { DatasetExtractionService } from './dataset-extraction.service';
+import { authorizeInferenceCapture } from '../execution/inference-capture';
 import { ExecutionService } from '../execution/execution.service';
 import {
   CreateDatasetDto,
@@ -157,8 +160,22 @@ export class DatasetController {
 
   @Post(':id/extract')
   @RequirePermissions(Permission.DATASETS)
-  async extractAll(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: unknown) {
-    return this.extractionService.extractAll(id, this.executionService.resolveAccessScope(user).ownerPrincipal);
+  async extractAll(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: unknown,
+    @Headers('x-evaluation-consent') consent?: string,
+    @Body('resourceId') resourceId?: unknown,
+  ) {
+    const capture = authorizeInferenceCapture(user, consent);
+    if (capture && (typeof resourceId !== 'number' || !Number.isSafeInteger(resourceId) || resourceId < 1)) {
+      throw new BadRequestException('Select one resource to authorize inference capture');
+    }
+    const { ownerPrincipal } = this.executionService.resolveAccessScope(user);
+    return this.extractionService.extractAll(
+      id,
+      ownerPrincipal,
+      capture ? resourceId as number : undefined,
+    );
   }
 
   @Post(':id/records/:recordId/re-extract')

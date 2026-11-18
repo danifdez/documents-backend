@@ -32,6 +32,7 @@ export class DatasetExtractionService {
   async extractAll(
     datasetId: number,
     ownerPrincipal: string,
+    captureResourceId?: number,
   ): Promise<{ rowsQueued: number; executionIds: string[] }> {
     const dataset = await this.datasetRepository.findOne({
       where: { id: datasetId },
@@ -46,6 +47,10 @@ export class DatasetExtractionService {
 
     const projectId = dataset.project?.id ?? null;
     const resources = await this.resolveSources(dataset, projectId);
+    const captureInference = captureResourceId !== undefined;
+    if (captureInference && (resources.length !== 1 || resources[0].id !== captureResourceId)) {
+      throw new BadRequestException('Dataset source does not match the authorized resource');
+    }
     if (!resources.length) {
       return { rowsQueued: 0, executionIds: [] };
     }
@@ -64,6 +69,7 @@ export class DatasetExtractionService {
         columnsToExtract,
         projectId,
         ownerPrincipal,
+        captureInference,
       );
       if (execution) executionIds.push(execution.executionId);
     }
@@ -315,6 +321,7 @@ export class DatasetExtractionService {
     columnsToExtract: string[],
     projectId: number | null,
     ownerPrincipal: string,
+    captureInference = false,
   ) {
     const content = await this.resourceService.getContentById(resource.id);
     const mediaType = resource.mimeType
@@ -347,7 +354,7 @@ export class DatasetExtractionService {
       'dataset.extract-row',
       ExecutionPriority.NORMAL,
       payload,
-      { steps, ownerPrincipal },
+      { steps, ownerPrincipal, ...(captureInference ? { captureInference } : {}) },
     );
   }
 }
