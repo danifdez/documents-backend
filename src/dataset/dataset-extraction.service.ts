@@ -317,7 +317,11 @@ export class DatasetExtractionService {
     ownerPrincipal: string,
   ) {
     const content = await this.resourceService.getContentById(resource.id);
-    const isAudio = (resource.mimeType ?? '').startsWith('audio/');
+    const mediaType = resource.mimeType
+      ?.split(';', 1)[0]
+      ?.trim()
+      .toLowerCase();
+    const isAudio = mediaType?.startsWith('audio/') ?? false;
     const fieldsForPayload: DatasetField[] = dataset.schema.filter(
       (f) => f.description && f.description.trim().length > 0,
     );
@@ -332,6 +336,9 @@ export class DatasetExtractionService {
       documentText: content ?? '',
       sourceTitle: resource.title ?? resource.name ?? '',
       isAudio,
+      ...(mediaType === 'text/html' && {
+        sourcePagination: 'unpaginated' as const,
+      }),
       model: dataset.extractionConfig?.model ?? DEFAULT_MODEL,
     };
 

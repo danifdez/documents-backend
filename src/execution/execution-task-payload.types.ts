@@ -299,6 +299,7 @@ export interface DatasetExtractRowPayload extends FinalizerIdentity {
   documentText: string;
   sourceTitle: string;
   isAudio: boolean;
+  sourcePagination?: 'unpaginated';
   model: string;
 }
 

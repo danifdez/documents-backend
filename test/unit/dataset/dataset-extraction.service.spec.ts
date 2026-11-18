@@ -55,7 +55,7 @@ describe('DatasetExtractionService', () => {
       executionService as any,
     );
 
-    await expect(
+    const enqueue = (mimeType: string) =>
       (service as any).enqueueExtractionExecution(
         {
           id: 3,
@@ -65,15 +65,20 @@ describe('DatasetExtractionService', () => {
         { id: 5 },
         {
           id: 7,
-          mimeType: 'text/plain',
+          mimeType,
           title: 'Source',
           name: 'source.txt',
         },
         ['name'],
         11,
         '42',
-      ),
-    ).resolves.toEqual({ executionId: 'execution-id' });
+      );
+    await expect(enqueue('Text/HTML; charset=utf-8')).resolves.toEqual({
+      executionId: 'execution-id',
+    });
+    const [, , payload, { steps }] = executionService.create.mock.calls[0];
+    expect(payload.sourcePagination).toBe('unpaginated');
+    expect(steps[0].work.payload.sourcePagination).toBe('unpaginated');
     expect(executionService.create).toHaveBeenCalledWith(
       'dataset.extract-row',
       expect.any(String),
@@ -98,6 +103,13 @@ describe('DatasetExtractionService', () => {
           }),
         ]),
       },
+    );
+
+    await enqueue('application/pdf');
+    const [, , pdfPayload, pdfOptions] = executionService.create.mock.calls[1];
+    expect(pdfPayload).not.toHaveProperty('sourcePagination');
+    expect(pdfOptions.steps[0].work.payload).not.toHaveProperty(
+      'sourcePagination',
     );
   });
 });
