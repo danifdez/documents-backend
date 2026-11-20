@@ -7,7 +7,7 @@ import { FileStorageService } from '../../../src/file-storage/file-storage.servi
 import { ExecutionService } from '../../../src/execution/execution.service';
 import { AgeGraphService } from '../../../src/graph/age-graph.service';
 import { createMockRepository, MockRepository } from '../../test-utils';
-import { buildResource } from '../../factories';
+import { buildAuthor, buildEntity, buildResource } from '../../factories';
 
 describe('ResourceService', () => {
   const scope = { ownerPrincipal: 'user-7' };
@@ -162,7 +162,9 @@ describe('ResourceService', () => {
 
       executionService.create.mockResolvedValue({ executionId: extractionId });
 
-      const result = await service.confirmExtraction(1, { ownerPrincipal: '42' });
+      const result = await service.confirmExtraction(1, {
+        ownerPrincipal: '42',
+      });
       expect(result.success).toBe(true);
       expect(result.executionId).toBe(extractionId);
       expect(executionService.create).toHaveBeenCalledWith(
@@ -175,14 +177,16 @@ describe('ResourceService', () => {
 
     it('should throw NotFoundException if resource not found', async () => {
       repo.findOne.mockResolvedValue(null);
-      await expect(service.confirmExtraction(999, { ownerPrincipal: '42' })).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.confirmExtraction(999, { ownerPrincipal: '42' }),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('should throw if resource is not in extracted state', async () => {
       repo.findOne.mockResolvedValue(buildResource({ status: 'extracting' }));
-      await expect(service.confirmExtraction(1, { ownerPrincipal: '42' })).rejects.toThrow(HttpException);
+      await expect(
+        service.confirmExtraction(1, { ownerPrincipal: '42' }),
+      ).rejects.toThrow(HttpException);
     });
   });
 
@@ -336,5 +340,114 @@ describe('ResourceService', () => {
         [1, 2],
       );
     });
+  });
+
+  it('finds pending resources and handles URL and thread scoping', async () => {
+    const resource = buildResource();
+    const url = 'https://example.org/report';
+    repo.findOne.mockResolvedValue(resource);
+    repo.find.mockResolvedValue([resource]);
+    const qb = repo.createQueryBuilder();
+    qb.getMany.mockResolvedValue([resource]);
+    await expect(service.findByUrl(url)).resolves.toBe(resource);
+    await expect(service.findByUrl(url, 7)).resolves.toBe(resource);
+    expect(repo.findOne).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ where: { url } }),
+    );
+    expect(repo.findOne).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ where: { url, project: { id: 7 } } }),
+    );
+    await expect(service.findByThread(4)).resolves.toEqual([resource]);
+    expect(repo.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { thread: { id: 4 } } }),
+    );
+    await expect(service.findPending()).resolves.toEqual([resource]);
+    expect(qb.where).toHaveBeenCalledWith('resource.projectId IS NULL');
+    await expect(service.assignToThread(1, 4)).resolves.toBeNull();
+    repo.findOneBy.mockResolvedValue(resource);
+    repo.save.mockImplementation(async (row) => row);
+    await expect(service.assignToThread(1, 4)).resolves.toMatchObject({
+      thread: { id: 4 },
+    });
+  });
+
+  it('lists available resources by ID and by entity references', async () => {
+    const resource = buildResource();
+    const qb = { ...repo.createQueryBuilder(), whereInIds: jest.fn() };
+    qb.select.mockReturnValue(qb);
+    qb.whereInIds.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([resource]);
+    repo.createQueryBuilder.mockClear().mockReturnValue(qb);
+    await expect(service.findByIds([])).resolves.toEqual([]);
+    expect(repo.createQueryBuilder).not.toHaveBeenCalled();
+    await expect(service.findByIds([4, 5])).resolves.toEqual([resource]);
+    expect(qb.whereInIds).toHaveBeenCalledWith([4, 5]);
+    await expect(service.findByEntityId(8)).resolves.toEqual([resource]);
+    expect(qb.where).toHaveBeenCalledWith('entity.id = :entityId', {
+      entityId: 8,
+    });
+    await expect(service.findByEntityName('Ada')).resolves.toEqual([resource]);
+    expect(qb.where).toHaveBeenCalledWith('entity.name ILIKE :entityName', {
+      entityName: '%Ada%',
+    });
+  });
+
+  it('adds only new author and entity links and uses the specified keys for removal', async () => {
+    const author = buildAuthor({ id: 3 });
+    const entity = buildEntity({ id: 4 });
+    repo.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ exists: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ exists: 1 }]);
+    await service.addAuthorToResource(7, author);
+    await service.addAuthorToResource(7, author);
+    await service.addEntityToResource(7, entity);
+    await service.addEntityToResource(7, entity);
+    await service.removeAuthorFromResource(7, 3);
+    await service.clearResourceAuthors(7);
+    await service.removeEntityFromResource(7, 4);
+    const inserts = repo.query.mock.calls.filter(([sql]) =>
+      sql.startsWith('INSERT'),
+    );
+    expect(inserts).toEqual([
+      [expect.stringContaining('INSERT INTO resource_authors'), [7, 3]],
+      [expect.stringContaining('INSERT INTO resource_entities'), [7, 4]],
+    ]);
+    const deletes = repo.query.mock.calls.filter(([sql]) =>
+      sql.startsWith('DELETE'),
+    );
+    expect(deletes).toEqual([
+      [expect.stringContaining('DELETE FROM resource_authors'), [7, 3]],
+      [expect.stringContaining('DELETE FROM resource_authors'), [7]],
+      [expect.stringContaining('DELETE FROM resource_entities'), [7, 4]],
+    ]);
+  });
+
+  it('returns translations and queries linked entities with their types', async () => {
+    const entity = buildEntity();
+    repo.findOne
+      .mockResolvedValueOnce({ translatedContent: 'Translated' })
+      .mockResolvedValueOnce(null);
+    await expect(service.getTranslatedContentById(7)).resolves.toBe(
+      'Translated',
+    );
+    await expect(service.getTranslatedContentById(7)).resolves.toBeNull();
+    const qb = repo.createQueryBuilder();
+    qb.getMany.mockResolvedValue([entity]);
+    const manager = repo.manager as unknown as { getRepository: jest.Mock };
+    manager.getRepository.mockReturnValue(repo);
+    await expect(service.getEntitiesByResourceId(7)).resolves.toEqual([entity]);
+    expect(qb.where).toHaveBeenCalledWith('re.resource_id = :resourceId', {
+      resourceId: 7,
+    });
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledWith(
+      'entity.entityType',
+      'entityType',
+    );
   });
 });

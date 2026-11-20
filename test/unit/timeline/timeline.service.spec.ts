@@ -87,4 +87,65 @@ describe('TimelineService', () => {
       expect(repo.save).not.toHaveBeenCalled();
     });
   });
+
+  it('finds timelines by ID or by a project and orders project timelines by update time', async () => {
+    const timeline = buildTimeline({ id: 3 });
+    repo.findOne.mockResolvedValue(timeline);
+    const qb = repo.createQueryBuilder();
+    qb.getMany.mockResolvedValue([timeline]);
+    await expect(service.findOne(3)).resolves.toBe(timeline);
+    expect(repo.findOne).toHaveBeenCalledWith({
+      where: { id: 3 },
+      relations: ['project'],
+    });
+    await expect(service.findByProject(9)).resolves.toEqual([timeline]);
+    expect(qb.where).toHaveBeenCalledWith('t.projectId = :projectId', {
+      projectId: 9,
+    });
+    expect(qb.orderBy).toHaveBeenCalledWith('t.updated_at', 'DESC');
+  });
+
+  it('persists full timeline settings and leaves optional fields out of partial writes', async () => {
+    const settings = {
+      name: 'Timeline',
+      timelineData: [],
+      epochs: [],
+      notes: 'Evidence',
+      syncDatasetId: 4,
+      syncMapping: { label: 'name' },
+      layoutType: 'vertical' as const,
+      axisBreaks: false,
+    };
+    repo.create.mockImplementation((data) => data);
+    repo.save.mockImplementation(async (data) => data);
+    await expect(service.create({ name: 'Minimal' })).resolves.toEqual({
+      name: 'Minimal',
+    });
+    await expect(
+      service.create({ ...settings, projectId: 9 }),
+    ).resolves.toEqual({ ...settings, project: { id: 9 } });
+    repo.preload
+      .mockResolvedValueOnce(null)
+      .mockImplementation(async (data) => data);
+    await expect(service.update(999, {})).resolves.toBeNull();
+    await expect(
+      service.update(3, { ...settings, projectId: 9 }),
+    ).resolves.toEqual({ ...settings, id: 3, project: { id: 9 } });
+    await expect(
+      service.update(3, { projectId: null, syncDatasetId: null }),
+    ).resolves.toEqual({
+      id: 3,
+      project: null,
+      syncDatasetId: null,
+    });
+  });
+
+  it('removes only an existing timeline', async () => {
+    await expect(service.remove(999)).resolves.toEqual({ deleted: false });
+    expect(repo.remove).not.toHaveBeenCalled();
+    const timeline = buildTimeline({ id: 3 });
+    repo.findOneBy.mockResolvedValue(timeline);
+    await expect(service.remove(3)).resolves.toEqual({ deleted: true });
+    expect(repo.remove).toHaveBeenCalledWith(timeline);
+  });
 });
