@@ -391,7 +391,7 @@ export class SearchService {
     return raw.map((r) => ({
       id: config.id(r),
       name: config.name(r),
-      score: config.score ? config.score(r) : parseFloat(r.score) || 0,
+      score: config.score ? config.score(r) : Number.parseFloat(r.score) || 0,
       collection: config.collection,
       ...config.highlights(r, highlight),
     }));
