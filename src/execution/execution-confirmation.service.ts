@@ -307,11 +307,13 @@ export class ExecutionConfirmationService {
       if (!plan || canonicalHash(plan.plan) !== confirmation.planHash) {
         throw new ConflictException('confirmation_stale');
       }
-      if (confirmation.status !== 'pending') {
-        if (confirmation.status === requestedDecision) {
+      switch (confirmation.status) {
+        case 'pending':
+          break;
+        case requestedDecision:
           return this.toView(confirmation, plan);
-        }
-        throw new ConflictException('confirmation_already_decided');
+        default:
+          throw new ConflictException('confirmation_already_decided');
       }
       if (!confirmation.requestedAt) {
         throw new ConflictException('confirmation_not_requested');
