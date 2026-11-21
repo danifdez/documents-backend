@@ -3,7 +3,6 @@ import { authorizeVoiceConnection } from './voice-authorization';
 import { assertVoiceEvidence } from './voice-evidence';
 import { canonicalHash, canonicalJson } from '../execution/execution-canonical';
 import { inferenceCaptureAuthorization } from '../execution/inference-capture';
-import { BadRequestException, ConflictException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ExecutionStreamService } from '../execution/execution-stream.service';
 import { ExecutionStatus } from '../execution/execution-status.enum';
@@ -28,6 +27,8 @@ interface VoiceSession {
 }
 
 import {
+  BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   OnModuleDestroy,
