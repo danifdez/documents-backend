@@ -232,8 +232,8 @@ export class ResourceController {
     const range = req.headers.range;
     if (range) {
       const match = range.match(/bytes=(\d*)-(\d*)/);
-      const start = match[1] ? parseInt(match[1], 10) : 0;
-      const end = match[2] ? parseInt(match[2], 10) : total - 1;
+      const start = match[1] ? Number.parseInt(match[1], 10) : 0;
+      const end = match[2] ? Number.parseInt(match[2], 10) : total - 1;
 
       res.status(206);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
