@@ -59,7 +59,7 @@ export class RelationshipController {
           .map((n) => n.trim())
           .filter(Boolean)
       : [];
-    const projectId = projectIdStr ? parseInt(projectIdStr, 10) : undefined;
+    const projectId = projectIdStr ? Number.parseInt(projectIdStr, 10) : undefined;
     return this.service.queryNeighborhood(entityNames, projectId);
   }
 
