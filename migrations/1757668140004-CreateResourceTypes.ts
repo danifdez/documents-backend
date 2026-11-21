@@ -78,7 +78,7 @@ export class CreateResourceTypes1757668140004 implements MigrationInterface {
       );
       const maxId =
         maxIdResult && maxIdResult[0] && maxIdResult[0].max
-          ? parseInt(maxIdResult[0].max, 10)
+          ? Number.parseInt(maxIdResult[0].max, 10)
           : 0;
       if (maxId > 0) {
         await queryRunner.query(
