@@ -197,8 +197,8 @@ function chunkMessage(message: string): ContextChunk[] {
         message.lastIndexOf(' ', end - 1),
       );
       if (boundary >= searchStart) end = boundary + 1;
-      const next = message.charCodeAt(end);
-      if (next >= 0xdc00 && next <= 0xdfff) end -= 1;
+      const next = message.codePointAt(end);
+      if (next !== undefined && next >= 0xdc00 && next <= 0xdfff) end -= 1;
     }
     const content = message.slice(start, end);
     chunks.push({
