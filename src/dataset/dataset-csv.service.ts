@@ -67,7 +67,7 @@ export class DatasetCsvService {
     const sample = values.slice(0, 100);
 
     if (sample.every((v) => v === 'true' || v === 'false')) return 'boolean';
-    if (sample.every((v) => !isNaN(Number(v)))) return 'number';
+    if (sample.every((v) => !Number.isNaN(Number(v)))) return 'number';
     if (
       sample.every((v) => /^\d{4}-\d{2}-\d{2}/.test(v) && !isNaN(Date.parse(v)))
     )
