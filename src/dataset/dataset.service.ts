@@ -311,7 +311,7 @@ export class DatasetService {
         );
       case 'date':
       case 'datetime':
-        return !isNaN(Date.parse(str));
+        return !Number.isNaN(Date.parse(str));
       case 'time':
         return /^\d{2}:\d{2}(:\d{2})?$/.test(str);
       case 'text':
