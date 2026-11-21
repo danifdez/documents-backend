@@ -448,7 +448,7 @@ export class DatasetService {
       return map;
     } else {
       // Lookup by record PK
-      const numIds = values.map((v) => Number(v)).filter((n) => !isNaN(n));
+      const numIds = values.map((v) => Number(v)).filter((n) => !Number.isNaN(n));
       if (!numIds.length) return {};
       records = await this.recordRepository
         .createQueryBuilder('r')
