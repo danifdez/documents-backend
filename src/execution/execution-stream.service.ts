@@ -268,8 +268,7 @@ export class ExecutionStreamService {
       ).inputCapture;
       const expected = inferenceCaptureAuthorization(scope.ownerPrincipal);
       if (
-        !grant ||
-        grant.schemaVersion !== expected.schemaVersion ||
+        grant?.schemaVersion !== expected.schemaVersion ||
         grant.purpose !== expected.purpose ||
         grant.authorizedBy !== expected.authorizedBy
       )
