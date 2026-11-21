@@ -124,7 +124,7 @@ export class FredProvider implements DataSourceProvider {
       .filter((obs: any) => obs.value !== '.')
       .map((obs: any) => ({
         date: obs.date,
-        value: parseFloat(obs.value),
+        value: Number.parseFloat(obs.value),
       }));
 
     return {
