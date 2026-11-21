@@ -33,7 +33,7 @@ abstract class OwnedResourceGuard implements CanActivate {
       const value = request.params?.[name];
       if (value !== undefined) return Number(value);
     }
-    return NaN;
+    return Number.NaN;
   }
 
   abstract canActivate(context: ExecutionContext): Promise<boolean>;
