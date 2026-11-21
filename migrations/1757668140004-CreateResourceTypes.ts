@@ -61,7 +61,7 @@ export class CreateResourceTypes1757668140004 implements MigrationInterface {
     await queryRunner.startTransaction();
     try {
       for (const r of rows) {
-        const id = parseInt(r[0] as string, 10);
+        const id = Number.parseInt(r[0] as string, 10);
         const abbreviation = r[1] as string;
         const name = r[2] as string;
         const description = r[3] as string | null;
