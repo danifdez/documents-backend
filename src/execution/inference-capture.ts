@@ -173,7 +173,7 @@ export function assertInferenceRuntimeCapture(
     reject();
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) reject();
-  if (!Object.prototype.hasOwnProperty.call(value, 'templates')) return false;
+  if (!Object.hasOwn(value, 'templates')) return false;
   const pool = value.templates;
   if (!pool || typeof pool !== 'object' || Array.isArray(pool)) reject();
   if (Object.keys(pool).length === 0) return false;
