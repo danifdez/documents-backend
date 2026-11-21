@@ -304,7 +304,7 @@ export class DatasetService {
     const str = String(value);
     switch (targetType) {
       case 'number':
-        return !isNaN(Number(value));
+        return !Number.isNaN(Number(value));
       case 'boolean':
         return (
           typeof value === 'boolean' || value === 'true' || value === 'false'
