@@ -124,7 +124,7 @@ export class OfflineService {
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
   ) {
-    this.fileSizeLimit = parseInt(
+    this.fileSizeLimit = Number.parseInt(
       this.configService.get('OFFLINE_FILE_SIZE_LIMIT', '10485760'),
       10,
     );
