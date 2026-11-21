@@ -734,7 +734,7 @@ export class DatasetService {
 
       switch (field.type) {
         case 'number':
-          if (isNaN(Number(value))) {
+          if (Number.isNaN(Number(value))) {
             errors.push(`Field "${field.name}" must be a valid number`);
           }
           break;
