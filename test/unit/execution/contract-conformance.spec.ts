@@ -1403,6 +1403,6 @@ describe('execution v1 contract', () => {
       join(fixturesRoot, 'valid', 'documents-bundle.json'),
     );
     bundle.optionalExtension = { producerHint: 'future' };
-    if (!validate(bundle)) throw new Error(JSON.stringify(validate.errors));
+    expect(validate(bundle)).toBe(true);
   });
 });
