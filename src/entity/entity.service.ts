@@ -558,11 +558,11 @@ export class EntityService {
       const entity = rawResults.entities[i];
       const raw = rawResults.raw[i];
 
-      const inDocCount = parseInt(raw.in_document_count, 10) || 0;
+      const inDocCount = Number.parseInt(raw.in_document_count, 10) || 0;
       const inProjectCount = projectId
-        ? parseInt(raw.in_project_count, 10) || 0
+        ? Number.parseInt(raw.in_project_count, 10) || 0
         : 0;
-      const totalCount = parseInt(raw.total_resource_count, 10) || 0;
+      const totalCount = Number.parseInt(raw.total_resource_count, 10) || 0;
 
       if (inDocCount > 0) {
         documentEntities.push(entity);
