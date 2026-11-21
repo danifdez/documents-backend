@@ -47,7 +47,9 @@ export class BibliographyController {
     @Query('ids') ids: string,
     @Res() res: Response,
   ): Promise<void> {
-    const parsedProjectId = projectId ? parseInt(projectId, 10) : undefined;
+    const parsedProjectId = projectId
+      ? Number.parseInt(projectId, 10)
+      : undefined;
     const parsedIds = ids
       ? ids.split(',').map((id) => parseInt(id, 10))
       : undefined;
