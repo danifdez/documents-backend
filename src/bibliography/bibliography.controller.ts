@@ -51,7 +51,7 @@ export class BibliographyController {
       ? Number.parseInt(projectId, 10)
       : undefined;
     const parsedIds = ids
-      ? ids.split(',').map((id) => parseInt(id, 10))
+      ? ids.split(',').map((id) => Number.parseInt(id, 10))
       : undefined;
     const bibtex = await this.bibliographyService.exportBibTeX(
       parsedProjectId,
