@@ -335,6 +335,8 @@ describe('Voice authorization, reservations and durable recovery (simulated work
     const s = connect(token(1, { exp: Math.floor(Date.now() / 1000) + 2 }));
     await ready(s);
     await until(() => !s.connected && active === 0);
+    expect(s.connected).toBe(false);
+    expect(active).toBe(0);
   });
 
   it('reserves a connecting worker once across duplicate starts and concurrent users', async () => {
