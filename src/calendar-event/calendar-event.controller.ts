@@ -106,7 +106,7 @@ export class CalendarEventController {
   private parseOccurrenceDate(raw: string): Date {
     const decoded = decodeURIComponent(raw);
     const d = new Date(decoded);
-    if (isNaN(d.getTime())) {
+    if (Number.isNaN(d.getTime())) {
       throw new BadRequestException({ error: 'invalid_occurrence_date' });
     }
     return d;
