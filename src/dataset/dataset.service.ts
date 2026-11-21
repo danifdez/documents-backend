@@ -753,7 +753,7 @@ export class DatasetService {
           }
           break;
         case 'datetime':
-          if (isNaN(Date.parse(String(value)))) {
+          if (Number.isNaN(Date.parse(String(value)))) {
             errors.push(`Field "${field.name}" must be a valid datetime`);
           }
           break;
