@@ -37,7 +37,7 @@ export class DateExtractionProcessor implements ExecutionProcessor {
     const resourceId = Number(execution.payload['resourceId']);
     const result = execution.result as { dates?: ResourceDatePayload[] };
 
-    if (!resourceId || isNaN(resourceId)) {
+    if (!resourceId || Number.isNaN(resourceId)) {
       throw new Error(
         `Invalid resourceId in date-extraction execution: ${resourceId}`,
       );

@@ -39,7 +39,7 @@ export abstract class SingleEntityTranslationStrategyBase<
     this.logStart(execution, entityId);
     this.logger.debug(`Execution result: ${JSON.stringify(execution.result)}`);
 
-    if (!entityId || isNaN(entityId)) {
+    if (!entityId || Number.isNaN(entityId)) {
       const errorMessage = `Invalid entity ID: ${entityId}`;
       this.logger.error(errorMessage);
       throw new Error(errorMessage);

@@ -138,7 +138,7 @@ abstract class IndexedFileBaseController {
         HttpStatus.CONFLICT,
       );
     }
-    const n = Math.min(Math.max(parseInt(limit ?? '', 10) || 10, 1), 25);
+    const n = Math.min(Math.max(Number.parseInt(limit ?? '', 10) || 10, 1), 25);
     const hits = await this.indexedFileService.search(
       this.owner(ownerId),
       q,
