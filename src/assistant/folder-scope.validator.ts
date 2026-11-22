@@ -76,7 +76,7 @@ function isForbiddenPath(resolved: string): boolean {
   if (resolved === '~') return true;
 
   if (process.platform === 'win32') {
-    const normalized = resolved.replace(/\//g, '\\');
+    const normalized = resolved.replaceAll('/', '\\');
     const lower = normalized.toLowerCase();
     return WINDOWS_FORBIDDEN_ROOTS.some((root) => lower === root.toLowerCase());
   }
