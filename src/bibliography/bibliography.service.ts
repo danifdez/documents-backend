@@ -94,7 +94,7 @@ export class BibliographyService {
   }
 
   async search(query: string): Promise<BibliographyEntryEntity[]> {
-    if (!query || !query.trim()) return [];
+    if (!query?.trim()) return [];
     const like = `%${query}%`;
     return await this.repository
       .createQueryBuilder('b')
