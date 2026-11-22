@@ -77,7 +77,7 @@ export class CreateResourceTypes1757668140004 implements MigrationInterface {
         `SELECT MAX(id) as max FROM "resource_types"`,
       );
       const maxId =
-        maxIdResult && maxIdResult[0] && maxIdResult[0].max
+        maxIdResult?.[0]?.max
           ? Number.parseInt(maxIdResult[0].max, 10)
           : 0;
       if (maxId > 0) {
