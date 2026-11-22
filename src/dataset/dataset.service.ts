@@ -133,9 +133,7 @@ export class DatasetService {
       const rawConfig = dto.sourceConfig ?? dataset.sourceConfig;
       const nextConfig = this.normalizeSourceConfig(nextMode, rawConfig);
       const projectIdForValidation =
-        dto.projectId !== undefined
-          ? dto.projectId
-          : (dataset.project?.id ?? null);
+        dto.projectId ?? dataset.project?.id ?? null;
       this.validateSourceConfig(nextMode, nextConfig, projectIdForValidation);
       dataset.sourceMode = nextMode;
       dataset.sourceConfig = nextConfig;
