@@ -409,8 +409,7 @@ export class ExecutionToolRuntimeService {
     const decision = assignment.work.confirmationDecision as
       Record<string, unknown> | undefined;
     if (
-      !decision ||
-      decision.confirmationId !== requirement.confirmationId ||
+      decision?.confirmationId !== requirement.confirmationId ||
       decision.planHash !== canonicalHash(plan) ||
       typeof decision.decidedAt !== 'string' ||
       !['approved', 'denied', 'expired'].includes(String(decision.status))
