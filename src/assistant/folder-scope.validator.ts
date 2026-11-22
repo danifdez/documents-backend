@@ -25,7 +25,7 @@ const POSIX_FORBIDDEN_ROOTS = [
 
 const WINDOWS_FORBIDDEN_ROOTS = [
   'C:\\',
-  'C:\\Windows',
+  String.raw`C:\Windows`,
   'C:\\Program Files',
   'C:\\Program Files (x86)',
 ];
