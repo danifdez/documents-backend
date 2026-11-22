@@ -265,7 +265,7 @@ export class BibliographyService {
             const words = trimmed.split(' ');
             creators.push({
               creatorType: 'editor',
-              lastName: words[words.length - 1],
+              lastName: words.at(-1),
               firstName: words.slice(0, -1).join(' '),
             });
           }
