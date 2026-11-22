@@ -67,8 +67,7 @@ export class DatasetQueryService {
         const paramName = `filter_${i}`;
 
         if (
-          fieldDef &&
-          fieldDef.type === 'number' &&
+          fieldDef?.type === 'number' &&
           filter.operator !== 'contains'
         ) {
           // Numeric comparison
