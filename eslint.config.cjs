@@ -29,7 +29,7 @@ module.exports = [
         {
           code: 100,
           // Module specifiers cannot be wrapped without path aliases.
-          ignorePattern: '^import\\s.+from\\s.+;$',
+          ignorePattern: String.raw`^import\s.+from\s.+;$`,
         },
       ],
     },
