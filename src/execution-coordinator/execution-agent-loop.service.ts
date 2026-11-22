@@ -438,7 +438,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       .findOneByOrFail({ executionId: step.executionId });
     const sourceReservation =
       execution.progressLedger?.operationBudget?.reservations[step.operationId];
-    if (!sourceReservation || sourceReservation.status !== 'consumed') {
+    if (sourceReservation?.status !== 'consumed') {
       throw new ConflictException('tool_request_source_budget_missing');
     }
     const finish = await this.dataSource
