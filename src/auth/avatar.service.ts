@@ -84,7 +84,7 @@ export class AvatarService {
     userId: number,
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const user = await this.userRepo.findOneBy({ id: userId });
-    if (!user || !user.avatarPath) return null;
+    if (!user?.avatarPath) return null;
     const buffer = await this.storage.getFile(user.avatarPath);
     if (!buffer) return null;
     return { buffer, mimeType: 'image/webp' };
