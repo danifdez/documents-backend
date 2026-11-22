@@ -118,7 +118,7 @@ export class DatasetCsvService {
         str.includes('\n') ||
         str.includes('\r')
       ) {
-        return `"${str.replace(/"/g, '""')}"`;
+        return `"${str.replaceAll('"', '""')}"`;
       }
       return str;
     };
