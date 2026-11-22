@@ -99,8 +99,7 @@ export async function recordLoadedSkillResource(
     lock: { mode: 'pessimistic_write' },
   });
   if (
-    !activation ||
-    activation.skillVersion !== resource.skillVersion ||
+    activation?.skillVersion !== resource.skillVersion ||
     activation.contentHash !== resource.skillContentHash
   ) {
     throw new ConflictException('skill_activation_resource_mismatch');
