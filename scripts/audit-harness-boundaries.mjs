@@ -76,7 +76,7 @@ for (const field of [
   'leaseExpiresAt',
   'technicalResult',
 ]) {
-  if (new RegExp(`\\b${field}\\b`).test(executionEntity)) {
+  if (new RegExp(String.raw`\b${field}\b`).test(executionEntity)) {
     failures.push(`Canonical execution contains technical field: ${field}`);
   }
 }
