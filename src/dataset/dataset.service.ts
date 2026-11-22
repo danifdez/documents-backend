@@ -130,10 +130,7 @@ export class DatasetService {
 
     if (dto.sourceMode !== undefined || dto.sourceConfig !== undefined) {
       const nextMode: DatasetSourceMode = dto.sourceMode ?? dataset.sourceMode;
-      const rawConfig =
-        dto.sourceConfig !== undefined
-          ? dto.sourceConfig
-          : dataset.sourceConfig;
+      const rawConfig = dto.sourceConfig ?? dataset.sourceConfig;
       const nextConfig = this.normalizeSourceConfig(nextMode, rawConfig);
       const projectIdForValidation =
         dto.projectId !== undefined
