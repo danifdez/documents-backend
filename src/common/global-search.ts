@@ -16,7 +16,7 @@ export async function globalSimilaritySearch<T extends ObjectLiteral>(
   projectId: number | undefined,
   config: GlobalSearchConfig<T>,
 ): Promise<any[]> {
-  if (!searchTerm || !searchTerm.trim()) return [];
+  if (!searchTerm?.trim()) return [];
   const like = `%${searchTerm}%`;
   const where = config.searchColumns
     .map((col) => `unaccent(${col}) ILIKE unaccent(:q)`)
