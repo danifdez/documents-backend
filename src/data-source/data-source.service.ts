@@ -82,7 +82,7 @@ export class DataSourceService {
       syncSchedule: dto.syncSchedule || null,
       syncStrategy: dto.syncStrategy || 'full',
       incrementalKey: dto.incrementalKey || null,
-      enabled: dto.enabled !== undefined ? dto.enabled : true,
+      enabled: dto.enabled ?? true,
       rateLimitRpm: dto.rateLimitRpm || null,
     });
 
