@@ -77,7 +77,7 @@ export class ExecutionToolPlanService {
     }
 
     const invocationHash = canonicalHash(invocation);
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       await manager.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [`tool-call:${invocation.toolCallId}`],
@@ -153,7 +153,7 @@ export class ExecutionToolPlanService {
   ): Promise<ExecutionStepEntity | null> {
     this.assertUuid(toolCallId, 'toolCallId');
     this.assertUuid(budgetReservationId, 'budgetReservationId');
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       await manager.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [`tool-call:${toolCallId}`],
@@ -315,7 +315,7 @@ export class ExecutionToolPlanService {
     error: { code: string; message: string },
   ): Promise<ExecutionStepEntity> {
     this.assertUuid(toolCallId, 'toolCallId');
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       await manager.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [`tool-call:${toolCallId}`],
@@ -334,7 +334,7 @@ export class ExecutionToolPlanService {
     toolCallId: string,
   ): Promise<ToolPlanMaterializationDisposition> {
     this.assertUuid(toolCallId, 'toolCallId');
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const storedPlan = await manager
         .getRepository(ExecutionToolPlanEntity)
         .findOneBy({ toolCallId });
@@ -421,8 +421,7 @@ export class ExecutionToolPlanService {
       const toolResult = (existing?.result as Record<string, unknown> | null)
         ?.toolResult as ToolResultContract | undefined;
       if (
-        !existing ||
-        existing.status !== ExecutionStepStatus.COMPLETED ||
+        existing?.status !== ExecutionStepStatus.COMPLETED ||
         toolResult?.status !== 'not_executed' ||
         toolResult.error?.code !== error.code
       ) {
@@ -582,7 +581,7 @@ export class ExecutionToolPlanService {
       executionId: invocation.executionContext.executionId,
       operationId: invocation.requester.operationId,
     });
-    if (!source || source.status !== ExecutionStepStatus.COMPLETED) {
+    if (source?.status !== ExecutionStepStatus.COMPLETED) {
       throw new ConflictException('tool_request_source_not_accepted');
     }
     return [source.stepId];

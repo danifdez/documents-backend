@@ -1,3 +1,4 @@
+import { readString } from '../utils/read-string';
 import type { Attributes } from '@opentelemetry/api';
 import { EXECUTION_EVENT_PAYLOADS } from '../execution/execution.constants';
 import { ExecutionStatus } from '../execution/execution-status.enum';
@@ -26,10 +27,9 @@ export function executionEventMetadata(event: CommittedExecutionEvent): {
   failed: boolean;
 } | null {
   const data = event.envelope;
-  const type = String(data.eventType ?? '');
-  if (!Object.prototype.hasOwnProperty.call(EXECUTION_EVENT_PAYLOADS, type))
-    return null;
-  const occurredAt = new Date(String(data.occurredAt ?? ''));
+  const type = readString(data.eventType);
+  if (!Object.hasOwn(EXECUTION_EVENT_PAYLOADS, type)) return null;
+  const occurredAt = new Date(readString(data.occurredAt));
   if (!Number.isFinite(occurredAt.getTime())) return null;
   const attributes: Attributes = { 'execution.event.type': type };
   for (const key of [
@@ -79,7 +79,9 @@ export function executionEventMetadata(event: CommittedExecutionEvent): {
       type === 'operation.finished'
         ? 'documents.operation'
         : type === 'execution.state_changed' &&
-            ['completed', 'failed', 'cancelled'].includes(String(payload.to))
+            ['completed', 'failed', 'cancelled'].includes(
+              readString(payload.to),
+            )
           ? 'documents.execution'
           : 'documents.' + type,
     attributes,

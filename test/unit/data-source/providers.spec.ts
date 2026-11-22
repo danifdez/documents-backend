@@ -110,7 +110,7 @@ describe('Data source providers', () => {
     const items = [{ id: 1 }, { id: 2 }, { id: 3 }];
     const config = { url, dataPath: 'data.rows' };
 
-    it('validates the configuration and reads a nested response with configured headers', async () => {
+    it('validates configuration and fetches nested data with headers', async () => {
       expect(rest.validateConfig({})).toEqual([
         'URL is required',
         'Data path is required',
@@ -332,7 +332,7 @@ describe('Data source providers', () => {
       });
     });
 
-    it('maps Eurostat multidimensional observations, including sparse values and fallback labels', async () => {
+    it('maps sparse Eurostat observations and fallback labels', async () => {
       const provider = new EurostatProvider(httpService);
       expect(provider.validateConfig({})).toEqual(['Dataset code is required']);
       const config = {
@@ -397,7 +397,7 @@ describe('Data source providers', () => {
       });
     });
 
-    it('authenticates FRED, preserves observation dates and skips the missing-value sentinel', async () => {
+    it('authenticates FRED and keeps dated non-missing observations', async () => {
       const provider = new FredProvider(httpService);
       expect(provider.validateConfig({})).toEqual(['Series ID is required']);
       const config = {
@@ -455,7 +455,7 @@ describe('Data source providers', () => {
       ).resolves.toMatchObject({ success: false });
     });
 
-    it('maps Yahoo historical and quote data without converting missing prices to zero', async () => {
+    it('maps Yahoo prices without replacing missing values with zero', async () => {
       const provider = new YahooFinanceProvider(httpService);
       expect(provider.validateConfig({})).toEqual(['Symbol is required']);
       const quote = {

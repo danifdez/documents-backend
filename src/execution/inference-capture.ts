@@ -74,8 +74,7 @@ export function assertInferenceExchange(
     reject();
   }
   if (
-    !value ||
-    value.schemaVersion !== 'inference-exchange/1' ||
+    value?.schemaVersion !== 'inference-exchange/1' ||
     value.executionId !== execution.executionId ||
     value.stepId !== step.stepId ||
     value.operationId !== step.operationId ||
@@ -163,19 +162,18 @@ export function assertInferenceRuntimeCapture(
   step: ExecutionStepEntity,
   attemptId: string,
 ): boolean {
-  const reject = (): never => {
-    throw new BadRequestException('invalid_inference_runtime');
-  };
   let value: Record<string, any>;
   try {
     value = JSON.parse(body.toString('utf8'));
   } catch {
-    reject();
+    rejectInvalidInferenceRuntime();
   }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) reject();
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    rejectInvalidInferenceRuntime();
   if (!Object.hasOwn(value, 'templates')) return false;
   const pool = value.templates;
-  if (!pool || typeof pool !== 'object' || Array.isArray(pool)) reject();
+  if (!pool || typeof pool !== 'object' || Array.isArray(pool))
+    rejectInvalidInferenceRuntime();
   if (Object.keys(pool).length === 0) return false;
   if (
     !inferenceCaptureAuthorized(execution, step) ||
@@ -188,20 +186,8 @@ export function assertInferenceRuntimeCapture(
     value.calls.length > 128 ||
     Object.keys(pool).length > 256
   )
-    reject();
-  const references = new Set<string>();
-  for (const [index, call] of value.calls.entries()) {
-    if (!call || call.callIndex !== index + 1) reject();
-    const properties = call.engine?.properties ?? {};
-    for (const name of ['chatTemplateHash', 'toolTemplateHash']) {
-      if (Object.prototype.hasOwnProperty.call(properties, name)) {
-        const hash = properties[name];
-        if (typeof hash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(hash))
-          reject();
-        references.add(hash);
-      }
-    }
-  }
+    rejectInvalidInferenceRuntime();
+  const references = inferenceRuntimeTemplateReferences(value.calls);
   for (const [hash, template] of Object.entries(pool)) {
     if (
       typeof template !== 'string' ||
@@ -211,8 +197,35 @@ export function assertInferenceRuntimeCapture(
       !references.has(hash) ||
       canonicalHash(template) !== hash
     )
-      reject();
+      rejectInvalidInferenceRuntime();
   }
-  if (Buffer.byteLength(JSON.stringify(pool), 'utf8') > 256 * 1024) reject();
+  if (Buffer.byteLength(JSON.stringify(pool), 'utf8') > 256 * 1024)
+    rejectInvalidInferenceRuntime();
   return true;
+}
+
+function inferenceRuntimeTemplateReferences(
+  calls: Array<{
+    callIndex: number;
+    engine?: { properties?: Record<string, unknown> };
+  }>,
+): Set<string> {
+  const references = new Set<string>();
+  for (const [index, call] of calls.entries()) {
+    if (!call || call.callIndex !== index + 1) rejectInvalidInferenceRuntime();
+    const properties = call.engine?.properties ?? {};
+    for (const name of ['chatTemplateHash', 'toolTemplateHash']) {
+      if (Object.hasOwn(properties, name)) {
+        const hash = properties[name];
+        if (typeof hash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(hash))
+          rejectInvalidInferenceRuntime();
+        references.add(hash);
+      }
+    }
+  }
+  return references;
+}
+
+function rejectInvalidInferenceRuntime(): never {
+  throw new BadRequestException('invalid_inference_runtime');
 }

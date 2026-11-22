@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as crypto from 'crypto';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 
 @Injectable()
-export class FileStorageService {
+export class FileStorageService implements OnModuleInit {
   private readonly baseStoragePath: string;
   private readonly archiveStoragePath: string;
 
@@ -18,8 +18,13 @@ export class FileStorageService {
       this.configService.get('DOCUMENTS_ARCHIVE_DIR') ||
         path.join(this.baseStoragePath, '..', 'documents-archive'),
     );
-    this.ensureDirectoryExists(this.baseStoragePath);
-    this.ensureDirectoryExists(this.archiveStoragePath);
+  }
+
+  async onModuleInit(): Promise<void> {
+    await Promise.all([
+      this.ensureDirectoryExists(this.baseStoragePath),
+      this.ensureDirectoryExists(this.archiveStoragePath),
+    ]);
   }
 
   async storeFile(

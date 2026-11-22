@@ -16,7 +16,7 @@ export class ReferenceService {
   ) {}
 
   async search(query: string, types?: string[]): Promise<any[]> {
-    if (!query || !query.trim()) return [];
+    if (!query?.trim()) return [];
 
     const allTypes = !types || types.length === 0;
     const include = (t: string) => allTypes || types!.includes(t);

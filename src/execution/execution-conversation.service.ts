@@ -1,13 +1,17 @@
 import { lockExecutionRequest } from './execution-request';
 import { ExecutionRequestEntity } from './execution-request.entity';
-import { EXECUTION_UUID_PATTERN } from './execution.constants';
+import {
+  EXECUTION_UUID_PATTERN,
+  EXECUTION_SCHEMA,
+  isChatTurnTaskType,
+} from './execution.constants';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { executionTraceContext } from '../telemetry/telemetry';
 import { FeatureFlagService } from '../common/feature-flags.service';
@@ -39,7 +43,6 @@ import { ExecutionPublication } from '../execution-outbox/execution-publication'
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 import { contentHash, canonicalHash } from './execution-canonical';
-import { EXECUTION_SCHEMA, isChatTurnTaskType } from './execution.constants';
 import { redactExecutionText } from './execution-data-policy';
 import { ExecutionEntity } from './execution.entity';
 import { appendBackendExecutionEvent } from './execution-event.writer';
@@ -324,7 +327,7 @@ export class ExecutionConversationService {
       browserFederationEnabled: this.browserFederationEnabled(),
     });
     nextExecution.payload = {
-      ...(nextExecution.payload ?? {}),
+      ...nextExecution.payload,
       folderScope: ownerConfig.folderScope,
       ...(session.ownerType === 'agent'
         ? { systemPrompt: ownerConfig.systemPrompt }
@@ -413,7 +416,7 @@ export class ExecutionConversationService {
       throw new BadRequestException('invalid_conversation_owner');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const acceptance =
         requestId === undefined
           ? null
@@ -745,8 +748,7 @@ export class ExecutionConversationService {
     const expectedType =
       kind === 'assistant_chat' ? 'assistant-chat' : 'agent-chat';
     if (
-      !execution ||
-      !execution.turnId ||
+      !execution?.turnId ||
       execution.taskType !== expectedType ||
       Number(executionPayloadOwnerId(execution.payload)) !== ownerId
     ) {

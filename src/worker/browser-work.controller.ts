@@ -10,6 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 import { Public } from '../auth/decorators/public.decorator';
 import { FeatureFlagService } from '../common/feature-flags.service';
 import {
@@ -53,7 +54,7 @@ export class BrowserWorkController {
     const { worker, credential } = await this.workers.enrollBrowser(
       body.installationId,
       body.name,
-      this.resolveOwnerPrincipal(user),
+      ownerPrincipalFromUser(user),
       body.metadata,
     );
     return {
@@ -199,7 +200,7 @@ export class BrowserWorkController {
     this.assertEnabled();
     await this.workers.revokeBrowser(
       installationId,
-      this.resolveOwnerPrincipal(user),
+      ownerPrincipalFromUser(user),
     );
   }
 
@@ -207,11 +208,5 @@ export class BrowserWorkController {
     if (!this.features.isEnabled('browser_federation')) {
       throw new NotFoundException('browser_federation_disabled');
     }
-  }
-
-  private resolveOwnerPrincipal(user: unknown): string {
-    if (!user || typeof user !== 'object') return 'standalone';
-    const record = user as Record<string, unknown>;
-    return String(record.userId ?? record.sub ?? 'standalone');
   }
 }

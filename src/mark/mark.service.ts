@@ -37,7 +37,7 @@ export class MarkService {
   }
 
   async search(query: string): Promise<MarkEntity[]> {
-    if (!query || !query.trim()) return [];
+    if (!query?.trim()) return [];
     const like = `%${query}%`;
     return await this.repository
       .createQueryBuilder('m')

@@ -1,9 +1,9 @@
 import { renderHtmlToDocx } from '../../../src/common/html-to-docx';
 
-jest.mock('html-to-docx', () => jest.fn());
+jest.mock('@turbodocx/html-to-docx', () => jest.fn());
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const HTMLtoDOCX = require('html-to-docx') as jest.Mock;
+const HTMLtoDOCX = require('@turbodocx/html-to-docx') as jest.Mock;
 
 describe('renderHtmlToDocx', () => {
   beforeEach(() => {

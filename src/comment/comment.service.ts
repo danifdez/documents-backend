@@ -10,7 +10,7 @@ export class CommentService {
     private readonly repository: Repository<CommentEntity>,
   ) {}
 
-  async findOne(id: number): Promise<CommentEntity | null> {
+  findOne(id: number): Promise<CommentEntity | null> {
     return this.repository.findOneBy({ id });
   }
 
@@ -19,14 +19,14 @@ export class CommentService {
     return await this.repository.save(created);
   }
 
-  async findByDoc(docId: number): Promise<CommentEntity[]> {
+  findByDoc(docId: number): Promise<CommentEntity[]> {
     return this.repository.find({
       where: { doc: { id: docId } },
       order: { createdAt: 'DESC' },
     });
   }
 
-  async findByResource(resourceId: number): Promise<CommentEntity[]> {
+  findByResource(resourceId: number): Promise<CommentEntity[]> {
     return this.repository.find({
       where: { resource: { id: resourceId } },
       order: { createdAt: 'DESC' },

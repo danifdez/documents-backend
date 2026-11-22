@@ -97,7 +97,7 @@ export class RelationshipExtractionProcessor implements ExecutionProcessor {
 
   private parseRelationships(value: unknown): ExtractedRelationshipInput[] {
     if (!Array.isArray(value)) {
-      throw new Error('Invalid relationship extraction result');
+      throw new TypeError('Invalid relationship extraction result');
     }
     return value.map((entry) => {
       if (!entry || typeof entry !== 'object') {

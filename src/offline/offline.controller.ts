@@ -33,7 +33,7 @@ export class OfflineController {
 
   @Get('bundle/:type/:id')
   async getBundle(@Param('type') type: string, @Param('id') id: string) {
-    const numId = parseInt(id, 10);
+    const numId = Number.parseInt(id, 10);
     if (Number.isNaN(numId)) throw new BadRequestException('Invalid ID');
 
     const bundler = this.bundlersByType.get(type);

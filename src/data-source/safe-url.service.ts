@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { promises as dns } from 'dns';
-import * as net from 'net';
+import { promises as dns } from 'node:dns';
+import * as net from 'node:net';
 
 const BLOCKED_HOSTNAMES = new Set([
   'localhost',
@@ -93,24 +93,32 @@ export class SafeUrlService {
   }
 
   private isPrivateIPv4(address: string): boolean {
-    const octets = address.split('.').map((part) => Number(part));
+    const octets = address.split('.').map(Number);
     if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part))) {
       return true;
     }
     const [a, b, c] = octets;
 
-    if (a === 0 || a === 10 || a === 127) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
-    if (a === 198 && (b === 18 || b === 19)) return true;
-    if (a === 198 && b === 51 && c === 100) return true;
-    if (a === 203 && b === 0 && c === 113) return true;
-    if (a >= 224) return true;
-
-    return false;
+    switch (a) {
+      case 0:
+      case 10:
+      case 127:
+        return true;
+      case 100:
+        return b >= 64 && b <= 127;
+      case 169:
+        return b === 254;
+      case 172:
+        return b >= 16 && b <= 31;
+      case 192:
+        return b === 168 || (b === 0 && (c === 0 || c === 2));
+      case 198:
+        return b === 18 || b === 19 || (b === 51 && c === 100);
+      case 203:
+        return b === 0 && c === 113;
+      default:
+        return a >= 224;
+    }
   }
 
   private isPrivateIPv6(address: string): boolean {
@@ -118,11 +126,11 @@ export class SafeUrlService {
     if (normalized === '::' || normalized === '::1') return true;
 
     // IPv4-mapped addresses (::ffff:a.b.c.d) inherit the IPv4 policy.
-    const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
     if (mapped) return this.isPrivateIPv4(mapped[1]);
 
     // IPv4-compatible addresses (::a.b.c.d).
-    const compatible = normalized.match(/^::(\d+\.\d+\.\d+\.\d+)$/);
+    const compatible = /^::(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
     if (compatible) return this.isPrivateIPv4(compatible[1]);
 
     if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;

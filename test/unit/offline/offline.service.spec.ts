@@ -276,7 +276,7 @@ describe('OfflineService bundles and deltas', () => {
     expect(getFile).not.toHaveBeenCalled();
   });
 
-  it('bundles a resource with the relevant annotations and includes files at the limit', async () => {
+  it('bundles resource annotations and files within the size limit', async () => {
     resources.findOne.mockResolvedValue(small);
     comments.find.mockResolvedValue([{ id: 10 }]);
     marks.find.mockResolvedValue([{ id: 11 }]);

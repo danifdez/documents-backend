@@ -47,8 +47,17 @@ export class DataSourceSyncService {
     await this.dataSourceService.findOne(dataSourceId);
     const payload = { dataSourceId };
     const execution = request
-      ? await this.executionService.create('data-source-sync', ExecutionPriority.NORMAL, payload, request)
-      : await this.executionService.create('data-source-sync', ExecutionPriority.NORMAL, payload);
+      ? await this.executionService.create(
+          'data-source-sync',
+          ExecutionPriority.NORMAL,
+          payload,
+          request,
+        )
+      : await this.executionService.create(
+          'data-source-sync',
+          ExecutionPriority.NORMAL,
+          payload,
+        );
     return { executionId: execution.executionId };
   }
 

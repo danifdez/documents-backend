@@ -47,9 +47,13 @@ export class DatasetExtractionService {
 
     const projectId = dataset.project?.id ?? null;
     const resources = await this.resolveSources(dataset, projectId);
-    const captureInference = captureResourceId !== undefined;
-    if (captureInference && (resources.length !== 1 || resources[0].id !== captureResourceId)) {
-      throw new BadRequestException('Dataset source does not match the authorized resource');
+    if (
+      captureResourceId !== undefined &&
+      !resources.some((resource) => resource.id === captureResourceId)
+    ) {
+      throw new BadRequestException(
+        'Dataset source does not match the authorized resource',
+      );
     }
     if (!resources.length) {
       return { rowsQueued: 0, executionIds: [] };
@@ -69,7 +73,7 @@ export class DatasetExtractionService {
         columnsToExtract,
         projectId,
         ownerPrincipal,
-        captureInference,
+        captureResourceId !== undefined && resource.id === captureResourceId,
       );
       if (execution) executionIds.push(execution.executionId);
     }
@@ -171,24 +175,20 @@ export class DatasetExtractionService {
     }
     // Pull excerpts (max 3 resources, first ~2000 chars each) — backend
     // does the IO so the worker stays a pure LLM call.
-    const slice = resourceIds.slice(0, 3);
-    const excerpts = [] as Array<{
-      id: number;
-      title: string;
-      excerpt: string;
-    }>;
-    for (const rid of slice) {
-      const meta = await this.resourceService.findOne(rid);
-      if (!meta) continue;
-      const content = await this.resourceService.getContentById(rid);
-      const text = (content ?? '').slice(0, 2000);
-      excerpts.push({
-        id: rid,
-        title: meta.title || meta.name || `resource ${rid}`,
-        excerpt: text,
-      });
-    }
-    if (excerpts.length === 0 || excerpts.every((e) => !e.excerpt.trim())) {
+    const fetched = await Promise.all(
+      resourceIds.slice(0, 3).map(async (id) => {
+        const meta = await this.resourceService.findOne(id);
+        if (!meta) return null;
+        const content = await this.resourceService.getContentById(id);
+        return {
+          id,
+          title: meta.title || meta.name || `resource ${id}`,
+          excerpt: (content ?? '').slice(0, 2000),
+        };
+      }),
+    );
+    const excerpts = fetched.filter((excerpt) => excerpt !== null);
+    if (excerpts.every((excerpt) => !excerpt.excerpt.trim())) {
       throw new HttpException(
         'no readable content in any of the given resources',
         HttpStatus.BAD_REQUEST,
@@ -324,10 +324,7 @@ export class DatasetExtractionService {
     captureInference = false,
   ) {
     const content = await this.resourceService.getContentById(resource.id);
-    const mediaType = resource.mimeType
-      ?.split(';', 1)[0]
-      ?.trim()
-      .toLowerCase();
+    const mediaType = resource.mimeType?.split(';', 1)[0]?.trim().toLowerCase();
     const isAudio = mediaType?.startsWith('audio/') ?? false;
     const fieldsForPayload: DatasetField[] = dataset.schema.filter(
       (f) => f.description && f.description.trim().length > 0,
@@ -354,7 +351,11 @@ export class DatasetExtractionService {
       'dataset.extract-row',
       ExecutionPriority.NORMAL,
       payload,
-      { steps, ownerPrincipal, ...(captureInference ? { captureInference } : {}) },
+      {
+        steps,
+        ownerPrincipal,
+        ...(captureInference ? { captureInference } : {}),
+      },
     );
   }
 }

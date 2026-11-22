@@ -1,3 +1,4 @@
+import { readString } from '../utils/read-string';
 export type ProgressCounter = {
   started: number;
   finished: number;
@@ -259,7 +260,8 @@ function budgetUsage(
 }
 
 function ensureBudget(ledger: ProgressLedger): OperationBudgetProjection {
-  return (ledger.operationBudget ??= { grants: {}, reservations: {} });
+  ledger.operationBudget ??= { grants: {}, reservations: {} };
+  return ledger.operationBudget;
 }
 
 export function exactToolRepeatGuardSnapshot(
@@ -397,11 +399,10 @@ function consumeBudgetReservation(
   ) {
     return;
   }
-  const operationId = String(event.operationId ?? '');
+  const operationId = readString(event.operationId);
   const reservation = ledger.operationBudget?.reservations[operationId];
   if (
-    !reservation ||
-    reservation.status !== 'reserved' ||
+    reservation?.status !== 'reserved' ||
     reservation.operationKind !== event.payload.operationKind
   ) {
     return;
@@ -447,13 +448,13 @@ function consumeBudgetReservation(
 }
 
 function operationKey(event: ProgressEvent): string {
-  return `${String(event.operationId ?? '')}:${String(event.attemptId ?? '')}`;
+  return `${readString(event.operationId)}:${readString(event.attemptId)}`;
 }
 
 function inferencePhase(payload: Record<string, unknown>): string {
-  const explicit = String(payload.phase ?? '');
+  const explicit = readString(payload.phase);
   if (INFERENCE_PHASES.has(explicit)) return explicit;
-  const name = String(payload.name ?? '');
+  const name = readString(payload.name);
   if (name === 'output_repair') return 'output_repair';
   if (name === 'forced_finalization') return 'forced_finalization';
   if (name === 'memory_extraction') return 'memory_extraction';
@@ -523,7 +524,7 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
       const snapshot = event.payload.policy;
       if (snapshot && typeof snapshot === 'object') {
         const value = snapshot as Record<string, unknown>;
-        const loopId = String(value.loopId ?? '');
+        const loopId = readString(value.loopId);
         if (loopId) policy.loops[loopId] = structuredClone(value);
       }
       continue;
@@ -539,7 +540,7 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
           ? inferencePhase(event.payload)
           : undefined;
       const loopId = event.payload.loopId
-        ? String(event.payload.loopId)
+        ? readString(event.payload.loopId)
         : undefined;
       starts.set(key, { operationKind, phase, loopId });
       const counters = [ledger.operations[operationKind]];
@@ -549,8 +550,8 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
       }
       if (loopId) {
         const loop = (ledger.loops[loopId] ??= {
-          agentName: String(event.payload.agentName),
-          loopKind: String(event.payload.loopKind),
+          agentName: readString(event.payload.agentName),
+          loopKind: readString(event.payload.loopKind),
           maxRounds: Number(event.payload.maxRounds),
           operations: { inference: counter(), tool_call: counter() },
           inferencePhases: {},

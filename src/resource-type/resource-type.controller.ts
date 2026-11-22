@@ -27,9 +27,7 @@ export class ResourceTypeController {
   }
 
   @Post()
-  async create(
-    @Body() resourceType: CreateResourceTypeDto,
-  ): Promise<ResourceTypeEntity | any> {
+  async create(@Body() resourceType: CreateResourceTypeDto): Promise<any> {
     return await this.resourceTypeService.create(resourceType);
   }
 
@@ -37,7 +35,7 @@ export class ResourceTypeController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() resourceType: UpdateResourceTypeDto,
-  ): Promise<ResourceTypeEntity | any | null> {
+  ): Promise<any> {
     return await this.resourceTypeService.update(id, resourceType);
   }
 
@@ -47,7 +45,7 @@ export class ResourceTypeController {
   }
 
   @Get()
-  async findAll(): Promise<(ResourceTypeEntity | any)[]> {
+  async findAll(): Promise<any[]> {
     return await this.resourceTypeService.findAll();
   }
 }

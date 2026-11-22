@@ -8,11 +8,11 @@ import { SearchService } from '../search/search.service';
 import {
   DOCUMENT_SEARCH_PROVIDER,
   ExecutionToolRuntimeService,
+  USER_TASK_CREATE_PROVIDER,
 } from './execution-tool-runtime.service';
 import { ExecutionAgentLoopService } from './execution-agent-loop.service';
 import { UserTaskModule } from '../user-task/user-task.module';
 import { UserTaskService } from '../user-task/user-task.service';
-import { USER_TASK_CREATE_PROVIDER } from './execution-tool-runtime.service';
 import { IndexedFileModule } from '../indexed-file/indexed-file.module';
 import { ExecutionNextWorkService } from './execution-next-work.service';
 import { ExecutionTerminalCandidateService } from './execution-terminal-candidate.service';

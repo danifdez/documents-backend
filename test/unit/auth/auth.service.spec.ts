@@ -193,7 +193,7 @@ describe('AuthService', () => {
     await expect(service.updateUser(999, {})).resolves.toBeNull();
   });
 
-  it('copies permissions when creating a grouped user and sanitizes all returned users', async () => {
+  it('copies group permissions and strips password hashes from users', async () => {
     const group = { id: 5, permissions: { read: true } };
     groupRepo.findOneBy
       .mockResolvedValueOnce(group)
@@ -267,7 +267,7 @@ describe('AuthService', () => {
     });
   });
 
-  it('updates group permissions for assigned users and unassigns them when deleting a group', async () => {
+  it('updates assigned user permissions and clears deleted groups', async () => {
     groupRepo.create.mockImplementation((row) => row);
     groupRepo.save.mockImplementation(async (row) => row);
     await expect(service.createGroup({ name: 'Group' })).resolves.toEqual({

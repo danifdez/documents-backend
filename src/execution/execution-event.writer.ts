@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { EntityManager } from 'typeorm';
 import { canonicalHash, canonicalProfileValue } from './execution-canonical';
 import { EXECUTION_EVENT_SCHEMA } from './execution.constants';

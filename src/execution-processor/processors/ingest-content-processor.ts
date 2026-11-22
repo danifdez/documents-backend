@@ -48,7 +48,7 @@ export class IngestContentProcessor implements ExecutionProcessor {
     );
     const points = documents.flatMap((document) => {
       if (!Array.isArray(document.points)) {
-        throw new Error('ingest-content vector_points artifact is invalid');
+        throw new TypeError('ingest-content vector_points artifact is invalid');
       }
       return document.points as VectorPointInput[];
     });

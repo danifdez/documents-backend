@@ -62,7 +62,7 @@ describe('CalendarEventService', () => {
     expect(repo.remove).toHaveBeenCalled();
   });
 
-  it('expands recurring dates, applies completions to the right occurrences and sorts across events', async () => {
+  it('expands recurring events and applies completions in date order', async () => {
     const date = (day: number, hour = 9) =>
       new Date(Date.UTC(2026, 0, day, hour));
     const tracked = buildCalendarEvent({

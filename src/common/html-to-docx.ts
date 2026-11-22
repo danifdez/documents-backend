@@ -1,5 +1,5 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const HTMLtoDOCX = require('html-to-docx');
+const HTMLtoDOCX = require('@turbodocx/html-to-docx');
 
 export async function renderHtmlToDocx(html: string): Promise<Buffer> {
   const wrappedHtml =

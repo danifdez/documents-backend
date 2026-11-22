@@ -60,9 +60,7 @@ export class EntityController {
   }
 
   @Get(':id/detailed')
-  async findOneDetailed(
-    @Param('id', ParseIntPipe) id: number,
-  ): Promise<any | null> {
+  async findOneDetailed(@Param('id', ParseIntPipe) id: number): Promise<any> {
     return await this.entityService.findOneDetailed(id);
   }
 

@@ -271,7 +271,7 @@ describe('DataSourceService management and secret handling', () => {
     );
   });
 
-  it('loads recent sync logs within the data source and deletes only existing sources', async () => {
+  it('lists source sync logs and deletes only existing sources', async () => {
     const ds = entity();
     syncLogRepo.find.mockResolvedValue([{ id: 10 }]);
     await expect(service.getSyncLogs(1)).resolves.toEqual([{ id: 10 }]);

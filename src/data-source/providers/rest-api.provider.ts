@@ -142,10 +142,7 @@ export class RestApiProvider implements DataSourceProvider {
       const response = await this.makeRequest(config, headers, params);
 
       const records = this.extractData(response.data, config.dataPath);
-      if (!Array.isArray(records) || records.length === 0) {
-        hasMore = false;
-        break;
-      }
+      if (!Array.isArray(records) || records.length === 0) break;
 
       allRecords.push(...records);
 
@@ -165,9 +162,10 @@ export class RestApiProvider implements DataSourceProvider {
           ? this.extractData(response.data, config.totalPath)
           : null;
         const pageSize = config.pageSize || 100;
-        if (total && allRecords.length >= total) {
-          hasMore = false;
-        } else if (records.length < pageSize) {
+        if (
+          (total && allRecords.length >= total) ||
+          records.length < pageSize
+        ) {
           hasMore = false;
         } else {
           currentPage++;
@@ -178,9 +176,7 @@ export class RestApiProvider implements DataSourceProvider {
           : null;
         const pageSize = config.pageSize || 100;
         currentOffset += pageSize;
-        if (total && currentOffset >= total) {
-          hasMore = false;
-        } else if (records.length < pageSize) {
+        if ((total && currentOffset >= total) || records.length < pageSize) {
           hasMore = false;
         }
       }

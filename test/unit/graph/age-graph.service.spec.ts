@@ -192,7 +192,7 @@ describe('AgeGraphService query and write lifecycle', () => {
     expect(project[1]).toEqual([JSON.stringify({ project_id: 3 })]);
   });
 
-  it('short-circuits empty neighborhoods and resolves matching names from project text', async () => {
+  it('skips empty neighborhoods and finds entity names in project text', async () => {
     await expect(service.queryNeighborhood([])).resolves.toEqual({
       entities: [],
       relationships: [],

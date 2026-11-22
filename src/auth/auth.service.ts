@@ -36,7 +36,7 @@ export class AuthService {
     password: string,
   ): Promise<UserEntity | null> {
     const user = await this.userRepo.findOneBy({ username });
-    if (!user || !user.active) return null;
+    if (!user?.active) return null;
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     return valid ? user : null;
@@ -45,7 +45,7 @@ export class AuthService {
   async authenticateAccessToken(token: unknown) {
     try {
       if (typeof token !== 'string' || !token || token.length > 8192) {
-        throw new Error();
+        throw new Error('Access token must be a non-empty string');
       }
       const payload = this.jwtService.verify(token);
       if (
@@ -57,7 +57,7 @@ export class AuthService {
         payload.exp * 1000 <= Date.now() ||
         (payload.type !== undefined && payload.type !== 'access')
       ) {
-        throw new Error();
+        throw new Error('Access token claims are invalid or expired');
       }
       const user = await this.findUserById(payload.sub);
       if (
@@ -66,7 +66,7 @@ export class AuthService {
         user.username !== payload.username ||
         payload.exp * 1000 <= Date.now()
       )
-        throw new Error();
+        throw new Error('Access token does not match an active user');
       return { user, expiresAt: payload.exp * 1000 };
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');
@@ -102,7 +102,7 @@ export class AuthService {
       }
 
       const user = await this.userRepo.findOneBy({ id: payload.sub });
-      if (!user || !user.active) {
+      if (!user?.active) {
         throw new UnauthorizedException('User not found or inactive');
       }
 
@@ -149,10 +149,8 @@ export class AuthService {
       if (dto.groupId) {
         const group = await this.groupRepo.findOneBy({ id: dto.groupId });
         if (group) user.permissions = { ...group.permissions };
-      } else {
-        // Removed from group — use provided permissions or keep current
-        if (dto.permissions !== undefined) user.permissions = dto.permissions;
-      }
+      } else if (dto.permissions !== undefined)
+        user.permissions = dto.permissions;
     } else if (dto.permissions !== undefined) {
       user.permissions = dto.permissions;
     }
@@ -166,7 +164,7 @@ export class AuthService {
     return users.map((u) => this.sanitizeUser(u));
   }
 
-  async findUserById(id: number): Promise<any | null> {
+  async findUserById(id: number): Promise<any> {
     const user = await this.userRepo.findOneBy({ id });
     return user ? this.sanitizeUser(user) : null;
   }
@@ -239,11 +237,11 @@ export class AuthService {
     return this.groupRepo.save(group);
   }
 
-  async findAllGroups(): Promise<PermissionGroupEntity[]> {
+  findAllGroups(): Promise<PermissionGroupEntity[]> {
     return this.groupRepo.find({ order: { name: 'ASC' } });
   }
 
-  async findGroupById(id: number): Promise<PermissionGroupEntity | null> {
+  findGroupById(id: number): Promise<PermissionGroupEntity | null> {
     return this.groupRepo.findOneBy({ id });
   }
 
@@ -262,7 +260,8 @@ export class AuthService {
   }
 
   private sanitizeUser(user: UserEntity) {
-    const { passwordHash, ...rest } = user;
-    return rest;
+    const safeUser: Partial<UserEntity> = { ...user };
+    delete safeUser.passwordHash;
+    return safeUser;
   }
 }

@@ -53,7 +53,7 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
       throw new Error('entity-extraction source identity is invalid');
     }
     if (!Array.isArray(result?.entities)) {
-      throw new Error('entity-extraction result is invalid');
+      throw new TypeError('entity-extraction result is invalid');
     }
     const entities = result.entities.map((value) => {
       if (!value || typeof value !== 'object') {

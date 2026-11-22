@@ -19,10 +19,10 @@ export function extractTextFromHtml(html: string): Array<{
     const pathParts: string[] = [];
     let current = element;
 
-    while (current && current.type === 'tag') {
+    while (current?.type === 'tag') {
       const tagName = current.name;
       const siblings = $(current).siblings(tagName).toArray();
-      const index = siblings.findIndex((sibling) => sibling === current);
+      const index = siblings.indexOf(current);
 
       if (index > -1) {
         pathParts.unshift(`${tagName}:nth-child(${index + 1})`);

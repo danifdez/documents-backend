@@ -29,7 +29,7 @@ export class ProjectService {
     query: string,
     includeArchived = false,
   ): Promise<ProjectEntity[]> {
-    if (!query || !query.trim()) return this.findAll(includeArchived);
+    if (!query?.trim()) return this.findAll(includeArchived);
     const like = `%${query}%`;
     const qb = this.repository
       .createQueryBuilder('p')

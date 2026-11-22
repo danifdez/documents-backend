@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 export class CreateResourceTypes1757668140004 implements MigrationInterface {
   name = 'CreateResourceTypes1757668140004';
@@ -76,10 +76,9 @@ export class CreateResourceTypes1757668140004 implements MigrationInterface {
       const maxIdResult = await queryRunner.query(
         `SELECT MAX(id) as max FROM "resource_types"`,
       );
-      const maxId =
-        maxIdResult?.[0]?.max
-          ? Number.parseInt(maxIdResult[0].max, 10)
-          : 0;
+      const maxId = maxIdResult?.[0]?.max
+        ? Number.parseInt(maxIdResult[0].max, 10)
+        : 0;
       if (maxId > 0) {
         await queryRunner.query(
           `ALTER SEQUENCE "resource_types_id_seq" RESTART WITH ${maxId + 1}`,

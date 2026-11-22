@@ -110,14 +110,14 @@ export class AgeGraphService {
       );
       const entities = new Map<string, GraphEntity>();
       const relationships = rows.map((row) => {
-        const source = String(this.ageValue(row.source));
-        const target = String(this.ageValue(row.target));
+        const source = this.ageText(row.source);
+        const target = this.ageText(row.target);
         entities.set(source, { id: source, name: source, type: '' });
         entities.set(target, { id: target, name: target, type: '' });
         return {
           source,
           target,
-          predicate: String(this.ageValue(row.predicate)),
+          predicate: this.ageText(row.predicate),
           confidence: Number(this.ageValue(row.confidence) ?? 1),
         };
       });
@@ -145,7 +145,7 @@ export class AgeGraphService {
         'name agtype',
       );
       names = rows
-        .map((row) => String(this.ageValue(row.name) ?? '').trim())
+        .map((row) => this.ageText(row.name).trim())
         .filter((name) => name.length >= 2)
         .filter((name) => normalized.includes(name.toLocaleLowerCase()))
         .slice(0, 20);
@@ -165,16 +165,15 @@ export class AgeGraphService {
     await this.write(async (runner) => {
       await this.upsertEntity(runner, subject);
       await this.upsertEntity(runner, object);
-      await this.upsertRelationship(
-        runner,
-        subject.id,
+      await this.upsertRelationship(runner, {
+        subject_id: subject.id,
         predicate,
-        object.id,
-        resourceId,
-        projectId,
-        1,
-        '',
-      );
+        object_id: object.id,
+        resource_id: resourceId,
+        project_id: projectId ?? null,
+        confidence: 1,
+        context: '',
+      });
     });
   }
 
@@ -290,18 +289,18 @@ export class AgeGraphService {
     const observed = rows
       .map((row) => ({
         subject_id: Number(this.ageValue(row.subject_id)),
-        subject: String(this.ageValue(row.subject)),
-        subject_type: String(this.ageValue(row.subject_type)),
-        predicate: String(this.ageValue(row.predicate)),
+        subject: this.ageText(row.subject),
+        subject_type: this.ageText(row.subject_type),
+        predicate: this.ageText(row.predicate),
         confidence: Number(this.ageValue(row.confidence)),
-        context: String(this.ageValue(row.context) ?? ''),
+        context: this.ageText(row.context),
         project_id:
           this.ageValue(row.project_id) == null
             ? null
             : Number(this.ageValue(row.project_id)),
         object_id: Number(this.ageValue(row.object_id)),
-        object: String(this.ageValue(row.object)),
-        object_type: String(this.ageValue(row.object_type)),
+        object: this.ageText(row.object),
+        object_type: this.ageText(row.object_type),
       }))
       .sort((left, right) =>
         this.relationshipKey(left).localeCompare(this.relationshipKey(right)),
@@ -347,16 +346,15 @@ export class AgeGraphService {
       if (!subject || !object) {
         throw new Error('Relationship endpoints must reference known entities');
       }
-      await this.upsertRelationship(
-        target,
-        subject.id,
-        relationship.predicate,
-        object.id,
-        resourceId,
-        projectId,
-        relationship.confidence,
-        relationship.context ?? '',
-      );
+      await this.upsertRelationship(target, {
+        subject_id: subject.id,
+        predicate: relationship.predicate,
+        object_id: object.id,
+        resource_id: resourceId,
+        project_id: projectId ?? null,
+        confidence: relationship.confidence,
+        context: relationship.context ?? '',
+      });
     }
   }
 
@@ -387,18 +385,18 @@ export class AgeGraphService {
         const target = this.ageValue(row.target_id) as number | string;
         entities.set(source, {
           id: source,
-          name: String(this.ageValue(row.source_name)),
-          type: String(this.ageValue(row.source_type) ?? ''),
+          name: this.ageText(row.source_name),
+          type: this.ageText(row.source_type),
         });
         entities.set(target, {
           id: target,
-          name: String(this.ageValue(row.target_name)),
-          type: String(this.ageValue(row.target_type) ?? ''),
+          name: this.ageText(row.target_name),
+          type: this.ageText(row.target_type),
         });
         relationships.push({
           source,
           target,
-          predicate: String(this.ageValue(row.predicate)),
+          predicate: this.ageText(row.predicate),
           confidence: Number(this.ageValue(row.confidence) ?? 1),
           resource_id: Number(this.ageValue(row.resource_id)),
         });
@@ -428,13 +426,15 @@ export class AgeGraphService {
 
   private async upsertRelationship(
     runner: GraphQueryTarget,
-    subjectId: number,
-    predicate: string,
-    objectId: number,
-    resourceId: number,
-    projectId: number | null | undefined,
-    confidence: number,
-    context: string,
+    params: {
+      subject_id: number;
+      predicate: string;
+      object_id: number;
+      resource_id: number;
+      project_id: number | null;
+      confidence: number;
+      context: string;
+    },
   ): Promise<void> {
     await this.exec(
       runner,
@@ -442,15 +442,7 @@ export class AgeGraphService {
         'MATCH (o:Entity {entity_id: $object_id}) ' +
         'MERGE (s)-[r:REL {predicate: $predicate, resource_id: $resource_id}]->(o) ' +
         'SET r.project_id = $project_id, r.confidence = $confidence, r.context = $context',
-      {
-        subject_id: subjectId,
-        predicate,
-        object_id: objectId,
-        resource_id: resourceId,
-        project_id: projectId ?? null,
-        confidence,
-        context,
-      },
+      params,
     );
   }
 
@@ -510,6 +502,15 @@ export class AgeGraphService {
     } catch {
       return value;
     }
+  }
+
+  private ageText(value: unknown): string {
+    const scalar = this.ageValue(value);
+    if (typeof scalar === 'string') return scalar;
+    if (typeof scalar === 'number' || typeof scalar === 'boolean') {
+      return scalar.toString();
+    }
+    return '';
   }
 
   private safeLimit(value: number, fallback: number): number {

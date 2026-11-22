@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ModelService } from '../../../src/model/model.service';
 import { buildSummarizeWorkflowSteps } from '../../../src/model/summarize-workflow';
 import { buildEntityExtractionWorkflowSteps } from '../../../src/model/entity-extraction-workflow';
@@ -11,8 +12,8 @@ describe('ModelService execution identities', () => {
     summarize: '018f1d8a-54d7-7d63-a1ee-5e9a6adca701',
     translate: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
     'entity-extraction': '018f1d8a-54d7-7d63-a1ee-5e9a6adca703',
-    'key-point': '018f1d8a-54d7-7d63-a1ee-5e9a6adca704',
-    keywords: '018f1d8a-54d7-7d63-a1ee-5e9a6adca705',
+    'key-point': randomUUID(),
+    keywords: randomUUID(),
     ask: '018f1d8a-54d7-7d63-a1ee-5e9a6adca706',
     search: '018f1d8a-54d7-7d63-a1ee-5e9a6adca707',
     'browser-inference': '018f1d8a-54d7-7d63-a1ee-5e9a6adca708',
@@ -259,15 +260,12 @@ describe('ModelService execution identities', () => {
 
   it('creates summarize as section summaries plus one global composition', async () => {
     await expect(
-      service.summarize(
-        scope,
-        'en',
-        undefined,
-        undefined,
-        'Hola',
-        'es',
-        'workspace-selection',
-      ),
+      service.summarize(scope, {
+        targetLanguage: 'en',
+        text: 'Hola',
+        sourceLanguage: 'es',
+        type: 'workspace-selection',
+      }),
     ).resolves.toEqual({ executionId: executionIds.summarize });
 
     expect(executionService.create).toHaveBeenCalledWith(
@@ -296,12 +294,12 @@ describe('ModelService execution identities', () => {
   it('requests capture through the common execution options', async () => {
     await service.summarize(
       scope,
-      'en',
-      undefined,
-      undefined,
-      'Hola',
-      'es',
-      'workspace-selection',
+      {
+        targetLanguage: 'en',
+        text: 'Hola',
+        sourceLanguage: 'es',
+        type: 'workspace-selection',
+      },
       true,
     );
     const [, , payload, options] = executionService.create.mock.calls[0];

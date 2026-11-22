@@ -1,3 +1,4 @@
+import { compareStrings } from '../../../utils/compare-strings';
 import { Injectable } from '@nestjs/common';
 import { ExecutionEntity } from '../../../execution/execution.entity';
 import { PendingEntityService } from '../../../pending-entity/pending-entity.service';
@@ -112,7 +113,8 @@ export class EntityRetranslationStrategy extends Base<PendingEntityEntity> {
           entityId,
           beforeHash: canonicalHash(before),
           afterHash: canonicalHash(current.translations),
-          updatedLanguages: Object.keys(translationsToMerge).sort(),
+          updatedLanguages:
+            Object.keys(translationsToMerge).sort(compareStrings),
         };
       },
     );

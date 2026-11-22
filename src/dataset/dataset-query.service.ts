@@ -54,7 +54,7 @@ export class DatasetQueryService {
     const page = params.page || 1;
     const limit = params.limit || 50;
 
-    let qb = this.recordRepository
+    const qb = this.recordRepository
       .createQueryBuilder('record')
       .where('record.dataset_id = :datasetId', { datasetId });
 
@@ -66,10 +66,7 @@ export class DatasetQueryService {
         const fieldDef = dataset.schema.find((f) => f.key === field);
         const paramName = `filter_${i}`;
 
-        if (
-          fieldDef?.type === 'number' &&
-          filter.operator !== 'contains'
-        ) {
+        if (fieldDef?.type === 'number' && filter.operator !== 'contains') {
           // Numeric comparison
           const op = this.getSqlOperator(filter.operator);
           qb.andWhere(
@@ -182,15 +179,13 @@ export class DatasetQueryService {
                          GROUP BY ${groupExpression}
                          ORDER BY "value" DESC`;
       }
+    } else if (fn === 'count') {
+      query = `SELECT COUNT(*)::integer as "value"
+                         FROM dataset_records WHERE dataset_id = $1`;
     } else {
-      if (fn === 'count') {
-        query = `SELECT COUNT(*)::integer as "value"
+      queryParams.push(field);
+      query = `SELECT ${fn}((data->>$2)::numeric) as "value"
                          FROM dataset_records WHERE dataset_id = $1`;
-      } else {
-        queryParams.push(field);
-        query = `SELECT ${fn}((data->>$2)::numeric) as "value"
-                         FROM dataset_records WHERE dataset_id = $1`;
-      }
     }
 
     return await this.recordRepository.query(query, queryParams);

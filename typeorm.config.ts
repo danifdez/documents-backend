@@ -1,6 +1,6 @@
 import { ExecutionTelemetrySubscriber } from './src/telemetry/execution-telemetry.subscriber';
 import { config } from 'dotenv';
-import { resolve } from 'path';
+import { resolve } from 'node:path';
 import { DataSource } from 'typeorm';
 
 config({ path: resolve(__dirname, '..', '.env') });

@@ -1,3 +1,4 @@
+import { compareStrings } from '../utils/compare-strings';
 import { EntityManager, IsNull } from 'typeorm';
 import { MemoryEntryEntity, MemoryEntryType } from './memory-entry.entity';
 import type { MemoryOwnerType } from './memory.service';
@@ -128,7 +129,9 @@ export async function buildActiveMemoryContext(
       dataPolicy: {
         classification: entry.dataClassification,
         purpose: entry.purpose,
-        allowedDestinations: [...entry.allowedDestinations].sort(),
+        allowedDestinations: [...entry.allowedDestinations].sort(
+          compareStrings,
+        ),
       },
     })),
   };

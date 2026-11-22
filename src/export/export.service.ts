@@ -7,7 +7,7 @@ import { DocEntity } from '../doc/doc.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { renderHtmlToDocx } from '../common/html-to-docx';
 import * as archiver from 'archiver';
-import { PassThrough } from 'stream';
+import { PassThrough } from 'node:stream';
 
 @Injectable()
 export class ExportService {

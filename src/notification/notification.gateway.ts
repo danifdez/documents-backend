@@ -7,6 +7,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 
 @WebSocketGateway({
   cors: {
@@ -44,11 +45,8 @@ export class NotificationGateway implements OnGatewayConnection {
 
     try {
       const payload = this.jwtService.verify(token);
-      const principal = String(
-        (payload as Record<string, unknown>).userId ??
-          (payload as Record<string, unknown>).sub ??
-          'standalone',
-      );
+      const principal = ownerPrincipalFromUser(payload, '');
+      if (!principal) throw new Error('Missing user principal');
       client.join(this.executionRoom(principal));
     } catch {
       this.logger.warn('WebSocket connection rejected: invalid token');
@@ -70,7 +68,7 @@ export class NotificationGateway implements OnGatewayConnection {
   ): Promise<boolean> {
     if (!this.server) return false;
 
-    const room = this.executionRoom(ownerPrincipal || 'standalone');
+    const room = this.executionRoom(ownerPrincipal);
     const roomSize = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
     if (roomSize === 0) return false;
 

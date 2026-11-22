@@ -1,5 +1,5 @@
-import { promises as fs } from 'fs';
-import * as path from 'path';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 
 export type FolderScopeValidationReason =
   'not_absolute' | 'not_found' | 'not_a_directory' | 'forbidden_path';
@@ -8,7 +8,7 @@ export type FolderScopeValidationResult =
   | { ok: true; absolutePath: string }
   | { ok: false; reason: FolderScopeValidationReason };
 
-const POSIX_FORBIDDEN_ROOTS = [
+const POSIX_FORBIDDEN_ROOTS = new Set([
   '/',
   '/etc',
   '/bin',
@@ -21,12 +21,12 @@ const POSIX_FORBIDDEN_ROOTS = [
   '/dev',
   '/lib',
   '/lib64',
-];
+]);
 
 const WINDOWS_FORBIDDEN_ROOTS = [
   'C:\\',
   String.raw`C:\Windows`,
-  'C:\\Program Files',
+  String.raw`C:\Program Files`,
   String.raw`C:\Program Files (x86)`,
 ];
 
@@ -81,7 +81,7 @@ function isForbiddenPath(resolved: string): boolean {
     return WINDOWS_FORBIDDEN_ROOTS.some((root) => lower === root.toLowerCase());
   }
 
-  return POSIX_FORBIDDEN_ROOTS.includes(resolved);
+  return POSIX_FORBIDDEN_ROOTS.has(resolved);
 }
 
 export async function validateFolderScope(

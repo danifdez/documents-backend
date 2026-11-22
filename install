@@ -45,8 +45,8 @@ if [ -f ".env" ]; then
   ok ".env already exists (skipping)"
 else
   echo ""
-  printf "${BOLD}${CYAN}── Backend environment configuration ──${NC}\n"
-  printf "${DIM}  Press Enter to accept the default value shown in brackets.${NC}\n"
+  printf '%b%s%b\n' "${BOLD}${CYAN}" "── Backend environment configuration ──" "$NC"
+  printf '%b%s%b\n' "$DIM" "  Press Enter to accept the default value shown in brackets." "$NC"
   echo ""
 
   ask "PostgreSQL host" "${POSTGRES_HOST:-localhost}";       PG_HOST="$REPLY"
@@ -68,8 +68,8 @@ else
   ask "Offline file size limit (bytes)" "10485760";          OFFLINE_LIMIT="$REPLY"
 
   echo ""
-  printf "${BOLD}${CYAN}── Feature Flags ──${NC}\n"
-  printf "${DIM}  Enable or disable optional features. All enabled by default.${NC}\n"
+  printf '%b%s%b\n' "${BOLD}${CYAN}" "── Feature Flags ──" "$NC"
+  printf '%b%s%b\n' "$DIM" "  Enable or disable optional features. All enabled by default." "$NC"
   echo ""
   ask "Enable Entities (true/false)" "true";                 FEAT_ENTITIES="$REPLY"
   ask "Enable Authors (true/false)" "true";                  FEAT_AUTHORS="$REPLY"
@@ -157,9 +157,9 @@ else
 fi
 
 echo ""
-printf "${GREEN}============================================${NC}\n"
-printf "${GREEN}  Backend installation complete!${NC}\n"
-printf "${GREEN}============================================${NC}\n"
+printf '%b%s%b\n' "$GREEN" "============================================" "$NC"
+printf '%b%s%b\n' "$GREEN" "  Backend installation complete!" "$NC"
+printf '%b%s%b\n' "$GREEN" "============================================" "$NC"
 echo ""
 echo "  Start (dev):   npm run start:dev"
 echo "  Start (prod):  npm run build && npm run start:prod"

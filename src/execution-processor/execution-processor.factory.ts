@@ -1,8 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { ExecutionProcessor } from './execution-processor.interface';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 @Injectable()
 export class ExecutionProcessorFactory implements OnModuleInit {
@@ -23,33 +23,42 @@ export class ExecutionProcessorFactory implements OnModuleInit {
       const processorsPath = path.join(__dirname, 'processors');
       const files = fs.readdirSync(processorsPath);
 
-      for (const file of files) {
-        if (file.endsWith('.js')) {
-          const processorName = this.getProcessorClassName(file);
-          if (processorName) {
-            try {
-              const processorModule = await import(`./processors/${file}`);
-              const processor = this.moduleRef.get(
-                processorModule[processorName],
-                { strict: false },
-              );
-
-              if (processor && typeof processor.canProcess === 'function') {
-                this.registerProcessor(processor);
-                this.logger.log(`Registered processor: ${processorName}`);
-              }
-            } catch (err) {
-              this.logger.error(
-                `Failed to register processor from file ${file}: ${err.message}`,
-              );
-            }
-          }
-        }
+      const loaded = await Promise.all(
+        files
+          .filter((file) => file.endsWith('.js'))
+          .map((file) => this.loadProcessor(file)),
+      );
+      for (const entry of loaded) {
+        if (!entry) continue;
+        this.registerProcessor(entry.processor);
+        this.logger.log(`Registered processor: ${entry.name}`);
       }
 
       this.logger.log(`Total registered processors: ${this.processors.length}`);
     } catch (err) {
       this.logger.error(`Failed to load processors: ${err.message}`);
+    }
+  }
+
+  private async loadProcessor(
+    file: string,
+  ): Promise<{ name: string; processor: ExecutionProcessor } | null> {
+    const name = this.getProcessorClassName(file);
+    if (!name) return null;
+    try {
+      const processorModule = await import(`./processors/${file}`);
+      const processor = this.moduleRef.get(processorModule[name], {
+        strict: false,
+      });
+      return processor && typeof processor.canProcess === 'function'
+        ? { name, processor }
+        : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Failed to register processor from file ${file}: ${message}`,
+      );
+      return null;
     }
   }
 

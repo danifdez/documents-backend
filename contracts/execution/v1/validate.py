@@ -2,7 +2,6 @@
 
 import argparse
 import base64
-import binascii
 import copy
 import hashlib
 import json
@@ -40,6 +39,9 @@ FORBIDDEN_KEYS = {
 
 class ContractError(Exception):
     pass
+
+
+_STATE_CHANGED_EVENT = "execution.state_changed"
 
 
 def read_json(path: Path):
@@ -109,8 +111,7 @@ def validator_for_schema(schema, schemas):
     )
 
 
-def validate_protocol_fixture(fixture, schemas):
-    records = {}
+def _validate_fixture_records(fixture, schemas, records):
     for record in fixture.get("records", []):
         schema_id = record.get("schemaId")
         schema = schemas.get(schema_id)
@@ -133,22 +134,10 @@ def validate_protocol_fixture(fixture, schemas):
                 else "invalid_contract"
             )
         records[schema_id] = record["instance"]
+    return None
 
-    def schema(name):
-        return records.get(f"https://documents.local/harness/v1/schemas/{name}")
 
-    execution = schema("execution.schema.json")
-    step = schema("step.schema.json")
-    attempt = schema("step-attempt.schema.json")
-    assignment = schema("step-assignment.schema.json")
-    result = schema("step-result.schema.json")
-    ack = schema("step-result-ack.schema.json")
-    tool_invocation = schema("tool-invocation.schema.json")
-    tool_plan = schema("tool-plan.schema.json")
-    tool_result = schema("tool-result.schema.json")
-    if not all((execution, step, attempt, assignment, result, ack)):
-        return "invalid_contract"
-
+def _valid_fixture_identity(execution, step, attempt, assignment, result, ack):
     terminal_attempt = attempt["status"] in {
         "expired",
         "cancelled",
@@ -169,12 +158,12 @@ def validate_protocol_fixture(fixture, schemas):
         or step["executionId"] != execution["executionId"]
         or not (attempt_is_current or attempt_is_fenced)
     ):
-        return "invalid_protocol_identity"
+        return False
 
     for field in ("executionId", "stepId", "operationId", "attemptId"):
         expected = assignment[field]
         if any(record[field] != expected for record in (attempt, result, ack)):
-            return "invalid_protocol_identity"
+            return False
 
     if (
         step["stepId"] != assignment["stepId"]
@@ -182,21 +171,46 @@ def validate_protocol_fixture(fixture, schemas):
         or step["stepKind"] != assignment["stepKind"]
         or result["stepKind"] != assignment["stepKind"]
     ):
+        return False
+    return True
+
+
+def validate_protocol_fixture(fixture, schemas):
+    records = {}
+    error = _validate_fixture_records(fixture, schemas, records)
+    if error:
+        return error
+
+    def schema(name):
+        return records.get(f"https://documents.local/harness/v1/schemas/{name}")
+
+    execution = schema("execution.schema.json")
+    step = schema("step.schema.json")
+    attempt = schema("step-attempt.schema.json")
+    assignment = schema("step-assignment.schema.json")
+    result = schema("step-result.schema.json")
+    ack = schema("step-result-ack.schema.json")
+    tool_invocation = schema("tool-invocation.schema.json")
+    tool_plan = schema("tool-plan.schema.json")
+    tool_result = schema("tool-result.schema.json")
+    if not all((execution, step, attempt, assignment, result, ack)):
+        return "invalid_contract"
+
+    if not _valid_fixture_identity(execution, step, attempt, assignment, result, ack):
         return "invalid_protocol_identity"
 
     tool_records = (tool_invocation, tool_plan, tool_result)
     if any(tool_records) and not all(tool_records):
         return "invalid_contract"
-    if tool_invocation:
-        if (
-            tool_invocation["executionContext"]["executionId"]
-            != execution["executionId"]
-            or tool_invocation["toolCallId"] != tool_plan["toolCallId"]
-            or tool_plan["toolCallId"] != tool_result["toolCallId"]
-            or tool_plan["operationId"] != tool_result["operationId"]
-            or tool_invocation["name"] != tool_plan["toolName"]
-        ):
-            return "invalid_protocol_identity"
+    if tool_invocation and (
+        tool_invocation["executionContext"]["executionId"]
+        != execution["executionId"]
+        or tool_invocation["toolCallId"] != tool_plan["toolCallId"]
+        or tool_plan["toolCallId"] != tool_result["toolCallId"]
+        or tool_plan["operationId"] != tool_result["operationId"]
+        or tool_invocation["name"] != tool_plan["toolName"]
+    ):
+        return "invalid_protocol_identity"
 
     return None
 
@@ -284,27 +298,64 @@ def validate_bundle_invariants(
     events = bundle["events"]
     skill_activations = bundle["skillActivations"]
     artifacts = bundle["artifacts"]
-    root_execution_id = bundle["rootExecutionId"]
-    event_ids = {}
-    producer_positions = {}
-    operation_starts = {}
-    operation_finishes = set()
-    event_types = set()
-    source_events = {}
     policy = bundle["policySummary"]
     policy_purpose = policy["purpose"]
     policy_destinations = set(policy["allowedDestinations"])
-    policy_retention = policy["retentionClass"]
 
+    validate_event_sequence(events, bundle["eventRange"])
+    artifact_by_id = artifact_ids(artifacts)
+    validate_skill_activation_ids(skill_activations)
+    validate_embedded_artifacts(bundle, artifact_by_id, policy["retentionClass"])
+    event_state = validate_events(
+        events,
+        artifact_by_id,
+        bundle["rootExecutionId"],
+        policy_purpose,
+        policy_destinations,
+    )
+    validate_artifact_sources(artifacts, event_state["source_events"])
+    validate_event_type_requirements(
+        event_state["event_types"],
+        event_state["operation_starts"],
+        event_state["operation_finishes"],
+        bundle["bundleCompleteness"]["status"],
+    )
+    validate_terminal_events(events)
+    event_execution_ids = {event["executionId"] for event in events}
+    validate_activation_statuses(
+        skill_activations,
+        event_execution_ids,
+        terminal_states_by_execution(events),
+    )
+    validate_artifact_entries(
+        artifacts,
+        bundle_path,
+        valid_fixtures,
+        event_state["event_ids"],
+    )
+    validate_snapshot_integrity(events, artifact_by_id)
+    validate_bundle_hashes(bundle, schema_manifest_hash)
+
+
+def validate_event_sequence(events, event_range):
     sequences = [event["sequence"] for event in events]
-    expected_sequences = list(range(bundle["eventRange"]["firstSequence"], bundle["eventRange"]["lastSequence"] + 1))
+    expected_sequences = list(
+        range(event_range["firstSequence"], event_range["lastSequence"] + 1)
+    )
     if sequences != expected_sequences:
-        raise ContractError("events are not in a contiguous canonical sequence matching eventRange")
+        raise ContractError(
+            "events are not in a contiguous canonical sequence matching eventRange"
+        )
 
+
+def artifact_ids(artifacts):
     artifact_by_id = {artifact["artifactId"]: artifact for artifact in artifacts}
     if len(artifact_by_id) != len(artifacts):
         raise ContractError("duplicate artifactId")
+    return artifact_by_id
 
+
+def validate_skill_activation_ids(skill_activations):
     activation_ids = {
         activation["activationId"] for activation in skill_activations
     }
@@ -317,91 +368,167 @@ def validate_bundle_invariants(
     if len(activation_identities) != len(skill_activations):
         raise ContractError("duplicate skill activation identity")
 
+
+def validate_embedded_artifacts(bundle, artifact_by_id, policy_retention):
     embedded = bundle.get("embeddedArtifacts") or {}
+    validate_embedded_bodies(embedded, artifact_by_id)
+    validate_embedded_presence(artifact_by_id, embedded, policy_retention)
+
+
+def validate_embedded_bodies(embedded, artifact_by_id):
     for artifact_id, entry in embedded.items():
         artifact = artifact_by_id.get(artifact_id)
         if artifact is None:
             raise ContractError(f"embedded body has no artifact manifest: {artifact_id}")
         try:
             body = base64.b64decode(entry["data"], validate=True)
-        except (KeyError, TypeError, ValueError, binascii.Error) as error:
+        except (KeyError, TypeError, ValueError) as error:
             raise ContractError(f"embedded artifact is not canonical base64: {artifact_id}") from error
         if base64.b64encode(body).decode("ascii") != entry["data"]:
             raise ContractError(f"embedded artifact is not canonical base64: {artifact_id}")
         if artifact["size"] != len(body) or artifact["contentHash"] != sha256_bytes(body):
             raise ContractError(f"embedded artifact integrity mismatch: {artifact_id}")
+
+
+def validate_embedded_presence(artifact_by_id, embedded, policy_retention):
     for artifact_id, artifact in artifact_by_id.items():
-        if str(artifact.get("storageRef", "")).startswith("bundle:") and artifact_id not in embedded:
+        if (
+            str(artifact.get("storageRef", "")).startswith("bundle:")
+            and artifact_id not in embedded
+        ):
             raise ContractError(f"embedded artifact body is absent: {artifact_id}")
         if artifact["retentionClass"] != policy_retention:
             raise ContractError(
                 f"artifact retention differs from bundle policy: {artifact_id}"
             )
 
+
+def validate_events(
+    events,
+    artifact_by_id,
+    root_execution_id,
+    policy_purpose,
+    policy_destinations,
+):
+    event_ids = {}
+    producer_positions = {}
+    operation_starts = {}
+    operation_finishes = set()
+    event_types = set()
+    source_events = {}
+
     for event in events:
-        event_id = event["eventId"]
-        if event_id in event_ids:
-            raise ContractError(f"duplicate eventId: {event_id}")
-        event_ids[event_id] = event
+        validate_event_identity(event, event_ids, root_execution_id)
         event_types.add(event["eventType"])
-        if event["rootExecutionId"] != root_execution_id:
-            raise ContractError(f"{event_id}: rootExecutionId differs from bundle")
-        if not event.get("parentExecutionId") and event["rootExecutionId"] != event["executionId"]:
-            raise ContractError(f"{event_id}: root execution identity mismatch")
-        cause = event.get("causedByEventId")
-        if cause and cause not in event_ids:
-            raise ContractError(f"{event_id}: cause is missing or does not precede the event")
-        producer = event["producer"]
-        producer_key = (producer["component"], producer["instanceId"])
-        previous = producer_positions.get(producer_key, 0)
-        if event["producerSequence"] <= previous:
-            raise ContractError(f"{event_id}: producerSequence is not strictly monotonic")
-        producer_positions[producer_key] = event["producerSequence"]
-        for artifact_id in event["artifactRefs"]:
-            if artifact_id not in artifact_by_id:
-                raise ContractError(f"{event_id}: referenced artifact is absent: {artifact_id}")
-        expected_hash = canonical_hash({key: value for key, value in event.items() if key != "contentHash"})
-        if event["contentHash"] != expected_hash:
-            raise ContractError(f"{event_id}: contentHash mismatch")
-        security = event["security"]
-        if security["purpose"] != policy_purpose:
-            raise ContractError(f"{event_id}: purpose differs from bundle policy")
-        if not policy_destinations.issubset(security["allowedDestinations"]):
-            raise ContractError(
-                f"{event_id}: destination differs from bundle policy"
+        validate_producer_sequence(event, producer_positions)
+        validate_event_artifact_refs(event, artifact_by_id)
+        validate_event_content_hash(event)
+        validate_event_security(event, policy_purpose, policy_destinations)
+        if event["eventType"] == "source.observed":
+            validate_source_event(event, source_events, artifact_by_id)
+        elif event["eventType"] == "operation.started":
+            validate_operation_started(event, operation_starts)
+        elif event["eventType"] == "operation.finished":
+            validate_operation_finished(
+                event,
+                operation_starts,
+                operation_finishes,
             )
 
-        if event["eventType"] == "source.observed":
-            payload = event["payload"]
-            source_id = payload["sourceId"]
-            if event.get("sourceId") != source_id:
-                raise ContractError(f"{event_id}: source identity mismatch")
-            if source_id in source_events:
-                raise ContractError(f"duplicate sourceId: {source_id}")
-            source_events[source_id] = event
-            snapshot_id = payload.get("snapshotArtifactId")
-            if snapshot_id:
-                artifact = artifact_by_id.get(snapshot_id)
-                if not artifact or source_id not in artifact.get("inputSourceIds", []):
-                    raise ContractError(
-                        f"{event_id}: source snapshot lacks provenance link"
-                    )
-        elif event["eventType"] == "operation.started":
-            key = (event["operationId"], event["attemptId"])
-            if key in operation_starts:
-                raise ContractError(f"duplicate operation start: {key}")
-            operation_starts[key] = event
-        elif event["eventType"] == "operation.finished":
-            key = (event["operationId"], event["attemptId"])
-            start = operation_starts.get(key)
-            if not start:
-                raise ContractError(f"operation finish without start: {key}")
-            if key in operation_finishes:
-                raise ContractError(f"duplicate operation finish: {key}")
-            if start["payload"]["operationKind"] != event["payload"]["operationKind"]:
-                raise ContractError(f"operation kind changed: {key}")
-            operation_finishes.add(key)
+    return {
+        "event_ids": event_ids,
+        "event_types": event_types,
+        "operation_starts": operation_starts,
+        "operation_finishes": operation_finishes,
+        "source_events": source_events,
+    }
 
+
+def validate_event_identity(event, event_ids, root_execution_id):
+    event_id = event["eventId"]
+    if event_id in event_ids:
+        raise ContractError(f"duplicate eventId: {event_id}")
+    event_ids[event_id] = event
+    if event["rootExecutionId"] != root_execution_id:
+        raise ContractError(f"{event_id}: rootExecutionId differs from bundle")
+    if not event.get("parentExecutionId") and event["rootExecutionId"] != event["executionId"]:
+        raise ContractError(f"{event_id}: root execution identity mismatch")
+    cause = event.get("causedByEventId")
+    if cause and cause not in event_ids:
+        raise ContractError(f"{event_id}: cause is missing or does not precede the event")
+
+
+def validate_producer_sequence(event, producer_positions):
+    event_id = event["eventId"]
+    producer = event["producer"]
+    producer_key = (producer["component"], producer["instanceId"])
+    previous = producer_positions.get(producer_key, 0)
+    if event["producerSequence"] <= previous:
+        raise ContractError(f"{event_id}: producerSequence is not strictly monotonic")
+    producer_positions[producer_key] = event["producerSequence"]
+
+
+def validate_event_artifact_refs(event, artifact_by_id):
+    event_id = event["eventId"]
+    for artifact_id in event["artifactRefs"]:
+        if artifact_id not in artifact_by_id:
+            raise ContractError(f"{event_id}: referenced artifact is absent: {artifact_id}")
+
+
+def validate_event_content_hash(event):
+    event_id = event["eventId"]
+    expected_hash = canonical_hash(
+        {key: value for key, value in event.items() if key != "contentHash"}
+    )
+    if event["contentHash"] != expected_hash:
+        raise ContractError(f"{event_id}: contentHash mismatch")
+
+
+def validate_event_security(event, policy_purpose, policy_destinations):
+    event_id = event["eventId"]
+    security = event["security"]
+    if security["purpose"] != policy_purpose:
+        raise ContractError(f"{event_id}: purpose differs from bundle policy")
+    if not policy_destinations.issubset(security["allowedDestinations"]):
+        raise ContractError(f"{event_id}: destination differs from bundle policy")
+
+
+def validate_source_event(event, source_events, artifact_by_id):
+    event_id = event["eventId"]
+    payload = event["payload"]
+    source_id = payload["sourceId"]
+    if event.get("sourceId") != source_id:
+        raise ContractError(f"{event_id}: source identity mismatch")
+    if source_id in source_events:
+        raise ContractError(f"duplicate sourceId: {source_id}")
+    source_events[source_id] = event
+    snapshot_id = payload.get("snapshotArtifactId")
+    if snapshot_id:
+        artifact = artifact_by_id.get(snapshot_id)
+        if not artifact or source_id not in artifact.get("inputSourceIds", []):
+            raise ContractError(f"{event_id}: source snapshot lacks provenance link")
+
+
+def validate_operation_started(event, operation_starts):
+    key = (event["operationId"], event["attemptId"])
+    if key in operation_starts:
+        raise ContractError(f"duplicate operation start: {key}")
+    operation_starts[key] = event
+
+
+def validate_operation_finished(event, operation_starts, operation_finishes):
+    key = (event["operationId"], event["attemptId"])
+    start = operation_starts.get(key)
+    if not start:
+        raise ContractError(f"operation finish without start: {key}")
+    if key in operation_finishes:
+        raise ContractError(f"duplicate operation finish: {key}")
+    if start["payload"]["operationKind"] != event["payload"]["operationKind"]:
+        raise ContractError(f"operation kind changed: {key}")
+    operation_finishes.add(key)
+
+
+def validate_artifact_sources(artifacts, source_events):
     for artifact in artifacts:
         for source_id in artifact.get("inputSourceIds", []):
             if source_id not in source_events:
@@ -409,9 +536,16 @@ def validate_bundle_invariants(
                     f"artifact input source is absent: {artifact['artifactId']}: {source_id}"
                 )
 
+
+def validate_event_type_requirements(
+    event_types,
+    operation_starts,
+    operation_finishes,
+    completeness_status,
+):
     required_types = {
         "execution.created",
-        "execution.state_changed",
+        _STATE_CHANGED_EVENT,
         "operation.started",
         "operation.finished",
         "message.recorded",
@@ -421,12 +555,14 @@ def validate_bundle_invariants(
     if missing_types:
         raise ContractError(f"required event types absent: {', '.join(missing_types)}")
     open_operations = set(operation_starts) - operation_finishes
-    if open_operations and bundle["bundleCompleteness"]["status"] == "reproducible":
+    if open_operations and completeness_status == "reproducible":
         raise ContractError(f"reproducible bundle has open operations: {sorted(open_operations)}")
 
+
+def validate_terminal_events(events):
     terminal = [
         event for event in events
-        if event["eventType"] == "execution.state_changed"
+        if event["eventType"] == _STATE_CHANGED_EVENT
         and event["payload"].get("to") in {"completed", "failed", "cancelled"}
     ]
     lifecycle_events = {
@@ -443,13 +579,21 @@ def validate_bundle_invariants(
             "only evidence lifecycle events may follow the terminal execution state"
         )
 
-    event_execution_ids = {event["executionId"] for event in events}
-    terminal_by_execution = {
+
+def terminal_states_by_execution(events):
+    return {
         event["executionId"]: event["payload"]["to"]
         for event in events
-        if event["eventType"] == "execution.state_changed"
+        if event["eventType"] == _STATE_CHANGED_EVENT
         and event["payload"].get("to") in {"completed", "failed", "cancelled"}
     }
+
+
+def validate_activation_statuses(
+    skill_activations,
+    event_execution_ids,
+    terminal_by_execution,
+):
     for activation in skill_activations:
         execution_id = activation["executionId"]
         if execution_id not in event_execution_ids:
@@ -464,20 +608,32 @@ def validate_bundle_invariants(
                 f"skill activation status differs from execution: {activation['activationId']}"
             )
 
-    for artifact in artifacts:
-        if artifact["dataClassification"] == "secret":
-            raise ContractError(f"secret artifact cannot be exported: {artifact['artifactId']}")
-        created_by = artifact.get("createdByEventId")
-        if created_by and created_by not in event_ids:
-            raise ContractError(f"artifact creator event is absent: {artifact['artifactId']}")
-        if "bundlePath" in artifact and valid_fixtures is not None:
-            path = safe_artifact_path(bundle_path, artifact["bundlePath"], valid_fixtures)
-            if not path.is_file():
-                raise ContractError(f"artifact body is absent: {artifact['artifactId']}")
-            body = path.read_bytes()
-            if artifact["size"] != len(body) or artifact["contentHash"] != sha256_bytes(body):
-                raise ContractError(f"artifact integrity mismatch: {artifact['artifactId']}")
 
+def validate_artifact_entries(artifacts, bundle_path, valid_fixtures, event_ids):
+    for artifact in artifacts:
+        validate_artifact_metadata(artifact, event_ids)
+        validate_artifact_body(artifact, bundle_path, valid_fixtures)
+
+
+def validate_artifact_metadata(artifact, event_ids):
+    if artifact["dataClassification"] == "secret":
+        raise ContractError(f"secret artifact cannot be exported: {artifact['artifactId']}")
+    created_by = artifact.get("createdByEventId")
+    if created_by and created_by not in event_ids:
+        raise ContractError(f"artifact creator event is absent: {artifact['artifactId']}")
+
+
+def validate_artifact_body(artifact, bundle_path, valid_fixtures):
+    if "bundlePath" in artifact and valid_fixtures is not None:
+        path = safe_artifact_path(bundle_path, artifact["bundlePath"], valid_fixtures)
+        if not path.is_file():
+            raise ContractError(f"artifact body is absent: {artifact['artifactId']}")
+        body = path.read_bytes()
+        if artifact["size"] != len(body) or artifact["contentHash"] != sha256_bytes(body):
+            raise ContractError(f"artifact integrity mismatch: {artifact['artifactId']}")
+
+
+def validate_snapshot_integrity(events, artifact_by_id):
     for event in events:
         payload = event["payload"]
         snapshot_id = payload.get("snapshotArtifactId")
@@ -486,11 +642,15 @@ def validate_bundle_invariants(
             if not artifact or payload.get("contentHash") != artifact["contentHash"]:
                 raise ContractError(f"source snapshot integrity mismatch: {event['eventId']}")
 
+
+def validate_bundle_hashes(bundle, schema_manifest_hash):
     if bundle["integrity"]["schemaManifestHash"] != schema_manifest_hash:
         raise ContractError("bundle schemaManifestHash mismatch")
-    if bundle["integrity"]["eventsHash"] != canonical_hash(events):
+    if bundle["integrity"]["eventsHash"] != canonical_hash(bundle["events"]):
         raise ContractError("bundle eventsHash mismatch")
-    expected_manifest_hash = canonical_hash({key: value for key, value in bundle.items() if key != "manifestHash"})
+    expected_manifest_hash = canonical_hash(
+        {key: value for key, value in bundle.items() if key != "manifestHash"}
+    )
     if bundle["manifestHash"] != expected_manifest_hash:
         raise ContractError("bundle manifestHash mismatch")
 
@@ -503,12 +663,19 @@ def pointer_parent(value, pointer):
     return current, parts[-1]
 
 
+def remove_pointer_value(parent, key):
+    if isinstance(parent, list):
+        parent.pop(int(key))
+    else:
+        parent.pop(key)
+
+
 def apply_mutations(value, mutations):
     mutated = copy.deepcopy(value)
     for mutation in mutations:
         parent, key = pointer_parent(mutated, mutation["path"])
         if mutation["op"] == "remove":
-            parent.pop(int(key)) if isinstance(parent, list) else parent.pop(key)
+            remove_pointer_value(parent, key)
         elif mutation["op"] == "replace":
             if isinstance(parent, list):
                 parent[int(key)] = mutation["value"]
@@ -524,9 +691,12 @@ def apply_mutations(value, mutations):
     return mutated
 
 
+JSON_GLOB = f"*{SCHEMA_MANIFEST.suffix}"
+
+
 def validate_invalid_fixtures(bundle_validator, schema_manifest_hash, valid_fixtures, invalid_fixtures):
     failures = []
-    for path in sorted(invalid_fixtures.glob("*.json")):
+    for path in sorted(invalid_fixtures.glob(JSON_GLOB)):
         fixture = read_json(path)
         base_path = (path.parent / fixture["base"]).resolve()
         instance = apply_mutations(read_json(base_path), fixture["mutations"])
@@ -544,8 +714,8 @@ def validate_invalid_fixtures(bundle_validator, schema_manifest_hash, valid_fixt
 
 def validate_protocol_fixtures(protocol_fixtures, schemas):
     failures = []
-    valid_paths = sorted((protocol_fixtures / "valid").glob("*.json"))
-    invalid_paths = sorted((protocol_fixtures / "invalid").glob("*.json"))
+    valid_paths = sorted((protocol_fixtures / "valid").glob(JSON_GLOB))
+    invalid_paths = sorted((protocol_fixtures / "invalid").glob(JSON_GLOB))
     for path in valid_paths:
         error = validate_protocol_fixture(read_json(path), schemas)
         if error:
@@ -627,7 +797,7 @@ def main():
             print(f"FAIL {failure}", file=sys.stderr)
         raise SystemExit(1)
 
-    invalid_count = len(list(invalid_fixtures.glob("*.json")))
+    invalid_count = len(list(invalid_fixtures.glob(JSON_GLOB)))
     print(
         f"Validated {len(schemas)} schemas, {valid_count} valid bundles, "
         f"{invalid_count} invalid bundle fixtures, {valid_protocol_count} valid protocol fixtures, "

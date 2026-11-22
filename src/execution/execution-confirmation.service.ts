@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager, In } from 'typeorm';
 import {
   ExecutionOutboxEntity,
@@ -61,12 +61,15 @@ export class ExecutionConfirmationService {
     );
   }
 
-  async activatePending(executionId: string): Promise<number> {
+  activatePending(executionId: string): Promise<number> {
     return this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
       const reference = await executionRepo.findOneBy({ executionId });
       if (!reference) throw new NotFoundException('execution_not_found');
-      const { execution, root } = await this.lockExecutionTree(manager, reference);
+      const { execution, root } = await this.lockExecutionTree(
+        manager,
+        reference,
+      );
       if (
         ![ExecutionStatus.QUEUED, ExecutionStatus.RUNNING].includes(
           execution.status,
@@ -74,7 +77,8 @@ export class ExecutionConfirmationService {
       ) {
         return 0;
       }
-      if (execution.cancellationRequestedAt || root.cancellationRequestedAt) return 0;
+      if (execution.cancellationRequestedAt || root.cancellationRequestedAt)
+        return 0;
       const confirmations = await manager
         .getRepository(ExecutionConfirmationEntity)
         .find({
@@ -212,11 +216,13 @@ export class ExecutionConfirmationService {
       if (!execution)
         throw new ConflictException('confirmation_execution_missing');
       if (!this.acceptsDecision(execution)) return [];
-      return [{
-        confirmation: this.toView(item, plan),
-        ownerId: executionPayloadOwnerId(execution.payload) ?? null,
-        taskType: execution.taskType,
-      }];
+      return [
+        {
+          confirmation: this.toView(item, plan),
+          ownerId: executionPayloadOwnerId(execution.payload) ?? null,
+          taskType: execution.taskType,
+        },
+      ];
     });
   }
 
@@ -229,28 +235,64 @@ export class ExecutionConfirmationService {
   }
 
   async read(confirmationId: string, scope: ExecutionAccessScope) {
-    const confirmation = await this.dataSource.getRepository(ExecutionConfirmationEntity)
+    const confirmation = await this.dataSource
+      .getRepository(ExecutionConfirmationEntity)
       .findOneBy({ confirmationId, ownerPrincipal: scope.ownerPrincipal });
     if (!confirmation?.requestedAt) {
       throw new NotFoundException('confirmation_not_found');
     }
-    const plan = await this.dataSource.getRepository(ExecutionToolPlanEntity)
-      .findOneBy({ operationId: confirmation.operationId, executionId: confirmation.executionId });
+    if (confirmation.status === 'pending') {
+      await this.assertPendingConfirmationActive(confirmation, scope);
+    }
+    const plan = await this.dataSource
+      .getRepository(ExecutionToolPlanEntity)
+      .findOneBy({
+        operationId: confirmation.operationId,
+        executionId: confirmation.executionId,
+      });
     if (!plan || canonicalHash(plan.plan) !== confirmation.planHash) {
       throw new ConflictException('confirmation_stale');
     }
     return { confirmation: this.toView(confirmation, plan), plan: plan.plan };
   }
 
+  private async assertPendingConfirmationActive(
+    confirmation: ExecutionConfirmationEntity,
+    scope: ExecutionAccessScope,
+  ): Promise<void> {
+    const executions = this.dataSource.getRepository(ExecutionEntity);
+    const execution = await executions.findOneBy({
+      executionId: confirmation.executionId,
+      ownerPrincipal: scope.ownerPrincipal,
+    });
+    if (!execution || !this.acceptsDecision(execution)) {
+      throw new ConflictException('confirmation_inactive');
+    }
+    if (execution.rootExecutionId === execution.executionId) return;
+    const root = await executions.findOneBy({
+      executionId: execution.rootExecutionId,
+      ownerPrincipal: scope.ownerPrincipal,
+    });
+    if (!root || root.cancellationRequestedAt) {
+      throw new ConflictException('confirmation_inactive');
+    }
+  }
+
   async expirePending(limit = 20): Promise<number> {
     const candidates = await this.dataSource
       .getRepository(ExecutionConfirmationEntity)
       .createQueryBuilder('confirmation')
-      .innerJoin(ExecutionEntity, 'execution', 'execution.executionId = confirmation.executionId')
+      .innerJoin(
+        ExecutionEntity,
+        'execution',
+        'execution.executionId = confirmation.executionId',
+      )
       .where('confirmation.status = :pending', { pending: 'pending' })
       .andWhere('confirmation.requestedAt IS NOT NULL')
       .andWhere('confirmation.expiresAt <= :now', { now: new Date() })
-      .andWhere('execution.status = :waiting', { waiting: ExecutionStatus.WAITING })
+      .andWhere('execution.status = :waiting', {
+        waiting: ExecutionStatus.WAITING,
+      })
       .andWhere('execution.waitReason = :reason', { reason: 'confirmation' })
       .andWhere('execution.cancellationRequestedAt IS NULL')
       .orderBy('confirmation.expiresAt', 'ASC')
@@ -262,8 +304,12 @@ export class ExecutionConfirmationService {
         await this.settle(candidate.confirmationId, 'expired', null);
         expired += 1;
       } catch (error) {
-        if (!(error instanceof ConflictException) ||
-            !['confirmation_inactive', 'confirmation_already_decided'].includes(error.message)) {
+        if (
+          !(error instanceof ConflictException) ||
+          !['confirmation_inactive', 'confirmation_already_decided'].includes(
+            error.message,
+          )
+        ) {
           throw error;
         }
       }
@@ -271,7 +317,7 @@ export class ExecutionConfirmationService {
     return expired;
   }
 
-  private async settle(
+  private settle(
     confirmationId: string,
     requestedDecision: 'approved' | 'denied' | 'expired',
     scope: ExecutionAccessScope | null,
@@ -279,15 +325,26 @@ export class ExecutionConfirmationService {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(ExecutionConfirmationEntity);
       const candidate = await repository.findOneBy({ confirmationId });
-      if (!candidate || (scope && candidate.ownerPrincipal !== scope.ownerPrincipal)) {
+      if (
+        !candidate ||
+        (scope && candidate.ownerPrincipal !== scope.ownerPrincipal)
+      ) {
         throw new NotFoundException('confirmation_not_found');
       }
       const executionRepo = manager.getRepository(ExecutionEntity);
-      const reference = await executionRepo.findOneBy({ executionId: candidate.executionId });
-      if (!reference || (scope && reference.ownerPrincipal !== scope.ownerPrincipal)) {
+      const reference = await executionRepo.findOneBy({
+        executionId: candidate.executionId,
+      });
+      if (
+        !reference ||
+        (scope && reference.ownerPrincipal !== scope.ownerPrincipal)
+      ) {
         throw new NotFoundException('execution_not_found');
       }
-      const { execution, root } = await this.lockExecutionTree(manager, reference);
+      const { execution, root } = await this.lockExecutionTree(
+        manager,
+        reference,
+      );
       const confirmation = await repository.findOne({
         where: { confirmationId },
         lock: { mode: 'pessimistic_write' },
@@ -408,7 +465,7 @@ export class ExecutionConfirmationService {
     });
   }
 
-  async decisionForPlan(
+  decisionForPlan(
     manager: EntityManager,
     plan: ExecutionToolPlanEntity,
   ): Promise<ExecutionConfirmationEntity | null> {
@@ -418,8 +475,11 @@ export class ExecutionConfirmationService {
   }
 
   private acceptsDecision(execution: ExecutionEntity): boolean {
-    return execution.status === ExecutionStatus.WAITING &&
-      execution.waitReason === 'confirmation' && !execution.cancellationRequestedAt;
+    return (
+      execution.status === ExecutionStatus.WAITING &&
+      execution.waitReason === 'confirmation' &&
+      !execution.cancellationRequestedAt
+    );
   }
 
   private toView(
@@ -477,7 +537,8 @@ export class ExecutionConfirmationService {
       lock: { mode: 'pessimistic_write' },
     });
     if (!root) throw new NotFoundException('root_execution_not_found');
-    if (root.executionId === reference.executionId) return { root, execution: root };
+    if (root.executionId === reference.executionId)
+      return { root, execution: root };
     const execution = await repository.findOne({
       where: { executionId: reference.executionId },
       lock: { mode: 'pessimistic_write' },

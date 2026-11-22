@@ -23,7 +23,7 @@ export class VectorSearchProcessor implements ExecutionProcessor {
   ): Promise<{ success: true; resultCount: number }> {
     const result = execution.result as Record<string, unknown> | null;
     if (!Array.isArray(result?.results)) {
-      throw new Error(`${execution.taskType} result requires results`);
+      throw new TypeError(`${execution.taskType} result requires results`);
     }
     await this.validateIndexedFileResults(execution, result.results);
     return { success: true, resultCount: result.results.length };
@@ -60,7 +60,7 @@ export class VectorSearchProcessor implements ExecutionProcessor {
       const id = this.positiveId((result as Record<string, unknown>)[field]);
       const score = (result as Record<string, unknown>)['score'];
       if (typeof score !== 'number' || !Number.isFinite(score)) {
-        throw new Error('Vector search result score is invalid');
+        throw new TypeError('Vector search result score is invalid');
       }
       return id;
     });

@@ -277,7 +277,7 @@ describe('EntityService', () => {
     expect(qb.innerJoin).not.toHaveBeenCalled();
   });
 
-  it('classifies document, project and global entities once and ignores entities from other scopes', async () => {
+  it('groups entities by scope and excludes other projects', async () => {
     const rows = [
       {
         in_document_count: '2',
@@ -357,7 +357,7 @@ describe('EntityService', () => {
     expect(aggregate.where).toHaveBeenCalledTimes(1);
   });
 
-  it('creates an entity with project associations and skips repeating an existing membership', async () => {
+  it('creates memberships without duplicating project links', async () => {
     const entityType = buildEntityType({ id: 2 });
     const saved = buildEntity({ id: 3, entityType });
     entityTypeService.findOne.mockResolvedValue(entityType);
@@ -430,7 +430,7 @@ describe('EntityService', () => {
     expect(entityTypeService.findOne).toHaveBeenCalledTimes(2);
   });
 
-  it('moves translated names into aliases and keeps the target translation on conflicts', async () => {
+  it('copies translated aliases and preserves target translations', async () => {
     const source = buildEntity({
       id: 1,
       name: 'Source',

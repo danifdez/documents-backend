@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import Ajv2020, { ValidateFunction } from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
-import { existsSync, readFileSync, readdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 @Injectable()
 export class ExecutionContractValidator {
@@ -140,11 +140,8 @@ export class ExecutionContractValidator {
     return readdirSync(root, { withFileTypes: true })
       .flatMap((entry) => {
         const child = join(root, entry.name);
-        return entry.isDirectory()
-          ? this.schemaPaths(child)
-          : entry.name.endsWith('.json')
-            ? [child]
-            : [];
+        if (entry.isDirectory()) return this.schemaPaths(child);
+        return entry.name.endsWith('.json') ? [child] : [];
       })
       .sort();
   }

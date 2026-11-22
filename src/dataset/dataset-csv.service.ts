@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { parse } = require('csv-parse/sync');
+import { parse } from 'csv-parse/sync';
 
 export interface CsvPreview {
   headers: string[];
@@ -69,7 +68,9 @@ export class DatasetCsvService {
     if (sample.every((v) => v === 'true' || v === 'false')) return 'boolean';
     if (sample.every((v) => !Number.isNaN(Number(v)))) return 'number';
     if (
-      sample.every((v) => /^\d{4}-\d{2}-\d{2}/.test(v) && !isNaN(Date.parse(v)))
+      sample.every(
+        (v) => /^\d{4}-\d{2}-\d{2}/.test(v) && !Number.isNaN(Date.parse(v)),
+      )
     )
       return 'date';
 
@@ -137,9 +138,11 @@ export class DatasetCsvService {
     const headers: string[] = [];
     for (const f of schema) {
       headers.push(escapeCsv(f.name));
-      headers.push(escapeCsv(`${f.key}_source`));
-      headers.push(escapeCsv(`${f.key}_page`));
-      headers.push(escapeCsv(`${f.key}_quote`));
+      headers.push(
+        escapeCsv(`${f.key}_source`),
+        escapeCsv(`${f.key}_page`),
+        escapeCsv(`${f.key}_quote`),
+      );
     }
 
     const rows = records.map((r) => {
@@ -147,14 +150,15 @@ export class DatasetCsvService {
       for (const f of schema) {
         const anchor = r.cellMetadata?.[f.key] || null;
         cells.push(escapeCsv(r.data[f.key]));
-        if (anchor && anchor.sourceResourceId != null) {
+        if (anchor?.sourceResourceId != null) {
           cells.push(escapeCsv(resolver(anchor.sourceResourceId) || ''));
-          cells.push(escapeCsv(anchor.page ?? ''));
-          cells.push(escapeCsv(anchor.quote ?? ''));
+          cells.push(
+            escapeCsv(anchor.page ?? ''),
+            escapeCsv(anchor.quote ?? ''),
+          );
         } else {
           cells.push('');
-          cells.push('');
-          cells.push('');
+          cells.push('', '');
         }
       }
       return cells.join(',');

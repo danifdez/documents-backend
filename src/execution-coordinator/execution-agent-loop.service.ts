@@ -1,5 +1,6 @@
+import { readString } from '../utils/read-string';
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { canonicalHash, contentHash } from '../execution/execution-canonical';
 import { ExecutionEventEntity } from '../execution/execution-event.entity';
@@ -218,7 +219,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     return materialized;
   }
 
-  async releaseTerminalDelegations(limit = 20): Promise<number> {
+  releaseTerminalDelegations(limit = 20): Promise<number> {
     return this.dataSource.transaction(async (manager) => {
       const [releasedRows] = (await manager.query(
         `
@@ -302,12 +303,16 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     const round =
       existingReservation?.round ?? this.nextInferenceRound(refreshed);
     const coordination = this.inferenceCoordination(step);
-    const bucket =
-      coordination.purpose === 'repair'
-        ? 'repair'
-        : coordination.purpose === 'closing'
-          ? 'closing'
-          : 'normal';
+    let bucket: 'normal' | 'repair' | 'closing';
+    if (coordination.purpose === 'repair') {
+      bucket = 'repair';
+    } else {
+      if (coordination.purpose === 'closing') {
+        bucket = 'closing';
+      } else {
+        bucket = 'normal';
+      }
+    }
     const decision = await this.progress.reserveOperationBudget(
       root.executionId,
       {
@@ -637,7 +642,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     return materialized;
   }
 
-  private async materializeToolContinuation(stepId: string): Promise<boolean> {
+  private materializeToolContinuation(stepId: string): Promise<boolean> {
     return this.dataSource.transaction(async (manager) => {
       const stepRepo = manager.getRepository(ExecutionStepEntity);
       const source = await stepRepo.findOne({
@@ -755,17 +760,21 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         return true;
       }
       const purpose = requested.kind === 'closing' ? 'closing' : 'normal';
-      const directive =
-        requested.kind === 'closing'
-          ? this.forcedFinalizationDirective(requested.reason)
-          : requested.directive
-            ? {
-                schemaVersion: 'runtime-directive/1' as const,
-                kind: 'progress_warning' as const,
-                reason: requested.directive,
-                toolsAllowed: true as const,
-              }
-            : null;
+      let directive: RuntimeDirective;
+      if (requested.kind === 'closing') {
+        directive = this.forcedFinalizationDirective(requested.reason);
+      } else {
+        if (requested.directive) {
+          directive = {
+            schemaVersion: 'runtime-directive/1' as const,
+            kind: 'progress_warning' as const,
+            reason: requested.directive,
+            toolsAllowed: true as const,
+          };
+        } else {
+          directive = null;
+        }
+      }
       if (directive) {
         effectivePayload = this.payloadWithDirective(
           effectivePayload,
@@ -787,7 +796,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     });
   }
 
-  private async materializeInvalidOutcome(stepId: string): Promise<boolean> {
+  private materializeInvalidOutcome(stepId: string): Promise<boolean> {
     return this.dataSource.transaction(async (manager) => {
       const stepRepo = manager.getRepository(ExecutionStepEntity);
       const source = await stepRepo.findOne({
@@ -833,7 +842,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       }
 
       const purpose = coordination.purpose === 'repair' ? 'closing' : 'repair';
-      const reason = String(outcome.reason ?? 'invalid_model_output');
+      const reason = readString(outcome.reason, 'invalid_model_output');
       const directive: RuntimeDirective =
         purpose === 'repair'
           ? {
@@ -864,7 +873,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     });
   }
 
-  private async handleDeniedInference(
+  private handleDeniedInference(
     step: ExecutionStepEntity,
     execution: ExecutionEntity,
     grantId: string,
@@ -964,12 +973,16 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         ),
       },
     );
-    const phase =
-      input.purpose === 'repair'
-        ? 'output_repair'
-        : input.purpose === 'closing'
-          ? 'forced_finalization'
-          : 'agent_loop';
+    let phase: 'output_repair' | 'forced_finalization' | 'agent_loop';
+    if (input.purpose === 'repair') {
+      phase = 'output_repair';
+    } else {
+      if (input.purpose === 'closing') {
+        phase = 'forced_finalization';
+      } else {
+        phase = 'agent_loop';
+      }
+    }
     const taskType = input.source.work.taskType;
     if (!isChatTurnTaskType(taskType)) {
       throw new ConflictException('invalid_agent_inference_task');
@@ -1115,7 +1128,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         {
           operationId: row.operationId,
           toolCallId: String(row.envelope.toolCallId),
-          name: String(startPayload?.name ?? 'tool'),
+          name: readString(startPayload?.name, 'tool'),
           summary: payload.resultSummary,
         },
       ];

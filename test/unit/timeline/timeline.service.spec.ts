@@ -88,7 +88,7 @@ describe('TimelineService', () => {
     });
   });
 
-  it('finds timelines by ID or by a project and orders project timelines by update time', async () => {
+  it('finds timelines by ID and orders project timelines by update time', async () => {
     const timeline = buildTimeline({ id: 3 });
     repo.findOne.mockResolvedValue(timeline);
     const qb = repo.createQueryBuilder();
@@ -105,7 +105,7 @@ describe('TimelineService', () => {
     expect(qb.orderBy).toHaveBeenCalledWith('t.updated_at', 'DESC');
   });
 
-  it('persists full timeline settings and leaves optional fields out of partial writes', async () => {
+  it('persists timeline settings and skips omitted partial fields', async () => {
     const settings = {
       name: 'Timeline',
       timelineData: [],

@@ -12,7 +12,7 @@ import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 @Injectable()
 export class PermissionsGuard implements CanActivate {
   constructor(
-    private reflector: Reflector,
+    private readonly reflector: Reflector,
     private configService: ConfigService,
   ) {}
 

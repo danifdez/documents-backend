@@ -107,7 +107,7 @@ export class DataSourceController {
   ) {
     const result = await this.dataSourceService.update(id, dto);
     const ds = await this.dataSourceService.findOne(id);
-    this.scheduleService.updateSchedule(ds.id, ds.syncSchedule, ds.enabled);
+    this.scheduleService.updateSchedule(ds);
     return result;
   }
 

@@ -1,14 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { parse } from 'csv-parse/sync';
 import {
   DataSourceProvider,
   DataSourceProviderResult,
 } from '../data-source-provider.interface';
 import { SafeUrlService } from '../safe-url.service';
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { parse } = require('csv-parse/sync');
 
 @Injectable()
 export class CsvUrlProvider implements DataSourceProvider {
@@ -156,7 +154,7 @@ export class CsvUrlProvider implements DataSourceProvider {
     }
 
     if (!Array.isArray(records)) {
-      throw new Error(
+      throw new TypeError(
         `Expected an array at path "${dataPath || 'root'}", got ${typeof records}`,
       );
     }

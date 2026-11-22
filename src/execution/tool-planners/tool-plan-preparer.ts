@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { ExecutionEntity } from '../execution.entity';
 import type { ChatExecutionPayload } from '../execution-task-payload.types';
 import { isChatTurnTaskType } from '../execution.constants';
@@ -18,6 +18,14 @@ export type ToolPlanPreparer = (
   invocation: ToolInvocationContract,
   execution: ExecutionEntity,
 ) => ToolPlanContract;
+
+export function assertToolDataClassification(
+  invocation: ToolInvocationContract,
+): void {
+  if (invocation.executionContext.dataClassification === 'secret') {
+    throw new BadRequestException('data_policy_violation');
+  }
+}
 
 export function chatTurnPayload(
   execution: ExecutionEntity,

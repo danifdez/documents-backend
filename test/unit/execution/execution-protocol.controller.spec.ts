@@ -147,7 +147,7 @@ describe('ExecutionProtocolController worker requests', () => {
     );
   });
 
-  it('streams assigned input artifacts and binds upload and result data to the worker', async () => {
+  it('streams worker input and scopes uploads and results to the worker', async () => {
     const artifactId = 'a7d5f0ca-a719-4cba-b6e4-1cdd566a0d21';
     const body = Buffer.from('evidence');
     const response = { setHeader: jest.fn() };

@@ -1,6 +1,6 @@
 import { config } from 'dotenv';
-import { resolve } from 'path';
-import { randomBytes } from 'crypto';
+import { resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 
@@ -41,7 +41,7 @@ async function seedAdmin() {
   await dataSource.initialize();
 
   // Ensure Admin group exists
-  let adminGroup = await dataSource.query(
+  const adminGroup = await dataSource.query(
     `SELECT id FROM permission_groups WHERE name = 'Admin'`,
   );
 

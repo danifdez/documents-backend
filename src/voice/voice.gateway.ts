@@ -122,7 +122,9 @@ export class VoiceGateway
         const identity = await this.authorize(client);
         if (!client.connected || this.connections.get(client) !== connection)
           return;
-        if (identity.principal !== connection.principal) throw new Error();
+        if (identity.principal !== connection.principal) {
+          throw new Error('Voice connection principal changed');
+        }
         await action();
       })
       .catch(() => this.reject(client))

@@ -130,7 +130,8 @@ export class DatasetService {
 
     if (dto.sourceMode !== undefined || dto.sourceConfig !== undefined) {
       const nextMode: DatasetSourceMode = dto.sourceMode ?? dataset.sourceMode;
-      const rawConfig = dto.sourceConfig ?? dataset.sourceConfig;
+      let rawConfig = dataset.sourceConfig;
+      if (dto.sourceConfig !== undefined) rawConfig = dto.sourceConfig;
       const nextConfig = this.normalizeSourceConfig(nextMode, rawConfig);
       const projectIdForValidation =
         dto.projectId ?? dataset.project?.id ?? null;
@@ -425,7 +426,7 @@ export class DatasetService {
 
     if (lookupField) {
       // Lookup by a field inside the JSONB data column
-      const strValues = values.map((v) => String(v));
+      const strValues = values.map(String);
       records = await this.recordRepository
         .createQueryBuilder('r')
         .where('r.dataset_id = :datasetId', { datasetId })
@@ -443,7 +444,9 @@ export class DatasetService {
       return map;
     } else {
       // Lookup by record PK
-      const numIds = values.map((v) => Number(v)).filter((n) => !Number.isNaN(n));
+      const numIds = values
+        .map((v) => Number(v))
+        .filter((n) => !Number.isNaN(n));
       if (!numIds.length) return {};
       records = await this.recordRepository
         .createQueryBuilder('r')
@@ -541,7 +544,7 @@ export class DatasetService {
     // an anchor (came from extraction), mark the anchor as user-edited so a
     // later re-extract preserves the manual correction. Cells without a prior
     // anchor stay anchor-less — the flag is only meaningful with an anchor.
-    const cellMetadata = { ...(record.cellMetadata || {}) };
+    const cellMetadata = { ...record.cellMetadata };
     for (const field of dataset.schema) {
       const key = field.key;
       if (!(key in dto.data)) continue;
@@ -714,62 +717,46 @@ export class DatasetService {
 
     for (const field of schema) {
       const value = data[field.key];
-
-      if (
-        field.required &&
-        (value === undefined || value === null || value === '')
-      ) {
-        errors.push(`Field "${field.name}" is required`);
-        continue;
-      }
-
       if (value === undefined || value === null || value === '') {
+        if (field.required) errors.push(`Field "${field.name}" is required`);
         continue;
       }
-
-      switch (field.type) {
-        case 'number':
-          if (Number.isNaN(Number(value))) {
-            errors.push(`Field "${field.name}" must be a valid number`);
-          }
-          break;
-        case 'boolean':
-          if (
-            typeof value !== 'boolean' &&
-            value !== 'true' &&
-            value !== 'false'
-          ) {
-            errors.push(`Field "${field.name}" must be a boolean`);
-          }
-          break;
-        case 'date':
-          if (isNaN(Date.parse(String(value)))) {
-            errors.push(`Field "${field.name}" must be a valid date`);
-          }
-          break;
-        case 'datetime':
-          if (Number.isNaN(Date.parse(String(value)))) {
-            errors.push(`Field "${field.name}" must be a valid datetime`);
-          }
-          break;
-        case 'time':
-          if (!/^\d{2}:\d{2}(:\d{2})?$/.test(String(value))) {
-            errors.push(
-              `Field "${field.name}" must be a valid time (HH:mm or HH:mm:ss)`,
-            );
-          }
-          break;
-        case 'select':
-          if (field.options && !field.options.includes(String(value))) {
-            errors.push(
-              `Field "${field.name}" must be one of: ${field.options.join(', ')}`,
-            );
-          }
-          break;
-      }
+      const error = this.recordFieldError(field, value);
+      if (error) errors.push(error);
     }
 
     return errors;
+  }
+
+  private recordFieldError(field: DatasetField, value: unknown): string | null {
+    const fieldLabel = `Field "${field.name}"`;
+    switch (field.type) {
+      case 'number':
+        return Number.isNaN(Number(value))
+          ? `${fieldLabel} must be a valid number`
+          : null;
+      case 'boolean':
+        return typeof value === 'boolean' ||
+          value === 'true' ||
+          value === 'false'
+          ? null
+          : `${fieldLabel} must be a boolean`;
+      case 'date':
+      case 'datetime':
+        return Number.isNaN(Date.parse(String(value)))
+          ? `${fieldLabel} must be a valid ${field.type}`
+          : null;
+      case 'time':
+        return /^\d{2}:\d{2}(:\d{2})?$/.test(String(value))
+          ? null
+          : `${fieldLabel} must be a valid time (HH:mm or HH:mm:ss)`;
+      case 'select':
+        return !field.options || field.options.includes(String(value))
+          ? null
+          : `${fieldLabel} must be one of: ${field.options.join(', ')}`;
+      default:
+        return null;
+    }
   }
 
   private cleanRecordData(

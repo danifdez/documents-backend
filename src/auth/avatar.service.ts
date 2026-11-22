@@ -4,12 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createRequire } from 'node:module';
 import { Repository } from 'typeorm';
 import type { SharpConstructor } from 'sharp';
 import { UserEntity } from './user.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
 
-const sharp = require('sharp') as SharpConstructor;
+const sharp: SharpConstructor = createRequire(__filename)('sharp');
 
 const AVATAR_SIZE = 256;
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;

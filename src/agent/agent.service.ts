@@ -21,7 +21,10 @@ import {
   AGENT_DEFAULT_TTL_MS,
   AGENT_UNFAVORITE_GRACE_MS,
 } from './agent.constants';
-import { ExecutionAccessScope } from '../execution/execution.types';
+import {
+  ExecutionAccessScope,
+  STANDALONE_EXECUTION_ACCESS_SCOPE,
+} from '../execution/execution.types';
 import { ChatMessageStore } from '../common/chat-message.store';
 
 @Injectable()
@@ -43,7 +46,7 @@ export class AgentService {
     });
   }
 
-  async findAll(ownerPrincipal: string): Promise<AgentEntity[]> {
+  findAll(ownerPrincipal: string): Promise<AgentEntity[]> {
     return this.agentRepo
       .createQueryBuilder('a')
       .where('a.owner_principal = :ownerPrincipal', { ownerPrincipal })
@@ -172,9 +175,7 @@ export class AgentService {
   async sendMessage(
     agentId: number,
     content: string,
-    accessScope: ExecutionAccessScope = {
-      ownerPrincipal: 'standalone',
-    },
+    accessScope: ExecutionAccessScope = STANDALONE_EXECUTION_ACCESS_SCOPE,
   ): Promise<{
     userMessage: AgentMessageEntity;
     executionId: string;

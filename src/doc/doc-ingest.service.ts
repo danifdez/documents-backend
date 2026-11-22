@@ -5,7 +5,7 @@ import { ExecutionPriority } from '../execution/execution-priority.enum';
 @Injectable()
 export class DocIngestService {
   private readonly logger = new Logger(DocIngestService.name);
-  private timers = new Map<number, NodeJS.Timeout>();
+  private readonly timers = new Map<number, NodeJS.Timeout>();
   private readonly DEBOUNCE_MS = 5000;
 
   constructor(private readonly executionService: ExecutionService) {}

@@ -7,8 +7,8 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 @Injectable()
 export class ConditionalAuthGuard extends AuthGuard('jwt') {
   constructor(
-    private reflector: Reflector,
-    private configService: ConfigService,
+    private readonly reflector: Reflector,
+    private readonly configService: ConfigService,
   ) {
     super();
   }

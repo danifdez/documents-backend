@@ -3,7 +3,7 @@ import { authorizeVoiceConnection } from './voice-authorization';
 import { assertVoiceEvidence } from './voice-evidence';
 import { canonicalHash, canonicalJson } from '../execution/execution-canonical';
 import { inferenceCaptureAuthorization } from '../execution/inference-capture';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { ExecutionStreamService } from '../execution/execution-stream.service';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionEntity } from '../execution/execution.entity';
@@ -35,7 +35,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as http from 'http';
+import * as http from 'node:http';
 import * as WebSocket from 'ws';
 import { Socket } from 'socket.io';
 
@@ -121,7 +121,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       this.emitError(entry.client, 'backend shutdown');
     }
     this.queue = [];
-    await Promise.all([...this.pendingRecords]);
+    await Promise.all(this.pendingRecords);
     await Promise.all(
       [...this.sessions.values()].map((session) =>
         this.finish(session, ExecutionStatus.FAILED, 'voice_shutdown').catch(
@@ -606,11 +606,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
           'voice_final',
           payload.text,
         );
-        if (
-          !row ||
-          row.status !== ExecutionStatus.COMPLETED ||
-          !client.connected
-        ) {
+        if (row?.status !== ExecutionStatus.COMPLETED || !client.connected) {
           this.releaseWorker(worker, 'voice_inactive');
           return;
         }
@@ -681,17 +677,15 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
           canonicalHash({
             ...value,
             phase: 'started',
-            ...{
-              decoded: undefined,
-              decodeUs: undefined,
-              inferenceUs: undefined,
-              parameters: undefined,
-              audioDurationUs: undefined,
-              audioAfterVadUs: undefined,
-              text: undefined,
-              finishedAt: undefined,
-              errorCode: undefined,
-            },
+            decoded: undefined,
+            decodeUs: undefined,
+            inferenceUs: undefined,
+            parameters: undefined,
+            audioDurationUs: undefined,
+            audioAfterVadUs: undefined,
+            text: undefined,
+            finishedAt: undefined,
+            errorCode: undefined,
           }) !== canonicalHash(session.pendingCall)
         )
           throw new Error('Voice call identity differs');

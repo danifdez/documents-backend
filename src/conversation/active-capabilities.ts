@@ -205,7 +205,7 @@ function tool(
   return { name, descriptorVersion, availabilityBasis };
 }
 
-async function hasPairedBrowser(
+function hasPairedBrowser(
   manager: EntityManager,
   ownerPrincipal: string,
   capabilities: string[] = [

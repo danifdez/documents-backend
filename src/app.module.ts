@@ -1,4 +1,4 @@
-import { resolve } from 'path';
+import { resolve } from 'node:path';
 import { DynamicModule, Module } from '@nestjs/common';
 import { ReferenceModule } from './reference/reference.module';
 import { ProjectModule } from './project/project.module';

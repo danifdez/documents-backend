@@ -10,7 +10,10 @@ import { Repository } from 'typeorm';
 import { AssistantEntity } from './assistant.entity';
 import { AssistantMessageEntity } from './assistant-message.entity';
 import { ExecutionService } from '../execution/execution.service';
-import { ExecutionAccessScope } from '../execution/execution.types';
+import {
+  ExecutionAccessScope,
+  STANDALONE_EXECUTION_ACCESS_SCOPE,
+} from '../execution/execution.types';
 import { ChatMessageStore } from '../common/chat-message.store';
 import { IndexedFileService } from '../indexed-file/indexed-file.service';
 import {
@@ -122,9 +125,7 @@ export class AssistantService implements OnApplicationBootstrap {
   async sendMessage(
     assistantId: number,
     content: string,
-    accessScope: ExecutionAccessScope = {
-      ownerPrincipal: 'standalone',
-    },
+    accessScope: ExecutionAccessScope = STANDALONE_EXECUTION_ACCESS_SCOPE,
     requestId?: string,
   ): Promise<{
     userMessage: AssistantMessageEntity;

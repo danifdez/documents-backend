@@ -75,7 +75,7 @@ export class IndexedFileIngestProcessor implements ExecutionProcessor {
     );
     const points = documents.flatMap((document) => {
       if (!Array.isArray(document.points)) {
-        throw new Error(
+        throw new TypeError(
           'indexed-file-ingest vector_points artifact is invalid',
         );
       }

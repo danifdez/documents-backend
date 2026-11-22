@@ -31,11 +31,8 @@ const walk = (root, predicate = () => true) =>
   readdirSync(root, { withFileTypes: true })
     .flatMap((entry) => {
       const path = join(root, entry.name);
-      return entry.isDirectory()
-        ? walk(path, predicate)
-        : predicate(path)
-          ? [path]
-          : [];
+      if (entry.isDirectory()) return walk(path, predicate);
+      return predicate(path) ? [path] : [];
     })
     .sort();
 
@@ -47,12 +44,15 @@ const canonicalValue = (value) => {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .sort(([left], [right]) => {
+          if (left === right) return 0;
+          return left < right ? -1 : 1;
+        })
         .map(([key, child]) => [key, canonicalValue(child)]),
     );
   }
   if (typeof value === 'number' && !Number.isInteger(value)) {
-    throw new Error(
+    throw new TypeError(
       'Floating-point values are outside the canonical v1 profile',
     );
   }
@@ -137,7 +137,7 @@ const validatorPath = join(contractRoot, 'validate.py');
 
 syncRuntimeHash(
   join(backendRoot, 'src/execution/execution.constants.ts'),
-  /(EXECUTION_CONTRACT_SET_HASH\s*=\s*\n?\s*')[^']+(')/,
+  /\b(EXECUTION_CONTRACT_SET_HASH\s*=\s*')[^']+(')/,
   `$1${manifest.contractSetHash}$2`,
   'Documents Backend',
 );
@@ -156,12 +156,14 @@ const updateBundle = (path) => {
   for (const event of bundle.events) {
     const snapshot = artifacts.get(event.payload?.snapshotArtifactId);
     if (snapshot) event.payload.contentHash = snapshot.contentHash;
-    const { contentHash: _contentHash, ...withoutHash } = event;
+    const withoutHash = { ...event };
+    delete withoutHash.contentHash;
     event.contentHash = canonicalHash(withoutHash);
   }
   bundle.integrity.eventsHash = canonicalHash(bundle.events);
   bundle.integrity.schemaManifestHash = manifest.contractSetHash;
-  const { manifestHash: _manifestHash, ...withoutManifestHash } = bundle;
+  const withoutManifestHash = { ...bundle };
+  delete withoutManifestHash.manifestHash;
   bundle.manifestHash = canonicalHash(withoutManifestHash);
   writeJson(path, bundle);
 };

@@ -1,5 +1,6 @@
+import { readString } from '../../utils/read-string';
 import { BadRequestException } from '@nestjs/common';
-import { createHash, randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { IndexedFileOwnerType } from '../../indexed-file/indexed-file.entity';
 import { sanitizeFilename } from '../../indexed-file/path.util';
 import { ExecutionEntity } from '../execution.entity';
@@ -37,12 +38,16 @@ function workingFolderOwner(execution: ExecutionEntity): {
   ownerId: number;
   scopeKey: string;
 } {
-  const ownerType =
-    execution.taskType === 'assistant-chat'
-      ? 'assistant'
-      : execution.taskType === 'agent-chat'
-        ? 'agent'
-        : null;
+  let ownerType: 'assistant' | 'agent';
+  if (execution.taskType === 'assistant-chat') {
+    ownerType = 'assistant';
+  } else {
+    if (execution.taskType === 'agent-chat') {
+      ownerType = 'agent';
+    } else {
+      ownerType = null;
+    }
+  }
   const payload = chatTurnPayload(execution);
   const ownerId = Number(payload.ownerId);
   if (
@@ -183,7 +188,7 @@ function prepareWorkspaceFileSearch(
   if (keys.some((key) => !['query', 'limit'].includes(key))) {
     throw new BadRequestException('invalid_arguments');
   }
-  const query = String(invocation.arguments.query ?? '').trim();
+  const query = readString(invocation.arguments.query).trim();
   const requestedLimit = invocation.arguments.limit ?? 10;
   if (
     query.length < 3 ||

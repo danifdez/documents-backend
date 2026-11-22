@@ -549,7 +549,7 @@ describe('DatasetService', () => {
       });
     });
 
-    it('exports a safe filename and resolved anchor labels with a single resource lookup', async () => {
+    it('exports safe filenames and anchor labels with one resource lookup', async () => {
       datasets.findOne.mockResolvedValue({
         id: 1,
         name: 'Annual study!',
@@ -577,7 +577,13 @@ describe('DatasetService', () => {
         service.exportCsv(1, { includeAnchors: true }),
       ).resolves.toEqual({
         filename: 'Annual_study_.csv',
-        csv: 'label,label_source,label_page,label_quote\nFirst,Minutes,2,"A, B"\nSecond,Minutes,,\nThird,,,\nMissing source,,,',
+        csv: [
+          'label,label_source,label_page,label_quote',
+          'First,Minutes,2,"A, B"',
+          'Second,Minutes,,',
+          'Third,,,',
+          'Missing source,,,',
+        ].join('\n'),
       });
       expect(resources.findByIds).toHaveBeenCalledTimes(1);
       expect(resources.findByIds).toHaveBeenCalledWith([7, 99]);

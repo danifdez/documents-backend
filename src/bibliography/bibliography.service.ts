@@ -359,21 +359,59 @@ export class BibliographyService {
 
       const key = match[2].trim();
       const body = match[3];
-      const fields: Record<string, string> = {};
-
-      const fieldRegex =
-        /(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)"|(\d+))/g;
-      let fm: RegExpExecArray | null;
-      while ((fm = fieldRegex.exec(body)) !== null) {
-        const fieldName = fm[1].toLowerCase();
-        const value = (fm[2] ?? fm[3] ?? fm[4] ?? '').trim();
-        fields[fieldName] = value;
-      }
-
-      results.push({ type, key, fields });
+      results.push({ type, key, fields: this.parseBibTeXFields(body) });
     }
 
     return results;
+  }
+
+  private parseBibTeXFields(body: string): Record<string, string> {
+    const fields: Record<string, string> = Object.create(null);
+    const assignment = /(?:^|,)\s*(\w+)\s*=\s*/g;
+    const number = /\d+/y;
+    let match: RegExpExecArray | null;
+
+    while ((match = assignment.exec(body)) !== null) {
+      const offset = assignment.lastIndex;
+      const delimiter = body[offset];
+      const name = match[1].toLowerCase();
+      if (delimiter === '{' || delimiter === '"') {
+        const end = this.bibTeXFieldEnd(body, offset + 1, delimiter);
+        if (end === -1) break;
+        fields[name] = body.slice(offset + 1, end).trim();
+        assignment.lastIndex = end + 1;
+      } else {
+        number.lastIndex = offset;
+        const numericValue = number.exec(body);
+        if (numericValue) {
+          fields[name] = numericValue[0];
+          assignment.lastIndex = number.lastIndex;
+        }
+      }
+    }
+    return fields;
+  }
+
+  private bibTeXFieldEnd(
+    body: string,
+    start: number,
+    delimiter: '{' | '"',
+  ): number {
+    let depth = 1;
+    for (let offset = start; offset < body.length; offset += 1) {
+      const char = body[offset];
+      if (char === '\\') {
+        offset += 1;
+      } else if (delimiter === '"') {
+        if (char === '"') return offset;
+      } else if (char === '{') {
+        depth += 1;
+      } else if (char === '}') {
+        depth -= 1;
+        if (depth === 0) return offset;
+      }
+    }
+    return -1;
   }
 
   private entryToBibTeX(entry: BibliographyEntryEntity): string {

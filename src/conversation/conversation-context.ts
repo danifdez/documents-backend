@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { EntityManager, In } from 'typeorm';
 import { ExecutionArtifactEntity } from '../execution/execution-artifact.entity';
 import { canonicalJson, contentHash } from '../execution/execution-canonical';

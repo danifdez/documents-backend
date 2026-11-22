@@ -45,7 +45,7 @@ describe('SearchService collections and blocks', () => {
     );
   });
 
-  it('maps and ranks collections globally, including project hits and translated resource text', async () => {
+  it('ranks global matches with project hits and translated text', async () => {
     docs.globalSearch.mockResolvedValue([
       {
         d_id: 1,
@@ -138,7 +138,7 @@ describe('SearchService collections and blocks', () => {
     expect(knowledge.globalSearch).toHaveBeenCalledWith('C++');
   });
 
-  it('queries only project collections and crops long highlights around a literal match', async () => {
+  it('scopes queries and crops long highlights around literal text', async () => {
     const before = 'a'.repeat(80);
     const after = 'b'.repeat(80);
     docs.globalSearch.mockResolvedValue([

@@ -143,7 +143,7 @@ export function knowledgeTermsOf(entry: any): string[] {
 function authorList(entry: any): { last: string }[] {
   const creators = Array.isArray(entry?.creators) ? entry.creators : [];
   return creators
-    .filter((c: any) => c && c.creatorType === 'author')
+    .filter((c: any) => c?.creatorType === 'author')
     .map((c: any) => ({ last: (c.lastName ?? c.name ?? '').trim() }))
     .filter((a: { last: string }) => a.last.length > 0);
 }
@@ -174,12 +174,16 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
   if (authors.length > 0 && year) {
     const first = authors[0].last;
     const second = authors.length > 1 ? authors[1].last : '';
-    const short =
-      authors.length === 1
-        ? first
-        : authors.length === 2
-          ? `${first} & ${second}`
-          : `${first} et al.`;
+    let short: string;
+    if (authors.length === 1) {
+      short = first;
+    } else {
+      if (authors.length === 2) {
+        short = `${first} & ${second}`;
+      } else {
+        short = `${first} et al.`;
+      }
+    }
     const shortAnd = authors.length === 2 ? `${first} y ${second}` : short;
     const forms = [
       `${short} (${year})`,
@@ -198,9 +202,9 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
       citeKey,
       `[${citeKey}]`,
       `@${citeKey}`,
-      `\\cite{${citeKey}}`,
-      `\\citep{${citeKey}}`,
-      `\\citet{${citeKey}}`,
+      String.raw`\cite{${citeKey}}`,
+      String.raw`\citep{${citeKey}}`,
+      String.raw`\citet{${citeKey}}`,
     ]) {
       terms.push({ term: form, kind: 'citeKey' });
     }
@@ -218,8 +222,10 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
   const doi = entry?.doi ? String(entry.doi).trim() : '';
   if (doi.length >= 6) {
     terms.push({ term: doi, kind: 'identifier' });
-    terms.push({ term: `doi:${doi}`, kind: 'identifier' });
-    terms.push({ term: `https://doi.org/${doi}`, kind: 'identifier' });
+    terms.push(
+      { term: `doi:${doi}`, kind: 'identifier' },
+      { term: `https://doi.org/${doi}`, kind: 'identifier' },
+    );
   }
   for (const [value, label] of [
     [entry?.isbn, 'isbn'],

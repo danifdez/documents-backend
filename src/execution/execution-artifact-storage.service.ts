@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
-import { chmod, link, mkdir, open, readFile } from 'fs/promises';
+import { randomUUID } from 'node:crypto';
+import { chmod, link, mkdir, open, readFile } from 'node:fs/promises';
 import * as fs from 'fs-extra';
-import * as path from 'path';
+import * as path from 'node:path';
 import { EntityManager } from 'typeorm';
 import { contentHash } from './execution-canonical';
 import { ExecutionArtifactEntity } from './execution-artifact.entity';
@@ -18,7 +18,7 @@ const UUID_PATH_PATTERN =
   '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-' +
   '[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const FILE_STORAGE_REF_PATTERN = new RegExp(
-  `^file:v1/[0-9a-f]{2}/[0-9a-f]{2}/${UUID_PATH_PATTERN}\\.blob$`,
+  String.raw`^file:v1/[0-9a-f]{2}/[0-9a-f]{2}/${UUID_PATH_PATTERN}\.blob$`,
 );
 
 export interface StoredExecutionArtifactInput {

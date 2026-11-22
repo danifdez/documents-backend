@@ -150,24 +150,21 @@ describe('DatasetController', () => {
 
   it('uses basic pagination until filters or search options are supplied', async () => {
     await controller.findRecords(1);
-    await controller.findRecords(1, '2', '10');
+    await controller.findRecords(1, { page: '2', limit: '10' });
     expect(datasets.findRecords.mock.calls).toEqual([
       [1, 1, 50],
       [1, 2, 10],
     ]);
-    await controller.findRecords(
-      1,
-      '2',
-      '10',
-      'sample',
-      'count',
-      'desc',
-      '4',
-      '8',
-      {
-        filter: { count_gte: 7, label_contains: 'sample', unsupported: 'skip' },
-      },
-    );
+    await controller.findRecords(1, {
+      page: '2',
+      limit: '10',
+      search: 'sample',
+      sort: 'count',
+      order: 'desc',
+      relatedTo: '4',
+      relationId: '8',
+      filter: { count_gte: 7, label_contains: 'sample', unsupported: 'skip' },
+    });
     expect(query.queryRecords).toHaveBeenCalledWith(1, {
       filters: [
         { field: 'count', operator: 'gte', value: '7' },
@@ -181,17 +178,7 @@ describe('DatasetController', () => {
       page: 2,
       limit: 10,
     });
-    await controller.findRecords(
-      1,
-      undefined,
-      undefined,
-      'sample',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { filter: 'invalid' },
-    );
+    await controller.findRecords(1, { search: 'sample', filter: 'invalid' });
     expect(query.queryRecords).toHaveBeenLastCalledWith(
       1,
       expect.objectContaining({ filters: [], page: 1, limit: 50 }),
@@ -228,7 +215,7 @@ describe('DatasetController', () => {
     ]);
   });
 
-  it('propagates the current owner to extraction and analysis and returns only public result fields', async () => {
+  it('passes the current owner and returns public result fields', async () => {
     await controller.reExtractRow(1, 2, { columnsToExtract: ['name'] }, user);
     expect(extraction.extractRow).toHaveBeenCalledWith(1, 2, '7', ['name']);
     await controller.reExtractCell(1, 2, 'name', { force: true }, user);

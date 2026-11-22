@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { CreateExecutionStepInput } from './execution-control-plane.types';
 import { ExecutionStepKind } from './execution-step-kind.enum';
 

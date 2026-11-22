@@ -93,7 +93,7 @@ export class ExecutionStepEntity {
   currentAttemptId: string | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  result: unknown | null;
+  result: unknown;
 
   @Column({ type: 'jsonb', nullable: true })
   error: Record<string, unknown> | null;

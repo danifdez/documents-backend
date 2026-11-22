@@ -151,7 +151,7 @@ describe('Dataset extraction entry points', () => {
   });
 
   describe('extract all rows', () => {
-    it('filters project documents by MIME type and queues every matching source with the canonical owner', async () => {
+    it('queues matching project documents with their execution owner', async () => {
       datasets.findOne.mockResolvedValue({
         id: 1,
         project: { id: 3 },
@@ -223,7 +223,7 @@ describe('Dataset extraction entry points', () => {
       );
     });
 
-    it('checks the single authorized resource before enabling capture', async () => {
+    it('captures only the authorized resource in a batch', async () => {
       const dataset = {
         id: 1,
         schema,
@@ -241,19 +241,16 @@ describe('Dataset extraction entry points', () => {
       await expect(service.extractAll(1, '7', 8)).rejects.toThrow(
         'does not match the authorized resource',
       );
-      dataset.sourceConfig.resourceIds = [7, 8];
-      await expect(service.extractAll(1, '7', 7)).rejects.toThrow(
-        'does not match the authorized resource',
-      );
       expect(rows.save).not.toHaveBeenCalled();
       expect(executions.create).not.toHaveBeenCalled();
 
-      dataset.sourceConfig.resourceIds = [7];
+      dataset.sourceConfig.resourceIds = [7, 8, 9];
       await expect(service.extractAll(1, '7', 7)).resolves.toEqual({
-        rowsQueued: 1,
-        executionIds: ['queued'],
+        rowsQueued: 3,
+        executionIds: ['queued', 'queued', 'queued'],
       });
-      expect(executions.create).toHaveBeenCalledWith(
+      expect(executions.create).toHaveBeenNthCalledWith(
+        1,
         'dataset.extract-row',
         expect.any(String),
         expect.objectContaining({
@@ -267,6 +264,15 @@ describe('Dataset extraction entry points', () => {
           captureInference: true,
         },
       );
+      for (const [index, resourceId] of [8, 9].entries()) {
+        expect(executions.create).toHaveBeenNthCalledWith(
+          index + 2,
+          'dataset.extract-row',
+          expect.any(String),
+          expect.objectContaining({ resourceId }),
+          { ownerPrincipal: '7', steps: expect.any(Array) },
+        );
+      }
     });
 
     it('validates dataset mode and resource ownership and skips empty selections', async () => {
@@ -336,7 +342,7 @@ describe('Dataset extraction entry points', () => {
       expect(executions.create).not.toHaveBeenCalled();
     });
 
-    it('queues row retries with explicit or described columns and clears a previous error', async () => {
+    it('retries rows with chosen columns and clears old errors', async () => {
       datasets.findOne.mockResolvedValue({ id: 1, schema });
       rows.findOne.mockResolvedValue({
         id: 2,
@@ -373,7 +379,7 @@ describe('Dataset extraction entry points', () => {
       });
     });
 
-    it('requires confirmation for edited cells and keeps row status during a forced retry', async () => {
+    it('requires confirmation for edited cells unless forced', async () => {
       datasets.findOne.mockResolvedValue({ id: 1, schema, project: { id: 4 } });
       rows.findOne.mockResolvedValue({
         id: 2,

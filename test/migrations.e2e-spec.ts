@@ -49,7 +49,7 @@ describe('PostgreSQL migrations', () => {
     }
   });
 
-  it('builds the current schema from scratch and does not reapply recorded migrations', async () => {
+  it('applies fresh migrations once and reverts the latest migration', async () => {
     const applied = await candidate.runMigrations();
     expect(applied.length).toBeGreaterThan(0);
     expect(await candidate.showMigrations()).toBe(false);

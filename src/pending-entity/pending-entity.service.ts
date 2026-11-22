@@ -512,7 +512,7 @@ export class PendingEntityService {
         const target = await this.repository.findOneBy({
           id: source.mergedTargetId,
         });
-        if (target && target.aliases) {
+        if (target?.aliases) {
           target.aliases = (target.aliases || []).filter(
             (a) =>
               !(
@@ -526,7 +526,7 @@ export class PendingEntityService {
         const confirmed = await this.entityService.findOne(
           source.mergedTargetId!,
         );
-        if (confirmed && confirmed.aliases) {
+        if (confirmed?.aliases) {
           // Confirmed entity alias shape may not include scope; remove by value match
           const filtered = (confirmed.aliases || []).filter(
             (a) => a.value !== aliasToRemove.value,
@@ -574,7 +574,7 @@ export class PendingEntityService {
       }
 
       // Update translations object
-      const updatedTranslations = { ...(pending.translations || {}) };
+      const updatedTranslations = { ...pending.translations };
 
       // Update the current language translation with the new name
       if (currentLanguage !== 'en') {

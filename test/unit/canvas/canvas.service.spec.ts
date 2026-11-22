@@ -52,7 +52,7 @@ describe('CanvasService', () => {
     expect(repo.remove).toHaveBeenCalled();
   });
 
-  it('indexes the visible labels of canvas nodes and preserves its project and thread', async () => {
+  it('indexes canvas labels and preserves the project and thread', async () => {
     repo.create.mockImplementation((row) => row);
     repo.save.mockImplementation(async (row) => row);
     const canvasData = {
@@ -125,7 +125,7 @@ describe('CanvasService', () => {
     ).resolves.toMatchObject({ content: '' });
   });
 
-  it('constrains a search to the project and reports a missing canvas without deleting', async () => {
+  it('scopes searches to a project and leaves missing canvases intact', async () => {
     const qb = repo.createQueryBuilder();
     qb.getRawMany.mockResolvedValue([{ c_id: 5 }]);
     await expect(service.globalSearch('canvas', 7)).resolves.toEqual([

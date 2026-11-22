@@ -247,7 +247,7 @@ describe('ResourceController', () => {
     );
   });
 
-  it('serializes missing content and reports unavailable translations and entity collections', async () => {
+  it('serializes missing content and unavailable related data', async () => {
     resourceService.resourceExists
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false)

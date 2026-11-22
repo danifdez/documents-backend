@@ -52,4 +52,7 @@ async function bootstrap() {
     configService.get<string | undefined>('HOST'),
   );
 }
-bootstrap();
+bootstrap().catch((error: unknown) => {
+  Logger.error(error, 'Bootstrap');
+  process.exitCode = 1;
+});

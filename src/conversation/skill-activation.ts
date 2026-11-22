@@ -1,5 +1,6 @@
+import { compareStrings } from '../utils/compare-strings';
 import { ConflictException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { EntityManager } from 'typeorm';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import type { ActiveCapabilitySet } from './active-capabilities';
@@ -23,7 +24,9 @@ export async function createSkillActivations(
   const repo = manager.getRepository(SkillActivationEntity);
   const existing = await repo.find({ where: { executionId } });
   if (existing.length) {
-    const expected = capabilities.skills.map(skillIdentity).sort();
+    const expected = capabilities.skills
+      .map(skillIdentity)
+      .sort(compareStrings);
     const observed = existing
       .map((activation) =>
         skillIdentity({
@@ -34,7 +37,7 @@ export async function createSkillActivations(
             .signal as ProductSkillSignal,
         }),
       )
-      .sort();
+      .sort(compareStrings);
     if (JSON.stringify(expected) !== JSON.stringify(observed)) {
       throw new ConflictException('skill_activation_conflict');
     }

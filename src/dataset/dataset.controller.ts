@@ -167,14 +167,21 @@ export class DatasetController {
     @Body('resourceId') resourceId?: unknown,
   ) {
     const capture = authorizeInferenceCapture(user, consent);
-    if (capture && (typeof resourceId !== 'number' || !Number.isSafeInteger(resourceId) || resourceId < 1)) {
-      throw new BadRequestException('Select one resource to authorize inference capture');
+    if (
+      capture &&
+      (typeof resourceId !== 'number' ||
+        !Number.isSafeInteger(resourceId) ||
+        resourceId < 1)
+    ) {
+      throw new BadRequestException(
+        'Select one resource to authorize inference capture',
+      );
     }
     const { ownerPrincipal } = this.executionService.resolveAccessScope(user);
     return this.extractionService.extractAll(
       id,
       ownerPrincipal,
-      capture ? resourceId as number : undefined,
+      capture ? (resourceId as number) : undefined,
     );
   }
 
@@ -204,7 +211,10 @@ export class DatasetController {
     @CurrentUser() user: unknown,
   ) {
     return this.extractionService.extractCell(
-      id, recordId, fieldKey, this.executionService.resolveAccessScope(user).ownerPrincipal,
+      id,
+      recordId,
+      fieldKey,
+      this.executionService.resolveAccessScope(user).ownerPrincipal,
       { force: dto.force },
     );
   }
@@ -256,17 +266,11 @@ export class DatasetController {
   @Get(':id/records')
   async findRecords(
     @Param('id', ParseIntPipe) id: number,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-    @Query('sort') sort?: string,
-    @Query('order') order?: string,
-    @Query('relatedTo') relatedTo?: string,
-    @Query('relationId') relationId?: string,
-    @Query() allQuery?: Record<string, any>,
+    @Query() query: Record<string, any> = {},
   ) {
+    const { page, limit, search, sort, order, relatedTo, relationId } = query;
     // Parse filter params: filter[field_op]=value
-    const filters = this.parseFilters(allQuery || {});
+    const filters = this.parseFilters(query);
 
     if (filters.length > 0 || search || sort || relatedTo) {
       return await this.queryService.queryRecords(id, {
@@ -558,7 +562,7 @@ export class DatasetController {
     const filterObj = query.filter;
     if (filterObj && typeof filterObj === 'object') {
       for (const [key, value] of Object.entries(filterObj)) {
-        const match = key.match(filterRegex);
+        const match = filterRegex.exec(key);
         if (match) {
           filters.push({
             field: match[1],

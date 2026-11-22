@@ -43,7 +43,7 @@ export class ExecutionOperationEntity {
   causedByEventId: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  result: unknown | null;
+  result: unknown;
 
   @Column({ type: 'jsonb', nullable: true })
   error: Record<string, unknown> | null;

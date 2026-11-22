@@ -119,8 +119,11 @@ export class ContentTranslationStrategy implements TranslationStrategy {
               // Match the original text more flexibly (trim whitespace for comparison)
               if (nodeText.trim() === item.original_text.trim()) {
                 // Replace with translated text, preserving any surrounding whitespace
-                const leadingSpace = nodeText.match(/^\s*/)?.[0] || '';
-                const trailingSpace = nodeText.match(/\s*$/)?.[0] || '';
+                const leadingSpace = nodeText.slice(
+                  0,
+                  nodeText.length - nodeText.trimStart().length,
+                );
+                const trailingSpace = nodeText.slice(nodeText.trimEnd().length);
                 $(node).replaceWith(
                   `${leadingSpace}${item.translation_text}${trailingSpace}`,
                 );

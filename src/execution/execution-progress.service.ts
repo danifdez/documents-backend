@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { DataSource, Repository } from 'typeorm';
 import { canonicalJson } from './execution-canonical';
 import {
@@ -84,7 +84,7 @@ export class ExecutionProgressService {
     eventId: string;
   }> {
     validateProgressGrantRequest(rootExecutionId, request);
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
       const eventRepo = manager.getRepository(ExecutionEventEntity);
       const execution = await executionRepo.findOne({
@@ -250,7 +250,7 @@ export class ExecutionProgressService {
     eventId: string;
   }> {
     validateReservationRequest(rootExecutionId, request);
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
       const eventRepo = manager.getRepository(ExecutionEventEntity);
       const execution = await executionRepo.findOne({

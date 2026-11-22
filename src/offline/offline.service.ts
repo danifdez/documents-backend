@@ -5,7 +5,7 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository, getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository, MoreThan, ObjectLiteral } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ResourceEntity } from '../resource/resource.entity';
@@ -18,7 +18,6 @@ import { NoteEntity } from '../note/note.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { SyncChangeDto } from './dto/sync-change.dto';
-import { getRepositoryToken } from '@nestjs/typeorm';
 
 @Injectable()
 export class OfflineService {
@@ -383,7 +382,7 @@ export class OfflineService {
     return { files, excludedFiles };
   }
 
-  async applySync(changes: SyncChangeDto[]) {
+  applySync(changes: SyncChangeDto[]) {
     return this.dataSource.transaction(async (manager) => {
       const results: Array<{
         entityType: string;

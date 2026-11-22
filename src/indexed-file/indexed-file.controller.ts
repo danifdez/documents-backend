@@ -86,11 +86,10 @@ abstract class IndexedFileBaseController {
     file: Express.Multer.File,
     filenameOverride?: string,
   ): Promise<IndexedFileDto> {
-    if (!file || !file.buffer) {
+    if (!file?.buffer) {
       throw new BadRequestException({ error: 'missing_file' });
     }
-    const filename =
-      (filenameOverride && filenameOverride.trim()) || file.originalname;
+    const filename = filenameOverride?.trim() || file.originalname;
     if (!filename) {
       throw new BadRequestException({ error: 'missing_filename' });
     }

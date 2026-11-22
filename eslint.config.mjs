@@ -1,8 +1,8 @@
-const tsPlugin = require('@typescript-eslint/eslint-plugin');
-const globals = require('globals');
-const prettierRecommended = require('eslint-plugin-prettier/recommended');
+import tsPlugin from '@typescript-eslint/eslint-plugin';
+import globals from 'globals';
+import prettierRecommended from 'eslint-plugin-prettier/recommended';
 
-module.exports = [
+export default [
   ...tsPlugin.configs['flat/recommended'],
   prettierRecommended,
   {
@@ -13,7 +13,7 @@ module.exports = [
     languageOptions: {
       parserOptions: {
         project: './tsconfig.json',
-        tsconfigRootDir: __dirname,
+        tsconfigRootDir: import.meta.dirname,
       },
       globals: {
         ...globals.node,

@@ -20,6 +20,20 @@ import { extractTextFromHtml } from '../utils/text';
 import { buildDateExtractionWorkflowSteps } from '../model/date-extraction-workflow';
 import { AgeGraphService } from '../graph/age-graph.service';
 
+function stripMarkup(html: string): string {
+  const parts: string[] = [];
+  let offset = 0;
+  for (;;) {
+    const opening = html.indexOf('<', offset);
+    const closing = opening < 0 ? -1 : html.indexOf('>', opening + 1);
+    if (closing < 0) break;
+    parts.push(html.slice(offset, opening), ' ');
+    offset = closing + 1;
+  }
+  parts.push(html.slice(offset));
+  return parts.join('');
+}
+
 @Injectable()
 export class ResourceService {
   constructor(
@@ -192,7 +206,7 @@ export class ResourceService {
   }
 
   async search(query: string): Promise<ResourceEntity[]> {
-    if (!query || !query.trim()) return [];
+    if (!query?.trim()) return [];
     return await this.repo
       .createQueryBuilder('r')
       .where('r.name ILIKE :q', { q: `%${query}%` })
@@ -244,7 +258,7 @@ export class ResourceService {
   ): Promise<ResourceEntity | null> {
     let anchorChanged = false;
     let newAnchor: string | null = null;
-    if (Object.prototype.hasOwnProperty.call(resource, 'publicationDate')) {
+    if (Object.hasOwn(resource, 'publicationDate')) {
       const before = await this.repo.findOne({
         select: ['id', 'publicationDate'],
         where: { id },
@@ -512,7 +526,7 @@ export class ResourceService {
     id: number,
   ): Promise<{ buffer: Buffer; resource: ResourceEntity }> {
     const resource = await this.findOne(id);
-    if (!resource || !resource.path) {
+    if (!resource?.path) {
       throw new NotFoundException('File not found');
     }
 
@@ -529,17 +543,14 @@ export class ResourceService {
   async removeWithFile(id: number): Promise<void> {
     await this.graphService.deleteByResource(id);
     const resource = await this.remove(id);
-    if (resource && resource.path) {
+    if (resource?.path) {
       await this.fileStorageService.deleteFile(resource.path);
     }
   }
 
   private extractTextSamples(html: string): string[] {
     try {
-      const fullText = html
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      const fullText = stripMarkup(html).replace(/\s+/g, ' ').trim();
 
       const samples: string[] = [];
 

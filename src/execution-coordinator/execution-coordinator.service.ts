@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessorFactory } from '../execution-processor/execution-processor.factory';
 import { ExecutionAttemptService } from '../execution/execution-attempt.service';
 import { ExecutionStatus } from '../execution/execution-status.enum';
+import type { ExecutionEntity } from '../execution/execution.entity';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionOutboxService } from '../execution-outbox/execution-outbox.service';
 import { ExecutionToolRuntimeService } from './execution-tool-runtime.service';
@@ -61,77 +62,71 @@ export class ExecutionCoordinatorService {
       const execution = await this.executionService.claimReadyForFinalization();
       if (!execution) break;
 
-      try {
-        const finalizingFailure =
-          execution.phase === 'domain_failure_finalization';
-        const processor = this.executionProcessorFactory.getProcessor(
-          execution.taskType,
-        );
-        if (!processor) {
-          await this.executionService.markAsFailed(
-            execution.executionId,
-            `No execution finalizer registered for task type: ${execution.taskType}`,
-          );
-          finalized += 1;
-          continue;
-        }
-
-        this.logger.log(
-          `Finalizing execution ${execution.executionId} of type ${execution.taskType}`,
-        );
-        const result = await processor.process(execution);
-        if (
-          finalizingFailure ||
-          (result &&
-            typeof result === 'object' &&
-            'success' in result &&
-            result.success === false)
-        ) {
-          const executionError = execution.error as Record<
-            string,
-            unknown
-          > | null;
-          const message =
-            typeof result.message === 'string'
-              ? result.message
-              : typeof result.reason === 'string'
-                ? result.reason
-                : typeof executionError?.message === 'string'
-                  ? executionError.message
-                  : `Execution finalizer rejected task type: ${execution.taskType}`;
-          await this.executionService.markAsFailed(
-            execution.executionId,
-            message,
-            { publication: result.publication },
-          );
-          finalized += 1;
-          continue;
-        }
-
-        const current = await this.executionService.findOne(
-          execution.executionId,
-        );
-        if (current && !TERMINAL_STATUSES.has(current.status)) {
-          await this.executionService.markAsCompleted(execution.executionId, {
-            publication: result.publication,
-          });
-        }
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Unknown finalization error';
-        this.logger.error(
-          `Error finalizing execution ${execution.executionId}: ${message}`,
-        );
-        await this.executionService.markAsFailed(
-          execution.executionId,
-          message,
-        );
-      }
+      await this.finalizeClaimedExecution(execution);
       finalized += 1;
     }
     await this.nextWork.select(limit);
     await this.executionService.reconcileRequestedCancellations(limit);
     return finalized;
+  }
+
+  private async finalizeClaimedExecution(
+    execution: ExecutionEntity,
+  ): Promise<void> {
+    try {
+      const processor = this.executionProcessorFactory.getProcessor(
+        execution.taskType,
+      );
+      if (!processor) {
+        await this.executionService.markAsFailed(
+          execution.executionId,
+          `No execution finalizer registered for task type: ${execution.taskType}`,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `Finalizing execution ${execution.executionId} of type ${execution.taskType}`,
+      );
+      const finalizingFailure =
+        execution.phase === 'domain_failure_finalization';
+      const result = await processor.process(execution);
+      if (
+        finalizingFailure ||
+        (result &&
+          typeof result === 'object' &&
+          'success' in result &&
+          result.success === false)
+      ) {
+        const previousError = execution.error as Record<string, unknown> | null;
+        const message =
+          [result.message, result.reason, previousError?.message].find(
+            (value): value is string => typeof value === 'string',
+          ) ?? `Execution finalizer rejected task type: ${execution.taskType}`;
+        await this.executionService.markAsFailed(
+          execution.executionId,
+          message,
+          { publication: result.publication },
+        );
+        return;
+      }
+
+      const current = await this.executionService.findOne(
+        execution.executionId,
+      );
+      if (current && !TERMINAL_STATUSES.has(current.status)) {
+        await this.executionService.markAsCompleted(execution.executionId, {
+          publication: result.publication,
+        });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown finalization error';
+      this.logger.error(
+        `Error finalizing execution ${execution.executionId}: ${message}`,
+      );
+      await this.executionService.markAsFailed(execution.executionId, message);
+    }
   }
 
   recoverStaleFinalizations(staleAfterMs: number): Promise<number> {

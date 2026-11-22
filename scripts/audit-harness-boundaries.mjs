@@ -61,7 +61,7 @@ reject(
 
 const browserRuntime = sourceFiles(join(browser, 'src'), ['.cc', '.h']);
 reject(
-  /\/models-work(?:\/|\")/,
+  /\/models-work[\/"]/,
   browserRuntime,
   'IA Browser calls the Models worker protocol',
 );

@@ -3,7 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { tracedWork } from '../telemetry/telemetry';
 import { EntityManager, In, Repository } from 'typeorm';
 import { ExecutionEntity } from './execution.entity';
@@ -286,7 +286,7 @@ async function materializeCoordinatedInput(
       step?.status !== ExecutionStepStatus.COMPLETED ||
       !value ||
       typeof value !== 'object' ||
-      !Object.prototype.hasOwnProperty.call(value, resultKey)
+      !Object.hasOwn(value, resultKey)
     ) {
       throw new ConflictException('invalid_map_reduce_dependency_result');
     }

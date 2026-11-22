@@ -61,7 +61,7 @@ export class DocService {
       .getMany();
   }
 
-  async findByResource(resourceId: number): Promise<DocEntity | null> {
+  findByResource(resourceId: number): Promise<DocEntity | null> {
     return this.repository.findOne({
       where: { resource: { id: resourceId } },
     });

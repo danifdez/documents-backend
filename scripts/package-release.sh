@@ -23,8 +23,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -n "$VERSION" ] && [ -n "$TARGET" ] && [ -n "$NODE_VERSION" ] && [ -n "$STAGING" ] && [ -n "$OUTPUT" ] ||
+if [[ -z "$VERSION" || -z "$TARGET" || -z "$NODE_VERSION" || -z "$STAGING" || -z "$OUTPUT" ]]; then
   die "Backend packaging requires --version, --target, --node-version, --staging and --output" 2
+fi
 validate_semver "$VERSION"
 assert_local_target "$TARGET"
 assert_inside_workspace "$STAGING"

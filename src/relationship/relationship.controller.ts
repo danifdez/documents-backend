@@ -59,7 +59,9 @@ export class RelationshipController {
           .map((n) => n.trim())
           .filter(Boolean)
       : [];
-    const projectId = projectIdStr ? Number.parseInt(projectIdStr, 10) : undefined;
+    const projectId = projectIdStr
+      ? Number.parseInt(projectIdStr, 10)
+      : undefined;
     return this.service.queryNeighborhood(entityNames, projectId);
   }
 
@@ -93,7 +95,10 @@ export class RelationshipController {
     @Param('resourceId', ParseIntPipe) resourceId: number,
     @CurrentUser() user: unknown,
   ): Promise<{ executionId: string }> {
-    return this.service.extractRelationships(resourceId, ownerPrincipalFromUser(user));
+    return this.service.extractRelationships(
+      resourceId,
+      ownerPrincipalFromUser(user),
+    );
   }
 
   @Post('project/:projectId/extract')
@@ -102,6 +107,9 @@ export class RelationshipController {
     @Param('projectId', ParseIntPipe) projectId: number,
     @CurrentUser() user: unknown,
   ): Promise<{ executionIds: string[] }> {
-    return this.service.extractRelationshipsForProject(projectId, ownerPrincipalFromUser(user));
+    return this.service.extractRelationshipsForProject(
+      projectId,
+      ownerPrincipalFromUser(user),
+    );
   }
 }

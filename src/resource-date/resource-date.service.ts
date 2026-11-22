@@ -10,7 +10,7 @@ export class ResourceDateService {
     private readonly repo: Repository<ResourceDateEntity>,
   ) {}
 
-  async findByResourceId(resourceId: number): Promise<ResourceDateEntity[]> {
+  findByResourceId(resourceId: number): Promise<ResourceDateEntity[]> {
     return this.repo.find({
       where: { resourceId },
       order: { date: 'ASC', charOffset: 'ASC' },

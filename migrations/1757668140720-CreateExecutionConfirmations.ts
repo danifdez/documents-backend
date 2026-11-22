@@ -41,5 +41,8 @@ export class CreateExecutionConfirmations1757668140720 implements MigrationInter
     `);
   }
 
-  public async down(): Promise<void> {}
+  public down(): Promise<void> {
+    // The table may predate this migration because creation is conditional.
+    return Promise.resolve();
+  }
 }

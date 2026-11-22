@@ -63,7 +63,7 @@ describe('DatasetCsvService', () => {
       const csv = 'Header\n' + rows.join('\n');
       const result = service.parsePreview(Buffer.from(csv));
       expect(result.headers).toEqual(['Header']);
-      expect(result.previewRows.length).toBe(10);
+      expect(result.previewRows).toHaveLength(10);
       expect(result.totalRows).toBe(20);
     });
   });

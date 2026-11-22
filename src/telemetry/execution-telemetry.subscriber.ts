@@ -94,7 +94,7 @@ export class ExecutionTelemetrySubscriber implements ExecutionEventSubscriber {
       if (event.queryRunner.isTransactionActive) {
         const frames: Frames = (event.queryRunner.data[framesKey] ??= [[]]);
         if (!frames.length) frames.push([]);
-        frames[frames.length - 1].push(snapshot);
+        frames.at(-1).push(snapshot);
       } else {
         this.publish([snapshot]);
       }
@@ -109,7 +109,7 @@ export class ExecutionTelemetrySubscriber implements ExecutionEventSubscriber {
     const committed = frames.pop()!;
     if (event.queryRunner.isTransactionActive) {
       if (!frames.length) frames.push([]);
-      frames[frames.length - 1].push(...committed);
+      frames.at(-1).push(...committed);
     } else {
       delete event.queryRunner.data[framesKey];
       this.publish([...frames.flat(), ...committed]);

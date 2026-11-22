@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import * as os from 'os';
-import * as process from 'process';
+import * as os from 'node:os';
+import * as process from 'node:process';
 // eslint-disable-next-line max-len
 import { ExecutionCoordinatorService } from '../execution-coordinator/execution-coordinator.service';
 import { WorkerService } from '../worker/worker.service';

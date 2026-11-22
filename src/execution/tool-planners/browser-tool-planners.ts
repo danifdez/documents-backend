@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import {
   BROWSER_CLICK_TOOL_CAPABILITY,
   BROWSER_CLICK_TOOL_NAME,
@@ -32,6 +32,7 @@ import {
   BROWSER_TASK_TIMEOUT_MS,
   CONFIRMATION_TIMEOUT_MS,
   ToolPlanPreparer,
+  assertToolDataClassification,
   buildToolPlan,
 } from './tool-plan-preparer';
 
@@ -47,9 +48,7 @@ function isHttpUrl(value: string): boolean {
 function prepareBrowserTask(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   if (
     Object.keys(invocation.arguments).some((key) => key !== 'goal') ||
     typeof invocation.arguments.goal !== 'string'
@@ -110,9 +109,7 @@ function prepareBrowserTask(
 function prepareBrowserRead(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   const keys = Object.keys(invocation.arguments);
   if (keys.some((key) => !['expectedUrl', 'maxChars'].includes(key))) {
     throw new BadRequestException('invalid_arguments');
@@ -170,9 +167,7 @@ function prepareBrowserRead(
 function prepareBrowserNavigate(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   const keys = Object.keys(invocation.arguments);
   if (keys.some((key) => !['url', 'expectedCurrentUrl'].includes(key))) {
     throw new BadRequestException('invalid_arguments');
@@ -239,9 +234,7 @@ function prepareBrowserNavigate(
 function prepareBrowserGoBack(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   if (
     Object.keys(invocation.arguments).some(
       (key) => key !== 'expectedCurrentUrl',
@@ -299,19 +292,15 @@ function prepareBrowserGoBack(
 function prepareBrowserClick(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
-  const allowedKeys = [
+  assertToolDataClassification(invocation);
+  const allowedKeys = new Set([
     'expectedCurrentUrl',
     'elementIndex',
     'expectedKind',
     'expectedLabel',
-  ];
+  ]);
   if (
-    Object.keys(invocation.arguments).some(
-      (key) => !allowedKeys.includes(key),
-    ) ||
+    Object.keys(invocation.arguments).some((key) => !allowedKeys.has(key)) ||
     typeof invocation.arguments.expectedCurrentUrl !== 'string' ||
     !Number.isInteger(invocation.arguments.elementIndex) ||
     typeof invocation.arguments.expectedKind !== 'string' ||
@@ -389,23 +378,19 @@ function prepareBrowserClick(
 function prepareBrowserTypeText(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
-  const allowedKeys = [
+  assertToolDataClassification(invocation);
+  const allowedKeys = new Set([
     'expectedCurrentUrl',
     'elementIndex',
     'expectedLabel',
     'expectedCurrentValue',
     'expectedCurrentValueTruncated',
     'text',
-  ];
+  ]);
   const expectedCurrentValue = invocation.arguments.expectedCurrentValue;
   const text = invocation.arguments.text;
   if (
-    Object.keys(invocation.arguments).some(
-      (key) => !allowedKeys.includes(key),
-    ) ||
+    Object.keys(invocation.arguments).some((key) => !allowedKeys.has(key)) ||
     typeof invocation.arguments.expectedCurrentUrl !== 'string' ||
     !Number.isInteger(invocation.arguments.elementIndex) ||
     typeof invocation.arguments.expectedLabel !== 'string' ||
@@ -495,10 +480,8 @@ function prepareBrowserTypeText(
 function prepareBrowserSelectOption(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
-  const allowedKeys = [
+  assertToolDataClassification(invocation);
+  const allowedKeys = new Set([
     'expectedCurrentUrl',
     'elementIndex',
     'expectedLabel',
@@ -506,14 +489,12 @@ function prepareBrowserSelectOption(
     'expectedCurrentValueTruncated',
     'optionValue',
     'expectedOptionLabel',
-  ];
+  ]);
   const expectedCurrentValue = invocation.arguments.expectedCurrentValue;
   const optionValue = invocation.arguments.optionValue;
   const expectedOptionLabel = invocation.arguments.expectedOptionLabel;
   if (
-    Object.keys(invocation.arguments).some(
-      (key) => !allowedKeys.includes(key),
-    ) ||
+    Object.keys(invocation.arguments).some((key) => !allowedKeys.has(key)) ||
     typeof invocation.arguments.expectedCurrentUrl !== 'string' ||
     !Number.isInteger(invocation.arguments.elementIndex) ||
     typeof invocation.arguments.expectedLabel !== 'string' ||

@@ -47,12 +47,7 @@ export class ModelController {
     const captureInference = authorizeInferenceCapture(user, consent);
     return this.modelService.summarize(
       this.executions.resolveAccessScope(user),
-      summarizeData.targetLanguage,
-      summarizeData.resourceId,
-      summarizeData.targetDocId,
-      summarizeData.text,
-      summarizeData.sourceLanguage,
-      summarizeData.type,
+      summarizeData,
       captureInference,
     );
   }

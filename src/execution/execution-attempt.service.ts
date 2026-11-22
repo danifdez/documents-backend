@@ -1,3 +1,4 @@
+import { compareStrings } from '../utils/compare-strings';
 import {
   assertInferenceExchange,
   assertInferenceRuntimeCapture,
@@ -10,7 +11,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { createHash, randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   DataSource,
   EntityManager,
@@ -113,7 +114,7 @@ function canonicalValue(value: unknown): unknown {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .sort(([left], [right]) => compareStrings(left, right))
         .map(([key, child]) => [key, canonicalValue(child)]),
     );
   }
@@ -196,7 +197,7 @@ export class ExecutionAttemptService {
   ): Promise<ExecutionStepAttemptEntity> {
     this.assertLeaseDuration(input.leaseDurationMs);
 
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const stepRepo = manager.getRepository(ExecutionStepEntity);
       const step = await stepRepo.findOne({
         where: { stepId: input.stepId },
@@ -215,13 +216,13 @@ export class ExecutionAttemptService {
     if (!stepKinds.length) throw new BadRequestException('missing_step_kinds');
     const capabilities = [...new Set(input.capabilities)];
 
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       if (input.enforceRegisteredWorkerCapacity) {
         const worker = await manager.getRepository(WorkerEntity).findOne({
           where: { id: input.workerId },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!worker || worker.status !== 'online' || worker.revokedAt) {
+        if (worker?.status !== 'online' || worker.revokedAt) {
           throw new ConflictException('worker_not_available');
         }
         if (
@@ -385,7 +386,7 @@ export class ExecutionAttemptService {
     }
   }
 
-  async startAttempt(
+  startAttempt(
     attemptId: string,
     workerId: string,
   ): Promise<ExecutionStepAttemptEntity> {
@@ -429,7 +430,7 @@ export class ExecutionAttemptService {
     });
     const body = this.validateOutputArtifact(artifact);
 
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const attempt = await manager
         .getRepository(ExecutionStepAttemptEntity)
         .findOne({
@@ -609,8 +610,7 @@ export class ExecutionAttemptService {
     return step.inputArtifactRefs.map((ref) => {
       const artifact = byId.get(ref.artifactId);
       if (
-        !artifact ||
-        artifact.contentState !== 'active' ||
+        artifact?.contentState !== 'active' ||
         (artifact.expiresAt !== null && artifact.expiresAt <= now)
       ) {
         throw new ConflictException('artifact_unavailable');
@@ -640,7 +640,7 @@ export class ExecutionAttemptService {
     cancelled: boolean;
   }> {
     this.assertLeaseDuration(leaseDurationMs);
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const { attempt, step } = await this.lockCurrentAttempt(
         manager,
         attemptId,
@@ -841,7 +841,7 @@ export class ExecutionAttemptService {
     return recovered;
   }
 
-  async requeueVerifiedNotAppliedEffect(
+  requeueVerifiedNotAppliedEffect(
     attemptId: string,
     now = new Date(),
   ): Promise<boolean> {
@@ -853,8 +853,7 @@ export class ExecutionAttemptService {
           lock: { mode: 'pessimistic_write' },
         });
       if (
-        !attempt ||
-        attempt.claimedBy !== LOCAL_TOOL_RUNTIME_WORKER_ID ||
+        attempt?.claimedBy !== LOCAL_TOOL_RUNTIME_WORKER_ID ||
         attempt.leaseExpiresAt > now ||
         ![
           ExecutionStepAttemptStatus.LEASED,
@@ -929,7 +928,7 @@ export class ExecutionAttemptService {
     });
   }
 
-  async expireAttempt(attemptId: string, now = new Date()): Promise<boolean> {
+  expireAttempt(attemptId: string, now = new Date()): Promise<boolean> {
     return this.dataSource.transaction(async (manager) => {
       const attemptRepo = manager.getRepository(ExecutionStepAttemptEntity);
       const attempt = await attemptRepo.findOne({
@@ -1090,7 +1089,7 @@ export class ExecutionAttemptService {
       acknowledgedAt,
     });
 
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const receiptRepo = manager.getRepository(ExecutionResultReceiptEntity);
       const existing = await receiptRepo.findOne({
         where: { attemptId: input.attemptId },
@@ -1494,9 +1493,11 @@ export class ExecutionAttemptService {
           step,
           attempt,
           operation,
-          canonicalToolResult,
-          result,
-          acceptedError ?? null,
+          {
+            toolResult: canonicalToolResult,
+            stepResult: result,
+            error: acceptedError ?? null,
+          },
         );
         if (acceptedStatus === 'succeeded' && !executionHasTerminalIntent) {
           await releaseExecutionStepDependents(
@@ -1842,9 +1843,15 @@ export class ExecutionAttemptService {
     step: ExecutionStepEntity,
     attempt: ExecutionStepAttemptEntity,
     operation: ExecutionOperationEntity,
-    toolResult: ToolResultContract | null,
-    stepResult: Record<string, unknown>,
-    error: Record<string, unknown> | null,
+    {
+      toolResult,
+      stepResult,
+      error,
+    }: {
+      toolResult: ToolResultContract | null;
+      stepResult: Record<string, unknown>;
+      error: Record<string, unknown> | null;
+    },
   ): Promise<void> {
     const eventRoot = await this.lockEventRoot(manager, execution);
     const eventRepo = manager.getRepository(ExecutionEventEntity);
@@ -1863,8 +1870,7 @@ export class ExecutionAttemptService {
       operation.operationKind ?? operationKindForStep(step.stepKind);
     const output = stepResult.output as Record<string, unknown> | undefined;
     const outcome = output?.outcome as Record<string, unknown> | undefined;
-    const toolPlan = (step.work ?? {}).toolPlan as
-      Record<string, unknown> | undefined;
+    const toolPlan = step.work?.toolPlan as Record<string, unknown> | undefined;
     const toolSummary =
       toolResult?.status === 'succeeded'
         ? `${String(toolPlan?.toolName ?? 'Tool')} completed`.slice(0, 200)
@@ -1962,7 +1968,7 @@ export class ExecutionAttemptService {
     manager: EntityManager,
     resourceKeys: string[],
   ): Promise<void> {
-    for (const resourceKey of [...new Set(resourceKeys)].sort()) {
+    for (const resourceKey of [...new Set(resourceKeys)].sort(compareStrings)) {
       await manager.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [resourceKey],

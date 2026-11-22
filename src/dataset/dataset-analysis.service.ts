@@ -5,8 +5,12 @@ import {
 } from '@nestjs/common';
 import { EntityManager, In } from 'typeorm';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
-import { CreateExecutionOptions, ExecutionService } from '../execution/execution.service';
+import {
+  CreateExecutionOptions,
+  ExecutionService,
+} from '../execution/execution.service';
 import { ExecutionAccessScope } from '../execution/execution.types';
+import type { ExecutionTaskPayload } from '../execution/execution-task-payload.types';
 import { DatasetRecordEntity } from './dataset-record.entity';
 import { DatasetEntity, DatasetField } from './dataset.entity';
 import { parseDatasetAnalysisRequest } from './dataset-analysis-request';
@@ -23,9 +27,7 @@ interface DatasetAnalysisSnapshot {
 
 @Injectable()
 export class DatasetAnalysisService {
-  constructor(
-    private readonly executionService: ExecutionService,
-  ) {}
+  constructor(private readonly executionService: ExecutionService) {}
 
   async createExecution(
     operation: unknown,
@@ -63,81 +65,26 @@ export class DatasetAnalysisService {
         },
       ],
     };
-    switch (request.operation) {
-      case 'distribution':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'correlation':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'correlation-matrix':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'group-by':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'time-series':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'outliers':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'pivot-table':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'summary':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
-      case 'query':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          {
-            ...(ids.length === 1 ? { datasetId: ids[0] } : { datasetIds: ids }),
-            params: request.params,
-          },
-          options,
-        );
-      case 'chart':
-        return this.executionService.createCode(
-          request.operation,
-          ExecutionPriority.NORMAL,
-          { datasetId: ids[0], params: request.params },
-          options,
-        );
+    if (request.operation === 'query') {
+      return this.executionService.createCode(
+        request.operation,
+        ExecutionPriority.NORMAL,
+        {
+          ...(ids.length === 1 ? { datasetId: ids[0] } : { datasetIds: ids }),
+          params: request.params,
+        },
+        options,
+      );
     }
+    return this.executionService.createCode(
+      request.operation,
+      ExecutionPriority.NORMAL,
+      // The parsed request pairs the operation with its validated parameter type.
+      { datasetId: ids[0], params: request.params } as ExecutionTaskPayload<
+        typeof request.operation
+      >,
+      options,
+    );
   }
 
   private async buildSnapshots(
@@ -152,45 +99,43 @@ export class DatasetAnalysisService {
     if (missing !== undefined) {
       throw new NotFoundException(`Dataset with id ${missing} not found`);
     }
-    const records = new Map<number, DatasetRecordEntity[]>();
-    const loadRecords = async (datasetId: number) => {
-      if (!records.has(datasetId)) {
-        records.set(
-          datasetId,
-          await manager.getRepository(DatasetRecordEntity).find({
-            where: { dataset: { id: datasetId } },
-            select: ['id', 'data'],
-          }),
-        );
-      }
-      return records.get(datasetId)!;
-    };
-
-    const snapshots: DatasetAnalysisSnapshot[] = [];
-    for (const datasetId of datasetIds) {
-      const dataset = byId.get(datasetId)!;
-      const datasetRecords = await loadRecords(datasetId);
-      const schema: DatasetAnalysisField[] = [];
+    const recordDatasetIds = new Set(datasetIds);
+    for (const dataset of datasets) {
       for (const field of dataset.schema) {
-        const copy: DatasetAnalysisField = { ...field };
-        if (field.linkedDatasetId) {
-          copy.linkedLabels = this.buildLinkedLabels(
-            await loadRecords(field.linkedDatasetId),
-            field,
-          );
-        }
-        schema.push(copy);
+        if (field.linkedDatasetId) recordDatasetIds.add(field.linkedDatasetId);
       }
-      snapshots.push({
-        datasetId,
-        schema,
-        records: datasetRecords.map((record) => ({
-          id: record.id,
-          data: record.data,
-        })),
-      });
     }
-    return snapshots;
+    const records = await manager.getRepository(DatasetRecordEntity).find({
+      where: { dataset: { id: In([...recordDatasetIds]) } },
+      relations: { dataset: true },
+      select: { id: true, data: true, dataset: { id: true } },
+      order: { id: 'ASC' },
+    });
+    const recordsByDataset = new Map<number, DatasetRecordEntity[]>();
+    for (const record of records) {
+      const id = record.dataset.id;
+      const existing = recordsByDataset.get(id);
+      if (existing) existing.push(record);
+      else recordsByDataset.set(id, [record]);
+    }
+    return datasetIds.map((datasetId) => {
+      const dataset = byId.get(datasetId)!;
+      return {
+        datasetId,
+        schema: dataset.schema.map((field) => {
+          if (!field.linkedDatasetId) return field;
+          const linkedRecords =
+            recordsByDataset.get(field.linkedDatasetId) ?? [];
+          return {
+            ...field,
+            linkedLabels: this.buildLinkedLabels(linkedRecords, field),
+          };
+        }),
+        records: (recordsByDataset.get(datasetId) ?? []).map(
+          ({ id, data }) => ({ id, data }),
+        ),
+      };
+    });
   }
 
   private buildLinkedLabels(

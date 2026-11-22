@@ -14,6 +14,7 @@ import { contentHash } from '../execution/execution-canonical';
 import { buildTranslateWorkflowSteps } from './translate-workflow';
 import { ExecutionAccessScope } from '../execution/execution.types';
 import { BrowserInferenceDto } from './dto/browser-inference.dto';
+import type { SummarizeDto } from './dto/model.dto';
 
 @Injectable()
 export class ModelService {
@@ -82,14 +83,11 @@ export class ModelService {
 
   async summarize(
     scope: ExecutionAccessScope,
-    targetLanguage: string,
-    resourceId?: number,
-    targetDocId?: number,
-    text?: string,
-    sourceLanguage?: string,
-    type?: string,
+    request: SummarizeDto,
     captureInference = false,
   ): Promise<{ executionId: string }> {
+    const { targetLanguage, resourceId, targetDocId, text, type } = request;
+    let sourceLanguage = request.sourceLanguage;
     let content: string | null = null;
     if (resourceId) {
       const resource = await this.resourceService.findOne(resourceId);

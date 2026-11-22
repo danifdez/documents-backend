@@ -1,5 +1,6 @@
+import { readString } from '../../utils/read-string';
 import { BadRequestException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { resolveProductSkillResource } from '../../conversation/product-skill-registry';
 import { ExecutionEntity } from '../execution.entity';
 import {
@@ -25,6 +26,7 @@ import {
   DELEGATION_TIMEOUT_MS,
   PLAN_TIMEOUT_MS,
   ToolPlanPreparer,
+  assertToolDataClassification,
   buildToolPlan,
   chatTurnPayload,
 } from './tool-plan-preparer';
@@ -32,14 +34,12 @@ import {
 function prepareDocumentsSearch(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   const keys = Object.keys(invocation.arguments);
   if (keys.some((key) => !['query', 'limit'].includes(key))) {
     throw new BadRequestException('invalid_arguments');
   }
-  const query = String(invocation.arguments.query ?? '').trim();
+  const query = readString(invocation.arguments.query).trim();
   if (!query || query.length > 1_000) {
     throw new BadRequestException('invalid_arguments');
   }
@@ -79,9 +79,7 @@ function prepareSkillResourceLoad(
   execution: ExecutionEntity,
 ): ToolPlanContract {
   const payload = chatTurnPayload(execution);
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   if (
     Object.keys(invocation.arguments).some(
       (key) =>
@@ -162,14 +160,12 @@ function prepareSkillResourceLoad(
 function prepareUserTaskCreate(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   const keys = Object.keys(invocation.arguments);
   if (keys.some((key) => !['title', 'description'].includes(key))) {
     throw new BadRequestException('invalid_arguments');
   }
-  const title = String(invocation.arguments.title ?? '').trim();
+  const title = readString(invocation.arguments.title).trim();
   if (!title || title.length > 200) {
     throw new BadRequestException('invalid_arguments');
   }
@@ -232,13 +228,11 @@ function prepareUserTaskCreate(
 function prepareAgentDelegation(
   invocation: ToolInvocationContract,
 ): ToolPlanContract {
-  if (invocation.executionContext.dataClassification === 'secret') {
-    throw new BadRequestException('data_policy_violation');
-  }
+  assertToolDataClassification(invocation);
   if (Object.keys(invocation.arguments).some((key) => key !== 'goal')) {
     throw new BadRequestException('invalid_arguments');
   }
-  const goal = String(invocation.arguments.goal ?? '').trim();
+  const goal = readString(invocation.arguments.goal).trim();
   if (!goal || goal.length > 4_000) {
     throw new BadRequestException('invalid_arguments');
   }
@@ -262,6 +256,7 @@ function prepareAgentDelegation(
       effects: [],
       policyDecision: {
         decision: 'allowed',
+        // The child stays in the owner's execution tree and runs one inference.
         rule: 'bounded_internal_delegation',
         conditions: ['max_depth_1', 'single_inference', 'join_all'],
       },

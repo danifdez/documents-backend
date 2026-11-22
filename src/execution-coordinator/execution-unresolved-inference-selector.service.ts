@@ -47,15 +47,14 @@ export class ExecutionUnresolvedInferenceSelectorService implements ExecutionNex
     return selected;
   }
 
-  private async failUnsupportedOutcome(stepId: string): Promise<boolean> {
+  private failUnsupportedOutcome(stepId: string): Promise<boolean> {
     return this.dataSource.transaction(async (manager) => {
       const step = await manager.getRepository(ExecutionStepEntity).findOne({
         where: { stepId },
         lock: { mode: 'pessimistic_write' },
       });
       if (
-        !step ||
-        step.status !== ExecutionStepStatus.COMPLETED ||
+        step?.status !== ExecutionStepStatus.COMPLETED ||
         step.stepKind !== ExecutionStepKind.INFERENCE ||
         step.continuationProcessedAt
       ) {

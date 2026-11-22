@@ -67,7 +67,7 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
       'publication_date',
     );
     if (typeof result.content !== 'string') {
-      throw new Error('document-extraction result content is invalid');
+      throw new TypeError('document-extraction result content is invalid');
     }
     const content = result.content;
     const pages = this.optionalPages(result.pages);
@@ -211,7 +211,7 @@ export class DocumentExtractionProcessor implements ExecutionProcessor {
   private optionalString(value: unknown, field: string): string | null {
     if (value == null) return null;
     if (typeof value !== 'string') {
-      throw new Error(`document-extraction result ${field} is invalid`);
+      throw new TypeError(`document-extraction result ${field} is invalid`);
     }
     const normalized = value.trim();
     return normalized || null;

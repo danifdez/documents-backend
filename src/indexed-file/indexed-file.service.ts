@@ -8,9 +8,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { promises as fs } from 'fs';
-import * as path from 'path';
-import * as crypto from 'crypto';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { IndexedFileEntity, IndexedFileOwnerType } from './indexed-file.entity';
 import { AssistantEntity } from '../assistant/assistant.entity';
 import { AgentEntity } from '../agent/agent.entity';
@@ -533,15 +533,15 @@ export class IndexedFileService {
     return saved;
   }
 
-  async scanFolder(owner: OwnerRef): Promise<ScanFolderResult> {
+  scanFolder(owner: OwnerRef): Promise<ScanFolderResult> {
     const key = `${owner.ownerType}:${owner.ownerId}`;
     const existing = this.scanLocks.get(key);
-    if (existing) return await existing;
+    if (existing !== undefined) return existing;
     const promise = this.doScanFolder(owner).finally(() => {
       this.scanLocks.delete(key);
     });
     this.scanLocks.set(key, promise);
-    return await promise;
+    return promise;
   }
 
   private async doScanFolder(owner: OwnerRef): Promise<ScanFolderResult> {

@@ -2,13 +2,8 @@ export interface ExecutionAccessScope {
   ownerPrincipal: string;
 }
 
-export interface ExecutionContext {
-  schemaVersion: 'execution-context/1';
-  rootExecutionId: string;
-  executionId: string;
-  turnId?: string;
-  causedByEventId: string;
-}
+export const STANDALONE_EXECUTION_ACCESS_SCOPE: ExecutionAccessScope =
+  Object.freeze({ ownerPrincipal: 'standalone' });
 
 export interface IncomingExecutionArtifact {
   artifactId: string;

@@ -115,7 +115,7 @@ describe('ArchiveService', () => {
     );
   }
 
-  it('archives project contents, retains files referenced by active resources, and removes search vectors', async () => {
+  it('archives project contents and preserves files still in use', async () => {
     const log = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
@@ -160,7 +160,7 @@ describe('ArchiveService', () => {
     ]);
   });
 
-  it('restores archived project contents and moves back only files present in the archive', async () => {
+  it('restores archived contents and existing archived files', async () => {
     const log = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);

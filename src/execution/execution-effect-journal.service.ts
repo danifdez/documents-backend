@@ -130,7 +130,7 @@ export class ExecutionEffectJournalService {
   ): Promise<DurableExternalEffectState> {
     this.assertObservation(preparationObservation);
     const intentHash = canonicalHash(input.intent);
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const execution = await manager.getRepository(ExecutionEntity).findOne({
         where: { executionId: input.executionId },
         lock: { mode: 'pessimistic_write' },
@@ -180,7 +180,7 @@ export class ExecutionEffectJournalService {
   ): Promise<DurableExternalEffectState> {
     this.assertObservation(observation);
     const intentHash = canonicalHash(input.intent);
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(ExecutionEffectJournalEntity);
       const journal = await repository.findOne({
         where: {

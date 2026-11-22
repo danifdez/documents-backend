@@ -1,11 +1,11 @@
 import { ConfigService } from '@nestjs/config';
-import { randomBytes } from 'crypto';
+import { randomBytes } from 'node:crypto';
 
-const INSECURE_SECRETS = [
+const INSECURE_SECRETS = new Set([
   'change-me-in-production',
   'default-dev-secret-change-me',
   '',
-];
+]);
 
 let fallbackSecret: string | null = null;
 
@@ -13,7 +13,7 @@ export function getJwtSecret(configService: ConfigService): string {
   const secret = configService.get<string>('JWT_SECRET', '');
   const authEnabled = configService.get('AUTH_ENABLED') === 'true';
 
-  if (secret && !INSECURE_SECRETS.includes(secret)) {
+  if (secret && !INSECURE_SECRETS.has(secret)) {
     return secret;
   }
 

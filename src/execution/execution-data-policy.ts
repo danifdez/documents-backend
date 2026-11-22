@@ -7,13 +7,13 @@ const SECRET_FIELD_PATTERN =
   'access[_-]?token|api[_-]?key|auth[_-]?token|authorization|cookie|' +
   'id[_-]?token|password|refresh[_-]?token|session[_-]?token|token';
 const SECRET_VALUE_PATTERN = new RegExp(
-  `\\b(${SECRET_FIELD_PATTERN})\\s*[:=]\\s*(?!\\[REDACTED\\])([^\\s,;]+)`,
+  String.raw`\b(${SECRET_FIELD_PATTERN})\s*[:=]\s*(?!\[REDACTED\])([^\s,;]+)`,
   'gi',
 );
 const PRIVATE_REASONING_DETECTOR = /<think>[\s\S]*?<\/think>/i;
 const BEARER_DETECTOR = /\bbearer\s+[a-z0-9._~+/-]+=*/i;
 const SECRET_VALUE_DETECTOR = new RegExp(
-  `\\b(${SECRET_FIELD_PATTERN})\\s*[:=]\\s*(?!\\[REDACTED\\])([^\\s,;]+)`,
+  String.raw`\b(${SECRET_FIELD_PATTERN})\s*[:=]\s*(?!\[REDACTED\])([^\s,;]+)`,
   'i',
 );
 const REDACTED_VALUE = '[REDACTED]';

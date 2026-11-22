@@ -1,3 +1,4 @@
+import { compareStrings } from '../utils/compare-strings';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
@@ -128,7 +129,7 @@ export class ExecutionArtifactService {
         changed = true;
       }
     }
-    return [...affected].sort();
+    return [...affected].sort(compareStrings);
   }
 
   async retireGraph(
@@ -168,6 +169,6 @@ export class ExecutionArtifactService {
       artifact.contentDeletedAt = deletedAt;
     }
     if (active.length) await repository.save(active);
-    return active.map((artifact) => artifact.artifactId).sort();
+    return active.map((artifact) => artifact.artifactId).sort(compareStrings);
   }
 }

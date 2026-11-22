@@ -1,3 +1,4 @@
+import { readString } from '../utils/read-string';
 import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import { ExecutionAttemptService } from '../execution/execution-attempt.service';
 import { ExecutionContractValidator } from '../execution/execution-contract-validator';
@@ -319,11 +320,16 @@ export class ExecutionToolRuntimeService {
     this.contracts.assertToolResult(
       result as unknown as Record<string, unknown>,
     );
-    const status = ['succeeded', 'not_executed'].includes(result.status)
-      ? 'succeeded'
-      : result.status === 'cancelled'
-        ? 'cancelled'
-        : 'failed';
+    let status: 'failed' | 'cancelled' | 'succeeded';
+    if (['succeeded', 'not_executed'].includes(result.status)) {
+      status = 'succeeded';
+    } else {
+      if (result.status === 'cancelled') {
+        status = 'cancelled';
+      } else {
+        status = 'failed';
+      }
+    }
     const receive = recovered
       ? this.attempts.receiveRecoveredEffectResult.bind(this.attempts)
       : this.attempts.receiveResult.bind(this.attempts);
@@ -412,7 +418,7 @@ export class ExecutionToolRuntimeService {
       decision?.confirmationId !== requirement.confirmationId ||
       decision.planHash !== canonicalHash(plan) ||
       typeof decision.decidedAt !== 'string' ||
-      !['approved', 'denied', 'expired'].includes(String(decision.status))
+      !['approved', 'denied', 'expired'].includes(readString(decision.status))
     ) {
       throw new Error('tool_confirmation_not_authorized');
     }
@@ -423,7 +429,7 @@ export class ExecutionToolRuntimeService {
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
     const owner = await this.workspaceOwner(plan);
-    const filename = String(plan.normalizedArguments.filename ?? '');
+    const filename = readString(plan.normalizedArguments.filename);
     const offset = Number(plan.normalizedArguments.offset ?? 0);
     const maxChars = Number(plan.normalizedArguments.maxChars ?? 8_000);
     const read = await this.indexedFiles.readWithSync(owner, { filename });
@@ -560,7 +566,7 @@ export class ExecutionToolRuntimeService {
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
     const owner = await this.workspaceOwner(plan);
-    const query = String(plan.normalizedArguments.query ?? '');
+    const query = readString(plan.normalizedArguments.query);
     const limit = Number(plan.normalizedArguments.limit ?? 10);
     const reconciliation = await this.indexedFiles.scanFolder(owner);
     if (reconciliation.status !== 'done') {
@@ -631,7 +637,7 @@ export class ExecutionToolRuntimeService {
     const operation =
       plan.toolName === WORKSPACE_FILE_WRITE_TOOL_NAME ? 'write' : 'delete';
     const owner = await this.workspaceOwner(plan);
-    const filename = String(plan.normalizedArguments.filename ?? '');
+    const filename = readString(plan.normalizedArguments.filename);
     const body = this.workspaceWriteBody(plan);
     const intent = this.workspaceEffectInput(assignment, plan, operation, body);
     let state = await this.effectJournal.readExternal(intent);
@@ -795,7 +801,7 @@ export class ExecutionToolRuntimeService {
     return typeof content === 'string'
       ? Buffer.from(content, 'utf8')
       : Buffer.from(
-          String(plan.normalizedArguments.contentBase64 ?? ''),
+          readString(plan.normalizedArguments.contentBase64),
           'base64',
         );
   }
@@ -1015,7 +1021,7 @@ export class ExecutionToolRuntimeService {
         },
       };
     }
-    const filename = String(plan.normalizedArguments.filename ?? '');
+    const filename = readString(plan.normalizedArguments.filename);
     const writeAction =
       plan.normalizedArguments.overwrite === true ? 'Updated' : 'Created';
     return {
@@ -1072,7 +1078,7 @@ export class ExecutionToolRuntimeService {
     const ownerId = Number(plan.normalizedArguments.ownerId);
     const scopeKey = plan.normalizedArguments.scopeKey;
     if (
-      !['assistant', 'agent'].includes(String(ownerType)) ||
+      !['assistant', 'agent'].includes(readString(ownerType)) ||
       !Number.isInteger(ownerId) ||
       ownerId <= 0 ||
       typeof scopeKey !== 'string' ||
@@ -1091,7 +1097,7 @@ export class ExecutionToolRuntimeService {
   private async executeUserTaskCreate(
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
-    const title = String(plan.normalizedArguments.title ?? '');
+    const title = readString(plan.normalizedArguments.title);
     const description = plan.normalizedArguments.description;
     const task = await this.userTasks.createFromExecution(
       plan.operationId,
@@ -1132,7 +1138,7 @@ export class ExecutionToolRuntimeService {
     assignment: StepAssignment,
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
-    const childExecutionId = String(assignment.work.childExecutionId ?? '');
+    const childExecutionId = readString(assignment.work.childExecutionId);
     const child = await this.executions.findOne(childExecutionId);
     if (
       !child ||
@@ -1153,18 +1159,26 @@ export class ExecutionToolRuntimeService {
       throw new Error('delegated_execution_not_terminal');
     }
     const childResult = child.result as Record<string, unknown> | string | null;
-    const content =
-      typeof childResult === 'string'
-        ? childResult
-        : typeof childResult?.reply === 'string'
-          ? childResult.reply
-          : '';
-    const status =
-      child.status === ExecutionStatus.COMPLETED
-        ? 'succeeded'
-        : child.status === ExecutionStatus.CANCELLED
-          ? 'cancelled'
-          : 'failed';
+    let content: string;
+    if (typeof childResult === 'string') {
+      content = childResult;
+    } else {
+      if (typeof childResult?.reply === 'string') {
+        content = childResult.reply;
+      } else {
+        content = '';
+      }
+    }
+    let status: 'failed' | 'cancelled' | 'succeeded';
+    if (child.status === ExecutionStatus.COMPLETED) {
+      status = 'succeeded';
+    } else {
+      if (child.status === ExecutionStatus.CANCELLED) {
+        status = 'cancelled';
+      } else {
+        status = 'failed';
+      }
+    }
     return {
       schemaVersion: 'tool-result/1',
       operationId: plan.operationId,
@@ -1218,7 +1232,7 @@ export class ExecutionToolRuntimeService {
   private async executeDocumentsSearch(
     plan: ToolPlanContract,
   ): Promise<ToolResultContract> {
-    const query = String(plan.normalizedArguments.query ?? '');
+    const query = readString(plan.normalizedArguments.query);
     const limit = Number(plan.normalizedArguments.limit);
     const results = (await this.search.globalSearch(query)).slice(0, limit);
     const structuredResults = results.map((result) => ({

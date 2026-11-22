@@ -8,6 +8,7 @@ import {
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';
+import { ownerPrincipalFromUser } from '../auth/owner-principal';
 import { WorkerService } from '../worker/worker.service';
 import { FeatureFlagService } from './feature-flags.service';
 
@@ -20,9 +21,7 @@ export class FeatureFlagController {
 
   @Get('browser-federation/status')
   async browserFederationStatus(@CurrentUser() user: unknown) {
-    const record =
-      user && typeof user === 'object' ? (user as Record<string, unknown>) : {};
-    const ownerPrincipal = String(record.userId ?? record.sub ?? 'standalone');
+    const ownerPrincipal = ownerPrincipalFromUser(user);
     return {
       enabled: this.features.isEnabled('browser_federation'),
       browser: await this.workers.browserTaskStatus(ownerPrincipal),

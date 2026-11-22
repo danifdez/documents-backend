@@ -1,3 +1,5 @@
+import { readString } from '../utils/read-string';
+import { compareStrings } from '../utils/compare-strings';
 import { lockExecutionRequest } from './execution-request';
 import {
   INFERENCE_EXCHANGE_KIND,
@@ -11,7 +13,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ownerPrincipalFromUser } from '../auth/owner-principal';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { executionTraceContext } from '../telemetry/telemetry';
 import {
   DataSource,
@@ -174,10 +176,7 @@ export interface CreateChildInferenceInput<
 
 const FINALIZER_IDEMPOTENCY_FIELD = 'originFinalizerKey';
 
-export type {
-  ChatExecutionAcceptance,
-  ChatMessageEntity,
-} from './execution-conversation.service';
+export type { ChatExecutionAcceptance } from './execution-conversation.service';
 
 export interface CancellationRequestView {
   rootExecutionId: string;
@@ -192,6 +191,85 @@ type CreateSingleStepExecutionOptions = Omit<
 > & {
   finalizeOnFailure?: boolean;
 };
+
+interface ValidatedIncomingEvent extends Record<string, unknown> {
+  eventId: string;
+  executionId: string;
+  eventType: string;
+  producer: { component: 'documents-models'; instanceId: string };
+  producerSequence: number;
+  occurredAt: string;
+  operationId?: string | null;
+  attemptId?: string | null;
+  causedByEventId?: string | null;
+  artifactRefs: string[];
+  payload: Record<string, unknown>;
+}
+
+function bundleArtifactOmission(
+  artifact: ExecutionArtifactEntity,
+): string | undefined {
+  const state = artifact.contentState;
+  if (state === 'expired' || state === 'withdrawn') return state;
+  return artifact.body ? undefined : 'not_captured';
+}
+
+function bundleOperationEvidence(
+  events: Record<string, unknown>[],
+  missing: Set<string>,
+) {
+  const starts = new Map<
+    string,
+    { operationId: string; attemptId: unknown; operationKind: unknown }
+  >();
+  const finishes = new Set<string>();
+  let hasInference = false;
+  let hasTool = false;
+  for (const event of events) {
+    const eventType = readString(event.eventType);
+    const operationId = readString(event.operationId);
+    const attemptId = readString(event.attemptId);
+    const operationKey = `${operationId}:${attemptId}`;
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    if (eventType === 'operation.started') {
+      starts.set(operationKey, {
+        operationId,
+        attemptId: event.attemptId,
+        operationKind: payload.operationKind,
+      });
+      hasInference ||= payload.operationKind === 'inference';
+      hasTool ||= payload.operationKind === 'tool_call';
+    }
+    if (eventType !== 'operation.finished') continue;
+    finishes.add(operationKey);
+    const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(metrics)) {
+      if (value === 'unknown') {
+        missing.add(`operation.${operationId}.metrics.${key}`);
+      }
+    }
+  }
+  for (const [operationKey, { operationId }] of starts) {
+    if (!finishes.has(operationKey)) {
+      missing.add(`operation.${operationId}.finish`);
+    }
+  }
+  return { starts, hasInference, hasTool };
+}
+
+function hasCompleteInferenceExchange(body: Buffer | null): boolean {
+  if (!body) return false;
+  try {
+    const value = JSON.parse(body.toString('utf8'));
+    return (
+      value.status === 'completed' &&
+      typeof value.request?.bodyBase64 === 'string' &&
+      typeof value.response?.bodyBase64 === 'string'
+    );
+  } catch {
+    return false;
+  }
+}
 
 @Injectable()
 export class ExecutionService {
@@ -620,7 +698,7 @@ export class ExecutionService {
     if (!idempotencyKey || idempotencyKey.length > 160) {
       throw new BadRequestException('invalid_child_idempotency_key');
     }
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const executions = manager.getRepository(ExecutionEntity);
       const parentRef = await executions.findOneBy({
         executionId: parentExecutionId,
@@ -723,7 +801,7 @@ export class ExecutionService {
       : undefined;
     const executionId = randomUUID();
     const rootExecutionId = options?.rootExecutionId ?? executionId;
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
       let acceptance: ExecutionRequestEntity | null = null;
       if (options?.requestId !== undefined) {
@@ -739,7 +817,8 @@ export class ExecutionService {
         acceptance = await lockExecutionRequest(manager, options.requestId, {
           ownerPrincipal: options.ownerPrincipal,
         });
-        const { snapshotArtifacts, ...requestOptions } = options;
+        const requestOptions = { ...options };
+        delete requestOptions.snapshotArtifacts;
         const inputHash = canonicalDomainHash({
           taskType,
           priority,
@@ -1062,7 +1141,7 @@ export class ExecutionService {
     });
   }
 
-  async findOne(executionId: string): Promise<ExecutionEntity | null> {
+  findOne(executionId: string): Promise<ExecutionEntity | null> {
     return this.executionRepo.findOneBy({ executionId });
   }
 
@@ -1072,8 +1151,8 @@ export class ExecutionService {
   ): Promise<{
     executionId: string;
     status: ExecutionStatus;
-    result: unknown | null;
-    error: unknown | null;
+    result: unknown;
+    error: unknown;
   }> {
     const execution = await this.findOwned(rootExecutionId, scope);
     return {
@@ -1088,7 +1167,7 @@ export class ExecutionService {
     };
   }
 
-  async claimReadyForFinalization(): Promise<ExecutionEntity | null> {
+  claimReadyForFinalization(): Promise<ExecutionEntity | null> {
     return this.dataSource.transaction(async (manager) => {
       const rows = await manager.query(`
         SELECT "execution_id"
@@ -1115,7 +1194,7 @@ export class ExecutionService {
     });
   }
 
-  async recoverStaleFinalizations(staleBefore: Date): Promise<number> {
+  recoverStaleFinalizations(staleBefore: Date): Promise<number> {
     return this.dataSource.transaction(async (manager) => {
       const [rows] = (await manager.query(
         `
@@ -1249,12 +1328,19 @@ export class ExecutionService {
       let conversationMessage: ChatMessageEntity | null = null;
       if (TERMINAL_STATES.has(status)) {
         await finishSkillActivations(manager, execution.executionId, status);
-        const turnStatus =
-          status === ExecutionStatus.COMPLETED
-            ? ConversationTurnStatus.COMPLETED
-            : status === ExecutionStatus.CANCELLED
-              ? ConversationTurnStatus.CANCELLED
-              : ConversationTurnStatus.FAILED;
+        let turnStatus:
+          | ConversationTurnStatus.COMPLETED
+          | ConversationTurnStatus.FAILED
+          | ConversationTurnStatus.CANCELLED;
+        if (status === ExecutionStatus.COMPLETED) {
+          turnStatus = ConversationTurnStatus.COMPLETED;
+        } else {
+          if (status === ExecutionStatus.CANCELLED) {
+            turnStatus = ConversationTurnStatus.CANCELLED;
+          } else {
+            turnStatus = ConversationTurnStatus.FAILED;
+          }
+        }
         // A chat turn that fails without going through its processor finalizer
         // (worker_failed, missing processor, finalization error) still owes the
         // user an answer: without a persisted reply the client keeps the turn
@@ -1422,7 +1508,7 @@ export class ExecutionService {
         'artifacts must be an array of at most 100 items',
       );
     }
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const execution = await manager.getRepository(ExecutionEntity).findOne({
         where: { executionId: rootExecutionId, rootExecutionId },
         lock: { mode: 'pessimistic_write' },
@@ -1507,7 +1593,7 @@ export class ExecutionService {
         'events must contain between 1 and 200 items',
       );
     }
-    return this.dataSource.transaction(async (manager) => {
+    return await this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
       const eventRepo = manager.getRepository(ExecutionEventEntity);
       const execution = await executionRepo.findOne({
@@ -1525,17 +1611,17 @@ export class ExecutionService {
             ? execution
             : await executionRepo.findOne({
                 where: {
-                  executionId: String(incoming.executionId),
+                  executionId: incoming.executionId,
                   rootExecutionId,
                 },
                 lock: { mode: 'pessimistic_write' },
               });
         if (!targetExecution) {
           throw new BadRequestException(
-            `Unknown execution in root: ${String(incoming.executionId)}`,
+            `Unknown execution in root: ${incoming.executionId}`,
           );
         }
-        const eventId = String(incoming.eventId);
+        const { eventId, producer, producerSequence } = incoming;
         const duplicate = await eventRepo.findOne({ where: { eventId } });
         if (duplicate) {
           if (duplicate.rootExecutionId !== rootExecutionId) {
@@ -1549,13 +1635,11 @@ export class ExecutionService {
             'A terminal execution cannot accept new events',
           );
         }
-        const producer = incoming.producer as Record<string, unknown>;
-        const producerSequence = Number(incoming.producerSequence);
         const occupied = await eventRepo.findOne({
           where: {
             rootExecutionId,
-            producerComponent: String(producer.component),
-            producerInstanceId: String(producer.instanceId),
+            producerComponent: producer.component,
+            producerInstanceId: producer.instanceId,
             producerSequence: String(producerSequence),
           },
         });
@@ -1567,8 +1651,8 @@ export class ExecutionService {
         const previousProducerEvent = await eventRepo.findOne({
           where: {
             rootExecutionId,
-            producerComponent: String(producer.component),
-            producerInstanceId: String(producer.instanceId),
+            producerComponent: producer.component,
+            producerInstanceId: producer.instanceId,
           },
           order: { producerSequence: 'DESC' },
         });
@@ -1583,21 +1667,25 @@ export class ExecutionService {
         const cause = incoming.causedByEventId;
         if (cause) {
           const knownCause = await eventRepo.findOne({
-            where: { eventId: String(cause) },
+            where: { eventId: cause, rootExecutionId },
           });
-          if (!knownCause || knownCause.rootExecutionId !== rootExecutionId) {
+          if (!knownCause) {
             throw new BadRequestException(`Unknown causal event: ${cause}`);
           }
         }
-        for (const artifactId of incoming.artifactRefs as string[]) {
-          const artifact = await manager
+        if (incoming.artifactRefs.length > 0) {
+          const artifacts = await manager
             .getRepository(ExecutionArtifactEntity)
-            .findOne({
-              where: { artifactId },
-            });
-          if (!artifact || artifact.rootExecutionId !== rootExecutionId) {
+            .findBy({ artifactId: In(incoming.artifactRefs), rootExecutionId });
+          const found = new Set(
+            artifacts.map((artifact) => artifact.artifactId.toLowerCase()),
+          );
+          const missing = incoming.artifactRefs.find(
+            (id) => !found.has(id.toLowerCase()),
+          );
+          if (missing) {
             throw new BadRequestException(
-              `Unknown artifact reference: ${artifactId}`,
+              `Unknown artifact reference: ${missing}`,
             );
           }
         }
@@ -1630,17 +1718,15 @@ export class ExecutionService {
           eventId,
           rootExecutionId,
           sequence: String(sequence),
-          producerComponent: String(producer.component),
-          producerInstanceId: String(producer.instanceId),
+          producerComponent: producer.component,
+          producerInstanceId: producer.instanceId,
           producerSequence: String(producerSequence),
-          eventType: String(incoming.eventType),
-          executionId: String(incoming.executionId),
-          operationId: incoming.operationId
-            ? String(incoming.operationId)
-            : null,
-          attemptId: incoming.attemptId ? String(incoming.attemptId) : null,
-          causedByEventId: cause ? String(cause) : null,
-          occurredAt: new Date(String(incoming.occurredAt)),
+          eventType: incoming.eventType,
+          executionId: incoming.executionId,
+          operationId: incoming.operationId ?? null,
+          attemptId: incoming.attemptId ?? null,
+          causedByEventId: cause ?? null,
+          occurredAt: new Date(incoming.occurredAt),
           ingestedAt: new Date(ingestedAt),
           contentHash: withHash.contentHash,
           envelope: withHash,
@@ -2155,14 +2241,7 @@ export class ExecutionService {
         contentState: artifact.contentState,
         contentDeletedAt: artifact.contentDeletedAt?.toISOString(),
         withdrawalReason: artifact.withdrawalReason ?? undefined,
-        omissionReason:
-          artifact.contentState === 'expired'
-            ? 'expired'
-            : artifact.contentState === 'withdrawn'
-              ? 'withdrawn'
-              : artifact.body
-                ? undefined
-                : 'not_captured',
+        omissionReason: bundleArtifactOmission(artifact),
       };
     });
     const firstSequence = events.length ? Number(events[0].sequence) : 0;
@@ -2498,77 +2577,28 @@ export class ExecutionService {
       codeIdentityKnown: boolean;
       toolIdentityKnown: boolean;
       runtimeIdentityKnown: boolean;
-    } = {
-      modelIdentityKnown: false,
-      adapterIdentityKnown: false,
-      promptIdentityKnown: false,
-      codeIdentityKnown: false,
-      toolIdentityKnown: false,
-      runtimeIdentityKnown: false,
     },
   ): string[] {
     const missing = new Set(execution.missingEvidence ?? []);
 
-    const starts = new Map<string, Record<string, unknown>>();
-    const finishes = new Set<string>();
-    let hasInference = false;
-    let hasTool = false;
-    for (const event of events) {
-      const eventType = String(event.eventType ?? '');
-      const operationId = String(event.operationId ?? '');
-      const attemptId = String(event.attemptId ?? '');
-      const operationKey = `${operationId}:${attemptId}`;
-      const payload = (event.payload ?? {}) as Record<string, unknown>;
-      if (eventType === 'operation.started') {
-        starts.set(operationKey, event);
-        hasInference ||= payload.operationKind === 'inference';
-        hasTool ||= payload.operationKind === 'tool_call';
-      }
-      if (eventType !== 'operation.finished') continue;
-      finishes.add(operationKey);
-      const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
-      for (const [key, value] of Object.entries(metrics)) {
-        if (value === 'unknown') {
-          missing.add(`operation.${operationId}.metrics.${key}`);
-        }
-      }
-    }
-    for (const [operationKey, event] of starts) {
-      if (!finishes.has(operationKey)) {
-        missing.add(`operation.${String(event.operationId)}.finish`);
-      }
-    }
+    const { starts, hasInference, hasTool } = bundleOperationEvidence(
+      events,
+      missing,
+    );
     if (hasInference) {
-      for (const event of starts.values()) {
-        if (
-          (event.payload as Record<string, unknown>)?.operationKind !==
-          'inference'
-        )
-          continue;
+      for (const start of starts.values()) {
+        if (start.operationKind !== 'inference') continue;
         const exchanges = artifacts.filter(
           (artifact) =>
             artifact.kind === INFERENCE_EXCHANGE_KIND &&
-            artifact.producedByAttemptId === event.attemptId,
+            artifact.producedByAttemptId === start.attemptId,
         );
-        const complete =
-          exchanges.length > 0 &&
-          exchanges.every((artifact) => {
-            if (!artifact.body) return false;
-            try {
-              const value = JSON.parse(artifact.body.toString('utf8'));
-              return (
-                value.status === 'completed' &&
-                typeof value.request?.bodyBase64 === 'string' &&
-                typeof value.response?.bodyBase64 === 'string'
-              );
-            } catch {
-              return false;
-            }
-          });
-        if (!complete)
-          missing.add(
-            `operation.${String(event.operationId)}.inferenceExchange`,
-          );
+        if (
+          !exchanges.length ||
+          !exchanges.every(({ body }) => hasCompleteInferenceExchange(body))
+        ) {
+          missing.add(`operation.${start.operationId}.inferenceExchange`);
+        }
       }
       // Request/response capture alone does not establish the identity of the
       // served model, engine and template needed to replay an inference.
@@ -2593,17 +2623,13 @@ export class ExecutionService {
       missing.add('environment.runtimeFingerprints');
     }
     for (const artifact of artifacts) {
-      if (artifact.body === null) {
-        const reason =
-          artifact.contentState === 'expired'
-            ? 'expired'
-            : artifact.contentState === 'withdrawn'
-              ? 'withdrawn'
-              : 'body';
-        missing.add(`artifact.${artifact.artifactId}.${reason}`);
-      }
+      if (artifact.body !== null) continue;
+      const state = artifact.contentState;
+      const reason =
+        state === 'expired' || state === 'withdrawn' ? state : 'body';
+      missing.add(`artifact.${artifact.artifactId}.${reason}`);
     }
-    return [...missing].sort();
+    return [...missing].sort(compareStrings);
   }
 
   private async readInferenceIdentities(
@@ -2628,15 +2654,15 @@ export class ExecutionService {
             (event.payload as Record<string, unknown> | undefined)
               ?.operationKind === 'inference',
         )
-        .map((event) => String(event.operationId)),
+        .map((event) => readString(event.operationId)),
     );
     const executionIds = [
-      ...new Set(events.map((event) => String(event.executionId))),
+      ...new Set(events.map((event) => readString(event.executionId))),
     ].filter(Boolean);
     const operationIds = new Set(
       events
         .filter((event) => event.eventType === 'operation.started')
-        .map((event) => String(event.operationId)),
+        .map((event) => readString(event.operationId)),
     );
     const runtimeFingerprints = new Set<string>();
     for (const event of events) {
@@ -2656,7 +2682,7 @@ export class ExecutionService {
         adapterFingerprints: [],
         promptPackages: [],
         codeFingerprints: [],
-        runtimeFingerprints: [...runtimeFingerprints].sort(),
+        runtimeFingerprints: [...runtimeFingerprints].sort(compareStrings),
         modelIdentityKnown: inferenceOperationIds.size === 0,
         adapterIdentityKnown: inferenceOperationIds.size === 0,
         promptIdentityKnown: inferenceOperationIds.size === 0,
@@ -2708,7 +2734,7 @@ export class ExecutionService {
         modelFingerprints.add(metadata.effectiveModel);
         modelOperations.add(receipt.operationId);
       }
-      if (Object.prototype.hasOwnProperty.call(metadata, 'effectiveAdapter')) {
+      if (Object.hasOwn(metadata, 'effectiveAdapter')) {
         adapterOperations.add(receipt.operationId);
         if (
           typeof metadata.effectiveAdapter === 'string' &&
@@ -2735,11 +2761,11 @@ export class ExecutionService {
         covered.has(operationId),
       );
     return {
-      modelFingerprints: [...modelFingerprints].sort(),
-      adapterFingerprints: [...adapterFingerprints].sort(),
-      promptPackages: [...promptPackages].sort(),
-      codeFingerprints: [...codeFingerprints].sort(),
-      runtimeFingerprints: [...runtimeFingerprints].sort(),
+      modelFingerprints: [...modelFingerprints].sort(compareStrings),
+      adapterFingerprints: [...adapterFingerprints].sort(compareStrings),
+      promptPackages: [...promptPackages].sort(compareStrings),
+      codeFingerprints: [...codeFingerprints].sort(compareStrings),
+      runtimeFingerprints: [...runtimeFingerprints].sort(compareStrings),
       modelIdentityKnown: coversEveryInference(modelOperations),
       adapterIdentityKnown: coversEveryInference(adapterOperations),
       promptIdentityKnown: coversEveryInference(promptOperations),
@@ -2762,7 +2788,7 @@ export class ExecutionService {
             (event.payload as Record<string, unknown> | undefined)
               ?.operationKind === 'tool_call',
         )
-        .map((event) => String(event.operationId)),
+        .map((event) => readString(event.operationId)),
     );
     if (operationIds.size === 0) {
       return { toolVersions: [], toolIdentityKnown: true };
@@ -2784,7 +2810,7 @@ export class ExecutionService {
       }
     }
     return {
-      toolVersions: [...versions].sort(),
+      toolVersions: [...versions].sort(compareStrings),
       toolIdentityKnown: [...operationIds].every((operationId) =>
         covered.has(operationId),
       ),
@@ -2825,10 +2851,11 @@ export class ExecutionService {
   private validateIncomingEvent(
     execution: ExecutionEntity,
     event: Record<string, unknown>,
-  ): void {
+  ): asserts event is ValidatedIncomingEvent {
     rejectForbiddenData(event);
     for (const field of ['eventId', 'rootExecutionId', 'executionId']) {
-      if (!EXECUTION_UUID_PATTERN.test(String(event[field] ?? ''))) {
+      const value = event[field];
+      if (typeof value !== 'string' || !EXECUTION_UUID_PATTERN.test(value)) {
         throw new BadRequestException(`${field} must be a UUID`);
       }
     }
@@ -2837,7 +2864,8 @@ export class ExecutionService {
         'Event identity is outside execution scope',
       );
     }
-    const eventType = String(event.eventType ?? '');
+    const eventType =
+      typeof event.eventType === 'string' ? event.eventType : '';
     if (EXECUTION_EVENT_PAYLOADS[eventType] !== event.payloadSchema) {
       throw new BadRequestException(
         `Unsupported event or payload schema: ${eventType}`,
@@ -2850,7 +2878,8 @@ export class ExecutionService {
     const producerRecord = producer as Record<string, unknown>;
     if (
       producerRecord.component !== 'documents-models' ||
-      !String(producerRecord.instanceId ?? '').trim()
+      typeof producerRecord.instanceId !== 'string' ||
+      !producerRecord.instanceId.trim()
     ) {
       throw new BadRequestException(
         'Only documents-models may use internal ingestion',
@@ -2864,7 +2893,10 @@ export class ExecutionService {
         'producerSequence must be a positive integer',
       );
     }
-    if (Number.isNaN(new Date(String(event.occurredAt ?? '')).getTime())) {
+    if (
+      typeof event.occurredAt !== 'string' ||
+      Number.isNaN(Date.parse(event.occurredAt))
+    ) {
       throw new BadRequestException('occurredAt must be a timestamp');
     }
     const security = event.security as Record<string, unknown> | undefined;
@@ -2956,11 +2988,11 @@ export class ExecutionService {
 
   private materializeState(
     execution: ExecutionEntity,
-    event: Record<string, unknown>,
+    event: ValidatedIncomingEvent,
   ): void {
     if (event.eventType !== 'execution.state_changed') return;
-    const payload = event.payload as Record<string, unknown>;
-    const next = String(payload.to ?? '');
+    const { payload } = event;
+    const next = typeof payload.to === 'string' ? payload.to : '';
     if (
       ![
         'queued',
@@ -2975,10 +3007,14 @@ export class ExecutionService {
     }
     execution.status = next as ExecutionStatus;
     if (TERMINAL_STATES.has(next)) {
-      execution.completionKind = String(payload.completionKind ?? 'full');
-      execution.completionReason = String(
-        payload.completionReason ?? 'unknown',
-      );
+      execution.completionKind =
+        typeof payload.completionKind === 'string'
+          ? payload.completionKind
+          : 'full';
+      execution.completionReason =
+        typeof payload.completionReason === 'string'
+          ? payload.completionReason
+          : 'unknown';
       execution.result = (payload.result as Record<string, unknown>) ?? null;
       execution.error = (payload.error as Record<string, unknown>) ?? null;
     }
@@ -2987,21 +3023,22 @@ export class ExecutionService {
   private async validateOperationLifecycle(
     eventRepo: Repository<ExecutionEventEntity>,
     rootExecutionId: string,
-    event: Record<string, unknown>,
+    event: ValidatedIncomingEvent,
   ): Promise<void> {
     if (
-      !['operation.started', 'operation.finished'].includes(
-        String(event.eventType),
-      )
+      event.eventType !== 'operation.started' &&
+      event.eventType !== 'operation.finished'
     )
       return;
-    const operationId = String(event.operationId);
-    const attemptId = String(event.attemptId);
+    const { operationId, attemptId } = event;
+    if (!operationId || !attemptId) {
+      throw new BadRequestException('Operation and attempt ids are required');
+    }
     const related = await eventRepo.find({
       where: { rootExecutionId, operationId, attemptId },
     });
     const start = related.find((row) => row.eventType === 'operation.started');
-    const finish = related.find(
+    const finish = related.some(
       (row) => row.eventType === 'operation.finished',
     );
     if (event.eventType === 'operation.started' && start) {
@@ -3013,8 +3050,7 @@ export class ExecutionService {
       if (finish)
         throw new ConflictException('Operation attempt already finished');
       const startedPayload = start.envelope.payload as Record<string, unknown>;
-      const payload = event.payload as Record<string, unknown>;
-      if (startedPayload.operationKind !== payload.operationKind) {
+      if (startedPayload.operationKind !== event.payload.operationKind) {
         throw new BadRequestException(
           'Operation kind changed within an attempt',
         );
@@ -3024,13 +3060,14 @@ export class ExecutionService {
 
   private validateStateTransition(
     execution: ExecutionEntity,
-    event: Record<string, unknown>,
+    event: ValidatedIncomingEvent,
   ): void {
     if (event.eventType !== 'execution.state_changed') return;
-    const payload = event.payload as Record<string, unknown>;
-    if (payload.from !== execution.status) {
+    const from =
+      typeof event.payload.from === 'string' ? event.payload.from : '';
+    if (from !== execution.status) {
       throw new ConflictException(
-        `Execution state changed from ${execution.status}, not ${String(payload.from)}`,
+        `Execution state changed from ${execution.status}, not ${from}`,
       );
     }
   }

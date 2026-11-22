@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import type { EntityManager } from 'typeorm';
+import { In, type EntityManager } from 'typeorm';
 import { DatasetAnalysisService } from '../../../src/dataset/dataset-analysis.service';
 import { DatasetEntity } from '../../../src/dataset/dataset.entity';
 import { ExecutionPriority } from '../../../src/execution/execution-priority.enum';
@@ -28,9 +28,12 @@ describe('DatasetAnalysisService', () => {
       find: jest.fn().mockResolvedValue([sourceDataset]),
     };
     const recordRepository = {
-      find: jest.fn(async ({ where }: any) =>
-        where.dataset.id === 1 ? sourceRecords : linkedRecords,
-      ),
+      find: jest
+        .fn()
+        .mockResolvedValue([
+          ...sourceRecords.map((record) => ({ ...record, dataset: { id: 1 } })),
+          ...linkedRecords.map((record) => ({ ...record, dataset: { id: 2 } })),
+        ]),
     };
     const executionService = {
       createCode: jest.fn().mockResolvedValue({ executionId: 'execution-id' }),
@@ -43,11 +46,11 @@ describe('DatasetAnalysisService', () => {
     const service = new DatasetAnalysisService(
       executionService as unknown as ExecutionService,
     );
-    return { service, executionService, manager };
+    return { service, executionService, manager, recordRepository };
   }
 
   it('freezes records and linked labels into an input artifact', async () => {
-    const { service, executionService, manager } = setup();
+    const { service, executionService, manager, recordRepository } = setup();
 
     await expect(
       service.createExecution(
@@ -67,6 +70,10 @@ describe('DatasetAnalysisService', () => {
     ]);
     expect(call[3]).toMatchObject({ ...scope, requestId: 'request-id' });
     const [artifact] = await call[3].snapshotArtifacts(manager);
+    expect(recordRepository.find).toHaveBeenCalledTimes(1);
+    expect(recordRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { dataset: { id: In([1, 2]) } } }),
+    );
     expect(artifact).toMatchObject({
       role: 'datasets',
       kind: 'dataset_snapshot',
@@ -130,7 +137,7 @@ describe('DatasetAnalysisService', () => {
     );
   });
 
-  it('preserves unique query dataset IDs in order and rejects missing datasets at snapshot time', async () => {
+  it('keeps dataset ID order and rejects missing dataset snapshots', async () => {
     const { service, executionService, manager } = setup();
     await expect(
       service.createExecution('query', [0, -2], {}, scope),

@@ -101,12 +101,11 @@ export class DataSourceService {
     if (dto.description !== undefined) ds.description = dto.description || null;
     if (dto.config !== undefined) {
       const mergedConfig = this.mergeConfig(ds.config, dto.config);
-      const provider = this.providerFactory.getProvider(ds.providerType);
-      if (provider) {
-        const errors = provider.validateConfig(mergedConfig);
-        if (errors.length > 0) {
-          throw new BadRequestException(`Invalid config: ${errors.join(', ')}`);
-        }
+      const errors = this.providerFactory
+        .getProvider(ds.providerType)
+        ?.validateConfig(mergedConfig);
+      if (errors?.length) {
+        throw new BadRequestException(`Invalid config: ${errors.join(', ')}`);
       }
       ds.config = mergedConfig;
     }
@@ -117,14 +116,7 @@ export class DataSourceService {
     }
     if (dto.schemaMapping !== undefined)
       ds.schemaMapping = dto.schemaMapping || null;
-    if (dto.syncSchedule !== undefined)
-      ds.syncSchedule = dto.syncSchedule || null;
-    if (dto.syncStrategy !== undefined) ds.syncStrategy = dto.syncStrategy;
-    if (dto.incrementalKey !== undefined)
-      ds.incrementalKey = dto.incrementalKey || null;
-    if (dto.enabled !== undefined) ds.enabled = dto.enabled;
-    if (dto.rateLimitRpm !== undefined)
-      ds.rateLimitRpm = dto.rateLimitRpm || null;
+    this.applySyncOptions(ds, dto);
     if (dto.projectId !== undefined) {
       ds.project = dto.projectId ? ({ id: dto.projectId } as any) : null;
     }
@@ -133,12 +125,26 @@ export class DataSourceService {
     return this.sanitize(saved);
   }
 
+  private applySyncOptions(
+    ds: DataSourceEntity,
+    dto: UpdateDataSourceDto,
+  ): void {
+    if (dto.syncSchedule !== undefined)
+      ds.syncSchedule = dto.syncSchedule || null;
+    if (dto.syncStrategy !== undefined) ds.syncStrategy = dto.syncStrategy;
+    if (dto.incrementalKey !== undefined)
+      ds.incrementalKey = dto.incrementalKey || null;
+    if (dto.enabled !== undefined) ds.enabled = dto.enabled;
+    if (dto.rateLimitRpm !== undefined)
+      ds.rateLimitRpm = dto.rateLimitRpm || null;
+  }
+
   async remove(id: number): Promise<void> {
     const ds = await this.findOne(id);
     await this.repo.remove(ds);
   }
 
-  async getSyncLogs(
+  getSyncLogs(
     dataSourceId: number,
     limit = 20,
   ): Promise<DataSourceSyncLogEntity[]> {
@@ -149,7 +155,7 @@ export class DataSourceService {
     });
   }
 
-  async findAllWithSchedule(): Promise<DataSourceEntity[]> {
+  findAllWithSchedule(): Promise<DataSourceEntity[]> {
     return this.repo.find({
       where: { enabled: true },
       relations: ['dataset'],
@@ -228,28 +234,30 @@ export class DataSourceService {
         existing && typeof existing === 'object' && !Array.isArray(existing)
           ? existing
           : {};
-      const merged: Record<string, any> = { ...current };
-      for (const [key, value] of Object.entries(incoming)) {
-        merged[key] = this.mergeConfig(current[key], value);
-      }
-      return merged;
+      const updates = Object.entries(incoming).map(([key, value]) => [
+        key,
+        this.mergeConfig(
+          Object.hasOwn(current, key) ? current[key] : undefined,
+          value,
+        ),
+      ]);
+      return { ...current, ...Object.fromEntries(updates) };
     }
 
-    if (typeof incoming === 'string') {
-      const trimmed = incoming.trim();
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-          const parsedExisting =
-            typeof existing === 'string' ? JSON.parse(existing) : existing;
-          return JSON.stringify(
-            this.mergeConfig(parsedExisting, JSON.parse(trimmed)),
-          );
-        } catch {
-          return incoming;
-        }
-      }
-    }
+    return typeof incoming === 'string'
+      ? this.mergeConfigString(existing, incoming)
+      : incoming;
+  }
 
-    return incoming;
+  private mergeConfigString(existing: unknown, incoming: string): string {
+    const trimmed = incoming.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return incoming;
+    try {
+      const previous =
+        typeof existing === 'string' ? JSON.parse(existing) : existing;
+      return JSON.stringify(this.mergeConfig(previous, JSON.parse(trimmed)));
+    } catch {
+      return incoming;
+    }
   }
 }

@@ -3,6 +3,7 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { DataSourceService } from './data-source.service';
 import { DataSourceSyncService } from './data-source-sync.service';
+import type { DataSourceEntity } from './data-source.entity';
 
 @Injectable()
 export class DataSourceScheduleService implements OnModuleInit {
@@ -61,6 +62,7 @@ export class DataSourceScheduleService implements OnModuleInit {
     } catch (err) {
       this.logger.error(
         `Invalid cron expression for data source ${dataSourceId}: ${cronExpression}`,
+        err instanceof Error ? err.stack : undefined,
       );
     }
   }
@@ -78,14 +80,12 @@ export class DataSourceScheduleService implements OnModuleInit {
   }
 
   updateSchedule(
-    dataSourceId: number,
-    cronExpression: string | null,
-    enabled: boolean,
+    source: Pick<DataSourceEntity, 'id' | 'syncSchedule' | 'enabled'>,
   ): void {
-    if (cronExpression && enabled) {
-      this.registerCron(dataSourceId, cronExpression);
+    if (source.syncSchedule && source.enabled) {
+      this.registerCron(source.id, source.syncSchedule);
     } else {
-      this.unregisterCron(dataSourceId);
+      this.unregisterCron(source.id);
     }
   }
 }

@@ -31,7 +31,7 @@ export class EntityService {
     });
   }
 
-  async findOneDetailed(id: number): Promise<any | null> {
+  async findOneDetailed(id: number): Promise<any> {
     const entity = await this.repository.findOne({
       where: { id },
       relations: ['entityType', 'projects'],
@@ -311,10 +311,7 @@ export class EntityService {
     await this.repository.delete({ id });
   }
 
-  async merge(
-    sourceEntityId: number,
-    targetEntityId: number,
-  ): Promise<EntityEntity> {
+  merge(sourceEntityId: number, targetEntityId: number): Promise<EntityEntity> {
     return this.repository.manager.transaction(async (manager) => {
       const repository = manager.getRepository(EntityEntity);
 
@@ -472,7 +469,7 @@ export class EntityService {
     });
   }
 
-  async findByResourceId(resourceId: number): Promise<EntityEntity[]> {
+  findByResourceId(resourceId: number): Promise<EntityEntity[]> {
     return this.repository
       .createQueryBuilder('entity')
       .leftJoinAndSelect('entity.entityType', 'entityType')

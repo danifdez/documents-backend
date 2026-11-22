@@ -54,7 +54,7 @@ describe.each([
     controller = new Controller(service as any);
   });
 
-  it('returns public file metadata and reconciles or removes files within the owner scope', async () => {
+  it('reconciles and removes files in scope and returns public metadata', async () => {
     service.findByOwner.mockResolvedValue([
       file,
       {

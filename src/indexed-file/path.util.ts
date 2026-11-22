@@ -1,5 +1,5 @@
-import { promises as fs } from 'fs';
-import * as path from 'path';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import { ForbiddenException } from '@nestjs/common';
 
 const MIME_MAP: Record<string, string> = {
@@ -91,12 +91,12 @@ const RESERVED_CHARS = /[<>:"|?*\x00-\x1f]/g;
 
 export function sanitizeFilename(name: string): string {
   if (!name) throw new ForbiddenException('invalid_filename');
-  const normalized = name.replace(/\\/g, '/');
+  const normalized = name.replaceAll('\\', '/');
   const segments = normalized
     .split('/')
     .filter((s) => s.length > 0 && s !== '.');
   if (segments.length === 0) throw new ForbiddenException('invalid_filename');
-  if (segments.some((s) => s === '..')) {
+  if (segments.includes('..')) {
     throw new ForbiddenException('path_outside_scope');
   }
   const cleaned = segments

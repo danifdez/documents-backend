@@ -13,7 +13,7 @@ import { selectTerminalCandidate } from './execution-terminal-candidate.policy';
 export class ExecutionTerminalCandidateService {
   constructor(private readonly dataSource: DataSource) {}
 
-  async promoteReady(limit = 20): Promise<number> {
+  promoteReady(limit = 20): Promise<number> {
     return this.dataSource.transaction(async (manager) => {
       const rows = await manager.query(
         `

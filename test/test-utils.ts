@@ -68,16 +68,6 @@ export function createMockQueryBuilder<
   return qb;
 }
 
-export function createMockService(
-  methods: string[],
-): Record<string, jest.Mock> {
-  const mock: Record<string, jest.Mock> = {};
-  for (const method of methods) {
-    mock[method] = jest.fn();
-  }
-  return mock;
-}
-
 export const mockConfigService = {
   get: jest.fn((key: string, defaultValue?: any) => {
     const defaults: Record<string, string> = {

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { ExecutionArtifactStorageService } from './execution-artifact-storage.service';
 import { ExecutionEventEntity } from './execution-event.entity';
 import type { BackendExecutionEventData } from './execution-event.writer';
@@ -21,8 +21,7 @@ import {
   ExecutionTaskPayload,
   ExecutionTaskType,
 } from './execution-task-payload.types';
-import { contentHash } from './execution-canonical';
-import { canonicalDomainHash } from './execution-canonical';
+import { contentHash, canonicalDomainHash } from './execution-canonical';
 import { redactExecutionText } from './execution-data-policy';
 
 const terminal = new Set([
@@ -114,7 +113,7 @@ export class ExecutionStreamService {
       body.length > 256 * 1024
     )
       throw new BadRequestException('Invalid stream input');
-    return this.source.transaction(async (manager) => {
+    return await this.source.transaction(async (manager) => {
       const repo = manager.getRepository(ExecutionEntity);
       const current = await repo.findOne({
         where: {
@@ -249,7 +248,7 @@ export class ExecutionStreamService {
       body.length > 64 * 1024
     )
       throw new BadRequestException('Invalid stream evidence');
-    return this.source.transaction(async (manager) => {
+    return await this.source.transaction(async (manager) => {
       const repo = manager.getRepository(ExecutionEntity);
       const current = await repo.findOne({
         where: {
@@ -410,7 +409,7 @@ export class ExecutionStreamService {
     return receipt;
   }
 
-  async record(
+  record(
     executionId: string,
     taskType: ExecutionTaskType,
     scope: ExecutionAccessScope,

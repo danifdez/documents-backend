@@ -1,3 +1,4 @@
+import { readString } from '../utils/read-string';
 import { ExecutionOperationStatus } from '../execution/execution-operation-status.enum';
 import { ExecutionStatus } from '../execution/execution-status.enum';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
@@ -64,13 +65,13 @@ function outcomeKind(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null;
   const outcome = (value as Record<string, unknown>).outcome;
   return outcome && typeof outcome === 'object'
-    ? String((outcome as Record<string, unknown>).kind ?? '') || null
+    ? readString((outcome as Record<string, unknown>).kind) || null
     : null;
 }
 
-export function selectTerminalCandidate(
+function terminalCandidateBlockers(
   snapshot: TerminalCandidateSnapshot,
-): TerminalCandidateDecision {
+): TerminalCandidateBlocker[] {
   const blockers: TerminalCandidateBlocker[] = [];
   if (
     snapshot.status !== ExecutionStatus.RUNNING ||
@@ -123,24 +124,24 @@ export function selectTerminalCandidate(
   if (snapshot.result === null || snapshot.result === undefined) {
     blockers.push('missing_result');
   }
+  return blockers;
+}
+
+export function selectTerminalCandidate(
+  snapshot: TerminalCandidateSnapshot,
+): TerminalCandidateDecision {
+  const blockers = terminalCandidateBlockers(snapshot);
   if (blockers.length) return { kind: 'blocked', blockers };
 
-  const result = snapshot.result as Record<string, unknown>;
-  const completionKind =
-    result && typeof result === 'object' && result.completionKind === 'partial'
-      ? 'partial'
-      : 'full';
-  const completionReason =
-    result &&
-    typeof result === 'object' &&
-    typeof result.completionReason === 'string' &&
-    result.completionReason.trim()
-      ? result.completionReason
-      : 'goal_satisfied';
+  const result =
+    typeof snapshot.result === 'object'
+      ? (snapshot.result as Record<string, unknown>)
+      : null;
+  const reason = readString(result?.completionReason);
   return {
     kind: 'ready',
-    completionKind,
-    completionReason,
+    completionKind: result?.completionKind === 'partial' ? 'partial' : 'full',
+    completionReason: reason.trim() ? reason : 'goal_satisfied',
     evidenceStepIds: snapshot.steps
       .filter((step) => step.status === ExecutionStepStatus.COMPLETED)
       .map((step) => step.stepId),

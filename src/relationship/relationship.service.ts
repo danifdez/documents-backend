@@ -118,7 +118,10 @@ export class RelationshipService {
 
     for (const resource of resources) {
       try {
-        const result = await this.extractRelationships(resource.id, ownerPrincipal);
+        const result = await this.extractRelationships(
+          resource.id,
+          ownerPrincipal,
+        );
         executionIds.push(result.executionId);
       } catch {
         // Resources without usable content or two confirmed entities are skipped.

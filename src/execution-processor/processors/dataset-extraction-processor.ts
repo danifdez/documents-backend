@@ -57,8 +57,7 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
           : 'Dataset extraction failed';
       status = 'failed';
     } else if (
-      !result ||
-      !result.data ||
+      !result?.data ||
       typeof result.data !== 'object' ||
       Array.isArray(result.data) ||
       !result.cellMetadata ||
@@ -111,8 +110,8 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
             record.extractionStatus = 'failed';
             record.extractionError = failureMessage;
           } else {
-            const data = { ...(record.data || {}) };
-            const cellMetadata = { ...(record.cellMetadata || {}) };
+            const data = { ...record.data };
+            const cellMetadata = { ...record.cellMetadata };
             for (const fieldKey of columns) {
               const currentAnchor = cellMetadata[fieldKey];
               if (currentAnchor?.editedByUser || !(fieldKey in result!.data!)) {

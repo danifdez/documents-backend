@@ -1,5 +1,6 @@
+import { compareStrings } from '../utils/compare-strings';
 import { BadRequestException } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash } from 'node:crypto';
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -7,7 +8,7 @@ function canonicalize(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([, child]) => child !== undefined)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .sort(([left], [right]) => compareStrings(left, right))
         .map(([key, child]) => [key, canonicalize(child)]),
     );
   }
@@ -28,7 +29,7 @@ function canonicalizeDomainValue(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([, child]) => child !== undefined)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .sort(([left], [right]) => compareStrings(left, right))
         .map(([key, child]) => [key, canonicalizeDomainValue(child)]),
     );
   }

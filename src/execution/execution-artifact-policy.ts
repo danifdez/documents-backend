@@ -64,7 +64,7 @@ export function earliestArtifactExpiry(
   if (dated.length) {
     return new Date(Math.min(...dated.map((value) => value.getTime())));
   }
-  return values.some((value) => value === null) ? null : undefined;
+  return values.includes(null) ? null : undefined;
 }
 
 const RETENTION_ORDER: ExecutionArtifactRetentionClass[] = [

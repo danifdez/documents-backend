@@ -1,3 +1,4 @@
+import { readString } from '../utils/read-string';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { ExecutionEntity } from './execution.entity';
 import {
@@ -431,28 +432,28 @@ export function governedBudgetStart(
   ) {
     return null;
   }
-  const phase = String(payload.phase ?? '');
+  const phase = readString(payload.phase);
   const governed =
     CHAT_TASK_TYPES.has(execution.taskType) &&
     (operationKind === 'tool_call' ||
       !EXCLUDED_CHAT_INFERENCE_PHASES.has(phase));
   if (!governed) return null;
   const identity: GovernedBudgetStart = {
-    operationId: String(event.operationId ?? ''),
+    operationId: readString(event.operationId),
     operationKind,
-    ...(event.toolCallId ? { toolCallId: String(event.toolCallId) } : {}),
-    grantId: String(payload.budgetGrantId ?? ''),
-    reservationId: String(payload.budgetReservationId ?? ''),
-    bucket: String(payload.budgetBucket ?? ''),
-    loopId: String(payload.loopId ?? ''),
+    ...(event.toolCallId ? { toolCallId: readString(event.toolCallId) } : {}),
+    grantId: readString(payload.budgetGrantId),
+    reservationId: readString(payload.budgetReservationId),
+    bucket: readString(payload.budgetBucket),
+    loopId: readString(payload.loopId),
     phase,
     round: Number(payload.round),
-    name: String(payload.name ?? ''),
+    name: readString(payload.name),
     budgetSoftLimitWarningApplied:
       payload.budgetSoftLimitWarningApplied === true,
     ...(payload.operationFingerprint
       ? {
-          operationFingerprint: String(payload.operationFingerprint),
+          operationFingerprint: readString(payload.operationFingerprint),
           operationFingerprintVersion: String(
             payload.operationFingerprintVersion,
           ) as 'canonical_tool_input_v1',
@@ -490,8 +491,7 @@ export function assertOperationBudgetProjection(
   if (
     !grant ||
     grant.loopId !== identity.loopId ||
-    !reservation ||
-    reservation.status !== 'reserved' ||
+    reservation?.status !== 'reserved' ||
     reservation.grantId !== identity.grantId ||
     reservation.reservationId !== identity.reservationId ||
     reservation.operationKind !== identity.operationKind ||

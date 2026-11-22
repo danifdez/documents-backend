@@ -17,9 +17,7 @@ export function executionStepOutputValue(
     }
     return outcome ?? null;
   }
-  return Object.prototype.hasOwnProperty.call(record, 'value')
-    ? record.value
-    : record;
+  return Object.hasOwn(record, 'value') ? record.value : record;
 }
 
 /** Project engine metadata without copying worker content into the event ledger. */

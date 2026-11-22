@@ -15,7 +15,7 @@ import {
   MoreThan,
   Repository,
 } from 'typeorm';
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ExecutionStepAttemptEntity } from '../execution/execution-step-attempt.entity';
 import { ExecutionStepAttemptStatus } from '../execution/execution-step-attempt-status.enum';
 import { ExecutionStepKind } from '../execution/execution-step-kind.enum';
@@ -45,7 +45,7 @@ export class WorkerService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async credentialHistory(id: string): Promise<WorkerCredentialEventEntity[]> {
+  credentialHistory(id: string): Promise<WorkerCredentialEventEntity[]> {
     return this.credentialEvents.find({
       where: { workerId: id },
       order: { occurredAt: 'DESC' },
@@ -62,16 +62,16 @@ export class WorkerService {
     metadata: Record<string, unknown>,
   ): Promise<{ worker: WorkerEntity; credential: string }> {
     this.assertModelsStepKinds(stepKinds);
-    return this.register(
+    return this.register({
       id,
       name,
-      WorkerKind.MODELS,
-      null,
+      workerKind: WorkerKind.MODELS,
+      ownerPrincipal: null,
       capabilities,
       stepKinds,
       maximumConcurrency,
       metadata,
-    );
+    });
   }
 
   async enrollBrowser(
@@ -80,12 +80,12 @@ export class WorkerService {
     ownerPrincipal: string,
     metadata: Record<string, unknown>,
   ): Promise<{ worker: WorkerEntity; credential: string }> {
-    return this.register(
+    return this.register({
       id,
       name,
-      WorkerKind.BROWSER,
+      workerKind: WorkerKind.BROWSER,
       ownerPrincipal,
-      [
+      capabilities: [
         BROWSER_READ_TOOL_CAPABILITY,
         BROWSER_NAVIGATE_TOOL_CAPABILITY,
         BROWSER_GO_BACK_TOOL_CAPABILITY,
@@ -96,10 +96,10 @@ export class WorkerService {
           ? [BROWSER_RUN_TASK_TOOL_CAPABILITY]
           : []),
       ],
-      [ExecutionStepKind.TOOL],
-      1,
+      stepKinds: [ExecutionStepKind.TOOL],
+      maximumConcurrency: 1,
       metadata,
-    );
+    });
   }
 
   async browserTaskStatus(
@@ -129,16 +129,25 @@ export class WorkerService {
     return online.length ? 'update_required' : 'offline';
   }
 
-  private async register(
-    id: string,
-    name: string,
-    workerKind: WorkerKind,
-    ownerPrincipal: string | null,
-    capabilities: string[],
-    stepKinds: ExecutionStepKind[],
-    maximumConcurrency: number,
-    metadata: Record<string, unknown>,
-  ): Promise<{ worker: WorkerEntity; credential: string }> {
+  private async register({
+    id,
+    name,
+    workerKind,
+    ownerPrincipal,
+    capabilities,
+    stepKinds,
+    maximumConcurrency,
+    metadata,
+  }: {
+    id: string;
+    name: string;
+    workerKind: WorkerKind;
+    ownerPrincipal: string | null;
+    capabilities: string[];
+    stepKinds: ExecutionStepKind[];
+    maximumConcurrency: number;
+    metadata: Record<string, unknown>;
+  }): Promise<{ worker: WorkerEntity; credential: string }> {
     this.assertMaximumConcurrency(maximumConcurrency);
     const credential = randomBytes(32).toString('base64url');
     const worker = await this.dataSource.transaction(async (manager) => {

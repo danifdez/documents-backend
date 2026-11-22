@@ -1548,7 +1548,7 @@ describe('Voice authorization, reservations and durable recovery (simulated work
       ws.send(JSON.stringify(frame));
       await until(() => active === 0);
       expect((await readRequest(accepted.id)).body.status).toBe('failed');
-      expect((await metadataRows()).length).toBe(
+      expect(await metadataRows()).toHaveLength(
         kind === 'wrong-runtime' || kind === 'changed-sequence' ? 1 : 0,
       );
       expect(JSON.stringify(socket.events)).not.toContain(

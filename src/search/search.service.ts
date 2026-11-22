@@ -240,7 +240,7 @@ export class SearchService {
     const $ = cheerio.load(fullContent);
     const textContent = $.text();
 
-    const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
     const regex = new RegExp(`(${escaped})`, 'gi');
     const matches = [...textContent.matchAll(regex)];
 
@@ -835,7 +835,7 @@ export class SearchService {
       .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
       .split(/\s+/)
       .filter((w) => w.length >= 3 && !stopwords.has(w.toLowerCase()))
-      .map((w) => w.replace(/^['-]+|['-]+$/g, ''));
+      .map((word) => word.replace(/^['-]+/, '').replace(/(?<!['-])['-]+$/, ''));
 
     // Count frequency - more frequent = more important
     const freq = new Map<string, number>();

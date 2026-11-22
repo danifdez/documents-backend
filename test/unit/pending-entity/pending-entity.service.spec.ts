@@ -245,7 +245,7 @@ describe('PendingEntityService', () => {
   describe('materialization and post-confirmation work', () => {
     const alias = { locale: 'en', scope: 'document' as const, value: 'A.' };
 
-    it('creates a project-scoped confirmed entity, links it to the resource, and removes the pending row', async () => {
+    it('creates a scoped entity, links its resource, and removes pending data', async () => {
       const pending = buildPending({ scope: 'project', aliases: [alias] });
       repository.findOne.mockResolvedValue(pending);
       repository.count.mockResolvedValue(2);
@@ -290,7 +290,7 @@ describe('PendingEntityService', () => {
       expect(entityService.addProjectToEntity).toHaveBeenCalledWith(8, 5);
     });
 
-    it('creates global entities and refuses to confirm missing, merged, or untyped rows', async () => {
+    it('creates global entities and rejects invalid pending records', async () => {
       await expect(service.confirmEntity(1)).resolves.toMatchObject({
         success: false,
         message: 'Pending entity not found',
@@ -325,7 +325,7 @@ describe('PendingEntityService', () => {
       });
     });
 
-    it('enqueues relationship extraction after the final confirmation when evidence exists', async () => {
+    it('queues relationship extraction when the final entity is confirmed', async () => {
       process.env.FEATURE_RELATIONSHIPS = 'true';
       repository.findOne.mockResolvedValue(buildPending());
       repository.count.mockResolvedValue(0);
@@ -353,7 +353,7 @@ describe('PendingEntityService', () => {
       );
     });
 
-    it('returns the relationship work error without losing the successful confirmation', async () => {
+    it('keeps the confirmation when relationship extraction fails', async () => {
       process.env.FEATURE_RELATIONSHIPS = 'true';
       repository.findOne.mockResolvedValue(buildPending());
       repository.count.mockResolvedValue(0);
@@ -392,7 +392,7 @@ describe('PendingEntityService', () => {
     };
     const unrelated = { locale: 'en', value: 'A.', scope: 'project' as const };
 
-    it('adds a pending alias and restores the source while preserving aliases with a different scope', async () => {
+    it('updates pending aliases while preserving other scopes', async () => {
       const source = buildPending({ scope: 'project' });
       const target = buildPending({
         id: 2,
@@ -533,7 +533,7 @@ describe('PendingEntityService', () => {
       );
     });
 
-    it('deduplicates requested languages and skips English and already available translations', async () => {
+    it('skips duplicate, English, and existing translation requests', async () => {
       repository.findOne.mockResolvedValue(buildPending());
       await service.retranslateEntity(1, 'Ada', 'en', 'fr', 'fr');
       expect(executionService.create).toHaveBeenCalledWith(
