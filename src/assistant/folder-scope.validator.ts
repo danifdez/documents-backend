@@ -27,7 +27,7 @@ const WINDOWS_FORBIDDEN_ROOTS = [
   'C:\\',
   String.raw`C:\Windows`,
   'C:\\Program Files',
-  'C:\\Program Files (x86)',
+  String.raw`C:\Program Files (x86)`,
 ];
 
 const SENSITIVE_SEGMENTS = new Set([
