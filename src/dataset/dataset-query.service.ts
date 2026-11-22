@@ -133,7 +133,7 @@ export class DatasetQueryService {
       const sortFieldDef = dataset.schema.find((f) => f.key === sortField);
       const direction = (params.order || 'asc').toUpperCase() as 'ASC' | 'DESC';
 
-      if (sortFieldDef && sortFieldDef.type === 'number') {
+      if (sortFieldDef?.type === 'number') {
         qb.orderBy(`(record.data ->> '${sortField}')::numeric`, direction);
       } else {
         qb.orderBy(`record.data ->> '${sortField}'`, direction);
