@@ -44,7 +44,7 @@ export class CalendarEventController {
     return await this.calendarEventService.findByDateRange(
       start,
       end,
-      projectId ? parseInt(projectId, 10) : undefined,
+      projectId ? Number.parseInt(projectId, 10) : undefined,
       tz,
     );
   }
