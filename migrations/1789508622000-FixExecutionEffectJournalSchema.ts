@@ -20,7 +20,7 @@ export class FixExecutionEffectJournalSchema1789508622000 implements MigrationIn
     )) as { schema_name: string }[];
     const schema = String(
       row?.schema_name ?? fallback?.schema_name ?? 'public',
-    ).replace(/"/g, '""');
+    ).replaceAll('"', '""');
 
     await queryRunner.query(
       'ALTER TABLE "execution_effect_journal" DROP CONSTRAINT IF EXISTS "FK_execution_effect_journal_execution"',
