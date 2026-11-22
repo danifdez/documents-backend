@@ -105,7 +105,7 @@ export class EurostatProvider implements DataSourceProvider {
   }
 
   private parseJsonStat(data: any): Record<string, any>[] {
-    if (!data || !data.dimension || !data.id || !data.size) {
+    if (!data?.dimension || !data.id || !data.size) {
       return [];
     }
 
