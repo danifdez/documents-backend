@@ -1,3 +1,4 @@
+import { claimAvailable } from '../utils/claim-available';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ExecutionService } from './execution.service';
@@ -11,8 +12,10 @@ export class ExecutionRetentionService {
   @Cron(CronExpression.EVERY_MINUTE)
   async purgeExpiredArtifacts(): Promise<void> {
     try {
-      while ((await this.executions.purgeExpiredArtifacts(100)) > 0) {
-        continue;
+      const purgeBatch = async () =>
+        (await this.executions.purgeExpiredArtifacts(100)) || null;
+      for await (const _ of claimAvailable(purgeBatch)) {
+        // Continue until no expired artifacts remain.
       }
     } catch (error) {
       this.logger.error(

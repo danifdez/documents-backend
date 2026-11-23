@@ -1,3 +1,5 @@
+import { claimAvailable } from '../utils/claim-available';
+import { forEachSequential } from '../utils/for-each-sequential';
 import { readString } from '../utils/read-string';
 import { compareStrings } from '../utils/compare-strings';
 import { lockExecutionRequest } from './execution-request';
@@ -271,6 +273,92 @@ function hasCompleteInferenceExchange(body: Buffer | null): boolean {
   }
 }
 
+interface FingerprintEvidence {
+  fingerprints: Set<string>;
+  operations: Set<string>;
+}
+
+interface ExecutionStatusUpdateOptions {
+  completionKind?: string;
+  completionReason?: string;
+  cancellationReason?: string;
+  publication?: ExecutionPublication;
+  phase?: string;
+}
+
+function addMissingInferenceExchanges(
+  missing: Set<string>,
+  starts: Iterable<{
+    operationKind: unknown;
+    attemptId: unknown;
+    operationId: string;
+  }>,
+  artifacts: ExecutionArtifactEntity[],
+): void {
+  for (const start of starts) {
+    if (start.operationKind !== 'inference') continue;
+    const exchanges = artifacts.filter(
+      (artifact) =>
+        artifact.kind === INFERENCE_EXCHANGE_KIND &&
+        artifact.producedByAttemptId === start.attemptId,
+    );
+    if (
+      !exchanges.length ||
+      !exchanges.every(({ body }) => hasCompleteInferenceExchange(body))
+    ) {
+      missing.add(`operation.${start.operationId}.inferenceExchange`);
+    }
+  }
+}
+
+function recordContentFingerprint(
+  evidence: FingerprintEvidence,
+  operationId: string,
+  fingerprint: unknown,
+): void {
+  if (
+    typeof fingerprint === 'string' &&
+    EXECUTION_CONTENT_HASH_PATTERN.test(fingerprint)
+  ) {
+    evidence.fingerprints.add(fingerprint);
+    evidence.operations.add(operationId);
+  }
+}
+
+function recordInferenceMetadata(
+  evidence: {
+    models: FingerprintEvidence;
+    adapters: FingerprintEvidence;
+    prompts: FingerprintEvidence;
+  },
+  operationId: string,
+  inference: unknown,
+): void {
+  if (!inference || typeof inference !== 'object') return;
+  const metadata = inference as Record<string, unknown>;
+  const model = readString(metadata.effectiveModel);
+  if (model && !['unreported', 'not_executed'].includes(model)) {
+    evidence.models.fingerprints.add(model);
+    evidence.models.operations.add(operationId);
+  }
+  if (Object.hasOwn(metadata, 'effectiveAdapter')) {
+    evidence.adapters.operations.add(operationId);
+    const adapter = readString(metadata.effectiveAdapter);
+    if (adapter) evidence.adapters.fingerprints.add(adapter);
+  }
+  const packages = metadata.effectivePromptPackages;
+  if (
+    Array.isArray(packages) &&
+    packages.length > 0 &&
+    packages.every(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    )
+  ) {
+    evidence.prompts.operations.add(operationId);
+    for (const value of packages) evidence.prompts.fingerprints.add(value);
+  }
+}
+
 @Injectable()
 export class ExecutionService {
   constructor(
@@ -313,7 +401,7 @@ export class ExecutionService {
         },
         order: { createdAt: 'ASC' },
       });
-    for (const turn of turns) {
+    await forEachSequential(turns, async (turn) => {
       await this.updateStatus(
         turn.rootExecutionId,
         ExecutionStatus.CANCELLED,
@@ -323,7 +411,7 @@ export class ExecutionService {
           completionReason: `${ownerType}_deleted`,
         },
       );
-    }
+    });
   }
 
   async requestCancellation(
@@ -404,7 +492,7 @@ export class ExecutionService {
     let sequence = Number(root.lastSequence);
     let lastEventId = root.lastEventId;
 
-    for (const execution of active) {
+    await forEachSequential(active, async (execution) => {
       const previousPhase = execution.phase;
       execution.cancellationRequestedAt = now;
       execution.cancellationReason = cancellationReason;
@@ -443,7 +531,7 @@ export class ExecutionService {
       execution.lastSequence = String(sequence);
       execution.lastEventId = event.eventId;
       lastEventId = event.eventId;
-    }
+    });
 
     await manager.query(
       `
@@ -498,6 +586,7 @@ export class ExecutionService {
         outboxRepo.create({
           outboxId: randomUUID(),
           executionId: rootExecutionId,
+          ownerPrincipal: root.ownerPrincipal,
           eventId: publicationEventId,
           schemaVersion: 'execution-outbox/1',
           socketEvent: 'executionCancellationRequested',
@@ -522,7 +611,8 @@ export class ExecutionService {
 
   async reconcileRequestedCancellations(limit = 20): Promise<number> {
     let reconciled = 0;
-    while (reconciled < limit) {
+    const findCancellation = async (): Promise<string | null> => {
+      if (reconciled >= limit) return null;
       const rows = await this.dataSource.query(
         `
           SELECT execution."execution_id"
@@ -545,10 +635,10 @@ export class ExecutionService {
           LIMIT 1
         `,
       );
-      if (!rows.length) break;
-      const execution = await this.executionRepo.findOneBy({
-        executionId: String(rows[0].execution_id),
-      });
+      return readString(rows[0]?.execution_id) || null;
+    };
+    for await (const executionId of claimAvailable(findCancellation)) {
+      const execution = await this.executionRepo.findOneBy({ executionId });
       if (!execution) continue;
       await this.updateStatus(
         execution.executionId,
@@ -803,120 +893,29 @@ export class ExecutionService {
     const rootExecutionId = options?.rootExecutionId ?? executionId;
     return await this.dataSource.transaction(async (manager) => {
       const executionRepo = manager.getRepository(ExecutionEntity);
-      let acceptance: ExecutionRequestEntity | null = null;
-      if (options?.requestId !== undefined) {
-        if (
-          options.parentExecutionId ||
-          options.rootExecutionId ||
-          !options.ownerPrincipal
-        ) {
-          throw new BadRequestException(
-            'Request identity requires an owned root execution',
-          );
-        }
-        acceptance = await lockExecutionRequest(manager, options.requestId, {
-          ownerPrincipal: options.ownerPrincipal,
-        });
-        const requestOptions = { ...options };
-        delete requestOptions.snapshotArtifacts;
-        const inputHash = canonicalDomainHash({
+      const { acceptance, existing } = await this.prepareAcceptedRequest(
+        manager,
+        taskType,
+        priority,
+        payload,
+        options,
+      );
+      if (existing) return existing;
+      const { eventRoot, parent } = await this.lockCreationTree(
+        executionRepo,
+        rootExecutionId,
+        executionId,
+        options,
+      );
+      const { effectivePayload, existingChild } =
+        await this.prepareChildPayload(
+          manager,
           taskType,
-          priority,
           payload,
-          options: requestOptions,
-        });
-        if (acceptance.inputHash && acceptance.inputHash !== inputHash) {
-          throw new ConflictException('execution_request_conflict');
-        }
-        if (acceptance.executionId) {
-          const existing = await executionRepo.findOneBy({
-            executionId: acceptance.executionId,
-            rootExecutionId: acceptance.executionId,
-            ownerPrincipal: options.ownerPrincipal,
-          });
-          if (!existing)
-            throw new ConflictException('execution_request_unavailable');
-          return existing;
-        }
-        if (acceptance.cancelRequested) {
-          throw new ConflictException('execution_request_cancelled');
-        }
-        acceptance.inputHash = inputHash;
-      }
-      let eventRoot: ExecutionEntity | null = null;
-      let parent: ExecutionEntity | null = null;
-      if (rootExecutionId !== executionId) {
-        if (!options?.parentExecutionId) {
-          throw new BadRequestException('Child execution requires a parent');
-        }
-        eventRoot = await executionRepo.findOne({
-          where: { executionId: rootExecutionId, rootExecutionId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!eventRoot) throw new NotFoundException('Root execution not found');
-        if (eventRoot.cancellationRequestedAt) {
-          throw new ConflictException('execution_cancellation_requested');
-        }
-        parent = await executionRepo.findOne({
-          where: {
-            executionId: options.parentExecutionId,
-            rootExecutionId,
-          },
-        });
-        if (!parent) throw new NotFoundException('Parent execution not found');
-        if (parent.cancellationRequestedAt) {
-          throw new ConflictException('execution_cancellation_requested');
-        }
-        if (
-          options.ownerPrincipal &&
-          options.ownerPrincipal !== eventRoot.ownerPrincipal
-        ) {
-          throw new BadRequestException('Child execution scope mismatch');
-        }
-      } else if (options?.parentExecutionId) {
-        throw new BadRequestException('Root execution cannot have a parent');
-      }
-      let effectivePayload = payload;
-      if (options?.childIdempotencyKey !== undefined) {
-        if (
-          !parent ||
-          !options.childIdempotencyKey ||
-          options.childIdempotencyKey.length > 160
-        ) {
-          throw new BadRequestException('invalid_child_idempotency_key');
-        }
-        effectivePayload = {
-          ...payload,
-          [FINALIZER_IDEMPOTENCY_FIELD]: options.childIdempotencyKey,
-        };
-        const candidates = await executionRepo.find({
-          where: { parentExecutionId: parent.executionId, taskType },
-        });
-        const matches = candidates.filter(
-          (candidate) =>
-            candidate.payload?.[FINALIZER_IDEMPOTENCY_FIELD] ===
-            options.childIdempotencyKey,
+          parent,
+          options,
         );
-        if (matches.length > 1) {
-          throw new ConflictException('duplicate_child_idempotency_key');
-        }
-        if (matches.length === 1) {
-          const existing = matches[0];
-          if (
-            canonicalHash(existing.payload) !== canonicalHash(effectivePayload)
-          ) {
-            throw new ConflictException('child_idempotency_conflict');
-          }
-          const stepCount = await manager
-            .getRepository(ExecutionStepEntity)
-            .countBy({ executionId: existing.executionId });
-          const expectedStepCount = options.steps?.length ?? 1;
-          if (stepCount !== expectedStepCount) {
-            throw new ConflictException('incomplete_child_execution');
-          }
-          return existing;
-        }
-      }
+      if (existingChild) return existingChild;
       const execution = executionRepo.create({
         executionId,
         rootExecutionId,
@@ -1021,7 +1020,7 @@ export class ExecutionService {
                 ...options?.initialStep,
               },
             ]);
-      for (const [index, step] of steps.entries()) {
+      await forEachSequential(steps.entries(), async ([index, step]) => {
         await createExecutionStep(manager, {
           ...step,
           work:
@@ -1036,7 +1035,7 @@ export class ExecutionService {
           executionId,
           causedByEventId: step.causedByEventId ?? executionEvent.eventId,
         });
-      }
+      });
       const saved = await executionRepo.save(execution);
       if (acceptance) {
         acceptance.executionId = saved.executionId;
@@ -1044,6 +1043,147 @@ export class ExecutionService {
       }
       return saved;
     });
+  }
+
+  private async prepareAcceptedRequest<TTaskType extends ExecutionTaskType>(
+    manager: EntityManager,
+    taskType: TTaskType,
+    priority: ExecutionPriority,
+    payload: ExecutionTaskPayload<TTaskType>,
+    options?: CreateExecutionOptions,
+  ): Promise<{
+    acceptance: ExecutionRequestEntity | null;
+    existing: ExecutionEntity | null;
+  }> {
+    if (options?.requestId === undefined)
+      return { acceptance: null, existing: null };
+    const executionRepo = manager.getRepository(ExecutionEntity);
+    if (
+      options.parentExecutionId ||
+      options.rootExecutionId ||
+      !options.ownerPrincipal
+    ) {
+      throw new BadRequestException(
+        'Request identity requires an owned root execution',
+      );
+    }
+    const acceptance = await lockExecutionRequest(manager, options.requestId, {
+      ownerPrincipal: options.ownerPrincipal,
+    });
+    const requestOptions = { ...options };
+    delete requestOptions.snapshotArtifacts;
+    const inputHash = canonicalDomainHash({
+      taskType,
+      priority,
+      payload,
+      options: requestOptions,
+    });
+    if (acceptance.inputHash && acceptance.inputHash !== inputHash) {
+      throw new ConflictException('execution_request_conflict');
+    }
+    if (acceptance.executionId) {
+      const existing = await executionRepo.findOneBy({
+        executionId: acceptance.executionId,
+        rootExecutionId: acceptance.executionId,
+        ownerPrincipal: options.ownerPrincipal,
+      });
+      if (!existing)
+        throw new ConflictException('execution_request_unavailable');
+      return { acceptance, existing };
+    }
+    if (acceptance.cancelRequested) {
+      throw new ConflictException('execution_request_cancelled');
+    }
+    acceptance.inputHash = inputHash;
+    return { acceptance, existing: null };
+  }
+
+  private async lockCreationTree(
+    executionRepo: Repository<ExecutionEntity>,
+    rootExecutionId: string,
+    executionId: string,
+    options?: CreateExecutionOptions,
+  ): Promise<{
+    eventRoot: ExecutionEntity | null;
+    parent: ExecutionEntity | null;
+  }> {
+    let eventRoot: ExecutionEntity | null = null;
+    let parent: ExecutionEntity | null = null;
+    if (rootExecutionId !== executionId) {
+      if (!options?.parentExecutionId) {
+        throw new BadRequestException('Child execution requires a parent');
+      }
+      eventRoot = await executionRepo.findOne({
+        where: { executionId: rootExecutionId, rootExecutionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!eventRoot) throw new NotFoundException('Root execution not found');
+      if (eventRoot.cancellationRequestedAt) {
+        throw new ConflictException('execution_cancellation_requested');
+      }
+      parent = await executionRepo.findOne({
+        where: {
+          executionId: options.parentExecutionId,
+          rootExecutionId,
+        },
+      });
+      if (!parent) throw new NotFoundException('Parent execution not found');
+      if (parent.cancellationRequestedAt) {
+        throw new ConflictException('execution_cancellation_requested');
+      }
+      if (
+        options.ownerPrincipal &&
+        options.ownerPrincipal !== eventRoot.ownerPrincipal
+      ) {
+        throw new BadRequestException('Child execution scope mismatch');
+      }
+    } else if (options?.parentExecutionId) {
+      throw new BadRequestException('Root execution cannot have a parent');
+    }
+    return { eventRoot, parent };
+  }
+
+  private async prepareChildPayload<TTaskType extends ExecutionTaskType>(
+    manager: EntityManager,
+    taskType: TTaskType,
+    payload: ExecutionTaskPayload<TTaskType>,
+    parent: ExecutionEntity | null,
+    options?: CreateExecutionOptions,
+  ): Promise<{
+    effectivePayload: ExecutionTaskPayload<TTaskType>;
+    existingChild: ExecutionEntity | null;
+  }> {
+    const executionRepo = manager.getRepository(ExecutionEntity);
+    const key = options?.childIdempotencyKey;
+    if (key === undefined)
+      return { effectivePayload: payload, existingChild: null };
+    if (!parent || !key || key.length > 160) {
+      throw new BadRequestException('invalid_child_idempotency_key');
+    }
+    const effectivePayload = { ...payload, [FINALIZER_IDEMPOTENCY_FIELD]: key };
+    const candidates = await executionRepo.find({
+      where: { parentExecutionId: parent.executionId, taskType },
+    });
+    const matches = candidates.filter(
+      (candidate) => candidate.payload?.[FINALIZER_IDEMPOTENCY_FIELD] === key,
+    );
+    if (matches.length > 1) {
+      throw new ConflictException('duplicate_child_idempotency_key');
+    }
+    const existingChild = matches[0];
+    if (!existingChild) return { effectivePayload, existingChild: null };
+    if (
+      canonicalHash(existingChild.payload) !== canonicalHash(effectivePayload)
+    ) {
+      throw new ConflictException('child_idempotency_conflict');
+    }
+    const stepCount = await manager.getRepository(ExecutionStepEntity).countBy({
+      executionId: existingChild.executionId,
+    });
+    if (stepCount !== (options.steps?.length ?? 1)) {
+      throw new ConflictException('incomplete_child_execution');
+    }
+    return { effectivePayload, existingChild };
   }
 
   async readRequest(requestId: string, scope: ExecutionAccessScope) {
@@ -1226,7 +1366,7 @@ export class ExecutionService {
       take: limit,
     });
     let finalized = 0;
-    for (const execution of pending) {
+    await forEachSequential(pending, async (execution) => {
       const cancelled = execution.phase === 'terminal_pending_cancelled';
       const status = cancelled
         ? ExecutionStatus.CANCELLED
@@ -1241,21 +1381,26 @@ export class ExecutionService {
         },
       );
       finalized += 1;
-    }
+    });
     return finalized;
   }
 
-  async updateStatus(
+  private defaultCompletionReason(status: ExecutionStatus): string {
+    switch (status) {
+      case ExecutionStatus.FAILED:
+        return 'processor_failed';
+      case ExecutionStatus.CANCELLED:
+        return 'cancelled';
+      default:
+        return 'backend_finalized';
+    }
+  }
+
+  updateStatus(
     executionId: string,
     status: ExecutionStatus,
     failureMessage?: string,
-    options?: {
-      completionKind?: string;
-      completionReason?: string;
-      cancellationReason?: string;
-      publication?: ExecutionPublication;
-      phase?: string;
-    },
+    options?: ExecutionStatusUpdateOptions,
     manager?: EntityManager,
   ): Promise<ExecutionEntity | null> {
     const transition = async (manager: EntityManager) => {
@@ -1272,17 +1417,7 @@ export class ExecutionService {
       )
         return execution;
 
-      const root =
-        execution.rootExecutionId === execution.executionId
-          ? execution
-          : await executionRepo.findOne({
-              where: {
-                executionId: execution.rootExecutionId,
-                rootExecutionId: execution.rootExecutionId,
-              },
-              lock: { mode: 'pessimistic_write' },
-            });
-      if (!root) throw new NotFoundException('Root execution not found');
+      const root = await this.lockExecutionRoot(executionRepo, execution);
 
       const previousStatus = execution.status;
       if (status === ExecutionStatus.WAITING) {
@@ -1297,76 +1432,16 @@ export class ExecutionService {
         execution.phase = null;
       }
       if (options?.phase !== undefined) execution.phase = options.phase;
-      if (TERMINAL_STATES.has(status)) {
-        execution.completedAt = new Date();
-        execution.phase = null;
-        execution.completionKind = options?.completionKind ?? 'full';
-        execution.completionReason =
-          options?.completionReason ??
-          (status === ExecutionStatus.FAILED
-            ? 'processor_failed'
-            : status === ExecutionStatus.CANCELLED
-              ? 'cancelled'
-              : 'backend_finalized');
-        if (status === ExecutionStatus.FAILED && !execution.error) {
-          execution.error = {
-            code: 'EXECUTION_FAILED',
-            message: redactExecutionText(failureMessage ?? 'Execution failed'),
-          };
-        }
-        if (status === ExecutionStatus.CANCELLED) {
-          execution.cancellationRequestedAt ??= new Date();
-          execution.cancellationReason = redactExecutionText(
-            options?.cancellationReason ??
-              execution.cancellationReason ??
-              'Cancelled',
-          ).slice(0, 500);
-          execution.error = null;
-        }
-      }
-
+      const terminal = TERMINAL_STATES.has(status);
       let conversationMessage: ChatMessageEntity | null = null;
-      if (TERMINAL_STATES.has(status)) {
-        await finishSkillActivations(manager, execution.executionId, status);
-        let turnStatus:
-          | ConversationTurnStatus.COMPLETED
-          | ConversationTurnStatus.FAILED
-          | ConversationTurnStatus.CANCELLED;
-        if (status === ExecutionStatus.COMPLETED) {
-          turnStatus = ConversationTurnStatus.COMPLETED;
-        } else {
-          if (status === ExecutionStatus.CANCELLED) {
-            turnStatus = ConversationTurnStatus.CANCELLED;
-          } else {
-            turnStatus = ConversationTurnStatus.FAILED;
-          }
-        }
-        // A chat turn that fails without going through its processor finalizer
-        // (worker_failed, missing processor, finalization error) still owes the
-        // user an answer: without a persisted reply the client keeps the turn
-        // pending forever, since `chatPublication` is built from a message.
-        const failureResponse =
-          status === ExecutionStatus.FAILED &&
-          isChatTurnTaskType(execution.taskType) &&
-          !options?.publication
-            ? {
-                reply: '',
-                error: redactExecutionText(
-                  failureMessage ??
-                    (typeof (execution.error as Record<string, unknown> | null)
-                      ?.message === 'string'
-                      ? String(
-                          (execution.error as Record<string, unknown>).message,
-                        )
-                      : 'The assistant could not complete the request'),
-                ),
-              }
-            : undefined;
-        conversationMessage = await this.conversations.finishConversationTurn(
+      if (terminal) {
+        this.applyTerminalStatus(execution, status, failureMessage, options);
+        conversationMessage = await this.finishTerminalConversation(
           manager,
           execution,
-          turnStatus,
-          failureResponse,
+          status,
+          failureMessage,
+          options?.publication,
         );
       }
 
@@ -1390,14 +1465,14 @@ export class ExecutionService {
             from: previousStatus,
             to: status,
             phase: execution.phase ?? undefined,
-            completionKind: TERMINAL_STATES.has(status)
-              ? execution.completionKind
-              : undefined,
-            completionReason: TERMINAL_STATES.has(status)
-              ? execution.completionReason
-              : undefined,
-            result: TERMINAL_STATES.has(status) ? execution.result : undefined,
-            error: TERMINAL_STATES.has(status) ? execution.error : undefined,
+            ...(terminal
+              ? {
+                  completionKind: execution.completionKind,
+                  completionReason: execution.completionReason,
+                  result: execution.result,
+                  error: execution.error,
+                }
+              : {}),
             reason:
               status === ExecutionStatus.CANCELLED
                 ? execution.cancellationReason
@@ -1416,7 +1491,7 @@ export class ExecutionService {
       if (root.executionId !== execution.executionId) {
         await executionRepo.save(root);
       }
-      if (TERMINAL_STATES.has(status)) {
+      if (terminal) {
         await this.appendTerminalPublication(
           manager,
           execution,
@@ -1430,6 +1505,96 @@ export class ExecutionService {
     return manager
       ? transition(manager)
       : this.dataSource.transaction(transition);
+  }
+
+  private async lockExecutionRoot(
+    repository: Repository<ExecutionEntity>,
+    execution: ExecutionEntity,
+  ): Promise<ExecutionEntity> {
+    if (execution.rootExecutionId === execution.executionId) return execution;
+    const root = await repository.findOne({
+      where: {
+        executionId: execution.rootExecutionId,
+        rootExecutionId: execution.rootExecutionId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!root) throw new NotFoundException('Root execution not found');
+    return root;
+  }
+
+  private applyTerminalStatus(
+    execution: ExecutionEntity,
+    status: ExecutionStatus,
+    failureMessage?: string,
+    options?: ExecutionStatusUpdateOptions,
+  ): void {
+    execution.completedAt = new Date();
+    execution.phase = null;
+    execution.completionKind = options?.completionKind ?? 'full';
+    execution.completionReason =
+      options?.completionReason ?? this.defaultCompletionReason(status);
+    if (status === ExecutionStatus.FAILED && !execution.error) {
+      execution.error = {
+        code: 'EXECUTION_FAILED',
+        message: redactExecutionText(failureMessage ?? 'Execution failed'),
+      };
+    }
+    if (status === ExecutionStatus.CANCELLED) {
+      execution.cancellationRequestedAt ??= new Date();
+      execution.cancellationReason = redactExecutionText(
+        options?.cancellationReason ??
+          execution.cancellationReason ??
+          'Cancelled',
+      ).slice(0, 500);
+      execution.error = null;
+    }
+  }
+
+  private async finishTerminalConversation(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    status: ExecutionStatus,
+    failureMessage: string | undefined,
+    publication?: ExecutionPublication,
+  ): Promise<ChatMessageEntity | null> {
+    await finishSkillActivations(manager, execution.executionId, status);
+    let turnStatus:
+      | ConversationTurnStatus.COMPLETED
+      | ConversationTurnStatus.FAILED
+      | ConversationTurnStatus.CANCELLED;
+    if (status === ExecutionStatus.COMPLETED) {
+      turnStatus = ConversationTurnStatus.COMPLETED;
+    } else if (status === ExecutionStatus.CANCELLED) {
+      turnStatus = ConversationTurnStatus.CANCELLED;
+    } else {
+      turnStatus = ConversationTurnStatus.FAILED;
+    }
+    // A chat turn that fails without going through its processor finalizer
+    // (worker_failed, missing processor, finalization error) still owes the
+    // user an answer: without a persisted reply the client keeps the turn
+    // pending forever, since `chatPublication` is built from a message.
+    const failureResponse =
+      status === ExecutionStatus.FAILED &&
+      isChatTurnTaskType(execution.taskType) &&
+      !publication
+        ? {
+            reply: '',
+            error: redactExecutionText(
+              failureMessage ??
+                readString(
+                  (execution.error as Record<string, unknown> | null)?.message,
+                  'The assistant could not complete the request',
+                ),
+            ),
+          }
+        : undefined;
+    return this.conversations.finishConversationTurn(
+      manager,
+      execution,
+      turnStatus,
+      failureResponse,
+    );
   }
 
   async markAsCompleted(
@@ -1485,6 +1650,7 @@ export class ExecutionService {
       outboxRepo.create({
         outboxId: randomUUID(),
         executionId: execution.executionId,
+        ownerPrincipal: execution.ownerPrincipal,
         eventId,
         schemaVersion: 'execution-outbox/1',
         socketEvent: resolved.socketEvent,
@@ -1516,7 +1682,7 @@ export class ExecutionService {
       if (!execution) throw new NotFoundException('Execution not found');
       let accepted = 0;
       let duplicates = 0;
-      for (const input of artifacts) {
+      await forEachSequential(artifacts, async (input) => {
         this.validateArtifact(input);
         const repo = manager.getRepository(ExecutionArtifactEntity);
         const existing = await repo.findOne({
@@ -1532,27 +1698,9 @@ export class ExecutionService {
             );
           }
           duplicates += 1;
-          continue;
+          return;
         }
-        const body =
-          input.bodyBase64 !== undefined
-            ? Buffer.from(input.bodyBase64, 'base64')
-            : null;
-        if (body !== null && body.toString('base64') !== input.bodyBase64) {
-          throw new BadRequestException(
-            `Artifact body is not canonical base64: ${input.artifactId}`,
-          );
-        }
-        if (
-          body !== null &&
-          (body.length !== input.size ||
-            contentHash(body) !== input.contentHash)
-        ) {
-          throw new BadRequestException(
-            `Artifact integrity mismatch: ${input.artifactId}`,
-          );
-        }
-        if (body !== null) rejectSensitiveArtifactBody(input, body);
+        const body = this.decodeIncomingArtifact(input);
         await this.artifactStorage.save(manager, {
           artifactId: input.artifactId,
           rootExecutionId,
@@ -1565,11 +1713,9 @@ export class ExecutionService {
           redaction: input.redaction ?? { applied: false },
           retentionClass: input.retentionClass ?? 'evaluation',
           expiresAt:
-            input.expiresAt === undefined
-              ? undefined
-              : input.expiresAt === null
-                ? null
-                : new Date(input.expiresAt),
+            typeof input.expiresAt === 'string'
+              ? new Date(input.expiresAt)
+              : input.expiresAt,
           createdByEventId: input.createdByEventId ?? null,
           inputSourceIds: input.inputSourceIds ?? [],
           derivedFromArtifactIds: input.derivedFromArtifactIds ?? [],
@@ -1578,10 +1724,34 @@ export class ExecutionService {
         if (!body)
           this.addMissing(execution, `artifact_body:${input.artifactId}`);
         accepted += 1;
-      }
+      });
       await manager.save(execution);
       return { accepted, duplicates };
     });
+  }
+
+  private decodeIncomingArtifact(
+    input: IncomingExecutionArtifact,
+  ): Buffer | null {
+    const body =
+      input.bodyBase64 !== undefined
+        ? Buffer.from(input.bodyBase64, 'base64')
+        : null;
+    if (body !== null && body.toString('base64') !== input.bodyBase64) {
+      throw new BadRequestException(
+        `Artifact body is not canonical base64: ${input.artifactId}`,
+      );
+    }
+    if (
+      body !== null &&
+      (body.length !== input.size || contentHash(body) !== input.contentHash)
+    ) {
+      throw new BadRequestException(
+        `Artifact integrity mismatch: ${input.artifactId}`,
+      );
+    }
+    if (body !== null) rejectSensitiveArtifactBody(input, body);
+    return body;
   }
 
   async acceptEvents(
@@ -1604,7 +1774,7 @@ export class ExecutionService {
       let sequence = Number(execution.lastSequence);
       let accepted = 0;
       let duplicates = 0;
-      for (const incoming of events) {
+      await forEachSequential(events, async (incoming) => {
         this.validateIncomingEvent(execution, incoming);
         const targetExecution =
           incoming.executionId === execution.executionId
@@ -1628,67 +1798,27 @@ export class ExecutionService {
             throw new ConflictException(`Event identity conflict: ${eventId}`);
           }
           duplicates += 1;
-          continue;
+          return;
         }
         if (TERMINAL_STATES.has(execution.status)) {
           throw new ConflictException(
             'A terminal execution cannot accept new events',
           );
         }
-        const occupied = await eventRepo.findOne({
-          where: {
-            rootExecutionId,
-            producerComponent: producer.component,
-            producerInstanceId: producer.instanceId,
-            producerSequence: String(producerSequence),
-          },
-        });
-        if (occupied) {
-          throw new ConflictException(
-            `Producer sequence already belongs to ${occupied.eventId}`,
-          );
-        }
-        const previousProducerEvent = await eventRepo.findOne({
-          where: {
-            rootExecutionId,
-            producerComponent: producer.component,
-            producerInstanceId: producer.instanceId,
-          },
-          order: { producerSequence: 'DESC' },
-        });
-        if (
-          previousProducerEvent &&
-          producerSequence <= Number(previousProducerEvent.producerSequence)
-        ) {
-          throw new ConflictException(
-            'producerSequence must be strictly monotonic',
-          );
-        }
+        await this.assertProducerSequence(
+          eventRepo,
+          rootExecutionId,
+          producer,
+          producerSequence,
+        );
         const cause = incoming.causedByEventId;
-        if (cause) {
-          const knownCause = await eventRepo.findOne({
-            where: { eventId: cause, rootExecutionId },
-          });
-          if (!knownCause) {
-            throw new BadRequestException(`Unknown causal event: ${cause}`);
-          }
-        }
-        if (incoming.artifactRefs.length > 0) {
-          const artifacts = await manager
-            .getRepository(ExecutionArtifactEntity)
-            .findBy({ artifactId: In(incoming.artifactRefs), rootExecutionId });
-          const found = new Set(
-            artifacts.map((artifact) => artifact.artifactId.toLowerCase()),
-          );
-          const missing = incoming.artifactRefs.find(
-            (id) => !found.has(id.toLowerCase()),
-          );
-          if (missing) {
-            throw new BadRequestException(
-              `Unknown artifact reference: ${missing}`,
-            );
-          }
-        }
+        await this.assertEventReferences(
+          manager,
+          eventRepo,
+          rootExecutionId,
+          cause,
+          incoming.artifactRefs,
+        );
         await this.validateOperationLifecycle(
           eventRepo,
           rootExecutionId,
@@ -1738,12 +1868,78 @@ export class ExecutionService {
         }
         execution.lastEventId = eventId;
         accepted += 1;
-      }
+      });
       execution.lastSequence = String(sequence);
       await this.progress.refreshProjection(eventRepo, execution);
       await executionRepo.save(execution);
       return { accepted, duplicates, lastSequence: sequence };
     });
+  }
+
+  private async assertProducerSequence(
+    eventRepo: Repository<ExecutionEventEntity>,
+    rootExecutionId: string,
+    producer: { component: string; instanceId: string },
+    producerSequence: number,
+  ): Promise<void> {
+    const occupied = await eventRepo.findOne({
+      where: {
+        rootExecutionId,
+        producerComponent: producer.component,
+        producerInstanceId: producer.instanceId,
+        producerSequence: String(producerSequence),
+      },
+    });
+    if (occupied) {
+      throw new ConflictException(
+        `Producer sequence already belongs to ${occupied.eventId}`,
+      );
+    }
+    const previousProducerEvent = await eventRepo.findOne({
+      where: {
+        rootExecutionId,
+        producerComponent: producer.component,
+        producerInstanceId: producer.instanceId,
+      },
+      order: { producerSequence: 'DESC' },
+    });
+    if (
+      previousProducerEvent &&
+      producerSequence <= Number(previousProducerEvent.producerSequence)
+    ) {
+      throw new ConflictException(
+        'producerSequence must be strictly monotonic',
+      );
+    }
+  }
+
+  private async assertEventReferences(
+    manager: EntityManager,
+    eventRepo: Repository<ExecutionEventEntity>,
+    rootExecutionId: string,
+    cause: string | undefined,
+    artifactRefs: string[],
+  ): Promise<void> {
+    if (cause) {
+      const knownCause = await eventRepo.findOne({
+        where: { eventId: cause, rootExecutionId },
+      });
+      if (!knownCause) {
+        throw new BadRequestException(`Unknown causal event: ${cause}`);
+      }
+    }
+    if (artifactRefs.length > 0) {
+      const artifacts = await manager
+        .getRepository(ExecutionArtifactEntity)
+        .findBy({ artifactId: In(artifactRefs), rootExecutionId });
+      const found = new Set(
+        artifacts.map((artifact) => artifact.artifactId.toLowerCase()),
+      );
+      const missing = artifactRefs.find((id) => !found.has(id.toLowerCase()));
+      if (missing) {
+        throw new BadRequestException(`Unknown artifact reference: ${missing}`);
+      }
+    }
   }
 
   async completeExecution(
@@ -1761,17 +1957,7 @@ export class ExecutionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!execution) return;
-      const root =
-        execution.executionId === execution.rootExecutionId
-          ? execution
-          : await executionRepo.findOne({
-              where: {
-                executionId: execution.rootExecutionId,
-                rootExecutionId: execution.rootExecutionId,
-              },
-              lock: { mode: 'pessimistic_write' },
-            });
-      if (!root) throw new NotFoundException('Root execution not found');
+      const root = await this.lockExecutionRoot(executionRepo, execution);
       const rows = await eventRepo.find({
         where: { rootExecutionId: execution.rootExecutionId },
         order: { sequence: 'ASC' },
@@ -1822,77 +2008,21 @@ export class ExecutionService {
           payload?.messageKind === 'final_response'
         );
       });
-      const observedSourceIds = rows.flatMap((row) => {
-        if (row.eventType !== 'source.observed') return [];
-        const sourceId = (row.envelope.payload as Record<string, unknown>)
-          ?.sourceId;
-        return typeof sourceId === 'string' ? [sourceId] : [];
-      });
-      const dependencyArtifactIds = [
-        ...new Set(rows.flatMap((row) => row.envelope.artifactRefs ?? [])),
-      ];
-      const dependencyArtifacts = dependencyArtifactIds.length
-        ? await manager.getRepository(ExecutionArtifactEntity).findBy({
-            rootExecutionId: execution.rootExecutionId,
-            artifactId: In(dependencyArtifactIds),
-          })
-        : [];
-      const finalArtifactPolicy = derivedArtifactPolicy(dependencyArtifacts);
-
       if (!hasFinalMessage && reply && !TERMINAL_STATES.has(execution.status)) {
-        const artifactId = randomUUID();
-        const safeReply = redactExecutionText(reply);
-        const body = Buffer.from(safeReply, 'utf8');
-        await this.artifactStorage.save(manager, {
-          artifactId,
-          rootExecutionId: execution.rootExecutionId,
-          kind: 'model_response',
-          contentHash: contentHash(body),
-          size: String(body.length),
-          mediaType: 'text/plain',
-          encoding: 'identity',
-          dataClassification: finalArtifactPolicy.dataClassification,
-          redaction: { applied: safeReply !== reply },
-          retentionClass: finalArtifactPolicy.retentionClass,
-          expiresAt: finalArtifactPolicy.expiresAt,
-          createdByEventId: null,
-          inputSourceIds: [
-            ...new Set([
-              ...observedSourceIds,
-              ...finalArtifactPolicy.inputSourceIds,
-            ]),
-          ],
-          derivedFromArtifactIds: finalArtifactPolicy.derivedFromArtifactIds,
-          body,
-        });
-        sequence += 1;
-        const messageEvent = await this.appendBackendEvent(
+        const message = await this.appendFinalResponse(
           manager,
           root,
-          ++nextProducerSequence,
+          execution,
+          rows,
           {
-            eventType: 'message.recorded',
-            payloadSchema: 'message.recorded/1',
-            payload: {
-              messageKind: 'final_response',
-              role: 'assistant',
-              contentPreview: safeReply.slice(0, 512),
-              contentArtifactId: artifactId,
-              format: 'text',
-              ...(completion?.source
-                ? { generationSource: completion.source }
-                : {}),
-            },
-            actor: { type: 'system' },
-            executionId: execution.executionId,
-            turnId: execution.turnId,
+            reply,
+            generationSource: completion?.source,
             causedByEventId: lastEventId,
-            artifactRefs: [artifactId],
-            redactionApplied: safeReply !== reply,
+            sequence: ++sequence,
+            producerSequence: ++nextProducerSequence,
           },
-          sequence,
         );
-        lastEventId = messageEvent.eventId;
+        lastEventId = message.eventId;
       } else if (!hasFinalMessage && !error) {
         this.addMissing(execution, 'final_message');
       }
@@ -1926,19 +2056,12 @@ export class ExecutionService {
         lastEventId = progressEvent.eventId;
 
         sequence += 1;
-        const status = error ? 'failed' : 'completed';
-        const completionKind = completion?.kind ?? 'full';
-        const completionReason =
-          completion?.reason ??
-          (error ? 'model_or_tool_failed' : 'goal_satisfied');
-        const finalResult = error
-          ? null
-          : {
-              ...(execution.result && typeof execution.result === 'object'
-                ? execution.result
-                : {}),
-              reply: redactExecutionText(reply),
-            };
+        const outcome = this.chatCompletionOutcome(
+          execution,
+          reply,
+          error,
+          completion,
+        );
         const stateEvent = await this.appendBackendEvent(
           manager,
           root,
@@ -1948,25 +2071,17 @@ export class ExecutionService {
             payloadSchema: 'execution.state_changed/1',
             payload: {
               from: execution.status,
-              to: status,
-              completionKind,
-              completionReason,
+              to: outcome.status,
+              completionKind: outcome.completionKind,
+              completionReason: outcome.completionReason,
               ...(completion?.source
                 ? { completionSource: completion.source }
                 : {}),
               ...(completion?.partialResult
                 ? { partialResult: completion.partialResult }
                 : {}),
-              result: finalResult,
-              error: error
-                ? {
-                    code:
-                      completionReason === 'partial_loop_guard'
-                        ? 'IMMEDIATE_EXACT_TOOL_REPEAT_PERSISTED'
-                        : 'CHAT_FAILED',
-                    message: redactExecutionText(error),
-                  }
-                : null,
+              result: outcome.result,
+              error: outcome.error,
             },
             actor: { type: 'system' },
             executionId: execution.executionId,
@@ -1978,19 +2093,7 @@ export class ExecutionService {
         );
         lastEventId = stateEvent.eventId;
         terminalEventId = stateEvent.eventId;
-        execution.status = status as ExecutionStatus;
-        execution.completionKind = completionKind;
-        execution.completionReason = completionReason;
-        execution.result = finalResult;
-        execution.error = error
-          ? {
-              code:
-                completionReason === 'partial_loop_guard'
-                  ? 'IMMEDIATE_EXACT_TOOL_REPEAT_PERSISTED'
-                  : 'CHAT_FAILED',
-              message: redactExecutionText(error),
-            }
-          : null;
+        Object.assign(execution, outcome);
       }
       execution.lastSequence = String(sequence);
       execution.lastEventId = lastEventId;
@@ -2018,6 +2121,134 @@ export class ExecutionService {
         );
       }
     });
+  }
+
+  private async appendFinalResponse(
+    manager: EntityManager,
+    root: ExecutionEntity,
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+    input: {
+      reply: string;
+      generationSource?: ExecutionCompletion['source'];
+      causedByEventId: string | null;
+      sequence: number;
+      producerSequence: number;
+    },
+  ): Promise<ExecutionEventEntity> {
+    const {
+      reply,
+      generationSource,
+      causedByEventId,
+      sequence,
+      producerSequence,
+    } = input;
+    const observedSourceIds = rows.flatMap((row) => {
+      if (row.eventType !== 'source.observed') return [];
+      const sourceId = (row.envelope.payload as Record<string, unknown>)
+        ?.sourceId;
+      return typeof sourceId === 'string' ? [sourceId] : [];
+    });
+    const dependencyArtifactIds = [
+      ...new Set(rows.flatMap((row) => row.envelope.artifactRefs ?? [])),
+    ];
+    const dependencyArtifacts = dependencyArtifactIds.length
+      ? await manager.getRepository(ExecutionArtifactEntity).findBy({
+          rootExecutionId: execution.rootExecutionId,
+          artifactId: In(dependencyArtifactIds),
+        })
+      : [];
+    const finalArtifactPolicy = derivedArtifactPolicy(dependencyArtifacts);
+
+    const artifactId = randomUUID();
+    const safeReply = redactExecutionText(reply);
+    const body = Buffer.from(safeReply, 'utf8');
+    await this.artifactStorage.save(manager, {
+      artifactId,
+      rootExecutionId: execution.rootExecutionId,
+      kind: 'model_response',
+      contentHash: contentHash(body),
+      size: String(body.length),
+      mediaType: 'text/plain',
+      encoding: 'identity',
+      dataClassification: finalArtifactPolicy.dataClassification,
+      redaction: { applied: safeReply !== reply },
+      retentionClass: finalArtifactPolicy.retentionClass,
+      expiresAt: finalArtifactPolicy.expiresAt,
+      createdByEventId: null,
+      inputSourceIds: [
+        ...new Set([
+          ...observedSourceIds,
+          ...finalArtifactPolicy.inputSourceIds,
+        ]),
+      ],
+      derivedFromArtifactIds: finalArtifactPolicy.derivedFromArtifactIds,
+      body,
+    });
+    return this.appendBackendEvent(
+      manager,
+      root,
+      producerSequence,
+      {
+        eventType: 'message.recorded',
+        payloadSchema: 'message.recorded/1',
+        payload: {
+          messageKind: 'final_response',
+          role: 'assistant',
+          contentPreview: safeReply.slice(0, 512),
+          contentArtifactId: artifactId,
+          format: 'text',
+          ...(generationSource ? { generationSource } : {}),
+        },
+        actor: { type: 'system' },
+        executionId: execution.executionId,
+        turnId: execution.turnId,
+        causedByEventId,
+        artifactRefs: [artifactId],
+        redactionApplied: safeReply !== reply,
+      },
+      sequence,
+    );
+  }
+
+  private chatCompletionOutcome(
+    execution: ExecutionEntity,
+    reply: string,
+    error: string | null,
+    completion?: ExecutionCompletion,
+  ): Pick<
+    ExecutionEntity,
+    'status' | 'completionKind' | 'completionReason' | 'result' | 'error'
+  > {
+    const completionKind = completion?.kind ?? 'full';
+    const completionReason =
+      completion?.reason ?? (error ? 'model_or_tool_failed' : 'goal_satisfied');
+    if (error) {
+      return {
+        status: ExecutionStatus.FAILED,
+        completionKind,
+        completionReason,
+        result: null,
+        error: {
+          code:
+            completionReason === 'partial_loop_guard'
+              ? 'IMMEDIATE_EXACT_TOOL_REPEAT_PERSISTED'
+              : 'CHAT_FAILED',
+          message: redactExecutionText(error),
+        },
+      };
+    }
+    const previous =
+      execution.result && typeof execution.result === 'object'
+        ? execution.result
+        : {};
+    return {
+      status: ExecutionStatus.COMPLETED,
+      completionKind,
+      completionReason,
+      result: { ...previous, reply: redactExecutionText(reply) },
+      error: null,
+    };
   }
 
   async validateDeterministicPartial(
@@ -2390,7 +2621,7 @@ export class ExecutionService {
             sourceId,
       );
       if (!observed) throw new NotFoundException('source_not_found');
-      const existing = events.find(
+      const existing = events.some(
         (event) =>
           event.eventType === 'source.withdrawn' &&
           (event.envelope.payload as Record<string, unknown>)?.sourceId ===
@@ -2454,7 +2685,7 @@ export class ExecutionService {
       byRoot.set(artifact.rootExecutionId, ids);
     }
     let purged = 0;
-    for (const [rootExecutionId, artifactIds] of byRoot) {
+    await forEachSequential(byRoot, async ([rootExecutionId, artifactIds]) => {
       const result = await this.dataSource.transaction(async (manager) => {
         const root = await manager.getRepository(ExecutionEntity).findOne({
           where: { executionId: rootExecutionId, rootExecutionId },
@@ -2494,7 +2725,7 @@ export class ExecutionService {
           ownerPrincipal: result.ownerPrincipal,
         });
       }
-    }
+    });
     return purged;
   }
 
@@ -2586,20 +2817,7 @@ export class ExecutionService {
       missing,
     );
     if (hasInference) {
-      for (const start of starts.values()) {
-        if (start.operationKind !== 'inference') continue;
-        const exchanges = artifacts.filter(
-          (artifact) =>
-            artifact.kind === INFERENCE_EXCHANGE_KIND &&
-            artifact.producedByAttemptId === start.attemptId,
-        );
-        if (
-          !exchanges.length ||
-          !exchanges.every(({ body }) => hasCompleteInferenceExchange(body))
-        ) {
-          missing.add(`operation.${start.operationId}.inferenceExchange`);
-        }
-      }
+      addMissingInferenceExchanges(missing, starts.values(), artifacts);
       // Request/response capture alone does not establish the identity of the
       // served model, engine and template needed to replay an inference.
       missing.add('environment.servedInferenceIdentity');
@@ -2695,83 +2913,62 @@ export class ExecutionService {
     const receipts = await this.dataSource
       .getRepository(ExecutionResultReceiptEntity)
       .find({ where: { executionId: In(executionIds) } });
-    const modelFingerprints = new Set<string>();
-    const adapterFingerprints = new Set<string>();
-    const promptPackages = new Set<string>();
-    const codeFingerprints = new Set<string>();
-    const modelOperations = new Set<string>();
-    const adapterOperations = new Set<string>();
-    const promptOperations = new Set<string>();
-    const codeOperations = new Set<string>();
-    const runtimeOperations = new Set<string>();
+    const evidence = {
+      models: {
+        fingerprints: new Set<string>(),
+        operations: new Set<string>(),
+      },
+      adapters: {
+        fingerprints: new Set<string>(),
+        operations: new Set<string>(),
+      },
+      prompts: {
+        fingerprints: new Set<string>(),
+        operations: new Set<string>(),
+      },
+      code: { fingerprints: new Set<string>(), operations: new Set<string>() },
+      runtime: {
+        fingerprints: runtimeFingerprints,
+        operations: new Set<string>(),
+      },
+    };
     for (const receipt of receipts) {
       if (!operationIds.has(receipt.operationId)) continue;
-      const runtimeFingerprint = receipt.result?.runtimeFingerprint;
-      if (
-        typeof runtimeFingerprint === 'string' &&
-        EXECUTION_CONTENT_HASH_PATTERN.test(runtimeFingerprint)
-      ) {
-        runtimeFingerprints.add(runtimeFingerprint);
-        runtimeOperations.add(receipt.operationId);
-      }
+      recordContentFingerprint(
+        evidence.runtime,
+        receipt.operationId,
+        receipt.result?.runtimeFingerprint,
+      );
       if (!inferenceOperationIds.has(receipt.operationId)) continue;
-      const codeFingerprint = receipt.result?.codeFingerprint;
-      if (
-        typeof codeFingerprint === 'string' &&
-        EXECUTION_CONTENT_HASH_PATTERN.test(codeFingerprint)
-      ) {
-        codeFingerprints.add(codeFingerprint);
-        codeOperations.add(receipt.operationId);
-      }
-      const inference = receipt.result?.inference;
-      if (!inference || typeof inference !== 'object') continue;
-      const metadata = inference as Record<string, unknown>;
-      if (
-        typeof metadata.effectiveModel === 'string' &&
-        metadata.effectiveModel &&
-        !['unreported', 'not_executed'].includes(metadata.effectiveModel)
-      ) {
-        modelFingerprints.add(metadata.effectiveModel);
-        modelOperations.add(receipt.operationId);
-      }
-      if (Object.hasOwn(metadata, 'effectiveAdapter')) {
-        adapterOperations.add(receipt.operationId);
-        if (
-          typeof metadata.effectiveAdapter === 'string' &&
-          metadata.effectiveAdapter
-        ) {
-          adapterFingerprints.add(metadata.effectiveAdapter);
-        }
-      }
-      if (
-        Array.isArray(metadata.effectivePromptPackages) &&
-        metadata.effectivePromptPackages.length > 0 &&
-        metadata.effectivePromptPackages.every(
-          (value) => typeof value === 'string' && value.length > 0,
-        )
-      ) {
-        promptOperations.add(receipt.operationId);
-        for (const promptPackage of metadata.effectivePromptPackages) {
-          promptPackages.add(promptPackage as string);
-        }
-      }
+      recordContentFingerprint(
+        evidence.code,
+        receipt.operationId,
+        receipt.result?.codeFingerprint,
+      );
+      recordInferenceMetadata(
+        evidence,
+        receipt.operationId,
+        receipt.result?.inference,
+      );
     }
     const coversEveryInference = (covered: Set<string>) =>
       [...inferenceOperationIds].every((operationId) =>
         covered.has(operationId),
       );
     return {
-      modelFingerprints: [...modelFingerprints].sort(compareStrings),
-      adapterFingerprints: [...adapterFingerprints].sort(compareStrings),
-      promptPackages: [...promptPackages].sort(compareStrings),
-      codeFingerprints: [...codeFingerprints].sort(compareStrings),
+      modelFingerprints: [...evidence.models.fingerprints].sort(compareStrings),
+      adapterFingerprints: [...evidence.adapters.fingerprints].sort(
+        compareStrings,
+      ),
+      promptPackages: [...evidence.prompts.fingerprints].sort(compareStrings),
+      codeFingerprints: [...evidence.code.fingerprints].sort(compareStrings),
       runtimeFingerprints: [...runtimeFingerprints].sort(compareStrings),
-      modelIdentityKnown: coversEveryInference(modelOperations),
-      adapterIdentityKnown: coversEveryInference(adapterOperations),
-      promptIdentityKnown: coversEveryInference(promptOperations),
-      codeIdentityKnown: coversEveryInference(codeOperations),
-      runtimeIdentityKnown: [...operationIds].every((operationId) =>
-        runtimeOperations.has(operationId),
+      modelIdentityKnown: coversEveryInference(evidence.models.operations),
+      adapterIdentityKnown: coversEveryInference(evidence.adapters.operations),
+      promptIdentityKnown: coversEveryInference(evidence.prompts.operations),
+      codeIdentityKnown: coversEveryInference(evidence.code.operations),
+      runtimeIdentityKnown: [...operationIds].every((id) =>
+        evidence.runtime.operations.has(id),
       ),
     };
   }

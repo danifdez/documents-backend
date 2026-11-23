@@ -1,3 +1,5 @@
+import { forEachSequential } from '../utils/for-each-sequential';
+import { readString } from '../utils/read-string';
 import { compareStrings } from '../utils/compare-strings';
 import {
   assertInferenceExchange,
@@ -373,17 +375,21 @@ export class ExecutionAttemptService {
     }
 
     const deadline = Date.now() + waitTimeoutMs;
-    while (true) {
-      const assignment = await this.claimReadyStep(input);
-      if (assignment || Date.now() >= deadline) return assignment;
+    return this.pollForAssignment(input, deadline);
+  }
 
-      await new Promise((resolve) =>
-        setTimeout(
-          resolve,
-          Math.min(CLAIM_RETRY_INTERVAL_MS, deadline - Date.now()),
-        ),
-      );
-    }
+  private async pollForAssignment(
+    input: ClaimExecutionStepInput,
+    deadline: number,
+  ): Promise<StepAssignment | null> {
+    const assignment = await this.claimReadyStep(input);
+    const remaining = deadline - Date.now();
+    if (assignment || remaining <= 0) return assignment;
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, Math.min(CLAIM_RETRY_INTERVAL_MS, remaining));
+    });
+    return this.pollForAssignment(input, deadline);
   }
 
   startAttempt(
@@ -437,15 +443,14 @@ export class ExecutionAttemptService {
           where: { attemptId },
           lock: { mode: 'pessimistic_write' },
         });
-      if (!attempt || attempt.claimedBy !== workerId) {
+      if (attempt?.claimedBy !== workerId) {
         return ack('stale_attempt');
       }
       const step = await manager.getRepository(ExecutionStepEntity).findOneBy({
         stepId: attempt.stepId,
       });
       if (
-        !step ||
-        step.currentAttemptId !== attemptId ||
+        step?.currentAttemptId !== attemptId ||
         attempt.leaseExpiresAt <= acknowledgedAt ||
         ![
           ExecutionStepAttemptStatus.LEASED,
@@ -704,7 +709,7 @@ export class ExecutionAttemptService {
     const attempt = await this.dataSource
       .getRepository(ExecutionStepAttemptEntity)
       .findOneBy({ attemptId });
-    if (!attempt || attempt.claimedBy !== workerId) {
+    if (attempt?.claimedBy !== workerId) {
       throw new NotFoundException('attempt_not_found');
     }
     const step = await this.dataSource
@@ -792,18 +797,18 @@ export class ExecutionAttemptService {
       ],
     );
     const recovered: RecoverableLocalEffectAssignment[] = [];
-    for (const row of rows) {
+    await forEachSequential(rows, async (row: { attempt_id: string }) => {
       const attempt = await this.dataSource
         .getRepository(ExecutionStepAttemptEntity)
         .findOneBy({ attemptId: String(row.attempt_id) });
-      if (!attempt) continue;
+      if (!attempt) return;
       const step = await this.dataSource
         .getRepository(ExecutionStepEntity)
         .findOneBy({ stepId: attempt.stepId });
       const execution = await this.dataSource
         .getRepository(ExecutionEntity)
         .findOneBy({ executionId: attempt.executionId });
-      if (!step || !execution) continue;
+      if (!step || !execution) return;
       const dependencies = await this.dataSource
         .getRepository(ExecutionStepDependencyEntity)
         .findBy({ stepId: step.stepId });
@@ -837,7 +842,7 @@ export class ExecutionAttemptService {
           execution.status === ExecutionStatus.CANCELLED ||
           Boolean(execution.cancellationRequestedAt),
       });
-    }
+    });
     return recovered;
   }
 
@@ -1035,9 +1040,9 @@ export class ExecutionAttemptService {
         take: limit,
       });
     let expired = 0;
-    for (const attempt of attempts) {
+    await forEachSequential(attempts, async (attempt) => {
       if (await this.expireAttempt(attempt.attemptId, now)) expired += 1;
-    }
+    });
     return expired;
   }
 
@@ -1204,7 +1209,7 @@ export class ExecutionAttemptService {
     result: ToolResultContract,
     now: Date,
   ): Promise<boolean> {
-    const taskType = String(step.work?.taskType ?? '');
+    const taskType = readString(step.work?.taskType);
     if (
       attempt.claimedBy !== LOCAL_TOOL_RUNTIME_WORKER_ID ||
       attempt.leaseExpiresAt > now ||
@@ -1282,7 +1287,8 @@ export class ExecutionAttemptService {
       if (
         typeof ref.role !== 'string' ||
         !ref.role.trim() ||
-        !UUID_PATTERN.test(String(ref.artifactId ?? '')) ||
+        typeof ref.artifactId !== 'string' ||
+        !UUID_PATTERN.test(ref.artifactId) ||
         (ref.revision !== undefined &&
           (!Number.isInteger(ref.revision) || Number(ref.revision) < 1))
       ) {
@@ -1290,7 +1296,7 @@ export class ExecutionAttemptService {
       }
       return {
         role: ref.role.trim(),
-        artifactId: String(ref.artifactId),
+        artifactId: ref.artifactId,
         ...(ref.revision === undefined
           ? {}
           : { revision: Number(ref.revision) }),
@@ -1372,84 +1378,28 @@ export class ExecutionAttemptService {
               operationId: operation.operationId,
             })
           : null;
-        const acceptedStatus = canonicalToolResult?.status ?? status;
+        const acceptedStatus =
+          canonicalToolResult?.status ?? readString(status, 'failed');
         const acceptedError = canonicalToolResult
           ? canonicalToolResult.error
           : (result.error as Record<string, unknown> | null | undefined);
-        const executionWasTerminal = [
-          ExecutionStatus.COMPLETED,
-          ExecutionStatus.FAILED,
-          ExecutionStatus.CANCELLED,
-        ].includes(execution.status);
-        const cancellationRequested = Boolean(
-          execution.cancellationRequestedAt,
-        );
-        const executionHasTerminalIntent =
-          executionWasTerminal ||
-          cancellationRequested ||
-          [
-            'terminal_pending_failed',
-            'terminal_pending_cancelled',
-            'backend_failure_finalization',
-            'domain_failure_finalization',
-          ].includes(execution.phase ?? '');
         const finishedAt = new Date();
-        if (['succeeded', 'not_executed'].includes(String(acceptedStatus))) {
-          assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
-          step.status = ExecutionStepStatus.COMPLETED;
-          step.result = result.output ?? null;
-          operation.status = canonicalToolResult
-            ? operationStatusForToolResult(canonicalToolResult.status)
-            : ExecutionOperationStatus.SUCCEEDED;
-          operation.result = canonicalToolResult ?? result.output ?? null;
-          operation.error = null;
-        } else if (acceptedStatus === 'cancelled') {
-          assertStepTransition(step.status, ExecutionStepStatus.CANCELLED);
-          step.status = ExecutionStepStatus.CANCELLED;
-          operation.status = ExecutionOperationStatus.CANCELLED;
-          operation.result = canonicalToolResult;
-          operation.error = acceptedError ?? null;
-          if (!executionHasTerminalIntent) {
-            execution.phase = 'terminal_pending_cancelled';
-          }
-        } else {
-          assertStepTransition(step.status, ExecutionStepStatus.FAILED);
-          step.status = ExecutionStepStatus.FAILED;
-          step.error = acceptedError as Record<string, unknown>;
-          operation.status = canonicalToolResult
-            ? operationStatusForToolResult(canonicalToolResult.status)
-            : ExecutionOperationStatus.FAILED;
-          operation.result = canonicalToolResult;
-          operation.error = acceptedError as Record<string, unknown>;
-          if (!executionHasTerminalIntent) {
-            execution.error = acceptedError;
-            execution.phase = step.finalizeOnFailure
-              ? 'backend_failure_finalization'
-              : 'terminal_pending_failed';
-          }
-        }
-        if (cancellationRequested && !executionWasTerminal) {
-          if (
-            ['succeeded', 'cancelled', 'not_executed'].includes(
-              String(acceptedStatus),
-            )
-          ) {
-            execution.phase = 'terminal_pending_cancelled';
-          } else {
-            execution.phase = 'terminal_pending_failed';
-            execution.error = acceptedError ?? {
-              code: 'operation_failed_during_cancellation',
-              message: 'An operation failed while cancellation was pending',
-            };
-          }
-        }
+        const executionHasTerminalIntent = this.applyAcceptedStepResult(
+          execution,
+          step,
+          operation,
+          acceptedStatus,
+          result,
+          canonicalToolResult,
+          acceptedError,
+        );
         assertAttemptTransition(
           attempt.status,
           ExecutionStepAttemptStatus.CLOSED,
         );
         attempt.status = ExecutionStepAttemptStatus.CLOSED;
         attempt.finishedAt = finishedAt;
-        attempt.finishReason = String(acceptedStatus);
+        attempt.finishReason = acceptedStatus;
         operation.currentAttemptId = null;
         operation.finishedAt = finishedAt;
         step.version += 1;
@@ -1458,31 +1408,13 @@ export class ExecutionAttemptService {
           canonicalToolResult &&
           toolPlan?.toolName === SKILL_RESOURCE_LOAD_TOOL_NAME
         ) {
-          const loaded = canonicalToolResult.structuredContent as Record<
-            string,
-            unknown
-          > | null;
-          const planned = toolPlan.plan.normalizedArguments as Record<
-            string,
-            unknown
-          >;
-          if (
-            loaded?.schemaVersion !== 'skill-resource/1' ||
-            loaded.skillId !== planned.skillId ||
-            loaded.skillVersion !== planned.skillVersion ||
-            loaded.resourceId !== planned.resourceId ||
-            loaded.contentHash !== planned.resourceContentHash
-          ) {
-            throw new ConflictException('skill_resource_result_mismatch');
-          }
-          await recordLoadedSkillResource(manager, execution.executionId, {
-            skillId: String(planned.skillId),
-            skillVersion: String(planned.skillVersion),
-            skillContentHash: String(planned.skillContentHash),
-            resourceId: String(planned.resourceId),
-            resourceContentHash: String(planned.resourceContentHash),
-            operationId: operation.operationId,
-          });
+          await this.recordAcceptedSkillResource(
+            manager,
+            execution.executionId,
+            operation.operationId,
+            canonicalToolResult,
+            toolPlan,
+          );
         }
         await attemptRepo.save(attempt);
         await stepRepo.save(step);
@@ -1534,6 +1466,125 @@ export class ExecutionAttemptService {
       processed += 1;
     }
     return processed;
+  }
+
+  private applyAcceptedStepResult(
+    execution: ExecutionEntity,
+    step: ExecutionStepEntity,
+    operation: ExecutionOperationEntity,
+    acceptedStatus: string,
+    result: Record<string, unknown>,
+    canonicalToolResult: ToolResultContract | null,
+    acceptedError:
+      Record<string, unknown> | ToolResultContract['error'] | null | undefined,
+  ): boolean {
+    const executionWasTerminal = [
+      ExecutionStatus.COMPLETED,
+      ExecutionStatus.FAILED,
+      ExecutionStatus.CANCELLED,
+    ].includes(execution.status);
+    const cancellationRequested = Boolean(execution.cancellationRequestedAt);
+    const executionHasTerminalIntent =
+      executionWasTerminal ||
+      cancellationRequested ||
+      [
+        'terminal_pending_failed',
+        'terminal_pending_cancelled',
+        'backend_failure_finalization',
+        'domain_failure_finalization',
+      ].includes(execution.phase ?? '');
+    if (['succeeded', 'not_executed'].includes(acceptedStatus)) {
+      assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
+      step.status = ExecutionStepStatus.COMPLETED;
+      step.result = result.output ?? null;
+      operation.status = canonicalToolResult
+        ? operationStatusForToolResult(canonicalToolResult.status)
+        : ExecutionOperationStatus.SUCCEEDED;
+      operation.result = canonicalToolResult ?? result.output ?? null;
+      operation.error = null;
+    } else if (acceptedStatus === 'cancelled') {
+      assertStepTransition(step.status, ExecutionStepStatus.CANCELLED);
+      step.status = ExecutionStepStatus.CANCELLED;
+      operation.status = ExecutionOperationStatus.CANCELLED;
+      operation.result = canonicalToolResult;
+      operation.error = acceptedError ?? null;
+      if (!executionHasTerminalIntent) {
+        execution.phase = 'terminal_pending_cancelled';
+      }
+    } else {
+      assertStepTransition(step.status, ExecutionStepStatus.FAILED);
+      step.status = ExecutionStepStatus.FAILED;
+      step.error = acceptedError as Record<string, unknown>;
+      operation.status = canonicalToolResult
+        ? operationStatusForToolResult(canonicalToolResult.status)
+        : ExecutionOperationStatus.FAILED;
+      operation.result = canonicalToolResult;
+      operation.error = acceptedError as Record<string, unknown>;
+      if (!executionHasTerminalIntent) {
+        execution.error = acceptedError;
+        execution.phase = step.finalizeOnFailure
+          ? 'backend_failure_finalization'
+          : 'terminal_pending_failed';
+      }
+    }
+    if (cancellationRequested && !executionWasTerminal) {
+      this.reconcileResultDuringCancellation(
+        execution,
+        acceptedStatus,
+        acceptedError,
+      );
+    }
+    return executionHasTerminalIntent;
+  }
+
+  private reconcileResultDuringCancellation(
+    execution: ExecutionEntity,
+    status: string,
+    error: unknown,
+  ): void {
+    if (['succeeded', 'cancelled', 'not_executed'].includes(status)) {
+      execution.phase = 'terminal_pending_cancelled';
+      return;
+    }
+    execution.phase = 'terminal_pending_failed';
+    execution.error = error ?? {
+      code: 'operation_failed_during_cancellation',
+      message: 'An operation failed while cancellation was pending',
+    };
+  }
+
+  private async recordAcceptedSkillResource(
+    manager: EntityManager,
+    executionId: string,
+    operationId: string,
+    canonicalToolResult: ToolResultContract,
+    toolPlan: ExecutionToolPlanEntity,
+  ): Promise<void> {
+    const loaded = canonicalToolResult.structuredContent as Record<
+      string,
+      unknown
+    > | null;
+    const planned = toolPlan.plan.normalizedArguments as Record<
+      string,
+      unknown
+    >;
+    if (
+      loaded?.schemaVersion !== 'skill-resource/1' ||
+      loaded.skillId !== planned.skillId ||
+      loaded.skillVersion !== planned.skillVersion ||
+      loaded.resourceId !== planned.resourceId ||
+      loaded.contentHash !== planned.resourceContentHash
+    ) {
+      throw new ConflictException('skill_resource_result_mismatch');
+    }
+    await recordLoadedSkillResource(manager, executionId, {
+      skillId: readString(planned.skillId),
+      skillVersion: readString(planned.skillVersion),
+      skillContentHash: readString(planned.skillContentHash),
+      resourceId: readString(planned.resourceId),
+      resourceContentHash: readString(planned.resourceContentHash),
+      operationId,
+    });
   }
 
   private async lockCurrentAttempt(
@@ -1626,7 +1677,7 @@ export class ExecutionAttemptService {
       step.stepKind === ExecutionStepKind.INFERENCE &&
       isAgentLoopTaskType(execution.taskType) &&
       !['context-input-map', 'context-input-reduce'].includes(
-        String(step.work?.taskType ?? ''),
+        readString(step.work?.taskType),
       ) &&
       !step.budgetReservationId
     ) {
@@ -1667,7 +1718,7 @@ export class ExecutionAttemptService {
       where: { operationId: step.operationId },
       lock: { mode: 'pessimistic_write' },
     });
-    if (!operation || operation.stepId !== step.stepId) {
+    if (operation?.stepId !== step.stepId) {
       throw new ConflictException('operation_not_found');
     }
     if (
@@ -1739,7 +1790,7 @@ export class ExecutionAttemptService {
         payload: {
           operationKind,
           status: 'dispatched',
-          name: String(work.taskType ?? operationKind),
+          name: readString(work.taskType, operationKind),
           ...budgetPayload,
         },
         actor: { type: 'system' },
@@ -1777,8 +1828,7 @@ export class ExecutionAttemptService {
     const reservation =
       ledger.operationBudget?.reservations[operation.operationId];
     if (
-      !reservation ||
-      reservation.reservationId !== step.budgetReservationId ||
+      reservation?.reservationId !== step.budgetReservationId ||
       reservation.status !== 'reserved' ||
       reservation.operationKind !== operationKind
     ) {
@@ -1798,9 +1848,9 @@ export class ExecutionAttemptService {
     );
     return {
       loopId: grant.loopId,
-      agentName: String(
-        work.agentName ??
-          (execution.taskType === 'agent-chat' ? 'agent' : 'assistant'),
+      agentName: readString(
+        work.agentName,
+        execution.taskType === 'agent-chat' ? 'agent' : 'assistant',
       ),
       loopKind: execution.parentExecutionId
         ? 'synchronous_subagent'
@@ -1873,7 +1923,7 @@ export class ExecutionAttemptService {
     const toolPlan = step.work?.toolPlan as Record<string, unknown> | undefined;
     const toolSummary =
       toolResult?.status === 'succeeded'
-        ? `${String(toolPlan?.toolName ?? 'Tool')} completed`.slice(0, 200)
+        ? `${readString(toolPlan?.toolName, 'Tool')} completed`.slice(0, 200)
         : null;
     const eventStatus =
       operation.status === ExecutionOperationStatus.NOT_EXECUTED
@@ -1968,11 +2018,14 @@ export class ExecutionAttemptService {
     manager: EntityManager,
     resourceKeys: string[],
   ): Promise<void> {
-    for (const resourceKey of [...new Set(resourceKeys)].sort(compareStrings)) {
-      await manager.query(
-        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        [resourceKey],
-      );
-    }
+    await forEachSequential(
+      [...new Set(resourceKeys)].sort(compareStrings),
+      async (resourceKey) => {
+        await manager.query(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          [resourceKey],
+        );
+      },
+    );
   }
 }

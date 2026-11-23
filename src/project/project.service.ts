@@ -15,7 +15,7 @@ export class ProjectService {
     return await this.repository.findOneBy({ id });
   }
 
-  async create(project: Partial<ProjectEntity>): Promise<ProjectEntity> {
+  create(project: Partial<ProjectEntity>): Promise<ProjectEntity> {
     const created = this.repository.create(project);
     return this.repository.save(created);
   }
@@ -197,23 +197,6 @@ export class ProjectService {
       [id],
     );
 
-    const events: { date: string; label: string; endDate?: string }[] = [];
-    for (const tl of timelineEvents) {
-      const data =
-        typeof tl.timelineData === 'string'
-          ? JSON.parse(tl.timelineData)
-          : tl.timelineData;
-      if (Array.isArray(data)) {
-        for (const ev of data) {
-          events.push({
-            date: ev.date,
-            label: ev.title,
-            endDate: ev.endDate || undefined,
-          });
-        }
-      }
-    }
-
     return {
       ...counts[0],
       languages: languages.map((r: any) => r.language),
@@ -244,7 +227,30 @@ export class ProjectService {
         weight: r.weight,
       })),
       keyPoints: keyPoints.slice(0, 20),
-      timelineEvents: events,
+      timelineEvents: this.timelineSummary(timelineEvents),
     };
+  }
+
+  private timelineSummary(
+    timelines: Array<{ timelineData: unknown }>,
+  ): { date: string; label: string; endDate?: string }[] {
+    const events: { date: string; label: string; endDate?: string }[] = [];
+    for (const tl of timelines) {
+      const data =
+        typeof tl.timelineData === 'string'
+          ? JSON.parse(tl.timelineData)
+          : tl.timelineData;
+      if (Array.isArray(data)) {
+        for (const ev of data) {
+          events.push({
+            date: ev.date,
+            label: ev.title,
+            endDate: ev.endDate || undefined,
+          });
+        }
+      }
+    }
+
+    return events;
   }
 }

@@ -64,10 +64,7 @@ export class ExecutionArtifactStorageService {
   ): Promise<ExecutionArtifactEntity> {
     this.assertBodyIntegrity(input);
     assertArtifactRetentionClass(input.retentionClass);
-    const expiresAt =
-      input.expiresAt === undefined
-        ? defaultArtifactExpiry(input.retentionClass)
-        : input.expiresAt;
+    const { expiresAt = defaultArtifactExpiry(input.retentionClass) } = input;
     if (expiresAt !== null && expiresAt <= new Date()) {
       throw new Error('artifact_expiry_invalid');
     }

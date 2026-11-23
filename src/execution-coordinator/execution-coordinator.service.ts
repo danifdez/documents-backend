@@ -1,3 +1,4 @@
+import { claimAvailable } from '../utils/claim-available';
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessorFactory } from '../execution-processor/execution-processor.factory';
 import { ExecutionAttemptService } from '../execution/execution-attempt.service';
@@ -58,10 +59,10 @@ export class ExecutionCoordinatorService {
 
   async finalizeReady(limit = 20): Promise<number> {
     let finalized = 0;
-    while (finalized < limit) {
-      const execution = await this.executionService.claimReadyForFinalization();
-      if (!execution) break;
-
+    for await (const execution of claimAvailable(
+      () => this.executionService.claimReadyForFinalization(),
+      limit,
+    )) {
       await this.finalizeClaimedExecution(execution);
       finalized += 1;
     }

@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { AuthService } from '../auth/auth.service';
 import { authorizeVoiceConnection } from './voice-authorization';
 import { assertVoiceEvidence } from './voice-evidence';
@@ -66,7 +67,7 @@ interface QueueEntry {
 export class VoiceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VoiceService.name);
 
-  private workers: WorkerSlot[] = [];
+  private readonly workers: WorkerSlot[] = [];
   private queue: QueueEntry[] = [];
   private stopping = false;
   private healthTimer?: ReturnType<typeof setInterval>;
@@ -74,7 +75,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
   private readonly sessions = new Map<string, VoiceSession>();
   private readonly pendingRecords = new Set<Promise<unknown>>();
   /** Initial heuristic for average session duration, in seconds. */
-  private avgSessionSec = 60;
+  private readonly avgSessionSec = 60;
 
   constructor(
     private readonly config: ConfigService,
@@ -487,11 +488,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       output = output
         .then(() => this.onWorkerMessage(worker, client, data, isBinary))
         .catch(async () => {
-          await this.finish(
-            session,
-            ExecutionStatus.FAILED,
-            'voice_result_unconfirmed',
-          ).catch(() => undefined);
+          await this.finishFailedSession(session, 'voice_result_unconfirmed');
           this.releaseWorker(worker, 'result_unconfirmed');
           this.emitError(client, 'Voice result could not be confirmed');
         })
@@ -515,11 +512,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       // received output in order before deciding that the stream was lost.
       void output.then(async () => {
         if (worker.ws !== ws) return;
-        await this.finish(
-          session,
-          ExecutionStatus.FAILED,
-          'voice_worker_closed',
-        ).catch(() => undefined);
+        await this.finishFailedSession(session, 'voice_worker_closed');
         worker.ws = null;
         worker.clientId = null;
         worker.status = 'down';
@@ -532,6 +525,17 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
         this.processQueue();
       });
     });
+  }
+
+  private async finishFailedSession(
+    session: VoiceSession,
+    reason: string,
+  ): Promise<void> {
+    try {
+      await this.finish(session, ExecutionStatus.FAILED, reason);
+    } catch (error) {
+      this.logger.warn(error instanceof Error ? error.message : reason);
+    }
   }
 
   private enqueue(client: Socket): void {
@@ -593,47 +597,56 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (payload?.type === 'partial') {
-      if (
-        typeof payload.text !== 'string' ||
-        typeof payload.isFinal !== 'boolean' ||
-        Buffer.byteLength(payload.text) > 1024 * 1024
-      )
-        throw new Error('Invalid voice result');
-      if (payload.isFinal) {
-        const row = await this.finish(
-          session,
-          ExecutionStatus.COMPLETED,
-          'voice_final',
-          payload.text,
-        );
-        if (row?.status !== ExecutionStatus.COMPLETED || !client.connected) {
-          this.releaseWorker(worker, 'voice_inactive');
-          return;
-        }
-      } else {
-        const state = await this.records.read(
-          session.requestId,
-          'voice-dictation',
-          { ownerPrincipal: session.ownerPrincipal },
-        );
-        if (state.status !== ExecutionStatus.RUNNING || !client.connected) {
-          this.releaseIfHolding(client);
-          return;
-        }
-      }
-      client.emit('voice:partial', {
-        text: payload.text ?? '',
-        isFinal: !!payload.isFinal,
-      });
-      if (payload.isFinal) {
-        this.releaseWorker(worker, 'final');
-      }
+      await this.onPartialResult(worker, client, session, payload);
       return;
     }
     if (payload?.type === 'error') {
       await this.finish(session, ExecutionStatus.FAILED, 'voice_worker_error');
       this.emitError(client, 'Voice worker failed');
       this.releaseWorker(worker, 'worker-error');
+    }
+  }
+
+  private async onPartialResult(
+    worker: WorkerSlot,
+    client: Socket,
+    session: VoiceSession,
+    payload: { text?: string; isFinal?: boolean },
+  ): Promise<void> {
+    if (
+      typeof payload.text !== 'string' ||
+      typeof payload.isFinal !== 'boolean' ||
+      Buffer.byteLength(payload.text) > 1024 * 1024
+    )
+      throw new Error('Invalid voice result');
+    if (payload.isFinal) {
+      const row = await this.finish(
+        session,
+        ExecutionStatus.COMPLETED,
+        'voice_final',
+        payload.text,
+      );
+      if (row?.status !== ExecutionStatus.COMPLETED || !client.connected) {
+        this.releaseWorker(worker, 'voice_inactive');
+        return;
+      }
+    } else {
+      const state = await this.records.read(
+        session.requestId,
+        'voice-dictation',
+        { ownerPrincipal: session.ownerPrincipal },
+      );
+      if (state.status !== ExecutionStatus.RUNNING || !client.connected) {
+        this.releaseIfHolding(client);
+        return;
+      }
+    }
+    client.emit('voice:partial', {
+      text: payload.text ?? '',
+      isFinal: !!payload.isFinal,
+    });
+    if (payload.isFinal) {
+      this.releaseWorker(worker, 'final');
     }
   }
 
@@ -658,41 +671,10 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     assertVoiceEvidence(kind, value);
     const duplicate =
       Number.isSafeInteger(sequence) && sequence <= session.evidenceSequence;
-    if (!duplicate) {
-      if (kind === 'stream_runtime') {
-        if (sequence !== 1 || session.runtimeHash)
-          throw new Error('Voice runtime order differs');
-      } else {
-        if (
-          value.runtimeHash !== session.runtimeHash ||
-          value.input.chunks > session.chunks ||
-          value.input.bytes > session.audioBytes
-        )
-          throw new Error('Voice evidence binding differs');
-        if (value.phase === 'started') {
-          if (session.pendingCall || value.index !== session.callIndex + 1)
-            throw new Error('Voice call order differs');
-        } else if (
-          !session.pendingCall ||
-          canonicalHash({
-            ...value,
-            phase: 'started',
-            decoded: undefined,
-            decodeUs: undefined,
-            inferenceUs: undefined,
-            parameters: undefined,
-            audioDurationUs: undefined,
-            audioAfterVadUs: undefined,
-            text: undefined,
-            finishedAt: undefined,
-            errorCode: undefined,
-          }) !== canonicalHash(session.pendingCall)
-        )
-          throw new Error('Voice call identity differs');
-      }
-    }
+    if (!duplicate) this.assertEvidenceOrder(session, kind, sequence, value);
     const runtime = kind === 'stream_runtime';
     const key = 'stream.call.' + String(value.index) + '.finish';
+    const pendingCallFields = value.phase === 'started' ? [key] : [];
     const stored = await this.records.captureEvidence(
       session.executionId,
       'voice-dictation',
@@ -706,9 +688,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
               'stream.calls_unconfirmed',
               'stream.generation_defaults_not_captured',
             ]
-          : value.phase === 'started'
-            ? [key]
-            : [],
+          : pendingCallFields,
         resolve: runtime
           ? ['stream.engine_not_reported']
           : [
@@ -726,12 +706,51 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
     } else session.pendingCall = undefined;
   }
 
+  private assertEvidenceOrder(
+    session: VoiceSession,
+    kind: string,
+    sequence: number,
+    value: any,
+  ): void {
+    if (kind === 'stream_runtime') {
+      if (sequence !== 1 || session.runtimeHash)
+        throw new Error('Voice runtime order differs');
+    } else {
+      if (
+        value.runtimeHash !== session.runtimeHash ||
+        value.input.chunks > session.chunks ||
+        value.input.bytes > session.audioBytes
+      )
+        throw new Error('Voice evidence binding differs');
+      if (value.phase === 'started') {
+        if (session.pendingCall || value.index !== session.callIndex + 1)
+          throw new Error('Voice call order differs');
+      } else if (
+        !session.pendingCall ||
+        canonicalHash({
+          ...value,
+          phase: 'started',
+          decoded: undefined,
+          decodeUs: undefined,
+          inferenceUs: undefined,
+          parameters: undefined,
+          audioDurationUs: undefined,
+          audioAfterVadUs: undefined,
+          text: undefined,
+          finishedAt: undefined,
+          errorCode: undefined,
+        }) !== canonicalHash(session.pendingCall)
+      )
+        throw new Error('Voice call identity differs');
+    }
+  }
+
   private async refreshWorkers() {
     if (this.stopping || this.refreshing) return;
     this.refreshing = true;
     let recovered = false;
     try {
-      for (const worker of this.workers) {
+      await forEachSequential(this.workers, async (worker) => {
         if (
           worker.status === 'down' &&
           !worker.ws &&
@@ -741,7 +760,7 @@ export class VoiceService implements OnModuleInit, OnModuleDestroy {
           worker.status = 'free';
           recovered = true;
         }
-      }
+      });
       if (recovered && !this.stopping) this.processQueue();
     } finally {
       this.refreshing = false;

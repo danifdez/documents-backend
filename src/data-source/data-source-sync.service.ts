@@ -1,3 +1,5 @@
+import { claimAvailable } from '../utils/claim-available';
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable, Logger } from '@nestjs/common';
 import { EntityManager, In, Repository } from 'typeorm';
 import { isDeepStrictEqual } from 'node:util';
@@ -80,19 +82,25 @@ export class DataSourceSyncService {
       const records: Record<string, any>[] = [];
       let cursor: string | undefined;
       let hasMore = true;
-      while (hasMore) {
+      let firstPage = true;
+      const fetchNextPage = async () => {
+        if (!hasMore) return null;
+        if (!firstPage && source.rateLimitRpm) {
+          const delay = Math.ceil(60_000 / source.rateLimitRpm);
+          await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        }
         const page = await provider.fetch(
           source.config,
           credentials ?? undefined,
           cursor,
         );
-        records.push(...page.records);
+        firstPage = false;
         hasMore = page.hasMore ?? false;
         cursor = page.cursor;
-        if (hasMore && source.rateLimitRpm) {
-          const delay = Math.ceil(60_000 / source.rateLimitRpm);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
+        return page.records;
+      };
+      for await (const batch of claimAvailable(fetchNextPage)) {
+        records.push(...batch);
       }
       const mapped = this.applyMapping(records, source.schemaMapping);
       const schema = source.schemaMapping?.length
@@ -158,55 +166,13 @@ export class DataSourceSyncService {
       source.dataset = dataset;
     }
 
-    let created = 0;
-    let updated = 0;
-    const touched: DatasetRecordEntity[] = [];
-    let fullReplaceDatasetId: number | null = null;
-    if (dataset && prepared.records.length) {
-      const validated = this.datasetService.prepareValidRecords(
-        prepared.schema,
-        prepared.records,
-      );
-      if (source.syncStrategy === 'incremental' && source.incrementalKey) {
-        const existing = await records.find({
-          where: { dataset: { id: dataset.id } },
-        });
-        const byKey = new Map(
-          existing
-            .map(
-              (record) =>
-                [
-                  String(record.data?.[source.incrementalKey!] ?? ''),
-                  record,
-                ] as const,
-            )
-            .filter(([key]) => key),
-        );
-        for (const data of validated.records) {
-          const key = String(data[source.incrementalKey] ?? '');
-          const current = key ? byKey.get(key) : undefined;
-          if (current) {
-            current.data = data;
-            touched.push(await records.save(current));
-            updated += 1;
-          } else {
-            touched.push(
-              await records.save(this.newRecord(records, dataset.id, data)),
-            );
-            created += 1;
-          }
-        }
-      } else {
-        fullReplaceDatasetId = dataset.id;
-        await records.delete({ dataset: { id: dataset.id } });
-        for (const data of validated.records) {
-          touched.push(
-            await records.save(this.newRecord(records, dataset.id, data)),
-          );
-        }
-        created = touched.length;
-      }
-    }
+    const changes = await this.writeDatasetRecords(
+      records,
+      dataset,
+      source,
+      prepared,
+    );
+    const { created, updated, touched, fullReplaceDatasetId } = changes;
 
     const finishedAt = new Date();
     const logs = manager.getRepository(DataSourceSyncLogEntity);
@@ -251,6 +217,86 @@ export class DataSourceSyncService {
         touchedRecordsHash: this.recordsHash(touched),
       },
     };
+  }
+
+  private async writeDatasetRecords(
+    records: Repository<DatasetRecordEntity>,
+    dataset: DatasetEntity | null,
+    source: DataSourceEntity,
+    prepared: PreparedDataSourceSync,
+  ) {
+    if (!dataset || !prepared.records.length) {
+      return {
+        created: 0,
+        updated: 0,
+        touched: [],
+        fullReplaceDatasetId: null,
+      };
+    }
+    const { records: validated } = this.datasetService.prepareValidRecords(
+      prepared.schema,
+      prepared.records,
+    );
+    if (source.syncStrategy === 'incremental' && source.incrementalKey) {
+      const changes = await this.updateIncrementalRecords(
+        records,
+        dataset.id,
+        source.incrementalKey,
+        validated,
+      );
+      return { ...changes, fullReplaceDatasetId: null };
+    }
+
+    await records.delete({ dataset: { id: dataset.id } });
+    const touched: DatasetRecordEntity[] = [];
+    await forEachSequential(validated, async (data) => {
+      touched.push(
+        await records.save(this.newRecord(records, dataset.id, data)),
+      );
+    });
+    return {
+      created: touched.length,
+      updated: 0,
+      touched,
+      fullReplaceDatasetId: dataset.id,
+    };
+  }
+
+  private async updateIncrementalRecords(
+    records: Repository<DatasetRecordEntity>,
+    datasetId: number,
+    incrementalKey: string,
+    validated: Record<string, any>[],
+  ) {
+    const existing = await records.find({
+      where: { dataset: { id: datasetId } },
+    });
+    const byKey = new Map(
+      existing
+        .map(
+          (record) =>
+            [String(record.data?.[incrementalKey] ?? ''), record] as const,
+        )
+        .filter(([key]) => key),
+    );
+    let updated = 0;
+    let created = 0;
+    const touched: DatasetRecordEntity[] = [];
+    await forEachSequential(validated, async (data) => {
+      const key = String(data[incrementalKey] ?? '');
+      const current = byKey.get(key);
+      if (current) {
+        current.data = data;
+        touched.push(await records.save(current));
+        updated += 1;
+      } else {
+        touched.push(
+          await records.save(this.newRecord(records, datasetId, data)),
+        );
+        created += 1;
+      }
+    });
+    return { updated, created, touched };
   }
 
   private newRecord(

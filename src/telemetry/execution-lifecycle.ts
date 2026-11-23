@@ -31,6 +31,41 @@ export function executionEventMetadata(event: CommittedExecutionEvent): {
   if (!Object.hasOwn(EXECUTION_EVENT_PAYLOADS, type)) return null;
   const occurredAt = new Date(readString(data.occurredAt));
   if (!Number.isFinite(occurredAt.getTime())) return null;
+  const payload =
+    data.payload && typeof data.payload === 'object'
+      ? (data.payload as Record<string, unknown>)
+      : {};
+  const startedAt =
+    event.startedAt &&
+    Number.isFinite(event.startedAt.getTime()) &&
+    event.startedAt <= occurredAt
+      ? event.startedAt
+      : occurredAt;
+  return {
+    name: eventSpanName(type, payload),
+    attributes: eventAttributes(data, type, payload),
+    occurredAt,
+    startedAt,
+    failed: payload.to === 'failed' || payload.status === 'failed',
+  };
+}
+
+function eventSpanName(type: string, payload: Record<string, unknown>): string {
+  if (type === 'operation.finished') return 'documents.operation';
+  if (
+    type === 'execution.state_changed' &&
+    ['completed', 'failed', 'cancelled'].includes(readString(payload.to))
+  ) {
+    return 'documents.execution';
+  }
+  return 'documents.' + type;
+}
+
+function eventAttributes(
+  data: Record<string, unknown>,
+  type: string,
+  payload: Record<string, unknown>,
+): Attributes {
   const attributes: Attributes = { 'execution.event.type': type };
   for (const key of [
     'eventId',
@@ -47,10 +82,6 @@ export function executionEventMetadata(event: CommittedExecutionEvent): {
   }
   if (Number.isSafeInteger(data.sequence) && Number(data.sequence) >= 0)
     attributes['execution.sequence'] = Number(data.sequence);
-  const payload =
-    data.payload && typeof data.payload === 'object'
-      ? (data.payload as Record<string, unknown>)
-      : {};
   for (const key of ['from', 'to', 'status', 'initialStatus']) {
     const value = payload[key];
     if (typeof value === 'string' && states.has(value))
@@ -68,27 +99,7 @@ export function executionEventMetadata(event: CommittedExecutionEvent): {
       : {};
   if (typeof error.retryable === 'boolean')
     attributes['execution.retryable'] = error.retryable;
-  const startedAt =
-    event.startedAt &&
-    Number.isFinite(event.startedAt.getTime()) &&
-    event.startedAt <= occurredAt
-      ? event.startedAt
-      : occurredAt;
-  return {
-    name:
-      type === 'operation.finished'
-        ? 'documents.operation'
-        : type === 'execution.state_changed' &&
-            ['completed', 'failed', 'cancelled'].includes(
-              readString(payload.to),
-            )
-          ? 'documents.execution'
-          : 'documents.' + type,
-    attributes,
-    occurredAt,
-    startedAt,
-    failed: payload.to === 'failed' || payload.status === 'failed',
-  };
+  return attributes;
 }
 
 export interface ExecutionEventSnapshot {

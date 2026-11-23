@@ -1,3 +1,5 @@
+import { claimAvailable } from '../utils/claim-available';
+import { forEachSequential } from '../utils/for-each-sequential';
 import { readString } from '../utils/read-string';
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -104,7 +106,8 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
 
   async prepareReadyInferences(limit = 20): Promise<number> {
     let prepared = 0;
-    while (prepared < limit) {
+    const findReadyInference = async (): Promise<string | null> => {
+      if (prepared >= limit) return null;
       const rows = await this.dataSource.query(
         `
           SELECT step."step_id"
@@ -123,10 +126,10 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         `,
         [[...AGENT_LOOP_TASK_TYPES]],
       );
-      if (!rows.length) break;
-      const changed = await this.prepareInference(String(rows[0].step_id));
-      if (!changed) continue;
-      prepared += 1;
+      return readString(rows[0]?.step_id) || null;
+    };
+    for await (const stepId of claimAvailable(findReadyInference)) {
+      if (await this.prepareInference(stepId)) prepared += 1;
     }
     return prepared;
   }
@@ -154,9 +157,9 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       [limit, [...CHAT_TURN_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
-    for (const row of rows) {
+    await forEachSequential(rows, async (row: { step_id: string }) => {
       materialized += await this.materializeToolBatch(String(row.step_id));
-    }
+    });
     return materialized;
   }
 
@@ -182,11 +185,11 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       [limit, [...CHAT_TURN_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
-    for (const row of rows) {
+    await forEachSequential(rows, async (row: { step_id: string }) => {
       if (await this.materializeToolContinuation(String(row.step_id))) {
         materialized += 1;
       }
-    }
+    });
     return materialized;
   }
 
@@ -211,11 +214,11 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       [limit, [...AGENT_LOOP_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let materialized = 0;
-    for (const row of rows) {
+    await forEachSequential(rows, async (row: { step_id: string }) => {
       if (await this.materializeInvalidOutcome(String(row.step_id))) {
         materialized += 1;
       }
-    }
+    });
     return materialized;
   }
 
@@ -306,12 +309,10 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     let bucket: 'normal' | 'repair' | 'closing';
     if (coordination.purpose === 'repair') {
       bucket = 'repair';
+    } else if (coordination.purpose === 'closing') {
+      bucket = 'closing';
     } else {
-      if (coordination.purpose === 'closing') {
-        bucket = 'closing';
-      } else {
-        bucket = 'normal';
-      }
+      bucket = 'normal';
     }
     const decision = await this.progress.reserveOperationBudget(
       root.executionId,
@@ -324,14 +325,11 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         bucket,
         phase: coordination.phase,
         round,
-        name:
-          coordination.purpose === 'repair'
-            ? 'output_repair'
-            : coordination.purpose === 'closing'
-              ? 'forced_finalization'
-              : execution.taskType === 'delegated-agent'
-                ? 'delegated-agent'
-                : String(step.work.taskType ?? execution.taskType),
+        name: this.inferenceOperationName(
+          coordination.purpose,
+          execution,
+          step,
+        ),
       },
     );
     if (!decision.granted) {
@@ -421,6 +419,17 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     return Math.max(0, ...reservations.map((item) => item.round)) + 1;
   }
 
+  private inferenceOperationName(
+    purpose: string,
+    execution: ExecutionEntity,
+    step: ExecutionStepEntity,
+  ): string {
+    if (purpose === 'repair') return 'output_repair';
+    if (purpose === 'closing') return 'forced_finalization';
+    if (execution.taskType === 'delegated-agent') return 'delegated-agent';
+    return readString(step.work.taskType, execution.taskType);
+  }
+
   private async materializeToolBatch(stepId: string): Promise<number> {
     const step = await this.dataSource
       .getRepository(ExecutionStepEntity)
@@ -467,7 +476,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     }> = [];
     let confirmationPending = false;
     let continuation: AgentLoopContinuation = { kind: 'normal' };
-    for (const [index, call] of calls.entries()) {
+    await forEachSequential(calls.entries(), async ([index, call]) => {
       try {
         const prepared = await this.toolPlans.prepare({
           schemaVersion: 'tool-invocation/1',
@@ -492,14 +501,14 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         );
         if (disposition.kind === 'waiting_confirmation') {
           confirmationPending = true;
-          continue;
+          return;
         }
         if (disposition.kind === 'not_executed') {
           deniedBatch.push({
             plan: prepared.plan,
             error: disposition.error,
           });
-          continue;
+          return;
         }
         const decision = await this.progress.reserveOperationBudget(
           execution.executionId,
@@ -527,36 +536,9 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
           const action = decision.loopGuardSignal?.action;
           deniedBatch.push({
             plan: prepared.plan,
-            error: {
-              code:
-                action === 'terminate'
-                  ? 'loop_guard_terminated'
-                  : action === 'block'
-                    ? 'loop_guard_blocked'
-                    : 'tool_budget_exhausted',
-              message:
-                action === 'terminate'
-                  ? 'The repeated tool operation was not executed because ' +
-                    'the loop guard terminated the loop'
-                  : action === 'block'
-                    ? 'The repeated tool operation was not executed because ' +
-                      'the loop guard blocked it'
-                    : 'The tool operation was not executed because the tool budget was exhausted',
-            },
-            continuation:
-              action === 'terminate'
-                ? {
-                    kind: 'partial',
-                    trigger: 'exact_tool_repeat_persisted',
-                  }
-                : action === 'block'
-                  ? {
-                      kind: 'normal',
-                      directive: 'exact_tool_repeat_blocked',
-                    }
-                  : { kind: 'closing', reason: 'tool_budget_exhausted' },
+            ...this.deniedToolOutcome(action),
           });
-          continue;
+          return;
         }
         if (
           continuation.kind === 'normal' &&
@@ -588,29 +570,19 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         );
         throw error;
       }
-    }
-    for (const item of deniedBatch) {
+    });
+    await forEachSequential(deniedBatch, async (item) => {
       const alreadyMaterialized = item.plan.stepId !== null;
       await this.toolPlans.materializeNotExecuted(
         item.plan.toolCallId,
         item.error,
       );
       if (!alreadyMaterialized) materialized += 1;
-      if (item.continuation?.kind === 'partial') {
-        continuation = item.continuation;
-      } else if (
-        item.continuation?.kind === 'closing' &&
-        continuation.kind !== 'partial'
-      ) {
-        continuation = item.continuation;
-      } else if (
-        item.continuation?.kind === 'normal' &&
-        continuation.kind === 'normal'
-      ) {
+      if (this.shouldUseToolContinuation(continuation, item.continuation)) {
         continuation = item.continuation;
       }
-    }
-    for (const item of preparedBatch) {
+    });
+    await forEachSequential(preparedBatch, async (item) => {
       const alreadyMaterialized = item.plan.stepId !== null;
       const step = await this.toolPlans.materialize(
         item.call.toolCallId,
@@ -621,7 +593,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       } else if (!alreadyMaterialized) {
         materialized += 1;
       }
-    }
+    });
     if (confirmationPending) {
       await this.toolPlans.activatePendingConfirmations(execution.executionId);
       return materialized;
@@ -640,6 +612,74 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       await manager.save(locked);
     });
     return materialized;
+  }
+
+  private shouldUseToolContinuation(
+    current: AgentLoopContinuation,
+    candidate: AgentLoopContinuation | undefined,
+  ): candidate is AgentLoopContinuation {
+    if (!candidate) return false;
+    if (candidate.kind === 'partial') return true;
+    if (candidate.kind === 'closing') return current.kind !== 'partial';
+    return current.kind === 'normal';
+  }
+
+  private deniedToolOutcome(action: string | undefined): {
+    error: { code: string; message: string };
+    continuation: AgentLoopContinuation;
+  } {
+    switch (action) {
+      case 'terminate':
+        return {
+          error: {
+            code: 'loop_guard_terminated',
+            message:
+              'The repeated tool operation was not executed because the loop guard terminated the loop',
+          },
+          continuation: {
+            kind: 'partial',
+            trigger: 'exact_tool_repeat_persisted',
+          },
+        };
+      case 'block':
+        return {
+          error: {
+            code: 'loop_guard_blocked',
+            message:
+              'The repeated tool operation was not executed because the loop guard blocked it',
+          },
+          continuation: {
+            kind: 'normal',
+            directive: 'exact_tool_repeat_blocked',
+          },
+        };
+      default:
+        return {
+          error: {
+            code: 'tool_budget_exhausted',
+            message:
+              'The tool operation was not executed because the tool budget was exhausted',
+          },
+          continuation: { kind: 'closing', reason: 'tool_budget_exhausted' },
+        };
+    }
+  }
+
+  private toolContinuationDirective(
+    continuation: Extract<
+      AgentLoopContinuation,
+      { kind: 'normal' | 'closing' }
+    >,
+  ): RuntimeDirective {
+    if (continuation.kind === 'closing')
+      return this.forcedFinalizationDirective(continuation.reason);
+    if (!continuation.directive) return null;
+    return {
+      schemaVersion: 'runtime-directive/1',
+      kind: 'progress_warning',
+      reason: continuation.directive,
+      toolsAllowed: true,
+    };
   }
 
   private materializeToolContinuation(stepId: string): Promise<boolean> {
@@ -760,21 +800,7 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
         return true;
       }
       const purpose = requested.kind === 'closing' ? 'closing' : 'normal';
-      let directive: RuntimeDirective;
-      if (requested.kind === 'closing') {
-        directive = this.forcedFinalizationDirective(requested.reason);
-      } else {
-        if (requested.directive) {
-          directive = {
-            schemaVersion: 'runtime-directive/1' as const,
-            kind: 'progress_warning' as const,
-            reason: requested.directive,
-            toolsAllowed: true as const,
-          };
-        } else {
-          directive = null;
-        }
-      }
+      const directive = this.toolContinuationDirective(requested);
       if (directive) {
         effectivePayload = this.payloadWithDirective(
           effectivePayload,
@@ -976,12 +1002,10 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
     let phase: 'output_repair' | 'forced_finalization' | 'agent_loop';
     if (input.purpose === 'repair') {
       phase = 'output_repair';
+    } else if (input.purpose === 'closing') {
+      phase = 'forced_finalization';
     } else {
-      if (input.purpose === 'closing') {
-        phase = 'forced_finalization';
-      } else {
-        phase = 'agent_loop';
-      }
+      phase = 'agent_loop';
     }
     const taskType = input.source.work.taskType;
     if (!isChatTurnTaskType(taskType)) {
@@ -1000,12 +1024,10 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
       ],
       work: {
         ...executionTaskWork(taskType, input.payload),
-        agentName:
-          typeof input.source.work.agentName === 'string'
-            ? input.source.work.agentName
-            : taskType === 'agent-chat'
-              ? 'agent'
-              : 'assistant',
+        agentName: readString(
+          input.source.work.agentName,
+          taskType === 'agent-chat' ? 'agent' : 'assistant',
+        ),
         agentLoop: {
           schemaVersion: 'agent-inference/1',
           purpose: input.purpose,

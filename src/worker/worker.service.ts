@@ -425,6 +425,7 @@ export class WorkerService {
       worker.status === 'online'
         ? Math.max(worker.maximumConcurrency - activeAssignments.length, 0)
         : 0;
+    const onlineLoadState = available > 0 ? 'available' : 'busy';
     return {
       schemaVersion: 'worker-registration/1',
       workerId: worker.id,
@@ -450,12 +451,7 @@ export class WorkerService {
       activeAssignments,
       heartbeat: worker.lastHeartbeat.toISOString(),
       loadSummary: {
-        state:
-          worker.status !== 'online'
-            ? 'offline'
-            : available > 0
-              ? 'available'
-              : 'busy',
+        state: worker.status === 'online' ? onlineLoadState : 'offline',
         active: activeAssignments.length,
       },
     };

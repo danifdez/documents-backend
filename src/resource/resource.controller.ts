@@ -206,7 +206,7 @@ export class ResourceController {
     @Res() res: Response,
   ) {
     const { buffer, resource } = await this.resourceService.getFileBuffer(id);
-    const safeName = resource.originalName.replace(/[^\w.\-]/g, '_');
+    const safeName = resource.originalName.replace(/[^\w.-]/g, '_');
     res.setHeader('Content-Type', resource.mimeType);
     res.setHeader(
       'Content-Disposition',

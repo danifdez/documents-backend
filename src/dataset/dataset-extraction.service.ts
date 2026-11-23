@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import {
   BadRequestException,
   HttpException,
@@ -64,7 +65,7 @@ export class DatasetExtractionService {
       .map((f) => f.key);
 
     const executionIds: string[] = [];
-    for (const resource of resources) {
+    await forEachSequential(resources, async (resource) => {
       const record = await this.upsertRow(datasetId, resource.id);
       const execution = await this.enqueueExtractionExecution(
         dataset,
@@ -76,7 +77,7 @@ export class DatasetExtractionService {
         captureResourceId !== undefined && resource.id === captureResourceId,
       );
       if (execution) executionIds.push(execution.executionId);
-    }
+    });
 
     dataset.extractionConfig = {
       model: dataset.extractionConfig?.model ?? DEFAULT_MODEL,
@@ -265,29 +266,35 @@ export class DatasetExtractionService {
     }
 
     if (dataset.sourceMode === 'resource_selection') {
-      const ids: number[] = dataset.sourceConfig?.resourceIds ?? [];
-      if (ids.length === 0) return [];
-      const resources = await Promise.all(
-        ids.map((id) => this.resourceService.findOne(id)),
-      );
-      const found: ResourceEntity[] = [];
-      for (const r of resources) {
-        if (!r) {
-          throw new BadRequestException(
-            'One or more selected resources do not exist',
-          );
-        }
-        if (projectId != null && r.project?.id !== projectId) {
-          throw new BadRequestException(
-            `Resource ${r.id} does not belong to the dataset's project`,
-          );
-        }
-        found.push(r);
-      }
-      return found;
+      return this.resolveSelectedResources(dataset, projectId);
     }
-
     return [];
+  }
+
+  private async resolveSelectedResources(
+    dataset: DatasetEntity,
+    projectId: number | null,
+  ): Promise<ResourceEntity[]> {
+    const ids: number[] = dataset.sourceConfig?.resourceIds ?? [];
+    if (ids.length === 0) return [];
+    const resources = await Promise.all(
+      ids.map((id) => this.resourceService.findOne(id)),
+    );
+    const found: ResourceEntity[] = [];
+    for (const r of resources) {
+      if (!r) {
+        throw new BadRequestException(
+          'One or more selected resources do not exist',
+        );
+      }
+      if (projectId != null && r.project?.id !== projectId) {
+        throw new BadRequestException(
+          `Resource ${r.id} does not belong to the dataset's project`,
+        );
+      }
+      found.push(r);
+    }
+    return found;
   }
 
   private async upsertRow(

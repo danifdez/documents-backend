@@ -146,43 +146,51 @@ export class RestApiProvider implements DataSourceProvider {
 
       allRecords.push(...records);
 
-      if (config.pagination === 'none' || !config.pagination) {
-        hasMore = false;
-      } else if (config.pagination === 'cursor') {
-        const nextCursor = config.cursorPath
-          ? this.extractData(response.data, config.cursorPath)
-          : null;
-        if (!nextCursor) {
+      switch (config.pagination) {
+        case 'cursor':
+          currentCursor = config.cursorPath
+            ? this.extractData(response.data, config.cursorPath)
+            : null;
+          hasMore = Boolean(currentCursor);
+          break;
+        case 'page':
+          hasMore = this.hasMoreRecords(
+            config,
+            response.data,
+            records.length,
+            allRecords.length,
+          );
+          currentPage += 1;
+          break;
+        case 'offset':
+          currentOffset += config.pageSize || 100;
+          hasMore = this.hasMoreRecords(
+            config,
+            response.data,
+            records.length,
+            currentOffset,
+          );
+          break;
+        default:
           hasMore = false;
-        } else {
-          currentCursor = nextCursor;
-        }
-      } else if (config.pagination === 'page') {
-        const total = config.totalPath
-          ? this.extractData(response.data, config.totalPath)
-          : null;
-        const pageSize = config.pageSize || 100;
-        if (
-          (total && allRecords.length >= total) ||
-          records.length < pageSize
-        ) {
-          hasMore = false;
-        } else {
-          currentPage++;
-        }
-      } else if (config.pagination === 'offset') {
-        const total = config.totalPath
-          ? this.extractData(response.data, config.totalPath)
-          : null;
-        const pageSize = config.pageSize || 100;
-        currentOffset += pageSize;
-        if ((total && currentOffset >= total) || records.length < pageSize) {
-          hasMore = false;
-        }
       }
     }
 
     return { records: allRecords };
+  }
+
+  private hasMoreRecords(
+    config: Record<string, any>,
+    response: unknown,
+    batchSize: number,
+    position: number,
+  ): boolean {
+    const total = config.totalPath
+      ? this.extractData(response, config.totalPath)
+      : null;
+    return (
+      !(total && position >= total) && batchSize >= (config.pageSize || 100)
+    );
   }
 
   private buildHeaders(
@@ -244,7 +252,7 @@ export class RestApiProvider implements DataSourceProvider {
     return params;
   }
 
-  private async makeRequest(
+  private makeRequest(
     config: Record<string, any>,
     headers: Record<string, string>,
     params: Record<string, any>,

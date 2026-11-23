@@ -41,6 +41,7 @@ import {
   OperationBudgetReservation,
   OperationBudgetSnapshot,
   ProgressEvent,
+  ProgressLedger,
   exactToolRepeatGuardSnapshot,
   projectExecutionProgress,
 } from './execution-progress';
@@ -237,6 +238,24 @@ export class ExecutionProgressService {
     });
   }
 
+  private reservationMessage(granted: boolean, action?: string): string {
+    if (granted) return 'Operation budget reserved';
+    if (action === 'terminate') return 'Execution terminated by loop guard';
+    if (action) return 'Operation blocked by loop guard';
+    return 'Operation budget reservation denied';
+  }
+
+  private loopGuardMessage(action: string): string {
+    switch (action) {
+      case 'terminate':
+        return 'Immediate exact tool repeat persisted';
+      case 'block':
+        return 'Immediate exact tool repeat blocked';
+      default:
+        return 'Immediate exact tool repeat detected';
+    }
+  }
+
   async reserveOperationBudget(
     rootExecutionId: string,
     request: OperationBudgetReservationRequest,
@@ -272,58 +291,15 @@ export class ExecutionProgressService {
       );
       const existing =
         progress.ledger.operationBudget?.reservations[request.operationId];
-      if (existing) {
-        assertReservationMatches(existing, request);
-        const event = rows.find(
-          (row) =>
-            (row.envelope.payload as Record<string, any>)?.reservation
-              ?.operationId === request.operationId,
+      if (existing)
+        return this.readExistingReservation(
+          progress.ledger,
+          rows,
+          request,
+          existing,
         );
-        const softLimitEvent = rows.find(
-          (row) =>
-            (row.envelope.payload as Record<string, any>)?.signal
-              ?.triggeringOperationId === request.operationId,
-        );
-        const softLimitPayload = softLimitEvent?.envelope.payload as
-          Record<string, unknown> | undefined;
-        const softLimitSignal = softLimitPayload?.signal as
-          BudgetSoftLimitSignal | undefined;
-        const loopGuardEvent = rows.find(
-          (row) =>
-            (row.envelope.payload as Record<string, any>)?.loopGuardSignal
-              ?.triggeringOperationId === request.operationId,
-        );
-        const loopGuardPayload = loopGuardEvent?.envelope.payload as
-          Record<string, unknown> | undefined;
-        const loopGuardSignal = loopGuardPayload?.loopGuardSignal as
-          ExactToolRepeatSignal | undefined;
-        const existingGrant =
-          progress.ledger.operationBudget!.grants[existing.grantId];
-        const granted = existing.status === 'reserved';
-        return {
-          granted,
-          reservation:
-            existing.status === 'consumed'
-              ? {
-                  ...existing,
-                  reason: 'budget_reservation_consumed',
-                }
-              : existing,
-          budgetState: operationBudgetSnapshot(existingGrant),
-          ...(softLimitSignal ? { softLimitSignal } : {}),
-          guardState: exactToolRepeatGuardSnapshot(
-            progress.ledger,
-            existing.grantId,
-          ),
-          ...(loopGuardSignal ? { loopGuardSignal } : {}),
-          eventId:
-            loopGuardEvent?.eventId ??
-            softLimitEvent?.eventId ??
-            event!.eventId,
-        };
-      }
       const grant = progress.ledger.operationBudget?.grants[request.grantId];
-      if (!grant || grant.loopId !== request.loopId) {
+      if (grant?.loopId !== request.loopId) {
         throw new BadRequestException('Unknown operation budget grant');
       }
       if (
@@ -342,47 +318,19 @@ export class ExecutionProgressService {
         request.phase,
       );
       const usage = grant.usage[request.bucket];
-      const hasBudget = usage.available > 0;
-      const guardBefore = exactToolRepeatGuardSnapshot(
-        progress.ledger,
-        grant.grantId,
-      );
-      const terminateSignal =
-        hasBudget &&
-        grant.effectivePolicy.exactToolRepeatTerminateAfterBlock === true
-          ? exactToolRepeatTerminateSignal(rows, request, guardBefore)
-          : undefined;
-      const blockSignal =
-        hasBudget &&
-        !terminateSignal &&
-        grant.effectivePolicy.exactToolRepeatBlockAfterWarning === true
-          ? exactToolRepeatBlockSignal(rows, request, guardBefore)
-          : undefined;
-      const granted = hasBudget && !terminateSignal && !blockSignal;
-      const committed = usage.reserved + usage.consumed + (granted ? 1 : 0);
-      const crossesSoftLimit =
-        granted &&
-        ((request.operationKind === 'tool_call' && request.bucket === 'tool') ||
-          (request.operationKind === 'inference' &&
-            request.bucket === 'normal')) &&
-        Number(usage.softLimit ?? 0) > 0 &&
-        !usage.softLimitReached &&
-        committed >= Number(usage.softLimit);
-      const warningSignal =
-        granted && grant.effectivePolicy.exactToolRepeatWarning === true
-          ? exactToolRepeatWarningSignal(rows, request, guardBefore)
-          : undefined;
-      const loopGuardSignal = terminateSignal ?? blockSignal ?? warningSignal;
+      const {
+        granted,
+        committed,
+        crossesSoftLimit,
+        loopGuardSignal,
+        denialReason,
+      } = this.evaluateReservation(progress.ledger, rows, grant, request);
       const reservation = createOperationBudgetReservation(
         request,
         granted,
         randomUUID(),
         new Date().toISOString(),
-        terminateSignal
-          ? 'immediate_exact_tool_repeat_terminated'
-          : blockSignal
-            ? 'immediate_exact_tool_repeat_blocked'
-            : undefined,
+        denialReason,
       );
       let producerSequence = nextBackendProducerSequence(rows);
       let sequence = Number(execution.lastSequence) + 1;
@@ -394,13 +342,7 @@ export class ExecutionProgressService {
           eventType: 'progress.reported',
           payloadSchema: 'progress.reported/1',
           payload: {
-            message: granted
-              ? 'Operation budget reserved'
-              : loopGuardSignal
-                ? terminateSignal
-                  ? 'Execution terminated by loop guard'
-                  : 'Operation blocked by loop guard'
-                : 'Operation budget reservation denied',
+            message: this.reservationMessage(granted, loopGuardSignal?.action),
             kind: 'budget_reservation',
             reservation,
           },
@@ -461,12 +403,7 @@ export class ExecutionProgressService {
             eventType: 'progress.reported',
             payloadSchema: 'progress.reported/1',
             payload: {
-              message:
-                loopGuardSignal.action === 'terminate'
-                  ? 'Immediate exact tool repeat persisted'
-                  : loopGuardSignal.action === 'block'
-                    ? 'Immediate exact tool repeat blocked'
-                    : 'Immediate exact tool repeat detected',
+              message: this.loopGuardMessage(loopGuardSignal.action),
               kind: 'loop_guard_triggered',
               loopGuardSignal,
             },
@@ -498,6 +435,106 @@ export class ExecutionProgressService {
         eventId: lastEventId,
       };
     });
+  }
+
+  private readExistingReservation(
+    ledger: ProgressLedger,
+    rows: ExecutionEventEntity[],
+    request: OperationBudgetReservationRequest,
+    existing: OperationBudgetReservation,
+  ) {
+    assertReservationMatches(existing, request);
+    const event = rows.find(
+      (row) =>
+        (row.envelope.payload as Record<string, any>)?.reservation
+          ?.operationId === request.operationId,
+    );
+    const softLimitEvent = rows.find(
+      (row) =>
+        (row.envelope.payload as Record<string, any>)?.signal
+          ?.triggeringOperationId === request.operationId,
+    );
+    const softLimitPayload = softLimitEvent?.envelope.payload as
+      Record<string, unknown> | undefined;
+    const softLimitSignal = softLimitPayload?.signal as
+      BudgetSoftLimitSignal | undefined;
+    const loopGuardEvent = rows.find(
+      (row) =>
+        (row.envelope.payload as Record<string, any>)?.loopGuardSignal
+          ?.triggeringOperationId === request.operationId,
+    );
+    const loopGuardPayload = loopGuardEvent?.envelope.payload as
+      Record<string, unknown> | undefined;
+    const loopGuardSignal = loopGuardPayload?.loopGuardSignal as
+      ExactToolRepeatSignal | undefined;
+    const existingGrant = ledger.operationBudget!.grants[existing.grantId];
+    const granted = existing.status === 'reserved';
+    return {
+      granted,
+      reservation:
+        existing.status === 'consumed'
+          ? {
+              ...existing,
+              reason: 'budget_reservation_consumed',
+            }
+          : existing,
+      budgetState: operationBudgetSnapshot(existingGrant),
+      ...(softLimitSignal ? { softLimitSignal } : {}),
+      guardState: exactToolRepeatGuardSnapshot(ledger, existing.grantId),
+      ...(loopGuardSignal ? { loopGuardSignal } : {}),
+      eventId:
+        loopGuardEvent?.eventId ?? softLimitEvent?.eventId ?? event!.eventId,
+    };
+  }
+
+  private evaluateReservation(
+    ledger: ProgressLedger,
+    rows: ExecutionEventEntity[],
+    grant: NonNullable<ProgressLedger['operationBudget']>['grants'][string],
+    request: OperationBudgetReservationRequest,
+  ) {
+    const usage = grant.usage[request.bucket];
+    const hasBudget = usage.available > 0;
+    const guardBefore = exactToolRepeatGuardSnapshot(ledger, grant.grantId);
+    const terminateSignal =
+      hasBudget &&
+      grant.effectivePolicy.exactToolRepeatTerminateAfterBlock === true
+        ? exactToolRepeatTerminateSignal(rows, request, guardBefore)
+        : undefined;
+    const blockSignal =
+      hasBudget &&
+      !terminateSignal &&
+      grant.effectivePolicy.exactToolRepeatBlockAfterWarning === true
+        ? exactToolRepeatBlockSignal(rows, request, guardBefore)
+        : undefined;
+    const granted = hasBudget && !terminateSignal && !blockSignal;
+    const committed = usage.reserved + usage.consumed + (granted ? 1 : 0);
+    const crossesSoftLimit =
+      granted &&
+      ((request.operationKind === 'tool_call' && request.bucket === 'tool') ||
+        (request.operationKind === 'inference' &&
+          request.bucket === 'normal')) &&
+      Number(usage.softLimit ?? 0) > 0 &&
+      !usage.softLimitReached &&
+      committed >= Number(usage.softLimit);
+    const warningSignal =
+      granted && grant.effectivePolicy.exactToolRepeatWarning === true
+        ? exactToolRepeatWarningSignal(rows, request, guardBefore)
+        : undefined;
+    const loopGuardSignal = terminateSignal ?? blockSignal ?? warningSignal;
+    const blockReason = blockSignal
+      ? 'immediate_exact_tool_repeat_blocked'
+      : undefined;
+    const denialReason = terminateSignal
+      ? 'immediate_exact_tool_repeat_terminated'
+      : blockReason;
+    return {
+      granted,
+      committed,
+      crossesSoftLimit,
+      loopGuardSignal,
+      denialReason,
+    };
   }
 
   async refreshProjection(

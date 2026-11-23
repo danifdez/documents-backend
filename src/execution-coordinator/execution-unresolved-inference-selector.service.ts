@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import {
@@ -39,11 +40,11 @@ export class ExecutionUnresolvedInferenceSelectorService implements ExecutionNex
       [limit, [...AGENT_LOOP_TASK_TYPES], COORDINATION_PENDING_PHASE],
     );
     let selected = 0;
-    for (const row of rows) {
+    await forEachSequential(rows, async (row: { step_id: string }) => {
       if (await this.failUnsupportedOutcome(String(row.step_id))) {
         selected += 1;
       }
-    }
+    });
     return selected;
   }
 

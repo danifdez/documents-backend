@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import {
   ConflictException,
   Injectable,
@@ -34,13 +35,13 @@ export class ExecutionConfirmationService {
     private readonly contracts: ExecutionContractValidator,
   ) {}
 
-  async createPending(
+  createPending(
     manager: EntityManager,
     execution: ExecutionEntity,
     storedPlan: ExecutionToolPlanEntity,
   ): Promise<ExecutionConfirmationEntity | null> {
     const requirement = storedPlan.plan.confirmationRequirement;
-    if (!requirement) return null;
+    if (!requirement) return Promise.resolve(null);
     const expiresAt = requirement.expiresAt
       ? new Date(requirement.expiresAt)
       : null;
@@ -100,7 +101,7 @@ export class ExecutionConfirmationService {
       });
       let producerSequence = nextBackendProducerSequence(rows);
       let sequence = Number(root.lastSequence);
-      for (const confirmation of unrequested) {
+      await forEachSequential(unrequested, async (confirmation) => {
         const plan = planByOperation.get(confirmation.operationId);
         if (!plan) throw new ConflictException('confirmation_plan_missing');
         const view = this.toView(confirmation, plan);
@@ -138,7 +139,7 @@ export class ExecutionConfirmationService {
         confirmation.requestedAt = new Date();
         await manager.save(confirmation);
         root.lastEventId = event.eventId;
-      }
+      });
       const previousStatus = execution.status;
       const first = confirmations[0];
       const stateEvent = await appendBackendExecutionEvent(
@@ -204,18 +205,35 @@ export class ExecutionConfirmationService {
     const executions = await this.dataSource
       .getRepository(ExecutionEntity)
       .find({
-        where: { executionId: In(visible.map((item) => item.executionId)) },
+        where: {
+          executionId: In(visible.map((item) => item.executionId)),
+          ownerPrincipal: scope.ownerPrincipal,
+        },
       });
     const byExecution = new Map(
       executions.map((execution) => [execution.executionId, execution]),
     );
+    const unloadedRootIds = [
+      ...new Set(executions.map((execution) => execution.rootExecutionId)),
+    ].filter((id) => !byExecution.has(id));
+    if (unloadedRootIds.length) {
+      const roots = await this.dataSource
+        .getRepository(ExecutionEntity)
+        .findBy({
+          executionId: In(unloadedRootIds),
+          ownerPrincipal: scope.ownerPrincipal,
+        });
+      for (const root of roots) byExecution.set(root.executionId, root);
+    }
     return visible.flatMap((item) => {
       const plan = byOperation.get(item.operationId);
       if (!plan) throw new ConflictException('confirmation_plan_missing');
       const execution = byExecution.get(item.executionId);
       if (!execution)
         throw new ConflictException('confirmation_execution_missing');
-      if (!this.acceptsDecision(execution)) return [];
+      const root = byExecution.get(execution.rootExecutionId);
+      if (!root || !this.acceptsDecisionInTree(execution, root)) return [];
+      if (canonicalHash(plan.plan) !== item.planHash) return [];
       return [
         {
           confirmation: this.toView(item, plan),
@@ -265,15 +283,15 @@ export class ExecutionConfirmationService {
       executionId: confirmation.executionId,
       ownerPrincipal: scope.ownerPrincipal,
     });
-    if (!execution || !this.acceptsDecision(execution)) {
-      throw new ConflictException('confirmation_inactive');
-    }
-    if (execution.rootExecutionId === execution.executionId) return;
-    const root = await executions.findOneBy({
-      executionId: execution.rootExecutionId,
-      ownerPrincipal: scope.ownerPrincipal,
-    });
-    if (!root || root.cancellationRequestedAt) {
+    if (!execution) throw new ConflictException('confirmation_inactive');
+    const root =
+      execution.rootExecutionId === execution.executionId
+        ? execution
+        : await executions.findOneBy({
+            executionId: execution.rootExecutionId,
+            ownerPrincipal: scope.ownerPrincipal,
+          });
+    if (!root || !this.acceptsDecisionInTree(execution, root)) {
       throw new ConflictException('confirmation_inactive');
     }
   }
@@ -299,7 +317,7 @@ export class ExecutionConfirmationService {
       .limit(limit)
       .getMany();
     let expired = 0;
-    for (const candidate of candidates) {
+    await forEachSequential(candidates, async (candidate) => {
       try {
         await this.settle(candidate.confirmationId, 'expired', null);
         expired += 1;
@@ -313,7 +331,7 @@ export class ExecutionConfirmationService {
           throw error;
         }
       }
-    }
+    });
     return expired;
   }
 
@@ -375,7 +393,7 @@ export class ExecutionConfirmationService {
       if (!confirmation.requestedAt) {
         throw new ConflictException('confirmation_not_requested');
       }
-      if (!this.acceptsDecision(execution) || root.cancellationRequestedAt) {
+      if (!this.acceptsDecisionInTree(execution, root)) {
         throw new ConflictException('confirmation_inactive');
       }
       const now = new Date();
@@ -474,6 +492,13 @@ export class ExecutionConfirmationService {
     });
   }
 
+  private acceptsDecisionInTree(
+    execution: ExecutionEntity,
+    root: ExecutionEntity,
+  ): boolean {
+    return this.acceptsDecision(execution) && !root.cancellationRequestedAt;
+  }
+
   private acceptsDecision(execution: ExecutionEntity): boolean {
     return (
       execution.status === ExecutionStatus.WAITING &&
@@ -487,10 +512,7 @@ export class ExecutionConfirmationService {
     plan: ExecutionToolPlanEntity,
   ): ExecutionConfirmationView {
     const requirement = plan.plan.confirmationRequirement;
-    if (
-      !requirement ||
-      requirement.confirmationId !== confirmation.confirmationId
-    ) {
+    if (requirement?.confirmationId !== confirmation.confirmationId) {
       throw new ConflictException('confirmation_plan_mismatch');
     }
     return {
@@ -559,6 +581,7 @@ export class ExecutionConfirmationService {
       repository.create({
         outboxId: randomUUID(),
         executionId: execution.executionId,
+        ownerPrincipal: execution.ownerPrincipal,
         eventId,
         schemaVersion: 'execution-outbox/1',
         socketEvent,

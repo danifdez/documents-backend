@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import {
   Injectable,
   Logger,
@@ -348,48 +349,9 @@ export class IndexedFileService {
     owner: OwnerRef,
     ref: { indexedFileId?: number; filename?: string },
   ): Promise<ReadWithSyncResult> {
-    const { ownerType, ownerId } = owner;
-    let row: IndexedFileEntity | null = null;
-
-    if (typeof ref.indexedFileId === 'number') {
-      row = await this.repository.findOne({ where: { id: ref.indexedFileId } });
-      if (!row || row.ownerType !== ownerType || row.ownerId !== ownerId) {
-        return { ok: false, error: 'not_found' };
-      }
-    } else if (ref.filename) {
-      const requested = ref.filename;
-      const exact = await this.repository.findOne({
-        where: { ownerType, ownerId, filename: requested },
-      });
-      if (exact) {
-        row = exact;
-      } else {
-        const all = await this.repository.find({
-          where: { ownerType, ownerId },
-        });
-        const base = path.basename(requested);
-        const matches = all.filter((r) => path.basename(r.filename) === base);
-        if (matches.length === 1) {
-          row = matches[0];
-        } else if (matches.length > 1) {
-          return {
-            ok: false,
-            error: 'ambiguous',
-            candidates: matches.map((m) => ({
-              indexedFileId: m.id,
-              filename: m.filename,
-            })),
-          };
-        } else {
-          const onDisk = await this.tryAdoptFromDisk(owner, requested);
-          if (!onDisk)
-            return { ok: false, error: 'not_found', filename: requested };
-          row = onDisk;
-        }
-      }
-    } else {
-      return { ok: false, error: 'not_found' };
-    }
+    const lookup = await this.resolveReadTarget(owner, ref);
+    if (lookup.ok === false) return lookup;
+    let row = lookup.row;
 
     let stat;
     try {
@@ -428,6 +390,62 @@ export class IndexedFileService {
       }
     }
 
+    return this.workspaceReadResult(row, stat, buffer);
+  }
+
+  private async resolveReadTarget(
+    owner: OwnerRef,
+    ref: { indexedFileId?: number; filename?: string },
+  ): Promise<
+    | { ok: true; row: IndexedFileEntity }
+    | Extract<ReadWithSyncResult, { ok: false }>
+  > {
+    const { ownerType, ownerId } = owner;
+    if (typeof ref.indexedFileId === 'number') {
+      const row = await this.repository.findOne({
+        where: { id: ref.indexedFileId },
+      });
+      return row?.ownerType === ownerType && row.ownerId === ownerId
+        ? { ok: true, row }
+        : { ok: false, error: 'not_found' };
+    }
+    if (!ref.filename) return { ok: false, error: 'not_found' };
+    const requested = ref.filename;
+    const exact = await this.repository.findOne({
+      where: { ownerType, ownerId, filename: requested },
+    });
+    if (exact) return { ok: true, row: exact };
+
+    const existing = await this.repository.find({
+      where: { ownerType, ownerId },
+    });
+    const base = path.basename(requested);
+    const matches = existing.filter(
+      (item) => path.basename(item.filename) === base,
+    );
+    if (matches.length === 1) return { ok: true, row: matches[0] };
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        error: 'ambiguous',
+        candidates: matches.map((item) => ({
+          indexedFileId: item.id,
+          filename: item.filename,
+        })),
+      };
+    }
+
+    const adopted = await this.tryAdoptFromDisk(owner, requested);
+    return adopted
+      ? { ok: true, row: adopted }
+      : { ok: false, error: 'not_found', filename: requested };
+  }
+
+  private async workspaceReadResult(
+    row: IndexedFileEntity,
+    stat: { size: number; mtime: Date },
+    buffer: Buffer | null,
+  ): Promise<ReadWithSyncResult> {
     const isTextual = this.isTextual(row.mimeType);
     if (isTextual) {
       if (!buffer) {
@@ -573,15 +591,15 @@ export class IndexedFileService {
     };
     const onDisk = new Map<string, FsItem>();
 
-    for (const entry of entries as any[]) {
-      if (!entry.isFile?.()) continue;
+    await forEachSequential(entries as any[], async (entry) => {
+      if (!entry.isFile?.()) return;
       const parent: string = entry.parentPath ?? entry.path ?? folderScope;
       const absolute = path.resolve(parent, entry.name);
       let relative: string;
       try {
         relative = relativizeToScope(folderScope, absolute);
       } catch {
-        continue;
+        return;
       }
       try {
         const stat = await fs.stat(absolute);
@@ -594,11 +612,11 @@ export class IndexedFileService {
       } catch (err: any) {
         if (err?.code === 'EACCES') {
           this.logger.warn(`[indexed-file] skip unreadable file: ${absolute}`);
-          continue;
+          return;
         }
         throw err;
       }
-    }
+    });
 
     const indexed = await this.repository.find({
       where: { ownerType, ownerId },
@@ -609,11 +627,11 @@ export class IndexedFileService {
     let updated = 0;
     let removed = 0;
 
-    for (const [filename, item] of onDisk) {
+    await forEachSequential(onDisk, async ([filename, item]) => {
       const row = indexedByName.get(filename);
       if (!row) {
         const buffer = await this.readFileSafe(item.filePath);
-        if (buffer === null) continue;
+        if (buffer === null) return;
         const checksum = crypto
           .createHash('sha256')
           .update(buffer)
@@ -633,13 +651,13 @@ export class IndexedFileService {
         const saved = await this.repository.save(created);
         await this.enqueueExtraction(saved, buffer);
         added += 1;
-        continue;
+        return;
       }
       const mtimeDiffers = row.mtime.getTime() !== item.mtime.getTime();
       const sizeDiffers = Number(row.size) !== item.size;
       if (mtimeDiffers || sizeDiffers) {
         const buffer = await this.readFileSafe(item.filePath);
-        if (buffer === null) continue;
+        if (buffer === null) return;
         const checksum = crypto
           .createHash('sha256')
           .update(buffer)
@@ -660,14 +678,14 @@ export class IndexedFileService {
           await this.repository.save(row);
         }
       }
-    }
+    });
 
-    for (const row of indexed) {
+    await forEachSequential(indexed, async (row) => {
       if (!onDisk.has(row.filename)) {
         await this.repository.delete({ id: row.id });
         removed += 1;
       }
-    }
+    });
 
     this.logger.log(
       `[indexed-file] reconcile owner=${ownerType}:${ownerId} ` +

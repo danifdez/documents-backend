@@ -53,28 +53,11 @@ export class ExecutionTelemetrySubscriber implements ExecutionEventSubscriber {
           },
         });
       if (!execution) return;
-      let startedAt: Date | undefined;
-      if (row.eventType === 'operation.finished' && row.causedByEventId) {
-        const start = await event.manager
-          .getRepository(ExecutionEventEntity)
-          .findOne({
-            where: { eventId: row.causedByEventId },
-            select: {
-              eventType: true,
-              attemptId: true,
-              operationId: true,
-              occurredAt: true,
-            },
-          });
-        if (
-          start?.eventType === 'operation.started' &&
-          start.attemptId === row.attemptId &&
-          start.operationId === row.operationId
-        )
-          startedAt = start.occurredAt;
-      } else if (row.eventType === 'execution.state_changed') {
-        startedAt = execution.createdAt;
-      }
+      const startedAt = await this.findStartedAt(
+        event,
+        row,
+        execution.createdAt,
+      );
       const metadata = executionEventMetadata({
         envelope: row.envelope,
         traceContext: null,
@@ -100,6 +83,33 @@ export class ExecutionTelemetrySubscriber implements ExecutionEventSubscriber {
       }
     } catch {
       /* telemetry is best effort; the canonical event remains in PostgreSQL */
+    }
+  }
+
+  private async findStartedAt(
+    event: InsertEvent<ExecutionEventEntity>,
+    row: ExecutionEventEntity,
+    executionCreatedAt: Date,
+  ): Promise<Date | undefined> {
+    if (row.eventType === 'execution.state_changed') return executionCreatedAt;
+    if (row.eventType !== 'operation.finished' || !row.causedByEventId) return;
+    const start = await event.manager
+      .getRepository(ExecutionEventEntity)
+      .findOne({
+        where: { eventId: row.causedByEventId },
+        select: {
+          eventType: true,
+          attemptId: true,
+          operationId: true,
+          occurredAt: true,
+        },
+      });
+    if (
+      start?.eventType === 'operation.started' &&
+      start.attemptId === row.attemptId &&
+      start.operationId === row.operationId
+    ) {
+      return start.occurredAt;
     }
   }
 

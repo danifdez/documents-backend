@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { DatasetEntity } from './dataset.entity';
 import { DatasetRecordEntity } from './dataset-record.entity';
 
@@ -58,38 +58,7 @@ export class DatasetQueryService {
       .createQueryBuilder('record')
       .where('record.dataset_id = :datasetId', { datasetId });
 
-    // Apply filters
-    if (params.filters && params.filters.length > 0) {
-      for (let i = 0; i < params.filters.length; i++) {
-        const filter = params.filters[i];
-        const field = this.validateFieldKey(dataset, filter.field);
-        const fieldDef = dataset.schema.find((f) => f.key === field);
-        const paramName = `filter_${i}`;
-
-        if (fieldDef?.type === 'number' && filter.operator !== 'contains') {
-          // Numeric comparison
-          const op = this.getSqlOperator(filter.operator);
-          qb.andWhere(
-            `(record.data ->> :field_${i})::numeric ${op} :${paramName}`,
-            {
-              [`field_${i}`]: field,
-              [paramName]: Number(filter.value),
-            },
-          );
-        } else if (filter.operator === 'contains') {
-          qb.andWhere(`record.data ->> :field_${i} ILIKE :${paramName}`, {
-            [`field_${i}`]: field,
-            [paramName]: `%${filter.value}%`,
-          });
-        } else {
-          // String equality
-          qb.andWhere(`record.data ->> :field_${i} = :${paramName}`, {
-            [`field_${i}`]: field,
-            [paramName]: filter.value,
-          });
-        }
-      }
-    }
+    this.applyRecordFilters(qb, dataset, params.filters ?? []);
 
     // Apply search across all text fields
     if (params.search) {
@@ -146,6 +115,41 @@ export class DatasetQueryService {
       .getMany();
 
     return { records, total };
+  }
+
+  private applyRecordFilters(
+    qb: SelectQueryBuilder<DatasetRecordEntity>,
+    dataset: DatasetEntity,
+    filters: RecordFilter[],
+  ): void {
+    for (const [i, filter] of filters.entries()) {
+      const field = this.validateFieldKey(dataset, filter.field);
+      const fieldDef = dataset.schema.find((f) => f.key === field);
+      const paramName = `filter_${i}`;
+
+      if (fieldDef?.type === 'number' && filter.operator !== 'contains') {
+        // Numeric comparison
+        const op = this.getSqlOperator(filter.operator);
+        qb.andWhere(
+          `(record.data ->> :field_${i})::numeric ${op} :${paramName}`,
+          {
+            [`field_${i}`]: field,
+            [paramName]: Number(filter.value),
+          },
+        );
+      } else if (filter.operator === 'contains') {
+        qb.andWhere(`record.data ->> :field_${i} ILIKE :${paramName}`, {
+          [`field_${i}`]: field,
+          [paramName]: `%${filter.value}%`,
+        });
+      } else {
+        // String equality
+        qb.andWhere(`record.data ->> :field_${i} = :${paramName}`, {
+          [`field_${i}`]: field,
+          [paramName]: filter.value,
+        });
+      }
+    }
   }
 
   async aggregate(datasetId: number, params: AggregateParams): Promise<any[]> {

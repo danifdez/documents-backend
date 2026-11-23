@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import {
   Injectable,
   NotFoundException,
@@ -228,7 +229,7 @@ export class DatasetService {
     }[] = [];
 
     // Detect removed fields
-    for (const oldField of oldSchema) {
+    await forEachSequential(oldSchema, async (oldField) => {
       if (!newKeys.has(oldField.key)) {
         const count = await this.recordRepository
           .createQueryBuilder('record')
@@ -246,10 +247,10 @@ export class DatasetService {
           });
         }
       }
-    }
+    });
 
     // Detect type changes
-    for (const newField of newSchema) {
+    await forEachSequential(newSchema, async (newField) => {
       const oldField = oldFieldMap.get(newField.key);
       if (oldField && oldField.type !== newField.type) {
         const incompatible = await this.countIncompatibleRecords(
@@ -265,7 +266,7 @@ export class DatasetService {
           incompatibleRecords: incompatible,
         });
       }
-    }
+    });
 
     return {
       removedFields,
@@ -444,9 +445,7 @@ export class DatasetService {
       return map;
     } else {
       // Lookup by record PK
-      const numIds = values
-        .map((v) => Number(v))
-        .filter((n) => !Number.isNaN(n));
+      const numIds = values.map(Number).filter((n) => !Number.isNaN(n));
       if (!numIds.length) return {};
       records = await this.recordRepository
         .createQueryBuilder('r')
@@ -743,15 +742,24 @@ export class DatasetService {
           : `${fieldLabel} must be a boolean`;
       case 'date':
       case 'datetime':
-        return Number.isNaN(Date.parse(String(value)))
+        return (typeof value !== 'string' &&
+          typeof value !== 'number' &&
+          !(value instanceof Date)) ||
+          Number.isNaN(
+            value instanceof Date ? value.getTime() : Date.parse(String(value)),
+          )
           ? `${fieldLabel} must be a valid ${field.type}`
           : null;
       case 'time':
-        return /^\d{2}:\d{2}(:\d{2})?$/.test(String(value))
+        return typeof value === 'string' && /^\d{2}:\d{2}(:\d{2})?$/.test(value)
           ? null
           : `${fieldLabel} must be a valid time (HH:mm or HH:mm:ss)`;
       case 'select':
-        return !field.options || field.options.includes(String(value))
+        return !field.options ||
+          ((typeof value === 'string' ||
+            typeof value === 'number' ||
+            typeof value === 'boolean') &&
+            field.options.includes(String(value)))
           ? null
           : `${fieldLabel} must be one of: ${field.options.join(', ')}`;
       default:

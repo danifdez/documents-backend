@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable } from '@nestjs/common';
 import { DataSource, In } from 'typeorm';
 import { ExecutionConfirmationEntity } from '../execution/execution-confirmation.entity';
@@ -87,12 +88,12 @@ export class ExecutionTerminalCandidateService {
         [COORDINATION_PENDING_PHASE, limit],
       );
       let promoted = 0;
-      for (const row of rows) {
+      await forEachSequential(rows, async (row: { execution_id: string }) => {
         const executionId = String(row.execution_id);
         const execution = await manager
           .getRepository(ExecutionEntity)
           .findOneBy({ executionId });
-        if (!execution) continue;
+        if (!execution) return;
         const [steps, operations, pendingConfirmations, plans, activeChildren] =
           await Promise.all([
             manager
@@ -139,13 +140,13 @@ export class ExecutionTerminalCandidateService {
           unmaterializedToolPlans: plans.filter((plan) => !plan.stepId).length,
           activeChildren,
         });
-        if (decision.kind === 'blocked') continue;
+        if (decision.kind === 'blocked') return;
         execution.phase = 'backend_finalization';
         execution.completionKind = decision.completionKind;
         execution.completionReason = decision.completionReason;
         await manager.getRepository(ExecutionEntity).save(execution);
         promoted += 1;
-      }
+      });
       return promoted;
     });
   }

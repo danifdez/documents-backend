@@ -1,3 +1,5 @@
+import { claimAvailable } from '../utils/claim-available';
+import { forEachSequential } from '../utils/for-each-sequential';
 import { readString } from '../utils/read-string';
 import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import { ExecutionAttemptService } from '../execution/execution-attempt.service';
@@ -166,8 +168,8 @@ export class ExecutionToolRuntimeService {
 
   async executeReady(limit = 20): Promise<number> {
     let executed = 0;
-    while (executed < limit) {
-      const assignment = await this.attempts.claimReadyStep({
+    const claimTool = () =>
+      this.attempts.claimReadyStep({
         workerId: LOCAL_TOOL_RUNTIME_WORKER_ID,
         stepKinds: [ExecutionStepKind.TOOL],
         capabilities: [
@@ -183,7 +185,7 @@ export class ExecutionToolRuntimeService {
         ],
         leaseDurationMs: TOOL_LEASE_MS,
       });
-      if (!assignment) break;
+    for await (const assignment of claimAvailable(claimTool, limit)) {
       await this.executeAssignment(assignment);
       executed += 1;
     }
@@ -193,7 +195,7 @@ export class ExecutionToolRuntimeService {
   async recoverStaleEffects(limit = 20): Promise<number> {
     const candidates = await this.attempts.findRecoverableLocalEffects(limit);
     let recovered = 0;
-    for (const candidate of candidates) {
+    await forEachSequential(candidates, async (candidate) => {
       try {
         const { plan } = this.readPlan(candidate.assignment);
         const observation = await this.runWorkspaceFileEffect(
@@ -217,7 +219,7 @@ export class ExecutionToolRuntimeService {
           ) {
             recovered += 1;
           }
-          continue;
+          return;
         }
         if (
           observation.effectStatus === 'not_applied' &&
@@ -238,7 +240,7 @@ export class ExecutionToolRuntimeService {
             'verified',
           );
         }
-        const result = await this.workspaceObservationResult(
+        const result = this.workspaceObservationResult(
           candidate.assignment,
           plan,
           observation,
@@ -252,7 +254,7 @@ export class ExecutionToolRuntimeService {
           `Workspace effect recovery ${candidate.assignment.operationId} failed: ${message}`,
         );
       }
-    }
+    });
     return recovered;
   }
 
@@ -323,12 +325,10 @@ export class ExecutionToolRuntimeService {
     let status: 'failed' | 'cancelled' | 'succeeded';
     if (['succeeded', 'not_executed'].includes(result.status)) {
       status = 'succeeded';
+    } else if (result.status === 'cancelled') {
+      status = 'cancelled';
     } else {
-      if (result.status === 'cancelled') {
-        status = 'cancelled';
-      } else {
-        status = 'failed';
-      }
+      status = 'failed';
     }
     const receive = recovered
       ? this.attempts.receiveRecoveredEffectResult.bind(this.attempts)
@@ -643,13 +643,11 @@ export class ExecutionToolRuntimeService {
     let state = await this.effectJournal.readExternal(intent);
     const effectWasPrepared = state !== null;
     if (!state) {
-      let preparation: WorkspaceFileSnapshot;
-      try {
-        preparation = await this.observeWorkspaceFile(owner, filename);
-      } catch (error) {
-        if (!recoveryOnly) throw error;
-        preparation = this.unavailableWorkspaceSnapshot(filename);
-      }
+      const preparation = await this.observeWorkspaceFileForRecovery(
+        owner,
+        filename,
+        recoveryOnly,
+      );
       state = await this.effectJournal.prepareExternal(intent, preparation);
     }
     if (state.status !== 'prepared') {
@@ -671,13 +669,11 @@ export class ExecutionToolRuntimeService {
       return observation;
     }
 
-    let current: WorkspaceFileSnapshot;
-    try {
-      current = await this.observeWorkspaceFile(owner, filename);
-    } catch (error) {
-      if (!recoveryOnly) throw error;
-      current = this.unavailableWorkspaceSnapshot(filename);
-    }
+    const current = await this.observeWorkspaceFileForRecovery(
+      owner,
+      filename,
+      recoveryOnly,
+    );
     let observation = this.classifyWorkspaceEffect(
       operation,
       plan,
@@ -690,21 +686,13 @@ export class ExecutionToolRuntimeService {
       observation.effectStatus === 'inconclusive' ||
       observation.reason === 'workspace_file_exists' ||
       observation.reason === 'workspace_file_already_absent';
-    if (terminalWithoutApply) {
+    if (terminalWithoutApply || recoveryOnly) {
       await this.effectJournal.recordExternalObservation(
         intent,
         observation,
-        observation.effectStatus === 'inconclusive'
-          ? 'inconclusive'
-          : 'verified',
-      );
-      return observation;
-    }
-    if (recoveryOnly) {
-      await this.effectJournal.recordExternalObservation(
-        intent,
-        observation,
-        'continue',
+        terminalWithoutApply
+          ? this.workspaceObservationDisposition(observation)
+          : 'continue',
       );
       return observation;
     }
@@ -758,9 +746,30 @@ export class ExecutionToolRuntimeService {
     await this.effectJournal.recordExternalObservation(
       intent,
       observation,
-      observation.effectStatus === 'inconclusive' ? 'inconclusive' : 'verified',
+      this.workspaceObservationDisposition(observation),
     );
     return observation;
+  }
+
+  private workspaceObservationDisposition(
+    observation: WorkspaceFileEffectObservation,
+  ): 'inconclusive' | 'verified' {
+    return observation.effectStatus === 'inconclusive'
+      ? 'inconclusive'
+      : 'verified';
+  }
+
+  private async observeWorkspaceFileForRecovery(
+    owner: OwnerRef,
+    filename: string,
+    recoveryOnly: boolean,
+  ): Promise<WorkspaceFileSnapshot> {
+    try {
+      return await this.observeWorkspaceFile(owner, filename);
+    } catch (error) {
+      if (!recoveryOnly) throw error;
+      return this.unavailableWorkspaceSnapshot(filename);
+    }
   }
 
   private workspaceEffectInput(
@@ -867,61 +876,24 @@ export class ExecutionToolRuntimeService {
       );
     }
     if (operation === 'delete') {
-      if (before.exists === false && current.exists === false) {
-        return this.workspaceObservation(
-          operation,
-          'not_applied',
-          'workspace_file_already_absent',
-          current,
-        );
-      }
-      if (before.exists === true && current.exists === false) {
-        return this.workspaceObservation(
-          operation,
-          'applied',
-          'workspace_file_absence_verified',
-          current,
-        );
-      }
-      if (this.sameWorkspaceSnapshot(before, current)) {
-        return this.workspaceObservation(
-          operation,
-          'not_applied',
-          'workspace_baseline_unchanged',
-          current,
-        );
-      }
-      return this.workspaceObservation(
-        operation,
-        'inconclusive',
-        'workspace_file_changed_during_delete',
-        current,
-      );
+      return this.classifyWorkspaceDeletion(before, current);
     }
 
     const desiredHash = contentHash(body!);
     const overwrite = plan.normalizedArguments.overwrite === true;
-    if (current.exists && current.contentHash === desiredHash) {
-      if (!overwrite && before.exists) {
-        return this.workspaceObservation(
-          operation,
-          'not_applied',
-          'workspace_file_exists',
-          current,
-        );
-      }
-      return this.workspaceObservation(
-        operation,
-        'applied',
-        'workspace_file_content_verified',
-        current,
-      );
-    }
     if (!overwrite && before.exists) {
       return this.workspaceObservation(
         operation,
         'not_applied',
         'workspace_file_exists',
+        current,
+      );
+    }
+    if (current.exists && current.contentHash === desiredHash) {
+      return this.workspaceObservation(
+        operation,
+        'applied',
+        'workspace_file_content_verified',
         current,
       );
     }
@@ -937,6 +909,42 @@ export class ExecutionToolRuntimeService {
       operation,
       'inconclusive',
       'workspace_file_changed_during_write',
+      current,
+    );
+  }
+
+  private classifyWorkspaceDeletion(
+    before: WorkspaceFileSnapshot,
+    current: WorkspaceFileSnapshot,
+  ): WorkspaceFileEffectObservation {
+    if (before.exists === false && current.exists === false) {
+      return this.workspaceObservation(
+        'delete',
+        'not_applied',
+        'workspace_file_already_absent',
+        current,
+      );
+    }
+    if (before.exists === true && current.exists === false) {
+      return this.workspaceObservation(
+        'delete',
+        'applied',
+        'workspace_file_absence_verified',
+        current,
+      );
+    }
+    if (this.sameWorkspaceSnapshot(before, current)) {
+      return this.workspaceObservation(
+        'delete',
+        'not_applied',
+        'workspace_baseline_unchanged',
+        current,
+      );
+    }
+    return this.workspaceObservation(
+      'delete',
+      'inconclusive',
+      'workspace_file_changed_during_delete',
       current,
     );
   }
@@ -967,12 +975,12 @@ export class ExecutionToolRuntimeService {
     };
   }
 
-  private async workspaceObservationResult(
+  private workspaceObservationResult(
     assignment: StepAssignment,
     plan: ToolPlanContract,
     observation: WorkspaceFileEffectObservation,
     cancellationRequested: boolean,
-  ): Promise<ToolResultContract> {
+  ): ToolResultContract {
     const effectStatus = observation.effectStatus;
     if (effectStatus === 'inconclusive') {
       return this.unknownWorkspaceMutation(plan, observation.reason);
@@ -1024,17 +1032,19 @@ export class ExecutionToolRuntimeService {
     const filename = readString(plan.normalizedArguments.filename);
     const writeAction =
       plan.normalizedArguments.overwrite === true ? 'Updated' : 'Created';
+    let content = `${writeAction} file: ${filename}`;
+    if (observation.operation === 'delete') {
+      content =
+        effectStatus === 'applied'
+          ? `Deleted file: ${filename}`
+          : `File already absent: ${filename}`;
+    }
     return {
       schemaVersion: 'tool-result/1',
       operationId: assignment.operationId,
       toolCallId: plan.toolCallId,
       status: 'succeeded',
-      content:
-        observation.operation === 'delete'
-          ? effectStatus === 'applied'
-            ? `Deleted file: ${filename}`
-            : `File already absent: ${filename}`
-          : `${writeAction} file: ${filename}`,
+      content,
       structuredContent: observation,
       artifactRefs: [],
       sourceRefs: [],
@@ -1107,7 +1117,7 @@ export class ExecutionToolRuntimeService {
     const verified = await this.userTasks.findByExecutionOperation(
       plan.operationId,
     );
-    if (!verified || verified.id !== task.id || verified.title !== title) {
+    if (verified?.id !== task.id || verified.title !== title) {
       throw new Error('user_task_effect_not_verified');
     }
     return {
@@ -1141,8 +1151,7 @@ export class ExecutionToolRuntimeService {
     const childExecutionId = readString(assignment.work.childExecutionId);
     const child = await this.executions.findOne(childExecutionId);
     if (
-      !child ||
-      child.parentExecutionId !== assignment.executionId ||
+      child?.parentExecutionId !== assignment.executionId ||
       child.taskType !== 'delegated-agent' ||
       (child.payload as DelegatedAgentExecutionPayload)
         .delegationOperationId !== plan.operationId
@@ -1162,22 +1171,18 @@ export class ExecutionToolRuntimeService {
     let content: string;
     if (typeof childResult === 'string') {
       content = childResult;
+    } else if (typeof childResult?.reply === 'string') {
+      content = childResult.reply;
     } else {
-      if (typeof childResult?.reply === 'string') {
-        content = childResult.reply;
-      } else {
-        content = '';
-      }
+      content = '';
     }
     let status: 'failed' | 'cancelled' | 'succeeded';
     if (child.status === ExecutionStatus.COMPLETED) {
       status = 'succeeded';
+    } else if (child.status === ExecutionStatus.CANCELLED) {
+      status = 'cancelled';
     } else {
-      if (child.status === ExecutionStatus.CANCELLED) {
-        status = 'cancelled';
-      } else {
-        status = 'failed';
-      }
+      status = 'failed';
     }
     return {
       schemaVersion: 'tool-result/1',

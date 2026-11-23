@@ -7,10 +7,11 @@ interface ClaimedOutboxMessage {
   socket_event: string;
   payload: Record<string, unknown>;
   attempts: number;
-  owner_principal: string | null;
+  owner_principal: string;
 }
 
 const PUBLISH_LEASE_MS = 30_000;
+const MAX_PUBLISH_ATTEMPTS = 20;
 
 @Injectable()
 export class ExecutionPublicationStore {
@@ -20,7 +21,16 @@ export class ExecutionPublicationStore {
     return this.dataSource.transaction(async (manager) => {
       const [rows] = (await manager.query(
         `
-          WITH candidate AS (
+          WITH exhausted_leases AS (
+            UPDATE "execution_outbox"
+            SET "status" = '${ExecutionOutboxStatus.FAILED}',
+                "lease_expires_at" = NULL,
+                "last_error" = 'publication_lease_attempts_exhausted',
+                "updated_at" = now()
+            WHERE "status" = '${ExecutionOutboxStatus.PUBLISHING}'
+              AND "lease_expires_at" <= now()
+              AND "attempts" >= $2
+          ), candidate AS (
             SELECT "outbox_id"
             FROM "execution_outbox"
             WHERE (
@@ -29,6 +39,7 @@ export class ExecutionPublicationStore {
               ) OR (
                 "status" = '${ExecutionOutboxStatus.PUBLISHING}'
                 AND "lease_expires_at" <= now()
+                AND "attempts" < $2
               )
             ORDER BY "available_at", "created_at"
             LIMIT 1
@@ -42,11 +53,9 @@ export class ExecutionPublicationStore {
           FROM candidate
           WHERE message."outbox_id" = candidate."outbox_id"
           RETURNING message."outbox_id", message."socket_event",
-                    message."payload", message."attempts",
-                    (SELECT "owner_principal" FROM "executions"
-                     WHERE "execution_id" = message."execution_id") AS "owner_principal"
+                    message."payload", message."attempts", message."owner_principal"
         `,
-        [PUBLISH_LEASE_MS],
+        [PUBLISH_LEASE_MS, MAX_PUBLISH_ATTEMPTS],
       )) as [ClaimedOutboxMessage[], number];
       return rows[0] ?? null;
     });
@@ -73,11 +82,18 @@ export class ExecutionPublicationStore {
     message: ClaimedOutboxMessage,
     reason: string,
   ): Promise<void> {
+    // An offline owner may reconnect at any time, so keep their message pending.
+    const exhausted =
+      reason !== 'no_connected_clients' &&
+      message.attempts >= MAX_PUBLISH_ATTEMPTS;
+    const status = exhausted
+      ? ExecutionOutboxStatus.FAILED
+      : ExecutionOutboxStatus.PENDING;
     const backoffSeconds = Math.min(60, Math.max(1, message.attempts));
     await this.dataSource.query(
       `
         UPDATE "execution_outbox"
-        SET "status" = '${ExecutionOutboxStatus.PENDING}',
+        SET "status" = '${status}',
             "available_at" = now() + ($3 * interval '1 second'),
             "lease_expires_at" = NULL,
             "last_error" = $4,

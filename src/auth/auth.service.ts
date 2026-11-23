@@ -73,25 +73,27 @@ export class AuthService {
     }
   }
 
-  async login(user: UserEntity) {
-    const payload = {
-      sub: user.id,
-      username: user.username,
-      permissions: user.permissions,
-    };
+  login(user: UserEntity) {
+    return Promise.resolve().then(() => {
+      const payload = {
+        sub: user.id,
+        username: user.username,
+        permissions: user.permissions,
+      };
 
-    const refreshPayload = { sub: user.id, type: 'refresh' };
+      const refreshPayload = { sub: user.id, type: 'refresh' };
 
-    const accessExpiry = this.configService.get('JWT_ACCESS_EXPIRY', '15m');
-    const refreshExpiry = this.configService.get('JWT_REFRESH_EXPIRY', '7d');
+      const accessExpiry = this.configService.get('JWT_ACCESS_EXPIRY', '15m');
+      const refreshExpiry = this.configService.get('JWT_REFRESH_EXPIRY', '7d');
 
-    return {
-      accessToken: this.jwtService.sign(payload, { expiresIn: accessExpiry }),
-      refreshToken: this.jwtService.sign(refreshPayload, {
-        expiresIn: refreshExpiry,
-      }),
-      user: this.sanitizeUser(user),
-    };
+      return {
+        accessToken: this.jwtService.sign(payload, { expiresIn: accessExpiry }),
+        refreshToken: this.jwtService.sign(refreshPayload, {
+          expiresIn: refreshExpiry,
+        }),
+        user: this.sanitizeUser(user),
+      };
+    });
   }
 
   async refreshToken(token: string) {
@@ -106,7 +108,7 @@ export class AuthService {
         throw new UnauthorizedException('User not found or inactive');
       }
 
-      return this.login(user);
+      return await this.login(user);
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
@@ -205,7 +207,7 @@ export class AuthService {
 
   // ── Permission Groups ──────────────────────────────────────────
 
-  async createGroup(dto: CreateGroupDto): Promise<PermissionGroupEntity> {
+  createGroup(dto: CreateGroupDto): Promise<PermissionGroupEntity> {
     const group = this.groupRepo.create({
       name: dto.name,
       description: dto.description || null,

@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { lockExecutionRequest } from './execution-request';
 import { ExecutionRequestEntity } from './execution-request.entity';
 import {
@@ -417,32 +418,22 @@ export class ExecutionConversationService {
     }
 
     return await this.dataSource.transaction(async (manager) => {
-      const acceptance =
-        requestId === undefined
-          ? null
-          : await lockExecutionRequest(manager, requestId, scope);
-      if (acceptance) {
-        const inputHash = canonicalHash({
-          operation: 'conversation-message',
+      const acceptance = await this.prepareChatRequest(
+        manager,
+        scope,
+        requestId,
+        executionKind,
+        ownerId,
+        message,
+      );
+      if (acceptance?.executionId) {
+        return this.acceptedChat(
+          manager,
+          acceptance.executionId,
+          scope,
           executionKind,
           ownerId,
-          message,
-        });
-        if (acceptance.inputHash && acceptance.inputHash !== inputHash) {
-          throw new ConflictException('execution_request_conflict');
-        }
-        if (acceptance.executionId) {
-          return this.acceptedChat(
-            manager,
-            acceptance.executionId,
-            scope,
-            executionKind,
-            ownerId,
-          );
-        }
-        if (acceptance.cancelRequested)
-          throw new ConflictException('execution_request_cancelled');
-        acceptance.inputHash = inputHash;
+        );
       }
       const ownerConfig = await this.conversationOwnerConfig(
         manager,
@@ -712,6 +703,33 @@ export class ExecutionConversationService {
     });
   }
 
+  private async prepareChatRequest(
+    manager: EntityManager,
+    scope: ExecutionAccessScope,
+    requestId: string | undefined,
+    executionKind: 'assistant_chat' | 'agent_chat',
+    ownerId: number,
+    message: string,
+  ): Promise<ExecutionRequestEntity | null> {
+    if (requestId === undefined) return null;
+    const acceptance = await lockExecutionRequest(manager, requestId, scope);
+    const inputHash = canonicalHash({
+      operation: 'conversation-message',
+      executionKind,
+      ownerId,
+      message,
+    });
+    if (acceptance.inputHash && acceptance.inputHash !== inputHash) {
+      throw new ConflictException('execution_request_conflict');
+    }
+    if (acceptance.executionId) return acceptance;
+    if (acceptance.cancelRequested) {
+      throw new ConflictException('execution_request_cancelled');
+    }
+    acceptance.inputHash = inputHash;
+    return acceptance;
+  }
+
   async readChatRequest(
     requestId: string,
     scope: ExecutionAccessScope,
@@ -821,12 +839,12 @@ export class ExecutionConversationService {
       },
     );
     if (workflow) {
-      for (const step of workflow.steps) {
+      await forEachSequential(workflow.steps, async (step) => {
         await createExecutionStep(manager, {
           ...step,
           executionId: execution.executionId,
         });
-      }
+      });
       return;
     }
 

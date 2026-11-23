@@ -41,8 +41,7 @@ export class CreateResourceTypes1757668140004 implements MigrationInterface {
       const parts: string[] = [];
       let cur = '';
       let inQuotes = false;
-      for (let i = 0; i < l.length; i++) {
-        const ch = l[i];
+      for (const ch of l) {
         if (ch === '"') {
           inQuotes = !inQuotes;
           continue;
@@ -60,16 +59,23 @@ export class CreateResourceTypes1757668140004 implements MigrationInterface {
 
     await queryRunner.startTransaction();
     try {
-      for (const r of rows) {
-        const id = Number.parseInt(r[0] as string, 10);
-        const abbreviation = r[1] as string;
-        const name = r[2] as string;
-        const description = r[3] as string | null;
-        const example = r[4] as string | null;
-
+      if (rows.length) {
+        const resourceTypes = rows.map(
+          ([id, abbreviation, name, description, example]) => ({
+            id: Number.parseInt(id, 10),
+            abbreviation,
+            name,
+            description,
+            example,
+          }),
+        );
         await queryRunner.query(
-          `INSERT INTO "resource_types" ("id","abbreviation","name","description","example","created_at","updated_at") VALUES ($1,$2,$3,$4,$5, now(), now())`,
-          [id, abbreviation, name, description, example],
+          `INSERT INTO "resource_types" ("id", "abbreviation", "name", "description", "example")
+           SELECT id, abbreviation, name, description, example
+           FROM jsonb_to_recordset($1::jsonb) AS seed(
+             id integer, abbreviation text, name text, description text, example text
+           )`,
+          [JSON.stringify(resourceTypes)],
         );
       }
 

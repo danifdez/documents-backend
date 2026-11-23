@@ -125,52 +125,67 @@ export class IndexedFileExtractionProcessor implements ExecutionProcessor {
     );
 
     if (text) {
-      const ownerType = observation.ownerType;
-      const ownerId = Number(observation.ownerId);
-      const filename = observation.filename;
-      const checksum = observation.checksum;
-      if (
-        (ownerType !== 'assistant' && ownerType !== 'agent') ||
-        !Number.isInteger(ownerId) ||
-        ownerId <= 0 ||
-        typeof filename !== 'string' ||
-        typeof checksum !== 'string'
-      ) {
-        throw new Error('indexed_file_extraction_observation_invalid');
-      }
-      const normalizedOwnerType: IndexedFileOwnerType =
-        ownerType === 'assistant' ? 'assistant' : 'agent';
-      const current = await this.repository.findOne({
-        where: { id: indexedFileId },
-      });
-      if (!current) return { success: false, reason: 'not_found' };
-      if (current.checksum !== checksum) {
-        return { success: false, reason: 'stale' };
-      }
-      if (!execution.lastEventId) {
-        throw new Error('Indexed-file extraction has no causal event');
-      }
-      const payload = {
+      const failure = await this.scheduleVectorIngest(
+        execution,
         indexedFileId,
-        ownerType: normalizedOwnerType,
-        ownerId,
-        content: text,
-        filename,
-        checksum,
-      };
-      await this.executionService.createChildInferenceOnce(
-        execution.executionId,
-        `indexed-file-extraction:ingest:${indexedFileId}:${checksum}`,
-        {
-          taskType: 'indexed-file-ingest',
-          payload,
-          work: { taskType: 'indexed-file-ingest', payload },
-          requiredCapability: 'indexed-file-ingest',
-          causedByEventId: execution.lastEventId,
-        },
+        text,
+        observation,
       );
+      if (failure) return failure;
     }
 
     return { success: true, indexedFileId, length: text.length };
+  }
+
+  private async scheduleVectorIngest(
+    execution: ExecutionEntity,
+    indexedFileId: number,
+    text: string,
+    observation: Record<string, unknown>,
+  ): Promise<{ success: false; reason: 'not_found' | 'stale' } | undefined> {
+    const ownerType = observation.ownerType;
+    const ownerId = Number(observation.ownerId);
+    const filename = observation.filename;
+    const checksum = observation.checksum;
+    if (
+      (ownerType !== 'assistant' && ownerType !== 'agent') ||
+      !Number.isInteger(ownerId) ||
+      ownerId <= 0 ||
+      typeof filename !== 'string' ||
+      typeof checksum !== 'string'
+    ) {
+      throw new Error('indexed_file_extraction_observation_invalid');
+    }
+    const normalizedOwnerType: IndexedFileOwnerType =
+      ownerType === 'assistant' ? 'assistant' : 'agent';
+    const current = await this.repository.findOne({
+      where: { id: indexedFileId },
+    });
+    if (!current) return { success: false, reason: 'not_found' };
+    if (current.checksum !== checksum) {
+      return { success: false, reason: 'stale' };
+    }
+    if (!execution.lastEventId) {
+      throw new Error('Indexed-file extraction has no causal event');
+    }
+    const payload = {
+      indexedFileId,
+      ownerType: normalizedOwnerType,
+      ownerId,
+      content: text,
+      filename,
+      checksum,
+    };
+    await this.executionService.createChildInferenceOnce(
+      execution.executionId,
+      `indexed-file-extraction:ingest:${indexedFileId}:${checksum}`,
+      {
+        taskType: 'indexed-file-ingest',
+        payload,
+        work: { taskType: 'indexed-file-ingest', payload },
+        requiredCapability: 'indexed-file-ingest',
+        causedByEventId: execution.lastEventId,
+      },
+    );
   }
 }

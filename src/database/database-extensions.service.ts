@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
@@ -10,11 +11,11 @@ export class DatabaseExtensionsService implements OnModuleInit {
   constructor(private readonly dataSource: DataSource) {}
 
   async onModuleInit(): Promise<void> {
-    for (const extension of REQUIRED_EXTENSIONS) {
+    await forEachSequential(REQUIRED_EXTENSIONS, async (extension) => {
       await this.dataSource.query(
         `CREATE EXTENSION IF NOT EXISTS ${extension}`,
       );
-    }
+    });
     this.logger.log(
       `PostgreSQL extensions ready (${REQUIRED_EXTENSIONS.join(', ')})`,
     );

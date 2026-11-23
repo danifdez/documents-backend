@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { ExecutionProcessor } from '../execution-processor.interface';
+import {
+  ExecutionProcessor,
+  ExecutionProcessorResult,
+} from '../execution-processor.interface';
 import { ExecutionEntity } from 'src/execution/execution.entity';
 
 @Injectable()
@@ -10,16 +13,18 @@ export class SearchProcessor implements ExecutionProcessor {
     return taskType === this.TASK_TYPE;
   }
 
-  async process(execution: ExecutionEntity): Promise<any> {
-    const results = execution.result['results'] as any[];
-    const requestId = execution.payload['requestId'] as string | undefined;
+  process(execution: ExecutionEntity): Promise<ExecutionProcessorResult> {
+    return Promise.resolve().then(() => {
+      const results = execution.result['results'] as any[];
+      const requestId = execution.payload['requestId'] as string | undefined;
 
-    return {
-      success: true,
-      publication: {
-        socketEvent: 'searchResponse',
-        payload: { results, requestId },
-      },
-    };
+      return {
+        success: true,
+        publication: {
+          socketEvent: 'searchResponse',
+          payload: { results, requestId },
+        },
+      };
+    });
   }
 }

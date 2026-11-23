@@ -103,25 +103,19 @@ export function matchTaggedTermsInText(
 
 /** Every way an entity can be named: its name, aliases and translations. */
 export function entityTermsOf(entity: any): string[] {
-  const terms: string[] = [];
-  if (entity?.name && entity.name.length >= 3) {
-    terms.push(entity.name);
-  }
-  if (Array.isArray(entity?.aliases)) {
-    for (const alias of entity.aliases) {
-      if (alias?.value && alias.value.length >= 3) {
-        terms.push(alias.value);
-      }
-    }
-  }
-  if (entity?.translations && typeof entity.translations === 'object') {
-    for (const value of Object.values(entity.translations)) {
-      if (typeof value === 'string' && value.length >= 3) {
-        terms.push(value);
-      }
-    }
-  }
-  return terms;
+  if (!entity) return [];
+  const aliases = Array.isArray(entity.aliases) ? entity.aliases : [];
+  const translations =
+    entity.translations && typeof entity.translations === 'object'
+      ? Object.values(entity.translations)
+      : [];
+  return [
+    entity.name,
+    ...aliases.map((alias) => alias?.value),
+    ...translations,
+  ].filter(
+    (term): term is string => typeof term === 'string' && term.length >= 3,
+  );
 }
 
 /** A knowledge entry is matched by its title and its tags. */
@@ -160,13 +154,7 @@ function dedupe(terms: TaggedTerm[]): TaggedTerm[] {
   return out;
 }
 
-/**
- * The concrete forms in which a bibliography entry can be cited inside a page.
- * Numeric citations (`[3]`, `(12, 15)`) are deliberately left out: they point
- * at the page's own reference list, which we cannot see, so matching them would
- * only produce false positives.
- */
-export function bibliographyCitationForms(entry: any): TaggedTerm[] {
+function bibliographyReferenceLabels(entry: any): TaggedTerm[] {
   const terms: TaggedTerm[] = [];
   const authors = authorList(entry);
   const year = entry?.year ? String(entry.year) : '';
@@ -177,12 +165,10 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
     let short: string;
     if (authors.length === 1) {
       short = first;
+    } else if (authors.length === 2) {
+      short = `${first} & ${second}`;
     } else {
-      if (authors.length === 2) {
-        short = `${first} & ${second}`;
-      } else {
-        short = `${first} et al.`;
-      }
+      short = `${first} et al.`;
     }
     const shortAnd = authors.length === 2 ? `${first} y ${second}` : short;
     const forms = [
@@ -210,19 +196,15 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
     }
   }
 
-  const title = entry?.title ? String(entry.title).trim() : '';
-  if (title.length >= 20) {
-    terms.push({ term: title, kind: 'title' });
-  }
-  const shortTitle = entry?.shortTitle ? String(entry.shortTitle).trim() : '';
-  if (shortTitle.length >= 8 && shortTitle !== title) {
-    terms.push({ term: shortTitle, kind: 'title' });
-  }
+  return terms;
+}
 
+function bibliographyIdentifiers(entry: any): TaggedTerm[] {
+  const terms: TaggedTerm[] = [];
   const doi = entry?.doi ? String(entry.doi).trim() : '';
   if (doi.length >= 6) {
-    terms.push({ term: doi, kind: 'identifier' });
     terms.push(
+      { term: doi, kind: 'identifier' },
       { term: `doi:${doi}`, kind: 'identifier' },
       { term: `https://doi.org/${doi}`, kind: 'identifier' },
     );
@@ -233,8 +215,10 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
   ] as const) {
     const id = value ? String(value).trim() : '';
     if (id.length >= 6) {
-      terms.push({ term: id, kind: 'identifier' });
-      terms.push({ term: `${label}:${id}`, kind: 'identifier' });
+      terms.push(
+        { term: id, kind: 'identifier' },
+        { term: `${label}:${id}`, kind: 'identifier' },
+      );
     }
   }
   const url = entry?.url ? String(entry.url).trim() : '';
@@ -242,6 +226,29 @@ export function bibliographyCitationForms(entry: any): TaggedTerm[] {
     terms.push({ term: url, kind: 'identifier' });
   }
 
+  return terms;
+}
+
+/**
+ * The concrete forms in which a bibliography entry can be cited inside a page.
+ * Numeric citations (`[3]`, `(12, 15)`) are deliberately left out: they point
+ * at the page's own reference list, which we cannot see, so matching them would
+ * only produce false positives.
+ */
+export function bibliographyCitationForms(entry: any): TaggedTerm[] {
+  const terms: TaggedTerm[] = [];
+  terms.push(...bibliographyReferenceLabels(entry));
+
+  const title = entry?.title ? String(entry.title).trim() : '';
+  if (title.length >= 20) {
+    terms.push({ term: title, kind: 'title' });
+  }
+  const shortTitle = entry?.shortTitle ? String(entry.shortTitle).trim() : '';
+  if (shortTitle.length >= 8 && shortTitle !== title) {
+    terms.push({ term: shortTitle, kind: 'title' });
+  }
+
+  terms.push(...bibliographyIdentifiers(entry));
   return dedupe(terms);
 }
 

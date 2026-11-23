@@ -137,8 +137,8 @@ export class DatasetCsvService {
     // Headers interleaved: value column, then its three auxiliaries.
     const headers: string[] = [];
     for (const f of schema) {
-      headers.push(escapeCsv(f.name));
       headers.push(
+        escapeCsv(f.name),
         escapeCsv(`${f.key}_source`),
         escapeCsv(`${f.key}_page`),
         escapeCsv(`${f.key}_quote`),
@@ -151,14 +151,13 @@ export class DatasetCsvService {
         const anchor = r.cellMetadata?.[f.key] || null;
         cells.push(escapeCsv(r.data[f.key]));
         if (anchor?.sourceResourceId != null) {
-          cells.push(escapeCsv(resolver(anchor.sourceResourceId) || ''));
           cells.push(
+            escapeCsv(resolver(anchor.sourceResourceId) || ''),
             escapeCsv(anchor.page ?? ''),
             escapeCsv(anchor.quote ?? ''),
           );
         } else {
-          cells.push('');
-          cells.push('', '');
+          cells.push('', '', '');
         }
       }
       return cells.join(',');

@@ -11,14 +11,16 @@ export class DatasetProposeColumnsProcessor implements ExecutionProcessor {
     return taskType === 'dataset.propose-columns';
   }
 
-  async process(execution: ExecutionEntity): Promise<ExecutionProcessorResult> {
-    const result = execution.result as { columns?: unknown } | null;
-    if (!Array.isArray(result?.columns) || result.columns.length === 0) {
-      return {
-        success: false,
-        reason: 'invalid_column_proposal',
-      };
-    }
-    return { success: true };
+  process(execution: ExecutionEntity): Promise<ExecutionProcessorResult> {
+    return Promise.resolve().then(() => {
+      const result = execution.result as { columns?: unknown } | null;
+      if (!Array.isArray(result?.columns) || result.columns.length === 0) {
+        return {
+          success: false,
+          reason: 'invalid_column_proposal',
+        };
+      }
+      return { success: true };
+    });
   }
 }

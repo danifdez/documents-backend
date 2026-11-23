@@ -41,12 +41,10 @@ function workingFolderOwner(execution: ExecutionEntity): {
   let ownerType: 'assistant' | 'agent';
   if (execution.taskType === 'assistant-chat') {
     ownerType = 'assistant';
+  } else if (execution.taskType === 'agent-chat') {
+    ownerType = 'agent';
   } else {
-    if (execution.taskType === 'agent-chat') {
-      ownerType = 'agent';
-    } else {
-      ownerType = null;
-    }
+    ownerType = null;
   }
   const payload = chatTurnPayload(execution);
   const ownerId = Number(payload.ownerId);

@@ -6,7 +6,7 @@ export async function renderHtmlToDocx(html: string): Promise<Buffer> {
     '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' +
     html +
     '</body></html>';
-  return HTMLtoDOCX(wrappedHtml, null, {
+  return await HTMLtoDOCX(wrappedHtml, null, {
     table: { row: { cantSplit: true } },
     footer: false,
     header: false,

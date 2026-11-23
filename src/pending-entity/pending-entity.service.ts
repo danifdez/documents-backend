@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
@@ -237,7 +238,7 @@ export class PendingEntityService {
       throw new NotFoundException(`Resource with id ${resourceId} not found`);
     }
 
-    for (const pending of pendingEntities) {
+    await forEachSequential(pendingEntities, async (pending) => {
       try {
         const entityTypeName = pending.entityType?.name;
         if (!entityTypeName) {
@@ -251,7 +252,7 @@ export class PendingEntityService {
           `Failed to confirm entity "${pending.name}": ${error.message}`,
         );
       }
-    }
+    });
 
     // Never mark the resource confirmed or enqueue a new ingest when nothing
     // was actually confirmed. Otherwise a failed batch would leave the

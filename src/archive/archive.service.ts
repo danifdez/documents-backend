@@ -1,3 +1,5 @@
+import { claimAvailable } from '../utils/claim-available';
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository } from 'typeorm';
@@ -226,20 +228,23 @@ export class ArchiveService {
   private async collectDescendantThreadIds(rootId: number): Promise<number[]> {
     const result: number[] = [rootId];
     let frontier: number[] = [rootId];
-    while (frontier.length) {
+    const fetchChildren = async () => {
+      if (!frontier.length) return null;
       const rows = await this.threadRepo
         .createQueryBuilder('t')
         .select('t.id', 'id')
         .where('t."parentId" IN (:...parents)', { parents: frontier })
         .getRawMany<{ id: number }>();
-      const next = rows.map((r) => r.id);
-      result.push(...next);
-      frontier = next;
+      frontier = rows.map((r) => r.id);
+      return frontier;
+    };
+    for await (const children of claimAvailable(fetchChildren)) {
+      result.push(...children);
     }
     return result;
   }
 
-  private async findDocs(
+  private findDocs(
     projectId: number | null,
     threadIds: number[],
     onlyActive: boolean,
@@ -255,14 +260,14 @@ export class ArchiveService {
       conditions.push('d."threadId" IN (:...threadIds)');
       params.threadIds = threadIds;
     }
-    if (!conditions.length) return [];
+    if (!conditions.length) return Promise.resolve([]);
     qb.where(`(${conditions.join(' OR ')})`, params);
     if (onlyActive) qb.andWhere(`d.status = 'active'`);
     else qb.andWhere(`d.status = 'archived'`);
     return qb.getMany();
   }
 
-  private async findNotes(
+  private findNotes(
     projectId: number | null,
     threadIds: number[],
     onlyActive: boolean,
@@ -278,14 +283,14 @@ export class ArchiveService {
       conditions.push('n."threadId" IN (:...threadIds)');
       params.threadIds = threadIds;
     }
-    if (!conditions.length) return [];
+    if (!conditions.length) return Promise.resolve([]);
     qb.where(`(${conditions.join(' OR ')})`, params);
     if (onlyActive) qb.andWhere(`n.status = 'active'`);
     else qb.andWhere(`n.status = 'archived'`);
     return qb.getMany();
   }
 
-  private async findResources(
+  private findResources(
     projectId: number | null,
     threadIds: number[],
     onlyActive: boolean,
@@ -301,7 +306,7 @@ export class ArchiveService {
       conditions.push('r."threadId" IN (:...threadIds)');
       params.threadIds = threadIds;
     }
-    if (!conditions.length) return [];
+    if (!conditions.length) return Promise.resolve([]);
     qb.where(`(${conditions.join(' OR ')})`, params);
     if (onlyActive) qb.andWhere('r.archived_at IS NULL');
     else qb.andWhere('r.archived_at IS NOT NULL');
@@ -311,12 +316,12 @@ export class ArchiveService {
   private async moveResourceFilesToArchive(
     resources: ResourceEntity[],
   ): Promise<void> {
-    for (const r of resources) {
-      if (!r.path || !r.hash) continue;
+    await forEachSequential(resources, async (r) => {
+      if (!r.path || !r.hash) return;
       const otherActive = await this.resourceRepo.count({
         where: { hash: r.hash, archivedAt: IsNull(), id: Not(r.id) },
       });
-      if (otherActive > 0) continue;
+      if (otherActive > 0) return;
       try {
         await this.fileStorageService.moveToArchive(r.path);
       } catch (err) {
@@ -324,16 +329,16 @@ export class ArchiveService {
           `Failed to move file to archive for resource ${r.id} (${r.path}): ${err.message}`,
         );
       }
-    }
+    });
   }
 
   private async moveResourceFilesFromArchive(
     resources: ResourceEntity[],
   ): Promise<void> {
-    for (const r of resources) {
-      if (!r.path) continue;
+    await forEachSequential(resources, async (r) => {
+      if (!r.path) return;
       const archived = await this.fileStorageService.archivedFileExists(r.path);
-      if (!archived) continue;
+      if (!archived) return;
       try {
         await this.fileStorageService.moveFromArchive(r.path);
       } catch (err) {
@@ -341,7 +346,7 @@ export class ArchiveService {
           `Failed to restore file from archive for resource ${r.id} (${r.path}): ${err.message}`,
         );
       }
-    }
+    });
   }
 
   private async deleteVectors(buckets: CascadeBuckets): Promise<void> {

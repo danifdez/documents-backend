@@ -72,6 +72,18 @@ export class ExecutionCompletionValidator {
     }
     this.assertPartialShape(partial);
 
+    this.assertFinalMessage(execution, rows, artifacts, safeReply);
+    this.assertCompletedOperations(execution, rows, partial);
+    this.assertLoopOperationsSettled(execution, rows, partial);
+    this.assertCompletionTrigger(execution, rows, partial);
+  }
+
+  private assertFinalMessage(
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+    artifacts: ExecutionArtifactEntity[],
+    safeReply: string,
+  ): void {
     const finalMessages = rows.filter((row) => {
       const envelope = row.envelope as Record<string, any>;
       const payload = envelope['payload'] as Record<string, any> | undefined;
@@ -102,12 +114,10 @@ export class ExecutionCompletionValidator {
       !Array.isArray(artifactRefs) ||
       !artifactRefs.includes(artifactId) ||
       finalPayload['contentPreview'] !== safeReply.slice(0, 512) ||
-      !artifact ||
-      artifact.rootExecutionId !== execution.rootExecutionId ||
+      artifact?.rootExecutionId !== execution.rootExecutionId ||
       artifact.kind !== 'model_response' ||
       artifact.mediaType !== 'text/plain' ||
-      !artifact.body ||
-      artifact.body.toString('utf8') !== safeReply ||
+      artifact.body?.toString('utf8') !== safeReply ||
       artifact.contentHash !== contentHash(Buffer.from(safeReply, 'utf8')) ||
       Number(artifact.size) !== Buffer.byteLength(safeReply, 'utf8')
     ) {
@@ -115,7 +125,13 @@ export class ExecutionCompletionValidator {
         'Runtime template final artifact differs from the completed reply',
       );
     }
+  }
 
+  private assertCompletedOperations(
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+    partial: DeterministicPartialResult,
+  ): void {
     const operationIds = new Set<string>();
     let previousSequence = -1;
     for (const item of partial.completedOperations) {
@@ -169,7 +185,13 @@ export class ExecutionCompletionValidator {
       }
       previousSequence = sequence;
     }
+  }
 
+  private assertLoopOperationsSettled(
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+    partial: DeterministicPartialResult,
+  ): void {
     const loopStarts = rows.filter((row) => {
       const envelope = row.envelope as Record<string, any>;
       const payload = envelope['payload'] as Record<string, any> | undefined;
@@ -199,6 +221,13 @@ export class ExecutionCompletionValidator {
         );
       }
     }
+  }
+
+  private assertCompletionTrigger(
+    execution: ExecutionEntity,
+    rows: ExecutionEventEntity[],
+    partial: DeterministicPartialResult,
+  ): void {
     if (partial.trigger === 'exact_tool_repeat_persisted') {
       const termination = rows.some((row) => {
         const payload = row.envelope['payload'] as

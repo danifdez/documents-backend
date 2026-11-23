@@ -60,19 +60,27 @@ export class FavoriteCategoryService {
     }
 
     if (selfId !== undefined) {
-      let currentId: number | null = parent.id;
-      while (currentId != null) {
-        if (currentId === selfId) {
-          throw new BadRequestException(
-            'A category cannot be nested inside itself',
-          );
-        }
-        const node = await this.repository.findOneBy({ id: currentId });
-        currentId = node?.parentId ?? null;
-      }
+      await this.assertOutsideOwnSubtree(parent.id, selfId, new Set());
     }
 
     return parent;
+  }
+
+  private async assertOutsideOwnSubtree(
+    categoryId: number,
+    selfId: number,
+    visited: Set<number>,
+  ): Promise<void> {
+    if (categoryId === selfId || visited.has(categoryId)) {
+      throw new BadRequestException(
+        'A category cannot be nested inside itself',
+      );
+    }
+    visited.add(categoryId);
+    const category = await this.repository.findOneBy({ id: categoryId });
+    if (category?.parentId != null) {
+      await this.assertOutsideOwnSubtree(category.parentId, selfId, visited);
+    }
   }
 
   async create(

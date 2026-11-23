@@ -312,58 +312,17 @@ function applyBudgetEvent(
     return true;
   }
   if (event.payload.kind === 'budget_soft_limit_reached') {
-    const signal = event.payload.signal as BudgetSoftLimitSignal | undefined;
-    if (!signal?.grantId) return true;
-    const usage =
-      ensureBudget(ledger).grants[signal.grantId]?.usage[signal.bucket];
-    if (usage && !usage.softLimitReached) {
-      usage.softLimit = signal.softLimit;
-      usage.softLimitReached = true;
-      usage.softLimitReachedAt = signal.decidedAt;
-      usage.softLimitTriggeringOperationId = signal.triggeringOperationId;
-      if (signal.bucket === 'normal') usage.softLimitWarningPending = true;
-    }
+    applyBudgetSoftLimit(
+      ledger,
+      event.payload.signal as BudgetSoftLimitSignal | undefined,
+    );
     return true;
   }
   if (event.payload.kind === 'loop_guard_triggered') {
-    const signal = event.payload.loopGuardSignal as
-      ExactToolRepeatSignal | undefined;
-    if (!signal?.grantId) return true;
-    const guards = (ledger.loopGuards ??= {});
-    if (signal.action === 'warn') {
-      if (!guards[signal.grantId]) {
-        guards[signal.grantId] = {
-          exactToolRepeat: {
-            detections: 1,
-            warningIssued: true,
-            warningPending: true,
-            blocks: 0,
-            blockResultPending: false,
-            terminations: 0,
-            previousOperationId: signal.previousOperationId,
-            triggeringOperationId: signal.triggeringOperationId,
-            operationFingerprint: signal.operationFingerprint,
-            operationFingerprintVersion: signal.operationFingerprintVersion,
-          },
-        };
-      }
-      return true;
-    }
-    const guard = guards[signal.grantId]?.exactToolRepeat;
-    if (!guard?.warningAppliedToOperationId) return true;
-    guard.detections += 1;
-    if (signal.action === 'terminate') {
-      if (!guard.blockResultAppliedToOperationId) return true;
-      guard.terminations = (guard.terminations ?? 0) + 1;
-      guard.lastTerminatedOperationId = signal.triggeringOperationId;
-      return true;
-    }
-    guard.blocks = (guard.blocks ?? 0) + 1;
-    guard.blockResultPending = true;
-    guard.lastBlockedOperationId = signal.triggeringOperationId;
-    guard.lastBlockedPreviousOperationId = signal.previousOperationId;
-    guard.resultFingerprint = signal.resultFingerprint;
-    guard.resultFingerprintVersion = signal.resultFingerprintVersion;
+    applyLoopGuardEvent(
+      ledger,
+      event.payload.loopGuardSignal as ExactToolRepeatSignal | undefined,
+    );
     return true;
   }
   if (event.payload.kind !== 'budget_reservation') return false;
@@ -386,6 +345,64 @@ function applyBudgetEvent(
     }
   }
   return true;
+}
+
+function applyBudgetSoftLimit(
+  ledger: ProgressLedger,
+  signal: BudgetSoftLimitSignal | undefined,
+): void {
+  if (!signal?.grantId) return;
+  const usage =
+    ensureBudget(ledger).grants[signal.grantId]?.usage[signal.bucket];
+  if (usage && !usage.softLimitReached) {
+    usage.softLimit = signal.softLimit;
+    usage.softLimitReached = true;
+    usage.softLimitReachedAt = signal.decidedAt;
+    usage.softLimitTriggeringOperationId = signal.triggeringOperationId;
+    if (signal.bucket === 'normal') usage.softLimitWarningPending = true;
+  }
+}
+
+function applyLoopGuardEvent(
+  ledger: ProgressLedger,
+  signal: ExactToolRepeatSignal | undefined,
+): void {
+  if (!signal?.grantId) return;
+  const guards = (ledger.loopGuards ??= {});
+  if (signal.action === 'warn') {
+    if (!guards[signal.grantId]) {
+      guards[signal.grantId] = {
+        exactToolRepeat: {
+          detections: 1,
+          warningIssued: true,
+          warningPending: true,
+          blocks: 0,
+          blockResultPending: false,
+          terminations: 0,
+          previousOperationId: signal.previousOperationId,
+          triggeringOperationId: signal.triggeringOperationId,
+          operationFingerprint: signal.operationFingerprint,
+          operationFingerprintVersion: signal.operationFingerprintVersion,
+        },
+      };
+    }
+    return;
+  }
+  const guard = guards[signal.grantId]?.exactToolRepeat;
+  if (!guard?.warningAppliedToOperationId) return;
+  guard.detections += 1;
+  if (signal.action === 'terminate') {
+    if (!guard.blockResultAppliedToOperationId) return;
+    guard.terminations = (guard.terminations ?? 0) + 1;
+    guard.lastTerminatedOperationId = signal.triggeringOperationId;
+    return;
+  }
+  guard.blocks = (guard.blocks ?? 0) + 1;
+  guard.blockResultPending = true;
+  guard.lastBlockedOperationId = signal.triggeringOperationId;
+  guard.lastBlockedPreviousOperationId = signal.previousOperationId;
+  guard.resultFingerprint = signal.resultFingerprint;
+  guard.resultFingerprintVersion = signal.resultFingerprintVersion;
 }
 
 function consumeBudgetReservation(
@@ -487,6 +504,12 @@ function recordFinished(counters: ProgressCounter[], failed: boolean): void {
   }
 }
 
+interface OperationStart {
+  operationKind: 'inference' | 'tool_call';
+  phase?: string;
+  loopId?: string;
+}
+
 export function projectExecutionProgress(events: ProgressEvent[]): {
   policy: ProgressPolicyProjection | null;
   ledger: ProgressLedger;
@@ -502,14 +525,7 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
     completeness: 'complete',
   };
   const policy: ProgressPolicyProjection = { version: '1', loops: {} };
-  const starts = new Map<
-    string,
-    {
-      operationKind: 'inference' | 'tool_call';
-      phase?: string;
-      loopId?: string;
-    }
-  >();
+  const starts = new Map<string, OperationStart>();
 
   for (const event of events) {
     ledger.lastSequence = Math.max(
@@ -517,76 +533,15 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
       Number(event.sequence ?? 0),
     );
     if (applyBudgetEvent(ledger, event)) continue;
-    if (
-      event.eventType === 'progress.reported' &&
-      event.payload.kind === 'policy_snapshot'
-    ) {
-      const snapshot = event.payload.policy;
-      if (snapshot && typeof snapshot === 'object') {
-        const value = snapshot as Record<string, unknown>;
-        const loopId = readString(value.loopId);
-        if (loopId) policy.loops[loopId] = structuredClone(value);
-      }
-      continue;
-    }
+    if (applyPolicySnapshot(policy, event)) continue;
     const kind = event.payload.operationKind;
     if (kind !== 'inference' && kind !== 'tool_call') continue;
-    const operationKind = kind as 'inference' | 'tool_call';
     const key = operationKey(event);
     if (event.eventType === 'operation.started') {
-      consumeBudgetReservation(ledger, event);
-      const phase =
-        operationKind === 'inference'
-          ? inferencePhase(event.payload)
-          : undefined;
-      const loopId = event.payload.loopId
-        ? readString(event.payload.loopId)
-        : undefined;
-      starts.set(key, { operationKind, phase, loopId });
-      const counters = [ledger.operations[operationKind]];
-      if (phase) {
-        ledger.inferencePhases[phase] ??= counter();
-        counters.push(ledger.inferencePhases[phase]);
-      }
-      if (loopId) {
-        const loop = (ledger.loops[loopId] ??= {
-          agentName: readString(event.payload.agentName),
-          loopKind: readString(event.payload.loopKind),
-          maxRounds: Number(event.payload.maxRounds),
-          operations: { inference: counter(), tool_call: counter() },
-          inferencePhases: {},
-        });
-        counters.push(loop.operations[operationKind]);
-        if (phase) {
-          loop.inferencePhases[phase] ??= counter();
-          counters.push(loop.inferencePhases[phase]);
-        }
-      }
-      recordStarted(counters);
-      continue;
-    }
-    if (event.eventType !== 'operation.finished') continue;
-    const start = starts.get(key);
-    if (!start) continue;
-    const counters = [ledger.operations[start.operationKind]];
-    if (start.phase) {
-      counters.push(ledger.inferencePhases[start.phase]);
-    }
-    if (start.loopId) {
-      const loop = ledger.loops[start.loopId];
-      counters.push(loop.operations[start.operationKind]);
-      if (start.phase) {
-        counters.push(loop.inferencePhases[start.phase]);
-      }
-    }
-    recordFinished(counters, event.payload.status === 'failed');
-    if (start.operationKind === 'inference') {
-      const metrics =
-        event.payload.metrics && typeof event.payload.metrics === 'object'
-          ? (event.payload.metrics as Record<string, unknown>)
-          : {};
-      consumeTokens(ledger.promptTokens, metrics.promptTokens);
-      consumeTokens(ledger.generatedTokens, metrics.generatedTokens);
+      starts.set(key, projectOperationStart(ledger, event, kind));
+    } else if (event.eventType === 'operation.finished') {
+      const start = starts.get(key);
+      if (start) projectOperationFinish(ledger, event, start);
     }
   }
 
@@ -599,4 +554,83 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
     policy: Object.keys(policy.loops).length ? policy : null,
     ledger,
   };
+}
+
+function applyPolicySnapshot(
+  policy: ProgressPolicyProjection,
+  event: ProgressEvent,
+): boolean {
+  if (
+    event.eventType !== 'progress.reported' ||
+    event.payload.kind !== 'policy_snapshot'
+  )
+    return false;
+  const snapshot = event.payload.policy;
+  if (snapshot && typeof snapshot === 'object') {
+    const value = snapshot as Record<string, unknown>;
+    const loopId = readString(value.loopId);
+    if (loopId) policy.loops[loopId] = structuredClone(value);
+  }
+  return true;
+}
+
+function projectOperationStart(
+  ledger: ProgressLedger,
+  event: ProgressEvent,
+  operationKind: OperationStart['operationKind'],
+): OperationStart {
+  consumeBudgetReservation(ledger, event);
+  const phase =
+    operationKind === 'inference' ? inferencePhase(event.payload) : undefined;
+  const loopId = event.payload.loopId
+    ? readString(event.payload.loopId)
+    : undefined;
+  const counters = [ledger.operations[operationKind]];
+  if (phase) {
+    ledger.inferencePhases[phase] ??= counter();
+    counters.push(ledger.inferencePhases[phase]);
+  }
+  if (loopId) {
+    const loop = (ledger.loops[loopId] ??= {
+      agentName: readString(event.payload.agentName),
+      loopKind: readString(event.payload.loopKind),
+      maxRounds: Number(event.payload.maxRounds),
+      operations: { inference: counter(), tool_call: counter() },
+      inferencePhases: {},
+    });
+    counters.push(loop.operations[operationKind]);
+    if (phase) {
+      loop.inferencePhases[phase] ??= counter();
+      counters.push(loop.inferencePhases[phase]);
+    }
+  }
+  recordStarted(counters);
+  return { operationKind, phase, loopId };
+}
+
+function projectOperationFinish(
+  ledger: ProgressLedger,
+  event: ProgressEvent,
+  start: OperationStart,
+): void {
+  const counters = [ledger.operations[start.operationKind]];
+  if (start.phase) {
+    counters.push(ledger.inferencePhases[start.phase]);
+  }
+  if (start.loopId) {
+    const loop = ledger.loops[start.loopId];
+    counters.push(loop.operations[start.operationKind]);
+    if (start.phase) {
+      counters.push(loop.inferencePhases[start.phase]);
+    }
+  }
+  recordFinished(counters, event.payload.status === 'failed');
+  if (start.operationKind === 'inference') {
+    const metrics =
+      event.payload.metrics && typeof event.payload.metrics === 'object'
+        ? (event.payload.metrics as Record<string, unknown>)
+        : {};
+    consumeTokens(ledger.promptTokens, metrics.promptTokens);
+    consumeTokens(ledger.generatedTokens, metrics.generatedTokens);
+  }
 }

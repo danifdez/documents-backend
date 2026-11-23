@@ -1,3 +1,4 @@
+import { claimAvailable } from '../utils/claim-available';
 import { Injectable, Logger } from '@nestjs/common';
 import { NotificationGateway } from '../notification/notification.gateway';
 import { ExecutionPublicationStore } from './execution-publication.store';
@@ -13,9 +14,10 @@ export class ExecutionOutboxService {
 
   async publishPending(limit = 20): Promise<number> {
     let published = 0;
-    for (let processed = 0; processed < limit; processed += 1) {
-      const message = await this.publications.claimNext();
-      if (!message) break;
+    for await (const message of claimAvailable(
+      () => this.publications.claimNext(),
+      limit,
+    )) {
       try {
         if (!message.owner_principal) {
           throw new Error('missing_owner_principal');
@@ -28,9 +30,11 @@ export class ExecutionOutboxService {
             payload: message.payload,
           },
         );
-        if (!delivered) throw new Error('no_connected_clients');
-        await this.publications.markPublished(message);
-        published += 1;
+        if (delivered) {
+          await this.publications.markPublished(message);
+          published += 1;
+          continue;
+        }
       } catch (error) {
         const reason =
           error instanceof Error ? error.message : 'publication_failed';
@@ -38,7 +42,9 @@ export class ExecutionOutboxService {
         this.logger.warn(
           `Execution publication ${message.outbox_id} deferred: ${reason}`,
         );
+        continue;
       }
+      await this.publications.releaseForRetry(message, 'no_connected_clients');
     }
     return published;
   }

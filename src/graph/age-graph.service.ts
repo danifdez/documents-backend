@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 import { isDeepStrictEqual } from 'node:util';
@@ -335,12 +336,12 @@ export class AgeGraphService {
         relationship.object,
       ]),
     );
-    for (const name of referencedNames) {
+    await forEachSequential(referencedNames, async (name) => {
       const entity = entities.get(name);
       if (!entity) throw new Error(`Unknown relationship entity: ${name}`);
       await this.upsertEntity(target, entity);
-    }
-    for (const relationship of relationships) {
+    });
+    await forEachSequential(relationships, async (relationship) => {
       const subject = entities.get(relationship.subject);
       const object = entities.get(relationship.object);
       if (!subject || !object) {
@@ -355,7 +356,7 @@ export class AgeGraphService {
         confidence: relationship.confidence,
         context: relationship.context ?? '',
       });
-    }
+    });
   }
 
   private async queryTriples(

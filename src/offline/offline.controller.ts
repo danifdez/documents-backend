@@ -58,7 +58,7 @@ export class OfflineController {
     if (body.changes.length > 500) {
       throw new BadRequestException('Too many changes in one sync (max 500)');
     }
-    return this.offlineService.applySync(body.changes);
+    return await this.offlineService.applySync(body.changes);
   }
 
   @Get('changes')

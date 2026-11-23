@@ -1,3 +1,4 @@
+import { forEachSequential } from '../../utils/for-each-sequential';
 import { Injectable, Logger } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
 import { ExecutionEntity } from '../../execution/execution.entity';
@@ -116,7 +117,7 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
             [resourceId],
           );
           const pendingIds: number[] = [];
-          for (const entity of entities) {
+          await forEachSequential(entities, async (entity) => {
             const [inserted] = await manager.query(
               `INSERT INTO pending_entities
                  (resource_id, name, language, translations, entity_type_id,
@@ -136,7 +137,7 @@ export class EntityExtractionProcessor implements ExecutionProcessor {
               throw new Error('entity_extraction_pending_entity_not_persisted');
             }
             pendingIds.push(pendingId);
-          }
+          });
           resource.status = 'entities';
           await resources.save(resource);
           const observedResource = await resources.findOneBy({

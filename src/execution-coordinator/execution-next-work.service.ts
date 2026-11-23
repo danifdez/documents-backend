@@ -15,13 +15,14 @@ export class ExecutionNextWorkService {
   ) {}
 
   async select(limit = 20): Promise<ExecutionNextWorkResult> {
-    let selectedWorkItems = 0;
-    for (const selector of this.selectors) {
-      if (selectedWorkItems >= limit) break;
-      selectedWorkItems += await selector.selectNextWork(
-        limit - selectedWorkItems,
-      );
-    }
+    const selectedWorkItems = await this.selectors.reduce(
+      async (pending, selector) => {
+        const selected = await pending;
+        if (selected >= limit) return selected;
+        return selected + (await selector.selectNextWork(limit - selected));
+      },
+      Promise.resolve(0),
+    );
     const terminalCandidates =
       await this.terminalCandidates.promoteReady(limit);
     return { selectedWorkItems, terminalCandidates };

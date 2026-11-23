@@ -11,6 +11,7 @@ export enum ExecutionOutboxStatus {
   PENDING = 'pending',
   PUBLISHING = 'publishing',
   PUBLISHED = 'published',
+  FAILED = 'failed',
 }
 
 @Entity({ name: 'execution_outbox' })
@@ -22,6 +23,9 @@ export class ExecutionOutboxEntity {
 
   @Column({ name: 'execution_id', type: 'uuid' })
   executionId: string;
+
+  @Column({ name: 'owner_principal', type: 'varchar', length: 200 })
+  ownerPrincipal: string;
 
   @Column({ name: 'event_id', type: 'uuid' })
   eventId: string;

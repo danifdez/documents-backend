@@ -454,9 +454,8 @@ export function governedBudgetStart(
     ...(payload.operationFingerprint
       ? {
           operationFingerprint: readString(payload.operationFingerprint),
-          operationFingerprintVersion: String(
-            payload.operationFingerprintVersion,
-          ) as 'canonical_tool_input_v1',
+          operationFingerprintVersion:
+            payload.operationFingerprintVersion as GovernedBudgetStart['operationFingerprintVersion'],
         }
       : {}),
     ...(payload.toolBatchSize !== undefined
@@ -489,8 +488,7 @@ export function assertOperationBudgetProjection(
   const reservation = budget?.reservations[identity.operationId];
   const grant = budget?.grants[identity.grantId];
   if (
-    !grant ||
-    grant.loopId !== identity.loopId ||
+    grant?.loopId !== identity.loopId ||
     reservation?.status !== 'reserved' ||
     reservation.grantId !== identity.grantId ||
     reservation.reservationId !== identity.reservationId ||

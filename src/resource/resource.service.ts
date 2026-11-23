@@ -556,8 +556,8 @@ export class ResourceService {
 
       if (fullText.length <= 400) {
         const midpoint = Math.floor(fullText.length / 2);
-        samples.push(fullText.substring(0, Math.min(200, midpoint)).trim());
         samples.push(
+          fullText.substring(0, Math.min(200, midpoint)).trim(),
           fullText
             .substring(
               midpoint,

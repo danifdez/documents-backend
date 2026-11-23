@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import {
   BadRequestException,
   ConflictException,
@@ -197,9 +198,9 @@ export async function releaseExecutionStepDependents(
   );
   const stepRepo = manager.getRepository(ExecutionStepEntity);
   const operationRepo = manager.getRepository(ExecutionOperationEntity);
-  for (const row of rows) {
+  await forEachSequential(rows, async (row: { step_id: string }) => {
     const candidate = await stepRepo.findOneBy({ stepId: row.step_id });
-    if (!candidate) continue;
+    if (!candidate) return;
     await materializeCoordinatedInput(
       manager,
       stepRepo,
@@ -215,7 +216,7 @@ export async function releaseExecutionStepDependents(
     if (!operation) throw new ConflictException('operation_not_found');
     operation.status = ExecutionOperationStatus.PREPARED;
     await operationRepo.save(operation);
-  }
+  });
   return rows.length;
 }
 

@@ -1,3 +1,4 @@
+import { claimAvailable } from '../../utils/claim-available';
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -70,11 +71,15 @@ export class WorldBankProvider implements DataSourceProvider {
     let page = 1;
     let totalPages = 1;
 
-    while (page <= totalPages) {
+    const fetchNextPage = async () => {
+      if (!(page <= totalPages)) return null;
       const result = await this.fetchPage(config, page, 1000);
-      allRecords.push(...result.records);
       totalPages = result.totalPages;
-      page++;
+      page += 1;
+      return result.records;
+    };
+    for await (const records of claimAvailable(fetchNextPage)) {
+      allRecords.push(...records);
     }
 
     return {

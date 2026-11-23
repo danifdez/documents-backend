@@ -384,7 +384,8 @@ export class EntityService {
       });
 
       // Merge translations
-      const sourceTranslations = sourceEntity.translations || {};
+      const sourceTranslations: EntityTranslation =
+        sourceEntity.translations ?? {};
       const targetTranslations = targetEntity.translations || {};
       const mergedTranslations: EntityTranslation = { ...targetTranslations };
 

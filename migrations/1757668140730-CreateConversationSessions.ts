@@ -140,14 +140,20 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
       'FK_conversation_sessions_active_turn',
       'FOREIGN KEY ("active_turn_id") REFERENCES "conversation_turns"("turn_id") ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED',
     );
-    for (const table of ['assistant_messages', 'agent_messages']) {
-      await this.addConstraintIfMissing(
-        queryRunner,
-        table,
-        `FK_${table}_turn`,
-        'FOREIGN KEY ("turn_id") REFERENCES "conversation_turns"("turn_id") ON DELETE CASCADE',
-      );
-    }
+    const turnReference =
+      'FOREIGN KEY ("turn_id") REFERENCES "conversation_turns"("turn_id") ON DELETE CASCADE';
+    await this.addConstraintIfMissing(
+      queryRunner,
+      'assistant_messages',
+      'FK_assistant_messages_turn',
+      turnReference,
+    );
+    await this.addConstraintIfMissing(
+      queryRunner,
+      'agent_messages',
+      'FK_agent_messages_turn',
+      turnReference,
+    );
   }
 
   private async addConstraintIfMissing(
@@ -169,11 +175,12 @@ export class CreateConversationSessions1757668140730 implements MigrationInterfa
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    for (const table of ['agent_messages', 'assistant_messages']) {
-      await queryRunner.query(
-        `ALTER TABLE "${table}" DROP CONSTRAINT "FK_${table}_turn"`,
-      );
-    }
+    await queryRunner.query(
+      `ALTER TABLE "agent_messages" DROP CONSTRAINT "FK_agent_messages_turn"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "assistant_messages" DROP CONSTRAINT "FK_assistant_messages_turn"`,
+    );
     await queryRunner.query(
       `ALTER TABLE "conversation_sessions" DROP CONSTRAINT "FK_conversation_sessions_active_turn"`,
     );

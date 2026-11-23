@@ -88,24 +88,19 @@ export class CalendarEventSchedulerService {
 
     for (const event of candidates) {
       if (!event.alarm) continue;
-      let occurrences;
-      try {
-        occurrences = this.expansion.expand(
-          event,
-          expandFrom,
-          expandTo,
-          serverTz,
-        );
-      } catch (err: any) {
-        this.logger.warn(
-          `Skipping event ${event.id}: ${err?.message ?? 'expansion failed'}`,
-        );
-        continue;
-      }
+      const occurrences = this.expandAlarmOccurrences(
+        event,
+        expandFrom,
+        expandTo,
+        serverTz,
+      );
       for (const o of occurrences) {
-        if (!o.alarmTriggerAt) continue;
-        if (o.alarmTriggerAt <= previousTick) continue;
-        if (o.alarmTriggerAt > now) continue;
+        if (
+          !o.alarmTriggerAt ||
+          o.alarmTriggerAt <= previousTick ||
+          o.alarmTriggerAt > now
+        )
+          continue;
         const item: AlarmItem = {
           eventId: event.id,
           occurrenceStart: o.occurrenceStart.toISOString(),
@@ -123,6 +118,22 @@ export class CalendarEventSchedulerService {
     const filteredLost = await this.filterAlreadyCompleted(lost);
     if (filteredLost.length > 0)
       this.gateway.sendCalendarMissed({ items: filteredLost });
+  }
+
+  private expandAlarmOccurrences(
+    event: CalendarEventEntity,
+    from: Date,
+    to: Date,
+    timezone: string,
+  ) {
+    try {
+      return this.expansion.expand(event, from, to, timezone);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'expansion failed';
+      this.logger.warn(`Skipping event ${event.id}: ${message}`);
+      return [];
+    }
   }
 
   private async processTaskReminders(

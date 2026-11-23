@@ -74,12 +74,11 @@ function prepareDocumentsSearch(
   );
 }
 
-function prepareSkillResourceLoad(
+function resolveActiveSkillResource(
   invocation: ToolInvocationContract,
   execution: ExecutionEntity,
-): ToolPlanContract {
+) {
   const payload = chatTurnPayload(execution);
-  assertToolDataClassification(invocation);
   if (
     Object.keys(invocation.arguments).some(
       (key) =>
@@ -120,6 +119,18 @@ function prepareSkillResourceLoad(
   if (!selected || !resource) {
     throw new BadRequestException('skill_resource_not_active');
   }
+  return { identity, resource };
+}
+
+function prepareSkillResourceLoad(
+  invocation: ToolInvocationContract,
+  execution: ExecutionEntity,
+): ToolPlanContract {
+  assertToolDataClassification(invocation);
+  const { identity, resource } = resolveActiveSkillResource(
+    invocation,
+    execution,
+  );
   const resourceKey = [
     'product-skill',
     resource.skillVersion,
@@ -157,10 +168,7 @@ function prepareSkillResourceLoad(
   );
 }
 
-function prepareUserTaskCreate(
-  invocation: ToolInvocationContract,
-): ToolPlanContract {
-  assertToolDataClassification(invocation);
+function normalizeUserTaskCreate(invocation: ToolInvocationContract) {
   const keys = Object.keys(invocation.arguments);
   if (keys.some((key) => !['title', 'description'].includes(key))) {
     throw new BadRequestException('invalid_arguments');
@@ -178,6 +186,14 @@ function prepareUserTaskCreate(
   if (description && description.length > 4_000) {
     throw new BadRequestException('invalid_arguments');
   }
+  return { title, description };
+}
+
+function prepareUserTaskCreate(
+  invocation: ToolInvocationContract,
+): ToolPlanContract {
+  assertToolDataClassification(invocation);
+  const { title, description } = normalizeUserTaskCreate(invocation);
   const preparedAt = new Date();
   const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
   return buildToolPlan(

@@ -24,7 +24,7 @@ export interface BackendExecutionEventData {
   redactionApplied?: boolean;
 }
 
-export async function appendBackendExecutionEvent(
+export function appendBackendExecutionEvent(
   manager: EntityManager,
   execution: ExecutionEntity,
   producerSequence: number,
@@ -34,6 +34,7 @@ export async function appendBackendExecutionEvent(
   const sequence = assignedSequence ?? Number(execution.lastSequence) + 1;
   const now = new Date().toISOString();
   const eventId = randomUUID();
+  const producerInstanceId = process.env.HOSTNAME ?? 'backend';
   const envelope: Record<string, unknown> = {
     schemaVersion: EXECUTION_EVENT_SCHEMA,
     eventId,
@@ -51,7 +52,7 @@ export async function appendBackendExecutionEvent(
     eventType: data.eventType,
     producer: {
       component: 'documents-backend',
-      instanceId: process.env.HOSTNAME ?? 'backend',
+      instanceId: producerInstanceId,
       version: process.env.npm_package_version ?? 'development',
       runtimeFingerprint: BACKEND_RUNTIME_FINGERPRINT,
     },
@@ -69,18 +70,18 @@ export async function appendBackendExecutionEvent(
       redactionApplied: data.redactionApplied ?? false,
     },
   };
-  const cleanEnvelope = JSON.parse(
-    JSON.stringify(canonicalProfileValue(envelope)),
-  );
-  cleanEnvelope.contentHash = canonicalHash(cleanEnvelope);
+  const cleanEnvelope = canonicalProfileValue(envelope) as Record<
+    string,
+    unknown
+  >;
+  const hash = canonicalHash(cleanEnvelope);
+  cleanEnvelope.contentHash = hash;
   const row = manager.getRepository(ExecutionEventEntity).create({
     eventId,
     rootExecutionId: execution.rootExecutionId,
     sequence: String(sequence),
     producerComponent: 'documents-backend',
-    producerInstanceId: String(
-      (cleanEnvelope.producer as Record<string, unknown>).instanceId,
-    ),
+    producerInstanceId,
     producerSequence: String(producerSequence),
     eventType: data.eventType,
     executionId: data.executionId,
@@ -89,7 +90,7 @@ export async function appendBackendExecutionEvent(
     causedByEventId: data.causedByEventId ?? null,
     occurredAt: new Date(now),
     ingestedAt: new Date(now),
-    contentHash: cleanEnvelope.contentHash,
+    contentHash: hash,
     envelope: cleanEnvelope,
   });
   return manager.save(row);

@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -854,8 +855,8 @@ export class SearchService {
       const original = words.find((w) => w.toLowerCase() === word);
       if (
         original &&
-        original[0] === original[0].toUpperCase() &&
-        original[0] !== original[0].toLowerCase()
+        original.startsWith(original[0].toUpperCase()) &&
+        !original.startsWith(original[0].toLowerCase())
       ) {
         score += 3;
       }
@@ -893,7 +894,7 @@ export class SearchService {
         const seenIds = new Set<string>();
         const MIN_SCORE = 0.3;
 
-        for (const keyword of keywords) {
+        await forEachSequential(keywords, async (keyword) => {
           try {
             const searchResults = await this.globalSearch(keyword, projectId);
             for (const r of searchResults) {
@@ -907,7 +908,7 @@ export class SearchService {
           } catch {
             // Skip failed searches
           }
-        }
+        });
 
         // Sort by score and take top 3
         allResults.sort((a, b) => b.score - a.score);

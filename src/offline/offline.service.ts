@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import {
   BadRequestException,
   Injectable,
@@ -6,7 +7,13 @@ import {
   Inject,
 } from '@nestjs/common';
 import { InjectRepository, getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource, Repository, MoreThan, ObjectLiteral } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  Repository,
+  MoreThan,
+  ObjectLiteral,
+} from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ResourceEntity } from '../resource/resource.entity';
 import { DocEntity } from '../doc/doc.entity';
@@ -18,6 +25,13 @@ import { NoteEntity } from '../note/note.entity';
 import { ProjectEntity } from '../project/project.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { SyncChangeDto } from './dto/sync-change.dto';
+
+export interface OfflineSyncResult {
+  entityType: string;
+  entityId: number;
+  status: 'error' | 'applied' | 'conflict';
+  serverData?: unknown;
+}
 
 @Injectable()
 export class OfflineService {
@@ -354,8 +368,8 @@ export class OfflineService {
       reason: string;
     }> = [];
 
-    for (const r of resources) {
-      if (!r.path || !r.fileSize) continue;
+    await forEachSequential(resources, async (r) => {
+      if (!r.path || !r.fileSize) return;
       if (r.fileSize > this.fileSizeLimit) {
         excludedFiles.push({
           resourceId: r.id,
@@ -363,7 +377,7 @@ export class OfflineService {
           fileSize: r.fileSize,
           reason: `File exceeds ${Math.round(this.fileSizeLimit / 1024 / 1024)}MB limit`,
         });
-        continue;
+        return;
       }
       try {
         const buffer = await this.fileStorage.getFile(r.path);
@@ -377,114 +391,76 @@ export class OfflineService {
           `Could not read file for resource ${r.id}: ${e.message}`,
         );
       }
-    }
+    });
 
     return { files, excludedFiles };
   }
 
   applySync(changes: SyncChangeDto[]) {
     return this.dataSource.transaction(async (manager) => {
-      const results: Array<{
-        entityType: string;
-        entityId: number;
-        status: string;
-        serverData?: any;
-      }> = [];
-
-      for (const change of changes) {
-        const repo = this.getRepo(change.entityType);
-        if (!repo) {
-          results.push({
-            entityType: change.entityType,
-            entityId: change.entityId,
-            status: 'error',
-          });
-          continue;
-        }
-
-        const txRepo = manager.withRepository(repo);
-
-        if (change.method === 'DELETE') {
-          try {
-            await txRepo.delete(change.entityId);
-            results.push({
-              entityType: change.entityType,
-              entityId: change.entityId,
-              status: 'applied',
-            });
-          } catch {
-            results.push({
-              entityType: change.entityType,
-              entityId: change.entityId,
-              status: 'error',
-            });
-          }
-          continue;
-        }
-
-        if (change.method === 'PATCH') {
-          const entity = await txRepo.findOneBy({ id: change.entityId } as any);
-          if (!entity) {
-            results.push({
-              entityType: change.entityType,
-              entityId: change.entityId,
-              status: 'error',
-            });
-            continue;
-          }
-
-          const serverUpdated = new Date((entity as any).updatedAt).getTime();
-          const clientUpdated = new Date(change.updatedAt).getTime();
-
-          if (clientUpdated >= serverUpdated) {
-            Object.assign(
-              entity,
-              this.pickFields(
-                change.entityType,
-                change.payload,
-                OfflineService.UPDATE_FIELDS,
-              ),
-            );
-            const saved = await txRepo.save(entity);
-            results.push({
-              entityType: change.entityType,
-              entityId: change.entityId,
-              status: 'applied',
-              serverData: saved,
-            });
-          } else {
-            results.push({
-              entityType: change.entityType,
-              entityId: change.entityId,
-              status: 'conflict',
-              serverData: entity,
-            });
-          }
-          continue;
-        }
-
-        if (change.method === 'POST') {
-          const data = this.buildCreateData(change.entityType, change.payload);
-          const newEntity = txRepo.create(data);
-          const saved = await txRepo.save(newEntity);
-          results.push({
-            entityType: change.entityType,
-            entityId: (saved as any).id,
-            status: 'applied',
-            serverData: saved,
-          });
-          continue;
-        }
-
-        results.push({
-          entityType: change.entityType,
-          entityId: change.entityId,
-          status: 'error',
-        });
-      }
-
+      const results: OfflineSyncResult[] = [];
+      await forEachSequential(changes, async (change) => {
+        results.push(await this.applySyncChange(manager, change));
+      });
       return { results };
     });
+  }
+
+  private async applySyncChange(
+    manager: EntityManager,
+    change: SyncChangeDto,
+  ): Promise<OfflineSyncResult> {
+    const identity = {
+      entityType: change.entityType,
+      entityId: change.entityId,
+    };
+    const repository = this.getRepo(change.entityType);
+    if (!repository) return { ...identity, status: 'error' };
+    const txRepo = manager.withRepository(repository);
+
+    switch (change.method) {
+      case 'DELETE':
+        try {
+          await txRepo.delete(change.entityId);
+          return { ...identity, status: 'applied' };
+        } catch {
+          return { ...identity, status: 'error' };
+        }
+      case 'PATCH': {
+        const entity = await txRepo.findOneBy({ id: change.entityId } as any);
+        if (!entity) return { ...identity, status: 'error' };
+        const serverUpdated = new Date((entity as any).updatedAt).getTime();
+        const clientUpdated = new Date(change.updatedAt).getTime();
+        if (clientUpdated >= serverUpdated) {
+          Object.assign(
+            entity,
+            this.pickFields(
+              change.entityType,
+              change.payload,
+              OfflineService.UPDATE_FIELDS,
+            ),
+          );
+          return {
+            ...identity,
+            status: 'applied',
+            serverData: await txRepo.save(entity),
+          };
+        }
+        return { ...identity, status: 'conflict', serverData: entity };
+      }
+      case 'POST': {
+        const data = this.buildCreateData(change.entityType, change.payload);
+        const saved = await txRepo.save(txRepo.create(data));
+        return {
+          ...identity,
+          entityId: (saved as any).id,
+          status: 'applied',
+          serverData: saved,
+        };
+      }
+      default:
+        return { ...identity, status: 'error' };
+    }
   }
 
   private pickFields(

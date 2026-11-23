@@ -165,13 +165,15 @@ export class TranscribeProcessor implements ExecutionProcessor {
     const samples: string[] = [];
     if (text.length <= 400) {
       const mid = Math.floor(text.length / 2);
-      samples.push(text.substring(0, Math.min(200, mid)).trim());
       samples.push(
+        text.substring(0, Math.min(200, mid)).trim(),
         text.substring(mid, mid + Math.min(200, text.length - mid)).trim(),
       );
     } else {
-      samples.push(text.substring(0, 200).trim());
-      samples.push(text.substring(text.length - 200).trim());
+      samples.push(
+        text.substring(0, 200).trim(),
+        text.substring(text.length - 200).trim(),
+      );
     }
     return samples.filter((s) => s.length > 0);
   }

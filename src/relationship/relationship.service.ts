@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable } from '@nestjs/common';
 import { ExecutionService } from '../execution/execution.service';
 import { ExecutionPriority } from '../execution/execution-priority.enum';
@@ -116,7 +117,7 @@ export class RelationshipService {
     const resources = await this.resourceService.findByProject(projectId);
     const executionIds: string[] = [];
 
-    for (const resource of resources) {
+    await forEachSequential(resources, async (resource) => {
       try {
         const result = await this.extractRelationships(
           resource.id,
@@ -126,7 +127,7 @@ export class RelationshipService {
       } catch {
         // Resources without usable content or two confirmed entities are skipped.
       }
-    }
+    });
 
     return { executionIds };
   }

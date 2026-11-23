@@ -212,7 +212,7 @@ function inferenceRuntimeTemplateReferences(
 ): Set<string> {
   const references = new Set<string>();
   for (const [index, call] of calls.entries()) {
-    if (!call || call.callIndex !== index + 1) rejectInvalidInferenceRuntime();
+    if (call?.callIndex !== index + 1) rejectInvalidInferenceRuntime();
     const properties = call.engine?.properties ?? {};
     for (const name of ['chatTemplateHash', 'toolTemplateHash']) {
       if (Object.hasOwn(properties, name)) {

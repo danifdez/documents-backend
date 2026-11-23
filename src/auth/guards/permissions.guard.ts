@@ -13,7 +13,7 @@ import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private configService: ConfigService,
+    private readonly configService: ConfigService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {

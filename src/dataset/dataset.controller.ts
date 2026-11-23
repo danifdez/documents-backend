@@ -418,15 +418,18 @@ export class DatasetController {
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
   )
-  async importPreview(
+  importPreview(
     @Param('id', ParseIntPipe) _id: number,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) {
-      throw new HttpException('No file uploaded', HttpStatus.BAD_REQUEST);
+      return Promise.reject(
+        new HttpException('No file uploaded', HttpStatus.BAD_REQUEST),
+      );
     }
-    const preview = this.csvService.parsePreview(file.buffer);
-    return preview;
+    return Promise.resolve().then(() =>
+      this.csvService.parsePreview(file.buffer),
+    );
   }
 
   @Post(':id/import/confirm')
@@ -563,13 +566,22 @@ export class DatasetController {
     if (filterObj && typeof filterObj === 'object') {
       for (const [key, value] of Object.entries(filterObj)) {
         const match = filterRegex.exec(key);
-        if (match) {
-          filters.push({
-            field: match[1],
-            operator: match[2] as RecordFilter['operator'],
-            value: String(value),
-          });
+        if (!match) continue;
+        if (
+          typeof value !== 'string' &&
+          typeof value !== 'number' &&
+          typeof value !== 'boolean'
+        ) {
+          throw new HttpException(
+            'Filter value must be a scalar',
+            HttpStatus.BAD_REQUEST,
+          );
         }
+        filters.push({
+          field: match[1],
+          operator: match[2] as RecordFilter['operator'],
+          value: String(value),
+        });
       }
     }
 

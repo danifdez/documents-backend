@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -33,7 +34,7 @@ export class AgentExpirationService {
     }
 
     const removed: Array<{ id: number; name: string }> = [];
-    for (const a of expired) {
+    await forEachSequential(expired, async (a) => {
       try {
         await this.agentService.removeSystem(a.id);
         removed.push({ id: a.id, name: a.name });
@@ -42,7 +43,7 @@ export class AgentExpirationService {
           `agent-expiration: failed to remove agent ${a.id} (${a.name}): ${e?.message ?? e}`,
         );
       }
-    }
+    });
     this.logger.log(
       `agent-expiration: removed ${removed.length} expired agents: ${JSON.stringify(removed)}`,
     );

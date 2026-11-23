@@ -122,21 +122,20 @@ export class VectorStoreService {
     await manager.query('DELETE FROM rag_chunks WHERE source_id = $1', [
       sourceId,
     ]);
-    for (const point of points) {
-      await manager.query(
-        `INSERT INTO rag_chunks
-           (id, embedding, source_type, source_id, project_id, payload)
-         VALUES ($1, $2::vector, $3, $4, $5, $6::jsonb)`,
-        [
-          point.id,
-          this.vectorLiteral(point.embedding),
-          sourceType,
-          sourceId,
-          projectId == null ? null : String(projectId),
-          JSON.stringify(point.payload),
-        ],
-      );
-    }
+    if (!points.length) return;
+    await manager.query(
+      `INSERT INTO rag_chunks
+         (id, embedding, source_type, source_id, project_id, payload)
+       SELECT value->>'id', (value->>'embedding')::vector,
+              $2::text, $1::text, $3::text, value->'payload'
+       FROM jsonb_array_elements($4::jsonb) AS item(value)`,
+      [
+        sourceId,
+        sourceType,
+        projectId == null ? null : String(projectId),
+        JSON.stringify(points),
+      ],
+    );
   }
 
   async replaceIndexedFileVerified(
@@ -224,20 +223,15 @@ export class VectorStoreService {
       'DELETE FROM indexed_file_chunks WHERE indexed_file_id = $1',
       [indexedFileId],
     );
-    for (const point of points) {
-      await manager.query(
-        `INSERT INTO indexed_file_chunks
-           (id, embedding, indexed_file_id, owner_tag, payload)
-         VALUES ($1, $2::vector, $3, $4, $5::jsonb)`,
-        [
-          point.id,
-          this.vectorLiteral(point.embedding),
-          indexedFileId,
-          ownerTag,
-          JSON.stringify(point.payload),
-        ],
-      );
-    }
+    if (!points.length) return;
+    await manager.query(
+      `INSERT INTO indexed_file_chunks
+         (id, embedding, indexed_file_id, owner_tag, payload)
+       SELECT value->>'id', (value->>'embedding')::vector,
+              $1::integer, $2::text, value->'payload'
+       FROM jsonb_array_elements($3::jsonb) AS item(value)`,
+      [indexedFileId, ownerTag, JSON.stringify(points)],
+    );
   }
 
   async deleteWorkspaceSource(sourceId: string): Promise<void> {
@@ -298,7 +292,11 @@ export class VectorStoreService {
       row.payload && typeof row.payload === 'object'
         ? (row.payload as Record<string, unknown>)
         : {};
-    return this.validatePoint({ id: String(row.id), embedding, payload });
+    const id =
+      typeof row.id === 'string' || typeof row.id === 'number'
+        ? String(row.id)
+        : '';
+    return this.validatePoint({ id, embedding, payload });
   }
 
   private validatePoint(point: VectorPointInput): VectorPointInput {

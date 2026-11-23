@@ -92,12 +92,13 @@ export class ExecutionOperationsService {
         `SELECT
              count(*) FILTER (WHERE "status" = 'pending') AS "pending",
              count(*) FILTER (WHERE "status" = 'publishing') AS "publishing",
+             count(*) FILTER (WHERE "status" = 'failed') AS "failed",
              count(*) FILTER (
                WHERE "status" = 'publishing' AND "lease_expires_at" <= $1
              ) AS "expiredPublishingLeases",
              coalesce(max(
                extract(epoch FROM ($1 - "created_at")) * 1000
-             ) FILTER (WHERE "status" != 'published'), 0) AS "oldestUnpublishedMs"
+             ) FILTER (WHERE "status" IN ('pending', 'publishing')), 0) AS "oldestUnpublishedMs"
            FROM "execution_outbox"`,
         [now],
       ),
@@ -160,6 +161,7 @@ export class ExecutionOperationsService {
     const publicationMetrics = {
       pending: this.number(publication.pending),
       publishing: this.number(publication.publishing),
+      failed: this.number(publication.failed),
       expiredPublishingLeases: this.number(publication.expiredPublishingLeases),
       oldestUnpublishedMs: this.number(publication.oldestUnpublishedMs),
     };

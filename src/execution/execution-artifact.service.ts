@@ -1,3 +1,4 @@
+import { forEachSequential } from '../utils/for-each-sequential';
 import { compareStrings } from '../utils/compare-strings';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -66,11 +67,7 @@ export class ExecutionArtifactService {
     return Promise.all(
       refs.map(async (ref) => {
         const artifact = byId.get(ref.artifactId);
-        if (
-          !artifact ||
-          artifact.kind !== kind ||
-          !artifact.producedByAttemptId
-        ) {
+        if (artifact?.kind !== kind || !artifact.producedByAttemptId) {
           throw new Error(`${role} output artifact is unavailable`);
         }
         const body = await this.storage.readBody(artifact);
@@ -160,14 +157,14 @@ export class ExecutionArtifactService {
     const active = artifacts.filter(
       (artifact) => artifact.contentState === 'active',
     );
-    for (const artifact of active) {
+    await forEachSequential(active, async (artifact) => {
       await this.storage.deleteBody(artifact);
       artifact.body = null;
       artifact.storageRef = `${state}:v1:${artifact.artifactId}`;
       artifact.contentState = state;
       artifact.withdrawalReason = reason;
       artifact.contentDeletedAt = deletedAt;
-    }
+    });
     if (active.length) await repository.save(active);
     return active.map((artifact) => artifact.artifactId).sort(compareStrings);
   }

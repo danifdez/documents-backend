@@ -165,8 +165,7 @@ export function exactToolRepeatBlockSignal(
         signal.loopId === request.loopId,
     );
   if (
-    !warningSignal ||
-    warningSignal.operationFingerprint !== request.operationFingerprint ||
+    warningSignal?.operationFingerprint !== request.operationFingerprint ||
     warningSignal.operationFingerprintVersion !==
       request.operationFingerprintVersion
   ) {

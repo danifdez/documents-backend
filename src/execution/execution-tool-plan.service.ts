@@ -204,8 +204,7 @@ export class ExecutionToolPlanService {
           storedPlan.operationId
         ];
       if (
-        !reservation ||
-        reservation.reservationId !== budgetReservationId ||
+        reservation?.reservationId !== budgetReservationId ||
         reservation.status !== 'reserved' ||
         reservation.operationKind !== 'tool_call' ||
         reservation.toolCallId !== toolCallId
@@ -220,59 +219,17 @@ export class ExecutionToolPlanService {
         manager,
         invocation.invocation,
       );
-      let delegationWork: Record<string, unknown> = {};
-      if (plan.toolName === AGENT_DELEGATE_TOOL_NAME) {
-        if (execution.parentExecutionId) {
-          throw new ConflictException('delegation_depth_exceeded');
-        }
-        const goal = String(plan.normalizedArguments.goal ?? '');
-        const parentPayload = chatTurnPayload(execution);
-        const child = await this.executions.createChildInference(
-          manager,
-          execution,
-          {
-            taskType: 'delegated-agent',
-            payload: {
-              goal,
-              delegationOperationId: plan.operationId,
-              joinPolicy: 'all',
-              depth: 1,
-            },
-            work: {
-              taskType: 'assistant-chat',
-              agentName: 'subagent',
-              agentLoop: {
-                schemaVersion: 'agent-inference/1',
-                purpose: 'normal',
-                phase: 'agent_loop',
-                sourceStepId: null,
-                evidenceStepIds: [],
-              },
-              payload: {
-                conversation: [{ role: 'user', content: goal }],
-                delegationMode: true,
-                activeMemory: null,
-                activeCapabilities: null,
-                ...(parentPayload.conversationContext
-                  ? {
-                      conversationContext: parentPayload.conversationContext,
-                    }
-                  : {}),
-              },
-            },
-            requiredCapability: 'assistant-chat',
-            deadline,
-            causedByEventId: invocation.causedByEventId,
-          },
-        );
-        dependsOnStepIds.push(child.step.stepId);
-        delegationWork = {
-          childExecutionId: child.execution.executionId,
-          childStepId: child.step.stepId,
-          joinPolicy: 'all',
-          delegationDepth: 1,
-        };
-      }
+      const delegationWork =
+        plan.toolName === AGENT_DELEGATE_TOOL_NAME
+          ? await this.materializeDelegation(
+              manager,
+              execution,
+              plan,
+              deadline,
+              dependsOnStepIds,
+              invocation.causedByEventId,
+            )
+          : {};
       const step = await createExecutionStep(manager, {
         executionId: execution.executionId,
         stepKind: ExecutionStepKind.TOOL,
@@ -308,6 +265,66 @@ export class ExecutionToolPlanService {
       await manager.getRepository(ExecutionEntity).save(execution);
       return step;
     });
+  }
+
+  private async materializeDelegation(
+    manager: EntityManager,
+    execution: ExecutionEntity,
+    plan: ToolPlanContract,
+    deadline: Date,
+    dependsOnStepIds: string[],
+    causedByEventId: string,
+  ): Promise<Record<string, unknown>> {
+    if (execution.parentExecutionId) {
+      throw new ConflictException('delegation_depth_exceeded');
+    }
+    const goal = String(plan.normalizedArguments.goal ?? '');
+    const parentPayload = chatTurnPayload(execution);
+    const child = await this.executions.createChildInference(
+      manager,
+      execution,
+      {
+        taskType: 'delegated-agent',
+        payload: {
+          goal,
+          delegationOperationId: plan.operationId,
+          joinPolicy: 'all',
+          depth: 1,
+        },
+        work: {
+          taskType: 'assistant-chat',
+          agentName: 'subagent',
+          agentLoop: {
+            schemaVersion: 'agent-inference/1',
+            purpose: 'normal',
+            phase: 'agent_loop',
+            sourceStepId: null,
+            evidenceStepIds: [],
+          },
+          payload: {
+            conversation: [{ role: 'user', content: goal }],
+            delegationMode: true,
+            activeMemory: null,
+            activeCapabilities: null,
+            ...(parentPayload.conversationContext
+              ? {
+                  conversationContext: parentPayload.conversationContext,
+                }
+              : {}),
+          },
+        },
+        requiredCapability: 'assistant-chat',
+        deadline,
+        causedByEventId,
+      },
+    );
+    dependsOnStepIds.push(child.step.stepId);
+    return {
+      childExecutionId: child.execution.executionId,
+      childStepId: child.step.stepId,
+      joinPolicy: 'all',
+      delegationDepth: 1,
+    };
   }
 
   async materializeNotExecuted(
@@ -371,27 +388,8 @@ export class ExecutionToolPlanService {
       };
     }
     if (plan.policyDecision.decision === 'confirmation_required') {
-      if (!confirmationStatus) {
-        throw new ConflictException('tool_confirmation_missing');
-      }
-      if (confirmationStatus === 'pending') {
-        return { kind: 'waiting_confirmation' };
-      }
-      if (confirmationStatus !== 'approved') {
-        return {
-          kind: 'not_executed',
-          error: {
-            code:
-              confirmationStatus === 'expired'
-                ? 'tool_confirmation_expired'
-                : 'tool_confirmation_denied',
-            message:
-              confirmationStatus === 'expired'
-                ? 'The tool operation was not executed because confirmation expired'
-                : 'The tool operation was not executed because confirmation was denied',
-          },
-        };
-      }
+      const pending = this.confirmationDisposition(confirmationStatus);
+      if (pending) return pending;
     } else if (plan.confirmationRequirement !== null || confirmationStatus) {
       throw new ConflictException('tool_confirmation_mismatch');
     }
@@ -406,6 +404,26 @@ export class ExecutionToolPlanService {
       };
     }
     return { kind: 'ready' };
+  }
+
+  private confirmationDisposition(
+    status: ExecutionConfirmationStatus | null,
+  ): ToolPlanMaterializationDisposition | null {
+    if (!status) throw new ConflictException('tool_confirmation_missing');
+    if (status === 'pending') return { kind: 'waiting_confirmation' };
+    if (status === 'approved') return null;
+    const expired = status === 'expired';
+    return {
+      kind: 'not_executed',
+      error: {
+        code: expired
+          ? 'tool_confirmation_expired'
+          : 'tool_confirmation_denied',
+        message: expired
+          ? 'The tool operation was not executed because confirmation expired'
+          : 'The tool operation was not executed because confirmation was denied',
+      },
+    };
   }
 
   private async materializeNotExecutedWithManager(
@@ -564,8 +582,7 @@ export class ExecutionToolPlanService {
         executionId: execution.executionId,
       });
     if (
-      !attempt ||
-      attempt.operationId !== invocation.requester.operationId ||
+      attempt?.operationId !== invocation.requester.operationId ||
       attempt.status !== ExecutionStepAttemptStatus.CLOSED
     ) {
       throw new BadRequestException('invalid_tool_requester');
