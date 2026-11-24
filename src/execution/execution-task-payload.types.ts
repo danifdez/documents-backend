@@ -62,16 +62,17 @@ export interface SummarizeReducePayload extends FinalizerIdentity {
 }
 
 export interface SummarizeComposePayload extends FinalizerIdentity {
+  maxWords?: number;
   targetLanguage: string;
   sourceLanguage?: string;
   partials?: unknown[];
 }
 
-export interface SummarizeFinalizePayload extends FinalizerIdentity {
-  final: boolean;
-  reductionLevel: number;
-  partials?: unknown[];
-}
+export type SummarizeFinalizePayload = FinalizerIdentity &
+  (
+    | { originalText: string }
+    | { final: boolean; reductionLevel: number; partials?: unknown[] }
+  );
 
 export type TranslateExecutionPayload = FinalizerIdentity &
   (

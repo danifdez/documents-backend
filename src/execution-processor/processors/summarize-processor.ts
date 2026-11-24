@@ -118,8 +118,12 @@ export class SummarizeProcessor implements ExecutionProcessor {
           lock: { mode: 'pessimistic_write' },
         });
         if (!doc) throw new TargetDocumentNotFoundError();
+        const safeText = summary
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;');
         const before = doc.content || '';
-        const content = `${before}\n\n${summary}`;
+        const content = `${before}\n\n${safeText}`;
         doc.content = content;
         await repository.save(doc);
         const observed = await repository.findOneBy({ id: targetDocId });

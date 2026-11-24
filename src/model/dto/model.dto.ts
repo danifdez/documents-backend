@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsNumber,
+  IsInt,
   IsUUID,
   MaxLength,
   Min,
@@ -30,6 +31,12 @@ export class AskQuestionDto {
 }
 
 export class SummarizeDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
+  maxWords?: number;
+
   @IsString()
   @IsNotEmpty()
   targetLanguage: string;

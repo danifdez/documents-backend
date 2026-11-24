@@ -86,9 +86,11 @@ export class ModelService {
     request: SummarizeDto,
     captureInference = false,
   ): Promise<{ executionId: string }> {
-    const { targetLanguage, resourceId, targetDocId, text, type } = request;
+    const { targetLanguage, resourceId, targetDocId, text, type, maxWords } =
+      request;
     let sourceLanguage = request.sourceLanguage;
     let content: string | null = null;
+    let plainText = false;
     if (resourceId) {
       const resource = await this.resourceService.findOne(resourceId);
       if (!resource) {
@@ -100,6 +102,14 @@ export class ModelService {
         throw new Error(`Resource with ID ${resourceId} has no content`);
       }
       sourceLanguage = resource.language || 'en';
+      if (
+        resource.path &&
+        resource.mimeType?.split(';', 1)[0].trim() === 'text/plain'
+      ) {
+        const { buffer } = await this.resourceService.getFileBuffer(resourceId);
+        content = buffer.toString('utf8');
+        plainText = true;
+      }
     } else if (type === 'workspace-selection' && text) {
       content = text;
     }
@@ -109,6 +119,11 @@ export class ModelService {
       content,
       targetLanguage,
       sourceLanguage,
+      {
+        selection: !resourceId && type === 'workspace-selection',
+        plainText,
+        maxWords,
+      },
     );
 
     const execution = await this.executionService.create(
@@ -120,6 +135,7 @@ export class ModelService {
         resourceId: resourceId,
         targetDocId: targetDocId,
         type: type || 'resource',
+        ...(maxWords === undefined ? {} : { maxWords }),
       },
       {
         steps,

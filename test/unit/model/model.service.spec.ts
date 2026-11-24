@@ -262,9 +262,11 @@ describe('ModelService execution identities', () => {
     await expect(
       service.summarize(scope, {
         targetLanguage: 'en',
-        text: 'Hola',
+        text: Array.from({ length: 90 }, () => 'palabra').join(' '),
         sourceLanguage: 'es',
         type: 'workspace-selection',
+        maxWords: 63,
+        targetDocId: 42,
       }),
     ).resolves.toEqual({ executionId: executionIds.summarize });
 
@@ -274,6 +276,7 @@ describe('ModelService execution identities', () => {
       expect.objectContaining({
         targetLanguage: 'en',
         sourceLanguage: 'es',
+        targetDocId: 42,
       }),
       {
         ownerPrincipal: scope.ownerPrincipal,
@@ -285,6 +288,9 @@ describe('ModelService execution identities', () => {
           expect.objectContaining({
             stepKind: 'inference',
             requiredCapabilities: ['summarize-compose'],
+            work: expect.objectContaining({
+              payload: expect.objectContaining({ maxWords: 63 }),
+            }),
           }),
         ],
       },
@@ -312,6 +318,66 @@ describe('ModelService execution identities', () => {
     );
     for (const step of options.steps)
       expect(step.work).not.toHaveProperty('inferenceCapture');
+  });
+
+  it.each([
+    [false, 79, false],
+    [false, 80, true],
+    [false, 81, true],
+    [true, 39, false],
+    [true, 40, true],
+    [true, 41, true],
+  ])(
+    'applies the cutoff for selection=%s and %s input words',
+    (selection, words, generated) => {
+      const content =
+        '  ' + Array.from({ length: words }, () => 'Café').join('  ') + '.\n';
+      const steps = buildSummarizeWorkflowSteps(content, 'en', 'es', {
+        selection,
+        maxWords: 23,
+      });
+      if (generated) {
+        expect(steps.map((step) => step.work.taskType)).toEqual([
+          'summarize-map',
+          'summarize-compose',
+        ]);
+        expect(steps[1].work.payload).toEqual(
+          expect.objectContaining({ maxWords: 23 }),
+        );
+      } else {
+        expect(steps).toEqual([
+          {
+            stepKind: 'code',
+            work: {
+              taskType: 'summarize-finalize',
+              payload: { originalText: content },
+            },
+            requiredCapabilities: ['summarize-finalize'],
+          },
+        ]);
+      }
+    },
+  );
+
+  it('uses the route defaults and keeps a generated summary shorter than its input', () => {
+    const words = Array.from({ length: 200 }, () => 'word');
+    const resource = buildSummarizeWorkflowSteps(words.join(' '), 'en');
+    const selection = buildSummarizeWorkflowSteps(words.join(' '), 'en', 'en', {
+      selection: true,
+    });
+    const atThreshold = buildSummarizeWorkflowSteps(
+      words.slice(0, 80).join(' '),
+      'en',
+    );
+    expect(resource[1].work.payload).toEqual(
+      expect.objectContaining({ maxWords: 150 }),
+    );
+    expect(selection[1].work.payload).toEqual(
+      expect.objectContaining({ maxWords: 80 }),
+    );
+    expect(atThreshold[1].work.payload).toEqual(
+      expect.objectContaining({ maxWords: 79 }),
+    );
   });
 
   it('fans long summaries out without splitting paragraphs', () => {
