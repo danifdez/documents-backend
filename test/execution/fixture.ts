@@ -32,6 +32,7 @@ import { CreateMemoryEntries1757668140740 } from '../../migrations/1757668140740
 import { CreateSkillActivations1757668140750 } from '../../migrations/1757668140750-CreateSkillActivations';
 import { CreateExecutionEffectJournal1757668140760 } from '../../migrations/1757668140760-CreateExecutionEffectJournal';
 import { AddExecutionTraceContext1794650000000 } from '../../migrations/1794650000000-AddExecutionTraceContext';
+import { StoreExecutionPublicationRouting1794800000001 } from '../../migrations/1794800000001-StoreExecutionPublicationRouting';
 import { ExecutionArtifactEntity } from '../../src/execution/execution-artifact.entity';
 import { ExecutionContractValidator } from '../../src/execution/execution-contract-validator';
 import { ExecutionCompletionValidator } from '../../src/execution/execution-completion-validator';
@@ -185,6 +186,7 @@ export function createExecutionFixture(
     await new CreateExecutionEffectJournal1757668140760().up(runner);
     await new AddExecutionTraceContext1794650000000().up(runner);
     await new CreateExecutionRequests1794800000000().up(runner);
+    await new StoreExecutionPublicationRouting1794800000001().up(runner);
     await options.prepare?.(runner);
     await runner.query(`
       INSERT INTO "assistants" ("id", "name", "icon", "sub", "owner_principal")
