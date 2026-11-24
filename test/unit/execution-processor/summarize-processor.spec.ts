@@ -51,48 +51,58 @@ describe('SummarizeProcessor', () => {
     );
   });
 
-  it('replaces a resource summary through the verified effect journal', async () => {
-    const resources = {
-      findOne: jest.fn().mockResolvedValue({ id: 9, summary: 'Previous' }),
-      save: jest.fn(async (resource) => resource),
-      findOneBy: jest.fn().mockResolvedValue({ id: 9, summary: 'Summary' }),
-    };
-    const manager = {
-      getRepository: jest.fn((entity) => {
-        expect(entity).toBe(ResourceEntity);
-        return resources;
-      }),
-    };
-    const effectJournal = {
-      runVerified: jest.fn(async (_input, callback) => ({
-        applied: true,
-        observation: await callback(manager),
-      })),
-    };
-    const processor = new SummarizeProcessor(effectJournal as any);
-    const execution = {
-      executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
-      taskType: 'summarize',
-      payload: { resourceId: 9 },
-      result: { response: 'Summary' },
-    } as ExecutionEntity;
+  it.each([
+    ['Summary', 'Summary'],
+    [
+      '  Literal <p> &lt;\nSecond line.\n',
+      '<div data-summary-format="text" style="white-space: pre-wrap">' +
+        '  Literal &lt;p&gt; &amp;lt;\nSecond line.\n</div>',
+    ],
+  ])(
+    'publishes a resource summary as safe display text',
+    async (summary, rendered) => {
+      const resources = {
+        findOne: jest.fn().mockResolvedValue({ id: 9, summary: 'Previous' }),
+        save: jest.fn(async (resource) => resource),
+        findOneBy: jest.fn().mockResolvedValue({ id: 9, summary: rendered }),
+      };
+      const manager = {
+        getRepository: jest.fn((entity) => {
+          expect(entity).toBe(ResourceEntity);
+          return resources;
+        }),
+      };
+      const effectJournal = {
+        runVerified: jest.fn(async (_input, callback) => ({
+          applied: true,
+          observation: await callback(manager),
+        })),
+      };
+      const processor = new SummarizeProcessor(effectJournal as any);
+      const execution = {
+        executionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca702',
+        taskType: 'summarize',
+        payload: { resourceId: 9 },
+        result: { response: summary },
+      } as ExecutionEntity;
 
-    await expect(processor.process(execution)).resolves.toEqual(
-      expect.objectContaining({ success: true }),
-    );
+      await expect(processor.process(execution)).resolves.toEqual(
+        expect.objectContaining({ success: true }),
+      );
 
-    expect(effectJournal.runVerified).toHaveBeenCalledWith(
-      expect.objectContaining({
-        executionId: execution.executionId,
-        effectKey: 'summarize-resource-replace:9',
-        effectType: 'resource_summary_replace',
-        resourceKey: 'resource:9',
-        intent: { resourceId: 9, summary: 'Summary' },
-      }),
-      expect.any(Function),
-    );
-    expect(resources.save).toHaveBeenCalledWith(
-      expect.objectContaining({ summary: 'Summary' }),
-    );
-  });
+      expect(effectJournal.runVerified).toHaveBeenCalledWith(
+        expect.objectContaining({
+          executionId: execution.executionId,
+          effectKey: 'summarize-resource-replace:9',
+          effectType: 'resource_summary_replace',
+          resourceKey: 'resource:9',
+          intent: { resourceId: 9, summary },
+        }),
+        expect.any(Function),
+      );
+      expect(resources.save).toHaveBeenCalledWith(
+        expect.objectContaining({ summary: rendered }),
+      );
+    },
+  );
 });

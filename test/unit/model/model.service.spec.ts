@@ -265,7 +265,6 @@ describe('ModelService execution identities', () => {
         text: Array.from({ length: 90 }, () => 'palabra').join(' '),
         sourceLanguage: 'es',
         type: 'workspace-selection',
-        maxWords: 63,
         targetDocId: 42,
       }),
     ).resolves.toEqual({ executionId: executionIds.summarize });
@@ -289,7 +288,7 @@ describe('ModelService execution identities', () => {
             stepKind: 'inference',
             requiredCapabilities: ['summarize-compose'],
             work: expect.objectContaining({
-              payload: expect.objectContaining({ maxWords: 63 }),
+              payload: expect.objectContaining({ maxWords: 80 }),
             }),
           }),
         ],
@@ -334,7 +333,6 @@ describe('ModelService execution identities', () => {
         '  ' + Array.from({ length: words }, () => 'Café').join('  ') + '.\n';
       const steps = buildSummarizeWorkflowSteps(content, 'en', 'es', {
         selection,
-        maxWords: 23,
       });
       if (generated) {
         expect(steps.map((step) => step.work.taskType)).toEqual([
@@ -342,7 +340,7 @@ describe('ModelService execution identities', () => {
           'summarize-compose',
         ]);
         expect(steps[1].work.payload).toEqual(
-          expect.objectContaining({ maxWords: 23 }),
+          expect.objectContaining({ maxWords: words - 1 }),
         );
       } else {
         expect(steps).toEqual([
@@ -377,6 +375,23 @@ describe('ModelService execution identities', () => {
     );
     expect(atThreshold[1].work.payload).toEqual(
       expect.objectContaining({ maxWords: 79 }),
+    );
+  });
+
+  it.each([
+    [2_800, 150],
+    [2_801, 400],
+  ])('uses the fixed resource limit at %s input words', (count, maxWords) => {
+    const content = Array.from({ length: count }, () => 'word').join(' ');
+    const resource = buildSummarizeWorkflowSteps(content, 'en');
+    const selection = buildSummarizeWorkflowSteps(content, 'en', 'en', {
+      selection: true,
+    });
+    expect(resource.at(-1)?.work.payload).toEqual(
+      expect.objectContaining({ maxWords }),
+    );
+    expect(selection.at(-1)?.work.payload).toEqual(
+      expect.objectContaining({ maxWords: 80 }),
     );
   });
 

@@ -86,8 +86,7 @@ export class ModelService {
     request: SummarizeDto,
     captureInference = false,
   ): Promise<{ executionId: string }> {
-    const { targetLanguage, resourceId, targetDocId, text, type, maxWords } =
-      request;
+    const { targetLanguage, resourceId, targetDocId, text, type } = request;
     let sourceLanguage = request.sourceLanguage;
     let content: string | null = null;
     let plainText = false;
@@ -122,7 +121,6 @@ export class ModelService {
       {
         selection: !resourceId && type === 'workspace-selection',
         plainText,
-        maxWords,
       },
     );
 
@@ -135,7 +133,6 @@ export class ModelService {
         resourceId: resourceId,
         targetDocId: targetDocId,
         type: type || 'resource',
-        ...(maxWords === undefined ? {} : { maxWords }),
       },
       {
         steps,

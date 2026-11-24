@@ -9,6 +9,19 @@ import { ResourceEntity } from '../../resource/resource.entity';
 class TargetDocumentNotFoundError extends Error {}
 class TargetResourceNotFoundError extends Error {}
 
+function renderSummaryText(text: string): string {
+  if (!/[&<>\r\n\t]| {2}|^ | $/.test(text)) return text;
+  const escaped = text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  return (
+    '<div data-summary-format="text" style="white-space: pre-wrap">' +
+    escaped +
+    '</div>'
+  );
+}
+
 @Injectable()
 export class SummarizeProcessor implements ExecutionProcessor {
   private readonly logger = new Logger(SummarizeProcessor.name);
@@ -118,12 +131,8 @@ export class SummarizeProcessor implements ExecutionProcessor {
           lock: { mode: 'pessimistic_write' },
         });
         if (!doc) throw new TargetDocumentNotFoundError();
-        const safeText = summary
-          .replaceAll('&', '&amp;')
-          .replaceAll('<', '&lt;')
-          .replaceAll('>', '&gt;');
         const before = doc.content || '';
-        const content = `${before}\n\n${safeText}`;
+        const content = `${before}\n\n${renderSummaryText(summary)}`;
         doc.content = content;
         await repository.save(doc);
         const observed = await repository.findOneBy({ id: targetDocId });
@@ -161,16 +170,17 @@ export class SummarizeProcessor implements ExecutionProcessor {
         });
         if (!resource) throw new TargetResourceNotFoundError();
         const before = resource.summary;
-        resource.summary = summary;
+        const renderedSummary = renderSummaryText(summary);
+        resource.summary = renderedSummary;
         await repository.save(resource);
         const observed = await repository.findOneBy({ id: resourceId });
-        if (observed?.summary !== summary) {
+        if (observed?.summary !== renderedSummary) {
           throw new Error('resource_summary_effect_not_verified');
         }
         return {
           resourceId,
           beforeSummaryHash: canonicalHash(before),
-          afterSummaryHash: canonicalHash(summary),
+          afterSummaryHash: canonicalHash(renderedSummary),
         };
       },
     );
