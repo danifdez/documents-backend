@@ -154,34 +154,30 @@ function dedupe(terms: TaggedTerm[]): TaggedTerm[] {
   return out;
 }
 
-function bibliographyReferenceLabels(entry: any): TaggedTerm[] {
-  const terms: TaggedTerm[] = [];
+function bibliographyAuthorYearLabels(entry: any): TaggedTerm[] {
   const authors = authorList(entry);
   const year = entry?.year ? String(entry.year) : '';
+  if (!authors.length || !year) return [];
 
-  if (authors.length > 0 && year) {
-    const first = authors[0].last;
-    const second = authors.length > 1 ? authors[1].last : '';
-    let short: string;
-    if (authors.length === 1) {
-      short = first;
-    } else if (authors.length === 2) {
-      short = `${first} & ${second}`;
-    } else {
-      short = `${first} et al.`;
-    }
-    const shortAnd = authors.length === 2 ? `${first} y ${second}` : short;
-    const forms = [
-      `${short} (${year})`,
-      `(${short}, ${year})`,
-      `${shortAnd} (${year})`,
-      `(${shortAnd}, ${year})`,
-    ];
-    for (const form of forms) {
-      terms.push({ term: form, kind: 'authorYear' });
-    }
+  const first = authors[0].last;
+  const second = authors[1]?.last;
+  let short = first;
+  if (authors.length === 2) {
+    short = `${first} & ${second}`;
+  } else if (authors.length > 2) {
+    short = `${first} et al.`;
   }
+  const shortAnd = authors.length === 2 ? `${first} y ${second}` : short;
+  return [
+    `${short} (${year})`,
+    `(${short}, ${year})`,
+    `${shortAnd} (${year})`,
+    `(${shortAnd}, ${year})`,
+  ].map((term) => ({ term, kind: 'authorYear' }));
+}
 
+function bibliographyReferenceLabels(entry: any): TaggedTerm[] {
+  const terms = bibliographyAuthorYearLabels(entry);
   const citeKey = entry?.citeKey ? String(entry.citeKey) : '';
   if (citeKey.length >= 3) {
     for (const form of [

@@ -2410,9 +2410,7 @@ export class ExecutionService {
       );
     }
     const exportedAt = new Date();
-    while ((await this.purgeExpiredArtifacts(1_000, exportedAt)) > 0) {
-      continue;
-    }
+    await this.purgeAllExpiredArtifacts(1_000, exportedAt);
     const execution = await this.findOwned(rootExecutionId, scope);
     const events = (
       await this.eventRepo.find({
@@ -2669,6 +2667,13 @@ export class ExecutionService {
     return { sourceId, artifactIds, state: 'withdrawn' };
   }
 
+  async purgeAllExpiredArtifacts(limit: number, now?: Date): Promise<void> {
+    const purgeBatch = () => this.purgeExpiredArtifacts(limit, now);
+    for await (const purged of claimAvailable(purgeBatch)) {
+      if (purged <= 0) return;
+    }
+  }
+
   async purgeExpiredArtifacts(limit = 100, now = new Date()): Promise<number> {
     const expired = await this.artifactRepo.find({
       where: {
@@ -2821,17 +2826,14 @@ export class ExecutionService {
       // Request/response capture alone does not establish the identity of the
       // served model, engine and template needed to replay an inference.
       missing.add('environment.servedInferenceIdentity');
-      if (!inferenceIdentities.codeIdentityKnown) {
-        missing.add('environment.codeFingerprints');
-      }
-      if (!inferenceIdentities.modelIdentityKnown) {
-        missing.add('environment.modelFingerprints');
-      }
-      if (!inferenceIdentities.adapterIdentityKnown) {
-        missing.add('environment.adapterFingerprints');
-      }
-      if (!inferenceIdentities.promptIdentityKnown) {
-        missing.add('environment.promptPackages');
+      const identities = [
+        [inferenceIdentities.codeIdentityKnown, 'codeFingerprints'],
+        [inferenceIdentities.modelIdentityKnown, 'modelFingerprints'],
+        [inferenceIdentities.adapterIdentityKnown, 'adapterFingerprints'],
+        [inferenceIdentities.promptIdentityKnown, 'promptPackages'],
+      ] as const;
+      for (const [known, field] of identities) {
+        if (!known) missing.add(`environment.${field}`);
       }
     }
     if (hasTool && !inferenceIdentities.toolIdentityKnown) {

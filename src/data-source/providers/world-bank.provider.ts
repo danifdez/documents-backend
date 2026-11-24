@@ -72,7 +72,7 @@ export class WorldBankProvider implements DataSourceProvider {
     let totalPages = 1;
 
     const fetchNextPage = async () => {
-      if (!(page <= totalPages)) return null;
+      if (Number.isNaN(totalPages) || page > totalPages) return null;
       const result = await this.fetchPage(config, page, 1000);
       totalPages = result.totalPages;
       page += 1;
@@ -144,7 +144,7 @@ export class WorldBankProvider implements DataSourceProvider {
 
     return {
       records,
-      totalPages: metadata.pages || 1,
+      totalPages: Number(metadata.pages || 1),
       total: metadata.total || 0,
     };
   }

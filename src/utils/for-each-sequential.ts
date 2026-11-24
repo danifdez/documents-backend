@@ -4,13 +4,19 @@ export async function forEachSequential<T>(
   values: Iterable<T>,
   visit: (value: T) => Promise<void>,
 ): Promise<void> {
-  async function* operations(): AsyncGenerator<void> {
-    for (const value of values) {
-      yield visit(value);
-    }
-  }
+  const iterator = values[Symbol.iterator]();
+  // Adapt the iterator without resolving promise-valued inputs.
+  const inputs: AsyncIterable<T> = {
+    [Symbol.asyncIterator]: () => ({
+      next: () => Promise.resolve(iterator.next()),
+      return: () =>
+        Promise.resolve(
+          iterator.return?.() ?? { done: true, value: undefined },
+        ),
+    }),
+  };
 
-  for await (const _ of operations()) {
-    // Drain the iterator. Each operation must settle before the next starts.
+  for await (const value of inputs) {
+    await visit(value);
   }
 }

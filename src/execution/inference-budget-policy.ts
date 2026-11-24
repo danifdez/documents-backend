@@ -43,6 +43,8 @@ export type OperationBudgetLimits = {
   exactToolRepeatTerminateAfterBlock: boolean;
 };
 
+type OperationFingerprintVersion = 'canonical_tool_input_v1';
+
 export type GovernedBudgetStart = {
   operationId: string;
   operationKind: 'inference' | 'tool_call';
@@ -56,7 +58,7 @@ export type GovernedBudgetStart = {
   name: string;
   budgetSoftLimitWarningApplied: boolean;
   operationFingerprint?: string;
-  operationFingerprintVersion?: 'canonical_tool_input_v1';
+  operationFingerprintVersion?: OperationFingerprintVersion;
   toolBatchSize?: number;
   toolBatchIndex?: number;
   loopGuardWarningApplied: boolean;
@@ -455,7 +457,7 @@ export function governedBudgetStart(
       ? {
           operationFingerprint: readString(payload.operationFingerprint),
           operationFingerprintVersion:
-            payload.operationFingerprintVersion as GovernedBudgetStart['operationFingerprintVersion'],
+            payload.operationFingerprintVersion as OperationFingerprintVersion,
         }
       : {}),
     ...(payload.toolBatchSize !== undefined

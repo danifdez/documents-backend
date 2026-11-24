@@ -1493,13 +1493,15 @@ export class ExecutionAttemptService {
         'backend_failure_finalization',
         'domain_failure_finalization',
       ].includes(execution.phase ?? '');
+    const toolOperationStatus =
+      canonicalToolResult &&
+      operationStatusForToolResult(canonicalToolResult.status);
     if (['succeeded', 'not_executed'].includes(acceptedStatus)) {
       assertStepTransition(step.status, ExecutionStepStatus.COMPLETED);
       step.status = ExecutionStepStatus.COMPLETED;
       step.result = result.output ?? null;
-      operation.status = canonicalToolResult
-        ? operationStatusForToolResult(canonicalToolResult.status)
-        : ExecutionOperationStatus.SUCCEEDED;
+      operation.status =
+        toolOperationStatus ?? ExecutionOperationStatus.SUCCEEDED;
       operation.result = canonicalToolResult ?? result.output ?? null;
       operation.error = null;
     } else if (acceptedStatus === 'cancelled') {
@@ -1515,9 +1517,7 @@ export class ExecutionAttemptService {
       assertStepTransition(step.status, ExecutionStepStatus.FAILED);
       step.status = ExecutionStepStatus.FAILED;
       step.error = acceptedError as Record<string, unknown>;
-      operation.status = canonicalToolResult
-        ? operationStatusForToolResult(canonicalToolResult.status)
-        : ExecutionOperationStatus.FAILED;
+      operation.status = toolOperationStatus ?? ExecutionOperationStatus.FAILED;
       operation.result = canonicalToolResult;
       operation.error = acceptedError as Record<string, unknown>;
       if (!executionHasTerminalIntent) {

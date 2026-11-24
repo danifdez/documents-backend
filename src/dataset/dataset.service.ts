@@ -742,14 +742,9 @@ export class DatasetService {
           : `${fieldLabel} must be a boolean`;
       case 'date':
       case 'datetime':
-        return (typeof value !== 'string' &&
-          typeof value !== 'number' &&
-          !(value instanceof Date)) ||
-          Number.isNaN(
-            value instanceof Date ? value.getTime() : Date.parse(String(value)),
-          )
-          ? `${fieldLabel} must be a valid ${field.type}`
-          : null;
+        return this.isValidRecordDate(value)
+          ? null
+          : `${fieldLabel} must be a valid ${field.type}`;
       case 'time':
         return typeof value === 'string' && /^\d{2}:\d{2}(:\d{2})?$/.test(value)
           ? null
@@ -765,6 +760,14 @@ export class DatasetService {
       default:
         return null;
     }
+  }
+
+  private isValidRecordDate(value: unknown): boolean {
+    if (value instanceof Date) return !Number.isNaN(value.getTime());
+    return (
+      (typeof value === 'string' || typeof value === 'number') &&
+      !Number.isNaN(Date.parse(String(value)))
+    );
   }
 
   private cleanRecordData(

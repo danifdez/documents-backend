@@ -1256,15 +1256,27 @@ describe('ExecutionToolPlanService', () => {
     );
   });
 
-  it('rejects recursive delegation before creating another child', async () => {
+  it.each([
+    {
+      reason: 'delegation_depth_exceeded',
+      parentExecutionId: '018f1d8a-54d7-7d63-a1ee-5e9a6adca799',
+      goal: 'Delegate again',
+    },
+    {
+      reason: 'invalid_delegation_goal',
+      parentExecutionId: null,
+      goal: { text: 'Malformed persisted goal' },
+    },
+  ])('rejects invalid delegation: $reason', async (testCase) => {
+    const { reason, parentExecutionId, goal } = testCase;
     const plan = {
       ...planContract(),
       toolName: 'agents.delegate',
       descriptorVersion: 'agents.delegate/1',
-      normalizedArguments: { goal: 'Delegate again' },
+      normalizedArguments: { goal },
       requiredCapabilities: ['tool.agents.delegate/1'],
     };
-    execution.parentExecutionId = '018f1d8a-54d7-7d63-a1ee-5e9a6adca799';
+    execution.parentExecutionId = parentExecutionId;
     execution.progressLedger = {
       operationBudget: {
         grants: {},
@@ -1294,7 +1306,7 @@ describe('ExecutionToolPlanService', () => {
 
     await expect(
       service.materialize(TOOL_CALL_ID, RESERVATION_ID),
-    ).rejects.toThrow('delegation_depth_exceeded');
+    ).rejects.toThrow(reason);
     expect(executions.createChildInference).not.toHaveBeenCalled();
   });
 

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
+import { readString } from '../utils/read-string';
 import { ExecutionContractValidator } from './execution-contract-validator';
 import { EXECUTION_UUID_PATTERN } from './execution.constants';
 import { ExecutionEntity } from './execution.entity';
@@ -278,7 +279,10 @@ export class ExecutionToolPlanService {
     if (execution.parentExecutionId) {
       throw new ConflictException('delegation_depth_exceeded');
     }
-    const goal = String(plan.normalizedArguments.goal ?? '');
+    const goal = readString(plan.normalizedArguments.goal);
+    if (!goal) {
+      throw new ConflictException('invalid_delegation_goal');
+    }
     const parentPayload = chatTurnPayload(execution);
     const child = await this.executions.createChildInference(
       manager,

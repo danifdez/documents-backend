@@ -1,6 +1,5 @@
 import { readString } from '../../utils/read-string';
 import { BadRequestException } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { resolveProductSkillResource } from '../../conversation/product-skill-registry';
 import { ExecutionEntity } from '../execution.entity';
 import {
@@ -30,6 +29,7 @@ import {
   buildToolPlan,
   chatTurnPayload,
 } from './tool-plan-preparer';
+import { resolveInternalToolPolicy } from './internal-tool-policy';
 
 function prepareDocumentsSearch(
   invocation: ToolInvocationContract,
@@ -65,8 +65,7 @@ function prepareDocumentsSearch(
         },
       ],
       effects: [],
-      policyDecision: { decision: 'allowed', rule: 'local_documents_read' },
-      confirmationRequirement: null,
+      ...resolveInternalToolPolicy({ toolName: DOCUMENT_SEARCH_TOOL_NAME }),
       recoveryClass: 'read_only_replayable',
       idempotencyKey: null,
       requiredCapabilities: [DOCUMENT_SEARCH_TOOL_CAPABILITY],
@@ -156,11 +155,7 @@ function prepareSkillResourceLoad(
         },
       ],
       effects: [],
-      policyDecision: {
-        decision: 'allowed',
-        rule: 'active_product_skill_resource_read',
-      },
-      confirmationRequirement: null,
+      ...resolveInternalToolPolicy({ toolName: SKILL_RESOURCE_LOAD_TOOL_NAME }),
       recoveryClass: 'read_only_replayable',
       idempotencyKey: null,
       requiredCapabilities: [SKILL_RESOURCE_LOAD_TOOL_CAPABILITY],
@@ -195,7 +190,6 @@ function prepareUserTaskCreate(
   assertToolDataClassification(invocation);
   const { title, description } = normalizeUserTaskCreate(invocation);
   const preparedAt = new Date();
-  const expiresAt = new Date(preparedAt.getTime() + CONFIRMATION_TIMEOUT_MS);
   return buildToolPlan(
     invocation,
     {
@@ -221,18 +215,11 @@ function prepareUserTaskCreate(
           verificationRequired: true,
         },
       ],
-      policyDecision: {
-        decision: 'confirmation_required',
-        rule: 'user_task_create_requires_confirmation',
-        expiresAt: expiresAt.toISOString(),
-      },
-      confirmationRequirement: {
-        confirmationId: randomUUID(),
-        reason: 'Creating a task changes local workspace data.',
-        prompt: `Create the task "${title}"?`,
-        scope: 'once',
-        expiresAt: expiresAt.toISOString(),
-      },
+      ...resolveInternalToolPolicy({
+        toolName: USER_TASK_CREATE_TOOL_NAME,
+        title,
+        preparedAt,
+      }),
       recoveryClass: 'effect_checked',
       idempotencyKey: `user-task:${invocation.toolCallId}`,
       requiredCapabilities: [USER_TASK_CREATE_TOOL_CAPABILITY],
@@ -270,13 +257,7 @@ function prepareAgentDelegation(
         },
       ],
       effects: [],
-      policyDecision: {
-        decision: 'allowed',
-        // The child stays in the owner's execution tree and runs one inference.
-        rule: 'bounded_internal_delegation',
-        conditions: ['max_depth_1', 'single_inference', 'join_all'],
-      },
-      confirmationRequirement: null,
+      ...resolveInternalToolPolicy({ toolName: AGENT_DELEGATE_TOOL_NAME }),
       recoveryClass: 'idempotent',
       idempotencyKey: `delegation:${invocation.toolCallId}`,
       requiredCapabilities: [AGENT_DELEGATE_TOOL_CAPABILITY],

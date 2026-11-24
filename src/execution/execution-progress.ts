@@ -534,15 +534,7 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
     );
     if (applyBudgetEvent(ledger, event)) continue;
     if (applyPolicySnapshot(policy, event)) continue;
-    const kind = event.payload.operationKind;
-    if (kind !== 'inference' && kind !== 'tool_call') continue;
-    const key = operationKey(event);
-    if (event.eventType === 'operation.started') {
-      starts.set(key, projectOperationStart(ledger, event, kind));
-    } else if (event.eventType === 'operation.finished') {
-      const start = starts.get(key);
-      if (start) projectOperationFinish(ledger, event, start);
-    }
+    projectOperationEvent(ledger, event, starts);
   }
 
   ledger.completeness = Object.values(ledger.operations).some(
@@ -554,6 +546,22 @@ export function projectExecutionProgress(events: ProgressEvent[]): {
     policy: Object.keys(policy.loops).length ? policy : null,
     ledger,
   };
+}
+
+function projectOperationEvent(
+  ledger: ProgressLedger,
+  event: ProgressEvent,
+  starts: Map<string, OperationStart>,
+): void {
+  const kind = event.payload.operationKind;
+  if (kind !== 'inference' && kind !== 'tool_call') return;
+  const key = operationKey(event);
+  if (event.eventType === 'operation.started') {
+    starts.set(key, projectOperationStart(ledger, event, kind));
+  } else if (event.eventType === 'operation.finished') {
+    const start = starts.get(key);
+    if (start) projectOperationFinish(ledger, event, start);
+  }
 }
 
 function applyPolicySnapshot(

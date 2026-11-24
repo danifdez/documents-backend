@@ -634,7 +634,8 @@ export class ExecutionAgentLoopService implements ExecutionNextStepSelector {
           error: {
             code: 'loop_guard_terminated',
             message:
-              'The repeated tool operation was not executed because the loop guard terminated the loop',
+              'The repeated tool operation was not executed because ' +
+              'the loop guard terminated the loop',
           },
           continuation: {
             kind: 'partial',
