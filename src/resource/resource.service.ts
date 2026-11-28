@@ -46,38 +46,38 @@ export class ResourceService {
 
   async findOne(id: number): Promise<ResourceEntity | null> {
     return await this.repo.findOne({
-      select: [
-        'id',
-        'name',
-        'title',
-        'path',
-        'project',
-        'summary',
-        'keyPoints',
-        'keywords',
-        'originalName',
-        'publicationDate',
-        'type',
-        'license',
-        'fileSize',
-        'pages',
-        'uploadDate',
-        'url',
-        'language',
-        'mimeType',
-        'status',
-        'archivedAt',
-        'createdAt',
-        'updatedAt',
-      ],
+      select: {
+        id: true,
+        name: true,
+        title: true,
+        path: true,
+        project: true,
+        summary: true,
+        keyPoints: true,
+        keywords: true,
+        originalName: true,
+        publicationDate: true,
+        type: true,
+        license: true,
+        fileSize: true,
+        pages: true,
+        uploadDate: true,
+        url: true,
+        language: true,
+        mimeType: true,
+        status: true,
+        archivedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       where: { id },
-      relations: ['project', 'authors'],
+      relations: { project: true, authors: true },
     });
   }
 
   async getContentById(id: number): Promise<string | null> {
     const resource = await this.repo.findOne({
-      select: ['content'],
+      select: { content: true },
       where: { id },
     });
     return resource?.content ?? null;
@@ -85,7 +85,7 @@ export class ResourceService {
 
   async getTranslatedContentById(id: number): Promise<string | null> {
     const resource = await this.repo.findOne({
-      select: ['translatedContent'],
+      select: { translatedContent: true },
       where: { id },
     });
     return resource?.translatedContent ?? null;
@@ -119,16 +119,16 @@ export class ResourceService {
 
   async findByProject(projectId: number): Promise<ResourceEntity[]> {
     return await this.repo.find({
-      select: [
-        'id',
-        'name',
-        'title',
-        'mimeType',
-        'originalName',
-        'type',
-        'status',
-        'createdAt',
-      ],
+      select: {
+        id: true,
+        name: true,
+        title: true,
+        mimeType: true,
+        originalName: true,
+        type: true,
+        status: true,
+        createdAt: true,
+      },
       where: { project: { id: projectId } },
       order: { createdAt: 'DESC' },
     });
@@ -152,16 +152,16 @@ export class ResourceService {
 
   async findByThread(threadId: number): Promise<ResourceEntity[]> {
     return await this.repo.find({
-      select: [
-        'id',
-        'name',
-        'title',
-        'mimeType',
-        'originalName',
-        'type',
-        'status',
-        'createdAt',
-      ],
+      select: {
+        id: true,
+        name: true,
+        title: true,
+        mimeType: true,
+        originalName: true,
+        type: true,
+        status: true,
+        createdAt: true,
+      },
       where: { thread: { id: threadId } },
       order: { createdAt: 'DESC' },
     });
@@ -232,7 +232,7 @@ export class ResourceService {
     return await this.repo.findOne({
       where,
       order: { id: 'DESC' },
-      relations: ['project'],
+      relations: { project: true },
     });
   }
 
@@ -260,7 +260,7 @@ export class ResourceService {
     let newAnchor: string | null = null;
     if (Object.hasOwn(resource, 'publicationDate')) {
       const before = await this.repo.findOne({
-        select: ['id', 'publicationDate'],
+        select: { id: true, publicationDate: true },
         where: { id },
       });
       const oldAnchor = before?.publicationDate

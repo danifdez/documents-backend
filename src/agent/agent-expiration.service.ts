@@ -22,7 +22,7 @@ export class AgentExpirationService {
     const now = new Date();
     const candidates = await this.agentRepo.find({
       where: { expiresAt: Not(IsNull()) },
-      select: ['id', 'name', 'expiresAt'],
+      select: { id: true, name: true, expiresAt: true },
     });
     const expired = candidates.filter(
       (a) => a.expiresAt !== null && a.expiresAt < now,

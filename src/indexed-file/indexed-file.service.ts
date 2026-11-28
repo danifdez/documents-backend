@@ -273,7 +273,7 @@ export class IndexedFileService {
     const { ownerType, ownerId } = owner;
     const rows = await this.repository.find({
       where: { ownerType, ownerId },
-      select: ['id'],
+      select: { id: true },
     });
     if (rows.length === 0) return;
     // Deleting the rows cascades to their indexed_file_chunks.
@@ -312,7 +312,7 @@ export class IndexedFileService {
       .filter((term) => term.length > 1);
     const rows = await this.repository.find({
       where: { ownerType, ownerId },
-      select: ['id', 'filename', 'extractedText'],
+      select: { id: true, filename: true, extractedText: true },
     });
     return rows
       .flatMap((row) => {

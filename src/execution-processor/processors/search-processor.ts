@@ -3,7 +3,7 @@ import {
   ExecutionProcessor,
   ExecutionProcessorResult,
 } from '../execution-processor.interface';
-import { ExecutionEntity } from 'src/execution/execution.entity';
+import { ExecutionEntity } from '../../execution/execution.entity';
 
 @Injectable()
 export class SearchProcessor implements ExecutionProcessor {

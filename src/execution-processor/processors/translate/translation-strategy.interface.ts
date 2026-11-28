@@ -1,4 +1,4 @@
-import { ExecutionEntity } from 'src/execution/execution.entity';
+import { ExecutionEntity } from '../../../execution/execution.entity';
 
 // Shared so every strategy keeps logging under the original context.
 export const TRANSLATE_LOG_CONTEXT = 'TranslateProcessor';

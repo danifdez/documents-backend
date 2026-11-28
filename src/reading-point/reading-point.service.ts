@@ -13,7 +13,7 @@ export class ReadingPointService {
   async findOne(id: number): Promise<ReadingPointEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['doc', 'resource'],
+      relations: { doc: true, resource: true },
     });
   }
 

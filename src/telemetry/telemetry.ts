@@ -21,6 +21,7 @@ import { ExecutionEventSnapshot } from './execution-lifecycle';
 
 export type TraceContext = { traceparent: string };
 let provider: TracerProvider | undefined;
+let executionsOnly = false;
 const w3c = new W3CTraceContextPropagator();
 
 // Only fixed-size W3C identifiers cross the durable queue. Never propagate
@@ -89,6 +90,7 @@ function configureTelemetryInternal(): void {
     console.warn('OpenTelemetry disabled: invalid endpoint or protocol');
     return;
   }
+  executionsOnly = process.env.OTEL_DOCUMENTS_EXECUTIONS_ONLY === 'true';
   provider = new TracerProvider({
     resource: resourceFromAttributes({ 'service.name': 'documents-backend' }),
     sampler: new ParentBasedSampler({ root: new AlwaysOnSampler() }),
@@ -124,7 +126,8 @@ export function traceRequest(
   res: Response,
   next: NextFunction,
 ): void {
-  if (!provider) {
+  // Durable execution events and model spans still share an execution context.
+  if (!provider || executionsOnly) {
     next();
     return;
   }
@@ -193,7 +196,11 @@ export function executionTraceContext(
 export function recordExecutionEvent(event: ExecutionEventSnapshot): void {
   if (!provider) return;
   const metadata = event.metadata;
-  if (!metadata) return;
+  if (
+    !metadata ||
+    (executionsOnly && metadata.name === 'documents.artifact.expired')
+  )
+    return;
   const carrier = safeTraceContext(event.traceContext);
   const parent = carrier
     ? propagation.extract(ROOT_CONTEXT, carrier)

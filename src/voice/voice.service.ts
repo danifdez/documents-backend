@@ -37,7 +37,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as http from 'node:http';
-import * as WebSocket from 'ws';
+import WebSocket from 'ws';
 import { Socket } from 'socket.io';
 
 type WorkerStatus = 'free' | 'connecting' | 'busy' | 'closing' | 'down';

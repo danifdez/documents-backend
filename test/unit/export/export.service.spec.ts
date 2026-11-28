@@ -7,7 +7,7 @@ const mockArchive = {
   finalize: jest.fn(),
 };
 
-jest.mock('archiver', () => jest.fn(() => mockArchive));
+jest.mock('archiver', () => ({ ZipArchive: jest.fn(() => mockArchive) }));
 jest.mock('../../../src/common/html-to-docx', () => ({
   renderHtmlToDocx: jest.fn(),
 }));

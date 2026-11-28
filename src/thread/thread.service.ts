@@ -14,7 +14,7 @@ export class ThreadService {
   async findOne(id: number): Promise<ThreadEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['parent', 'children'],
+      relations: { parent: true, children: true },
     });
   }
 
@@ -35,7 +35,7 @@ export class ThreadService {
     if (!includeArchived) where.status = 'active';
     return await this.repository.find({
       where,
-      relations: ['parent'],
+      relations: { parent: true },
       order: { createdAt: 'DESC' },
     });
   }

@@ -7,7 +7,7 @@ import { ProjectEntity } from '../project/project.entity';
 import { DocEntity } from '../doc/doc.entity';
 import { FileStorageService } from '../file-storage/file-storage.service';
 import { renderHtmlToDocx } from '../common/html-to-docx';
-import * as archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { PassThrough } from 'node:stream';
 
 interface ExportedProject {
@@ -31,7 +31,7 @@ export class ExportService {
   async getProjectsForExport(): Promise<ProjectEntity[]> {
     return await this.projectRepo.find({
       order: { name: 'ASC' },
-      select: ['id', 'name', 'description', 'createdAt'],
+      select: { id: true, name: true, description: true, createdAt: true },
     });
   }
 
@@ -40,7 +40,7 @@ export class ExportService {
     convertToDocx: boolean = false,
   ): Promise<{ stream: PassThrough; filename: string }> {
     const passThrough = new PassThrough();
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
 
     archive.pipe(passThrough);
 
@@ -95,7 +95,7 @@ export class ExportService {
   }
 
   private async appendProject(
-    archive: archiver.Archiver,
+    archive: ZipArchive,
     folder: string,
     name: string,
     convertToDocx: boolean,
@@ -105,7 +105,7 @@ export class ExportService {
       where: {
         project: projectId === undefined ? IsNull() : { id: projectId },
       },
-      relations: ['authors', 'entities'],
+      relations: { authors: true, entities: true },
     });
     const docsQuery = this.docRepo
       .createQueryBuilder('d')
@@ -137,7 +137,7 @@ export class ExportService {
   }
 
   private async appendResource(
-    archive: archiver.Archiver,
+    archive: ZipArchive,
     folder: string,
     resource: ResourceEntity,
     convertToDocx: boolean,
@@ -198,7 +198,7 @@ export class ExportService {
   }
 
   private async appendDocument(
-    archive: archiver.Archiver,
+    archive: ZipArchive,
     folder: string,
     doc: DocEntity,
     convertToDocx: boolean,
@@ -248,7 +248,7 @@ export class ExportService {
   }
 
   private async appendHtmlContent(
-    archive: archiver.Archiver,
+    archive: ZipArchive,
     html: string,
     basePath: string,
     convertToDocx: boolean,

@@ -13,7 +13,7 @@ export class UserTaskService {
 
   async findAll(): Promise<UserTaskEntity[]> {
     return await this.repository.find({
-      relations: ['project'],
+      relations: { project: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -21,7 +21,7 @@ export class UserTaskService {
   async findOne(id: number): Promise<UserTaskEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['project'],
+      relations: { project: true },
     });
   }
 

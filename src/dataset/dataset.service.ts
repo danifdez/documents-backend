@@ -54,14 +54,30 @@ export class DatasetService {
       .createQueryBuilder('dataset')
       .leftJoinAndSelect('dataset.project', 'project')
       .leftJoinAndSelect('dataset.dataSources', 'dataSource')
-      .loadRelationCountAndMap('dataset.recordCount', 'dataset.records');
+      .addSelect(
+        (query) =>
+          query
+            .select('COUNT(*)')
+            .from(DatasetRecordEntity, 'record')
+            .where('record.dataset_id = dataset.id'),
+        'record_count',
+      );
 
     if (projectId) {
       qb.where('dataset.project.id = :projectId', { projectId });
     }
 
     qb.orderBy('dataset.name', 'ASC');
-    return await qb.getMany();
+    const { entities, raw } = await qb.getRawAndEntities<{
+      dataset_id: number;
+      record_count: string;
+    }>();
+    const counts = new Map(
+      raw.map((row) => [row.dataset_id, Number(row.record_count)]),
+    );
+    return entities.map((dataset) =>
+      Object.assign(dataset, { recordCount: counts.get(dataset.id) ?? 0 }),
+    );
   }
 
   async globalSearch(searchTerm: string, projectId?: number): Promise<any[]> {
@@ -82,7 +98,7 @@ export class DatasetService {
   async findOneDataset(id: number): Promise<DatasetEntity | null> {
     return await this.datasetRepository.findOne({
       where: { id },
-      relations: ['project', 'dataSources'],
+      relations: { project: true, dataSources: true },
     });
   }
 
@@ -115,7 +131,7 @@ export class DatasetService {
   ): Promise<DatasetEntity> {
     const dataset = await this.datasetRepository.findOne({
       where: { id },
-      relations: ['project'],
+      relations: { project: true },
     });
     if (!dataset) {
       throw new NotFoundException(`Dataset with id ${id} not found`);
@@ -282,7 +298,7 @@ export class DatasetService {
   ): Promise<number> {
     const records = await this.recordRepository.find({
       where: { dataset: { id: datasetId } },
-      select: ['id', 'data'],
+      select: { id: true, data: true },
     });
 
     let incompatible = 0;
@@ -576,7 +592,7 @@ export class DatasetService {
         { sourceDataset: { id: datasetId } },
         { targetDataset: { id: datasetId } },
       ],
-      relations: ['sourceDataset', 'targetDataset'],
+      relations: { sourceDataset: true, targetDataset: true },
     });
   }
 
@@ -627,7 +643,7 @@ export class DatasetService {
   ): Promise<DatasetRecordLinkEntity> {
     const relation = await this.relationRepository.findOne({
       where: { id: relationId },
-      relations: ['sourceDataset', 'targetDataset'],
+      relations: { sourceDataset: true, targetDataset: true },
     });
     if (!relation) {
       throw new NotFoundException(`Relation with id ${relationId} not found`);
@@ -635,7 +651,7 @@ export class DatasetService {
 
     const sourceRecord = await this.recordRepository.findOne({
       where: { id: dto.sourceRecordId },
-      relations: ['dataset'],
+      relations: { dataset: true },
     });
     if (
       !sourceRecord ||
@@ -648,7 +664,7 @@ export class DatasetService {
 
     const targetRecord = await this.recordRepository.findOne({
       where: { id: dto.targetRecordId },
-      relations: ['dataset'],
+      relations: { dataset: true },
     });
     if (
       !targetRecord ||

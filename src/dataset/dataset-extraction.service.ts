@@ -37,7 +37,7 @@ export class DatasetExtractionService {
   ): Promise<{ rowsQueued: number; executionIds: string[] }> {
     const dataset = await this.datasetRepository.findOne({
       where: { id: datasetId },
-      relations: ['project'],
+      relations: { project: true },
     });
     if (!dataset) {
       throw new NotFoundException(`Dataset with id ${datasetId} not found`);
@@ -217,7 +217,7 @@ export class DatasetExtractionService {
   }> {
     const dataset = await this.datasetRepository.findOne({
       where: { id: datasetId },
-      relations: ['project'],
+      relations: { project: true },
     });
     if (!dataset) {
       throw new NotFoundException(`Dataset with id ${datasetId} not found`);

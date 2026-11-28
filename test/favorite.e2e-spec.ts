@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { FavoriteController } from '../src/favorite/favorite.controller';
 import { FavoriteService } from '../src/favorite/favorite.service';
 import { buildFavorite } from './factories';

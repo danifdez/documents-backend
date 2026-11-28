@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { ExecutionEntity } from 'src/execution/execution.entity';
+import { ExecutionEntity } from '../../../execution/execution.entity';
 import {
   TranslationStrategy,
   TRANSLATE_LOG_CONTEXT,

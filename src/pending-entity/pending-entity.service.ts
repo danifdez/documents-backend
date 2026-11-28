@@ -56,7 +56,7 @@ export class PendingEntityService {
 
   async findAll(): Promise<PendingEntityEntity[]> {
     return await this.repository.find({
-      relations: ['entityType', 'resource'],
+      relations: { entityType: true, resource: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -66,7 +66,7 @@ export class PendingEntityService {
   ): Promise<(PendingEntityEntity & { isConfirmed?: boolean })[]> {
     const pendingEntities = await this.repository.find({
       where: { resourceId },
-      relations: ['entityType'],
+      relations: { entityType: true },
       order: { name: 'ASC' },
     });
 
@@ -111,7 +111,7 @@ export class PendingEntityService {
   async findOne(id: number): Promise<PendingEntityEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['entityType', 'resource'],
+      relations: { entityType: true, resource: true },
     });
   }
 
@@ -347,7 +347,7 @@ export class PendingEntityService {
       // Find the pending entity
       const pending = await this.repository.findOne({
         where: { id },
-        relations: ['entityType', 'resource'],
+        relations: { entityType: true, resource: true },
       });
 
       if (!pending) {
@@ -410,7 +410,7 @@ export class PendingEntityService {
       // Get source pending entity
       const sourcePending = await this.repository.findOne({
         where: { id: sourceId },
-        relations: ['entityType'],
+        relations: { entityType: true },
       });
 
       if (!sourcePending) {
@@ -567,7 +567,7 @@ export class PendingEntityService {
     try {
       const pending = await this.repository.findOne({
         where: { id },
-        relations: ['entityType'],
+        relations: { entityType: true },
       });
 
       if (!pending) {

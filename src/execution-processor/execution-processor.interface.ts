@@ -1,5 +1,5 @@
-import { ExecutionEntity } from 'src/execution/execution.entity';
-import { ExecutionPublication } from 'src/execution-outbox/execution-publication';
+import { ExecutionEntity } from '../execution/execution.entity';
+import { ExecutionPublication } from '../execution-outbox/execution-publication';
 
 export interface ExecutionProcessorResult {
   success: boolean;

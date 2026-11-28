@@ -2,18 +2,18 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
-import { DocModule } from 'src/doc/doc.module';
-import { MarkModule } from 'src/mark/mark.module';
-import { ResourceModule } from 'src/resource/resource.module';
-import { NoteModule } from 'src/note/note.module';
-import { CanvasModule } from 'src/canvas/canvas.module';
-import { CalendarEventModule } from 'src/calendar-event/calendar-event.module';
-import { KnowledgeBaseModule } from 'src/knowledge-base/knowledge-base.module';
-import { EntityModule } from 'src/entity/entity.module';
-import { DatasetModule } from 'src/dataset/dataset.module';
-import { ProjectModule } from 'src/project/project.module';
-import { TimelineModule } from 'src/timeline/timeline.module';
-import { BibliographyModule } from 'src/bibliography/bibliography.module';
+import { DocModule } from '../doc/doc.module';
+import { MarkModule } from '../mark/mark.module';
+import { ResourceModule } from '../resource/resource.module';
+import { NoteModule } from '../note/note.module';
+import { CanvasModule } from '../canvas/canvas.module';
+import { CalendarEventModule } from '../calendar-event/calendar-event.module';
+import { KnowledgeBaseModule } from '../knowledge-base/knowledge-base.module';
+import { EntityModule } from '../entity/entity.module';
+import { DatasetModule } from '../dataset/dataset.module';
+import { ProjectModule } from '../project/project.module';
+import { TimelineModule } from '../timeline/timeline.module';
+import { BibliographyModule } from '../bibliography/bibliography.module';
 
 // SearchService's @Optional() constructor dependencies (notes, canvas, KB,
 // events, entities, datasets) were never wired here, so global search via

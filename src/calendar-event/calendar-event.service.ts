@@ -42,7 +42,7 @@ export class CalendarEventService {
 
   async findAll(): Promise<CalendarEventEntity[]> {
     return await this.repository.find({
-      relations: ['project'],
+      relations: { project: true },
       order: { startDate: 'ASC' },
     });
   }
@@ -50,7 +50,7 @@ export class CalendarEventService {
   async findOne(id: number): Promise<CalendarEventEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['project'],
+      relations: { project: true },
     });
   }
 

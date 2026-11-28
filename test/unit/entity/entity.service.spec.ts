@@ -257,7 +257,7 @@ describe('EntityService', () => {
     await expect(service.findByName('Ada')).resolves.toBe(result);
     expect(repo.findOne).toHaveBeenCalledWith({
       where: { name: 'Ada' },
-      relations: ['entityType'],
+      relations: { entityType: true },
     });
     const qb = repo.createQueryBuilder();
     qb.getRawMany.mockResolvedValue([{ e_id: 1 }]);

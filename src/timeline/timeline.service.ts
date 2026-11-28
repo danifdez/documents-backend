@@ -19,7 +19,7 @@ export class TimelineService {
   async findOne(id: number): Promise<TimelineEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['project'],
+      relations: { project: true },
     });
   }
 

@@ -92,7 +92,7 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
           const repository = manager.getRepository(DatasetRecordEntity);
           const record = await repository.findOne({
             where: { id: recordId },
-            relations: ['dataset'],
+            relations: { dataset: true },
             relationLoadStrategy: 'query',
             lock: { mode: 'pessimistic_write' },
           });
@@ -133,7 +133,7 @@ export class DatasetExtractionProcessor implements ExecutionProcessor {
           await repository.save(record);
           const observed = await repository.findOne({
             where: { id: recordId },
-            relations: ['dataset'],
+            relations: { dataset: true },
           });
           if (
             observed?.dataset?.id !== datasetId ||

@@ -26,7 +26,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { createServer, Server as HttpServer } from 'http';
 import { AddressInfo } from 'net';
 import { randomBytes, randomUUID } from 'crypto';
-import * as WebSocket from 'ws';
+import WebSocket from 'ws';
 import { AuthService } from '../src/auth/auth.service';
 import { UserEntity } from '../src/auth/user.entity';
 import { PermissionGroupEntity } from '../src/auth/permission-group.entity';

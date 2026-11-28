@@ -80,24 +80,32 @@ describe('DatasetService', () => {
     it('lists datasets and record counts, optionally scoped to a project', async () => {
       const qb = {
         ...createMockQueryBuilder(),
-        loadRelationCountAndMap: jest.fn(),
+        getRawAndEntities: jest.fn(),
       };
-      qb.loadRelationCountAndMap.mockReturnValue(qb);
       qb.leftJoinAndSelect.mockReturnValue(qb);
-      qb.getMany.mockResolvedValue([{ id: 1, recordCount: 3 }]);
+      qb.addSelect.mockReturnValue(qb);
+      qb.getRawAndEntities.mockResolvedValue({
+        entities: [{ id: 1 }, { id: 2 }],
+        raw: [
+          { dataset_id: 1, record_count: '3' },
+          { dataset_id: 1, record_count: '3' },
+          { dataset_id: 2, record_count: '0' },
+        ],
+      });
       datasets.createQueryBuilder.mockReturnValue(qb);
 
       await expect(service.findAllDatasets()).resolves.toEqual([
         { id: 1, recordCount: 3 },
+        { id: 2, recordCount: 0 },
       ]);
       expect(qb.where).not.toHaveBeenCalled();
       await service.findAllDatasets(9);
       expect(qb.where).toHaveBeenCalledWith('dataset.project.id = :projectId', {
         projectId: 9,
       });
-      expect(qb.loadRelationCountAndMap).toHaveBeenCalledWith(
-        'dataset.recordCount',
-        'dataset.records',
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.any(Function),
+        'record_count',
       );
       expect(qb.orderBy).toHaveBeenCalledWith('dataset.name', 'ASC');
     });
@@ -694,7 +702,7 @@ describe('DatasetService', () => {
       await expect(service.findRelations(1)).resolves.toEqual([relation]);
       expect(relations.find).toHaveBeenCalledWith({
         where: [{ sourceDataset: { id: 1 } }, { targetDataset: { id: 1 } }],
-        relations: ['sourceDataset', 'targetDataset'],
+        relations: { sourceDataset: true, targetDataset: true },
       });
       await expect(service.removeRelation(3)).rejects.toBeInstanceOf(
         NotFoundException,

@@ -43,7 +43,7 @@ export class VectorSearchProcessor implements ExecutionProcessor {
     if (!ids.length) return;
     const rows = await this.indexedFileRepository.find({
       where: { id: In(ids), ownerId, ownerType: normalizedOwnerType },
-      select: ['id'],
+      select: { id: true },
     });
     this.assertSameIds(
       ids,

@@ -39,25 +39,25 @@ describe('OwnedResourceGuard', () => {
   });
 
   it('rejects an assistant owned by another principal', async () => {
-    const repo = { exist: jest.fn().mockResolvedValue(false) };
+    const repo = { exists: jest.fn().mockResolvedValue(false) };
     const guard = new AssistantOwnedGuard(repo as any, config(true) as any);
 
     await expect(
       guard.canActivate(context({ assistantId: '1' }, { userId: 'user-a' })),
     ).rejects.toThrow(NotFoundException);
-    expect(repo.exist).toHaveBeenCalledWith({
+    expect(repo.exists).toHaveBeenCalledWith({
       where: { id: 1, ownerPrincipal: 'user-a' },
     });
   });
 
   it('accepts the owner and supports the memory ownerId parameter', async () => {
-    const repo = { exist: jest.fn().mockResolvedValue(true) };
+    const repo = { exists: jest.fn().mockResolvedValue(true) };
     const guard = new AgentOwnedGuard(repo as any, config(true) as any);
 
     await expect(
       guard.canActivate(context({ ownerId: '2' }, { sub: 'user-b' })),
     ).resolves.toBe(true);
-    expect(repo.exist).toHaveBeenCalledWith({
+    expect(repo.exists).toHaveBeenCalledWith({
       where: { id: 2, ownerPrincipal: 'user-b' },
     });
   });

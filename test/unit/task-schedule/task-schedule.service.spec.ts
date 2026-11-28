@@ -1,4 +1,4 @@
-import * as os from 'os';
+import os from 'node:os';
 import { TaskScheduleService } from '../../../src/task-schedule/task-schedule.service';
 
 describe('TaskScheduleService', () => {

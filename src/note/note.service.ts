@@ -14,7 +14,7 @@ export class NoteService {
 
   async findAll(): Promise<NoteEntity[]> {
     return await this.repository.find({
-      relations: ['project', 'thread'],
+      relations: { project: true, thread: true },
       order: { updatedAt: 'DESC' },
     });
   }
@@ -22,7 +22,7 @@ export class NoteService {
   async findOne(id: number): Promise<NoteEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['project', 'thread'],
+      relations: { project: true, thread: true },
     });
   }
 

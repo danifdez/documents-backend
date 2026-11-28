@@ -9,7 +9,7 @@ import {
   ParseIntPipe,
 } from '@nestjs/common';
 import { CommentService } from './comment.service';
-import { CommentEntity } from 'src/comment/comment.entity';
+import { CommentEntity } from './comment.entity';
 import { CreateCommentDto, UpdateCommentDto } from './dto/comment.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';

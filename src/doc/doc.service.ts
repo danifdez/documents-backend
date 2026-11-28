@@ -19,7 +19,7 @@ export class DocService {
   async findOneWithProject(id: number): Promise<DocEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['project'],
+      relations: { project: true },
     });
   }
 

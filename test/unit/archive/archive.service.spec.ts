@@ -9,6 +9,10 @@ import { NoteEntity } from '../../../src/note/note.entity';
 import { ProjectEntity } from '../../../src/project/project.entity';
 import { ResourceEntity } from '../../../src/resource/resource.entity';
 import { ThreadEntity } from '../../../src/thread/thread.entity';
+import {
+  sourceIdForDoc,
+  sourceIdForResource,
+} from '../../../src/vector/vector-source-id.util';
 import { VectorStoreService } from '../../../src/vector/vector-store.service';
 import { createMockQueryBuilder } from '../../test-utils';
 
@@ -119,8 +123,6 @@ describe('ArchiveService', () => {
     const log = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
-    const { sourceIdForDoc, sourceIdForResource } =
-      await import('../../../src/vector/vector-source-id.util');
     projects.findOneBy.mockResolvedValue({ id: 1, status: 'active' });
     threads.query.getRawMany.mockResolvedValue([{ id: 10 }, { id: 11 }]);
     populateChildren();

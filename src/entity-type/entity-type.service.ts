@@ -23,7 +23,7 @@ export class EntityTypeService {
   async findOne(id: number): Promise<EntityTypeEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['entities'],
+      relations: { entities: true },
     });
   }
 

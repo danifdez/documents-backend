@@ -40,7 +40,7 @@ describe('BibliographyService', () => {
       expect(await service.findOne(1)).toEqual(entry);
       expect(repo.findOne).toHaveBeenCalledWith({
         where: { id: 1 },
-        relations: ['project', 'sourceResource'],
+        relations: { project: true, sourceResource: true },
       });
     });
 

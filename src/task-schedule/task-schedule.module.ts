@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TaskScheduleService } from './task-schedule.service';
-import { ExecutionModule } from 'src/execution/execution.module';
-import { WorkerModule } from 'src/worker/worker.module';
-import { ExecutionCoordinatorModule } from 'src/execution-coordinator/execution-coordinator.module';
+import { ExecutionModule } from '../execution/execution.module';
+import { WorkerModule } from '../worker/worker.module';
+import { ExecutionCoordinatorModule } from '../execution-coordinator/execution-coordinator.module';
 
 @Module({
   imports: [ExecutionModule, ExecutionCoordinatorModule, WorkerModule],

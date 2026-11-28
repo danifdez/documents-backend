@@ -60,7 +60,7 @@ export class BibliographyService {
   async findOne(id: number): Promise<BibliographyEntryEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['project', 'sourceResource'],
+      relations: { project: true, sourceResource: true },
     });
   }
 
@@ -179,7 +179,7 @@ export class BibliographyService {
 
     const resource = await this.resourceRepository.findOne({
       where: { id: resourceId },
-      relations: ['authors'],
+      relations: { authors: true },
     });
     if (!resource) throw new Error(`Resource ${resourceId} not found`);
 

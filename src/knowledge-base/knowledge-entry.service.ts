@@ -30,14 +30,14 @@ export class KnowledgeEntryService {
   async findOne(id: number): Promise<KnowledgeEntryEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['entity', 'entity.entityType'],
+      relations: { entity: { entityType: true } },
     });
   }
 
   async findByEntityId(entityId: number): Promise<KnowledgeEntryEntity[]> {
     return await this.repository.find({
       where: { entityId },
-      relations: ['entity', 'entity.entityType'],
+      relations: { entity: { entityType: true } },
     });
   }
 

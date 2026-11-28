@@ -19,7 +19,7 @@ export class EntityService {
 
   async findAll(): Promise<EntityEntity[]> {
     return await this.repository.find({
-      relations: ['entityType'],
+      relations: { entityType: true },
       order: { name: 'ASC' },
     });
   }
@@ -27,14 +27,14 @@ export class EntityService {
   async findOne(id: number): Promise<EntityEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['entityType', 'resources'],
+      relations: { entityType: true, resources: true },
     });
   }
 
   async findOneDetailed(id: number): Promise<any> {
     const entity = await this.repository.findOne({
       where: { id },
-      relations: ['entityType', 'projects'],
+      relations: { entityType: true, projects: true },
     });
 
     if (!entity) return null;
@@ -77,7 +77,7 @@ export class EntityService {
   async findByName(name: string): Promise<EntityEntity | null> {
     return await this.repository.findOne({
       where: { name },
-      relations: ['entityType'],
+      relations: { entityType: true },
     });
   }
 
@@ -90,7 +90,7 @@ export class EntityService {
         name,
         entityType: { id: entityTypeId },
       },
-      relations: ['entityType'],
+      relations: { entityType: true },
     });
   }
 
@@ -234,7 +234,7 @@ export class EntityService {
   ): Promise<EntityEntity | null> {
     const existingEntity = await this.repository.findOne({
       where: { id },
-      relations: ['entityType'],
+      relations: { entityType: true },
     });
 
     if (!existingEntity) {
@@ -318,12 +318,12 @@ export class EntityService {
       // Find both entities (don't load resources relation as it's the inverse side)
       const sourceEntity = await repository.findOne({
         where: { id: sourceEntityId },
-        relations: ['entityType'],
+        relations: { entityType: true },
       });
 
       const targetEntity = await repository.findOne({
         where: { id: targetEntityId },
-        relations: ['entityType'],
+        relations: { entityType: true },
       });
 
       if (!sourceEntity) {

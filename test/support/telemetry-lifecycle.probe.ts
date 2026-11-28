@@ -4,14 +4,34 @@ import { Test } from '@nestjs/testing';
 import { createServer } from 'http';
 import { AddressInfo } from 'net';
 import { TelemetryModule } from '../../src/telemetry/telemetry.module';
-import { executionTraceContext } from '../../src/telemetry/telemetry';
+import {
+  executionTraceContext,
+  recordExecutionEvent,
+} from '../../src/telemetry/telemetry';
 
 @Controller('probe')
 class ProbeController {
   @Post()
   async probe() {
     await Promise.resolve();
-    return executionTraceContext();
+    const traceContext = executionTraceContext();
+    const occurredAt = new Date();
+    for (const name of [
+      'documents.execution.created',
+      'documents.artifact.expired',
+    ]) {
+      recordExecutionEvent({
+        traceContext,
+        metadata: {
+          name,
+          occurredAt,
+          startedAt: occurredAt,
+          attributes: {},
+          failed: false,
+        },
+      });
+    }
+    return traceContext;
   }
 }
 
@@ -21,6 +41,8 @@ async function main(): Promise<void> {
     if (key.startsWith('OTEL_EXPORTER_OTLP')) delete process.env[key];
   }
   delete process.env.OTEL_SDK_DISABLED;
+  const executionsOnly = process.argv.includes('--executions-only');
+  process.env.OTEL_DOCUMENTS_EXECUTIONS_ONLY = String(executionsOnly);
   const chunks: Buffer[] = [];
   const receiver = createServer((req, res) => {
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -70,16 +92,31 @@ async function main(): Promise<void> {
         return response.json();
       }),
     );
-    assert.deepEqual(
-      saved.map((item) => item.traceparent.slice(3, 35)),
-      roots,
-    );
+    const traceIds = saved.map((item) => item.traceparent.slice(3, 35));
+    if (executionsOnly) {
+      assert.equal(new Set(traceIds).size, roots.length);
+    } else {
+      assert.deepEqual(traceIds, roots);
+    }
     await app.close();
     app = undefined;
     assert.ok(shutdownCalls > 0);
     const wire = Buffer.concat(chunks);
     assert.ok(wire.length > 0);
     assert.equal(wire.includes(Buffer.from('PRIVATE_REQUEST_SECRET')), false);
+    assert.equal(wire.includes(Buffer.from('HTTP POST')), !executionsOnly);
+    assert.equal(
+      wire.includes(Buffer.from('documents.background')),
+      executionsOnly,
+    );
+    assert.equal(
+      wire.includes(Buffer.from('documents.execution.created')),
+      true,
+    );
+    assert.equal(
+      wire.includes(Buffer.from('documents.artifact.expired')),
+      !executionsOnly,
+    );
     console.log(
       JSON.stringify({
         exported: true,

@@ -1,16 +1,17 @@
 {
-  "moduleFileExtensions": [
-    "js",
-    "json",
-    "ts"
-  ],
+  "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": "..",
-  "roots": [
-    "<rootDir>/test"
-  ],
+  "roots": ["<rootDir>/test"],
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "tsconfig": {
+          "isolatedModules": true
+        }
+      }
+    ]
   }
 }

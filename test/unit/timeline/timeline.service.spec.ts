@@ -96,7 +96,7 @@ describe('TimelineService', () => {
     await expect(service.findOne(3)).resolves.toBe(timeline);
     expect(repo.findOne).toHaveBeenCalledWith({
       where: { id: 3 },
-      relations: ['project'],
+      relations: { project: true },
     });
     await expect(service.findByProject(9)).resolves.toEqual([timeline]);
     expect(qb.where).toHaveBeenCalledWith('t.projectId = :projectId', {

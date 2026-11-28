@@ -17,7 +17,7 @@ export class FavoriteService {
   async findByProject(projectId: number): Promise<FavoriteEntity[]> {
     return await this.repository.find({
       where: { project: { id: projectId } },
-      relations: ['category'],
+      relations: { category: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -25,7 +25,7 @@ export class FavoriteService {
   async findOne(id: number): Promise<FavoriteEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['category'],
+      relations: { category: true },
     });
   }
 
@@ -79,7 +79,7 @@ export class FavoriteService {
   ): Promise<FavoriteEntity | null> {
     const favorite = await this.repository.findOne({
       where: { id },
-      relations: ['category', 'project'],
+      relations: { category: true, project: true },
     });
     if (!favorite) return null;
 

@@ -47,7 +47,7 @@ export class DataSourceService {
   async findOne(id: number): Promise<DataSourceEntity> {
     const ds = await this.repo.findOne({
       where: { id },
-      relations: ['project', 'dataset'],
+      relations: { project: true, dataset: true },
     });
     if (!ds) throw new NotFoundException(`Data source ${id} not found`);
     return ds;
@@ -158,7 +158,7 @@ export class DataSourceService {
   findAllWithSchedule(): Promise<DataSourceEntity[]> {
     return this.repo.find({
       where: { enabled: true },
-      relations: ['dataset'],
+      relations: { dataset: true },
     });
   }
 

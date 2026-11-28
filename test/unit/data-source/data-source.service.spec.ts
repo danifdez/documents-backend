@@ -284,7 +284,7 @@ describe('DataSourceService management and secret handling', () => {
     await expect(service.findAllWithSchedule()).resolves.toEqual([ds]);
     expect(repo.find).toHaveBeenCalledWith({
       where: { enabled: true },
-      relations: ['dataset'],
+      relations: { dataset: true },
     });
     await expect(service.remove(999)).rejects.toThrow(
       'Data source 999 not found',

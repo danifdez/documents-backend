@@ -133,13 +133,13 @@ describe('PendingEntityService', () => {
       repository.findOne.mockResolvedValue(pending);
       await expect(service.findAll()).resolves.toEqual([pending]);
       expect(repository.find).toHaveBeenCalledWith({
-        relations: ['entityType', 'resource'],
+        relations: { entityType: true, resource: true },
         order: { createdAt: 'DESC' },
       });
       await expect(service.findOne(1)).resolves.toBe(pending);
       expect(repository.findOne).toHaveBeenCalledWith({
         where: { id: 1 },
-        relations: ['entityType', 'resource'],
+        relations: { entityType: true, resource: true },
       });
     });
 

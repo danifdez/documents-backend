@@ -25,7 +25,7 @@ describe('ReadingPointService', () => {
     expect(await service.findOne(1)).toBeDefined();
     expect(repo.findOne).toHaveBeenCalledWith({
       where: { id: 1 },
-      relations: ['doc', 'resource'],
+      relations: { doc: true, resource: true },
     });
   });
 

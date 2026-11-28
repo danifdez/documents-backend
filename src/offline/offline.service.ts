@@ -154,7 +154,7 @@ export class OfflineService {
   async bundleResource(id: number) {
     const resource = await this.resourceRepo.findOne({
       where: { id },
-      relations: ['project', 'authors'],
+      relations: { project: true, authors: true },
     });
     if (!resource) return null;
 
@@ -219,13 +219,13 @@ export class OfflineService {
   async bundleThread(id: number) {
     const thread = await this.threadRepo.findOne({
       where: { id },
-      relations: ['docs', 'project'],
+      relations: { docs: true, project: true },
     });
     if (!thread) return null;
 
     const docs = await this.docRepo.find({
       where: { thread: { id } },
-      relations: ['resource', 'project'],
+      relations: { resource: true, project: true },
     });
 
     const docIds = docs.map((d) => d.id);
@@ -287,11 +287,11 @@ export class OfflineService {
     const threads = await this.threadRepo.find({ where: { project: { id } } });
     const docs = await this.docRepo.find({
       where: { project: { id } },
-      relations: ['resource'],
+      relations: { resource: true },
     });
     const resources = await this.resourceRepo.find({
       where: { project: { id } },
-      relations: ['authors'],
+      relations: { authors: true },
     });
     const notes = this.noteRepo
       ? await this.noteRepo.find({ where: { project: { id } } })

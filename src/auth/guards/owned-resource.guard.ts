@@ -56,7 +56,7 @@ export class AssistantOwnedGuard extends OwnedResourceGuard {
     if (!Number.isInteger(id) || id <= 0) {
       throw new NotFoundException('Assistant not found');
     }
-    const exists = await this.repository.exist({
+    const exists = await this.repository.exists({
       where: { id, ownerPrincipal },
     });
     if (!exists) throw new NotFoundException('Assistant not found');
@@ -81,7 +81,7 @@ export class AgentOwnedGuard extends OwnedResourceGuard {
     if (!Number.isInteger(id) || id <= 0) {
       throw new NotFoundException('Agent not found');
     }
-    const exists = await this.repository.exist({
+    const exists = await this.repository.exists({
       where: { id, ownerPrincipal },
     });
     if (!exists) throw new NotFoundException('Agent not found');

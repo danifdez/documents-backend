@@ -15,7 +15,7 @@ import { Response } from 'express';
 import { DocService } from './doc.service';
 import { DocIngestService } from './doc-ingest.service';
 import { DocExportService } from './doc-export.service';
-import { DocEntity } from 'src/doc/doc.entity';
+import { DocEntity } from './doc.entity';
 import { CreateDocDto, UpdateDocDto } from './dto/doc.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permission } from '../auth/permission.enum';

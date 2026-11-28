@@ -349,7 +349,7 @@ describe('OfflineService bundles and deltas', () => {
     });
     expect(docs.find).toHaveBeenCalledWith({
       where: { thread: { id: 5 } },
-      relations: ['resource', 'project'],
+      relations: { resource: true, project: true },
     });
     expect(resources.qb.whereInIds).toHaveBeenCalledWith([6]);
     expect(comments.qb.where).toHaveBeenCalledWith('c.docId IN (:...ids)', {

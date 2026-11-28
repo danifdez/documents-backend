@@ -65,7 +65,7 @@ describe('KnowledgeEntryService', () => {
       expect(await service.findByEntityId(7)).toEqual(entries);
       expect(repo.find).toHaveBeenCalledWith({
         where: { entityId: 7 },
-        relations: ['entity', 'entity.entityType'],
+        relations: { entity: { entityType: true } },
       });
     });
   });

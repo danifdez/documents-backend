@@ -112,7 +112,7 @@ export class FavoriteCategoryService {
   ): Promise<FavoriteCategoryEntity | null> {
     const category = await this.repository.findOne({
       where: { id },
-      relations: ['project', 'parent'],
+      relations: { project: true, parent: true },
     });
     if (!category) return null;
 

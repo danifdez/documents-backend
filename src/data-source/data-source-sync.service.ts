@@ -136,7 +136,7 @@ export class DataSourceSyncService {
     const sources = manager.getRepository(DataSourceEntity);
     const source = await sources.findOne({
       where: { id: prepared.dataSourceId },
-      relations: ['project', 'dataset'],
+      relations: { project: true, dataset: true },
       relationLoadStrategy: 'query',
       lock: { mode: 'pessimistic_write' },
     });
@@ -360,7 +360,7 @@ export class DataSourceSyncService {
   ): Promise<void> {
     const observedSource = await manager
       .getRepository(DataSourceEntity)
-      .findOne({ where: { id: source.id }, relations: ['dataset'] });
+      .findOne({ where: { id: source.id }, relations: { dataset: true } });
     const observedLog = await manager
       .getRepository(DataSourceSyncLogEntity)
       .findOneBy({ id: log.id });

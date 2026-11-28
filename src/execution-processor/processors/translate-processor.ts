@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ExecutionProcessor } from '../execution-processor.interface';
-import { ExecutionEntity } from 'src/execution/execution.entity';
+import { ExecutionEntity } from '../../execution/execution.entity';
 import { TranslationStrategy } from './translate/translation-strategy.interface';
 import { ContentTranslationStrategy } from './translate/content-translation.strategy';
 import { EntityRetranslationStrategy } from './translate/entity-retranslation.strategy';

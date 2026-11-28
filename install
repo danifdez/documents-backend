@@ -36,7 +36,14 @@ fi
 command -v node >/dev/null 2>&1 || fail "Node.js is not installed."
 command -v npm  >/dev/null 2>&1 || fail "npm is not installed."
 
-node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 15) ? 0 : 1)' || fail "Node.js 22.15 or newer is required by OpenTelemetry."
+node -e '
+  const [major, minor, patch] = process.versions.node.split(".").map(Number);
+  const supported =
+    (major === 22 && (minor > 22 || (minor === 22 && patch >= 3))) ||
+    (major === 24 && minor >= 15) ||
+    major >= 26;
+  process.exit(supported ? 0 : 1);
+' || fail "Node.js 22.22.3+, 24.15.0+, or 26+ is required."
 NODE_VERSION=$(node -v)
 info "Node.js $NODE_VERSION detected"
 

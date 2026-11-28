@@ -13,7 +13,7 @@ export class MarkService {
   async findOne(id: number): Promise<MarkEntity | null> {
     return await this.repository.findOne({
       where: { id },
-      relations: ['doc', 'resource'],
+      relations: { doc: true, resource: true },
     });
   }
 
